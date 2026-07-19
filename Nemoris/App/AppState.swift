@@ -106,6 +106,16 @@ final class AppState {
         didSet { UserDefaults.standard.set(showPatrimoine, forKey: "featurePatrimoine") }
     }
 
+    /// Chantier A — synchronisation automatique des investissements (LiveSync
+    /// exchanges/wallets + historique des cours) au passage en premier plan et
+    /// à l'ouverture du module, au plus une fois toutes les 4 h. Activée par
+    /// défaut : la clé ABSENTE vaut true (lue aussi par InvestmentAutoSyncService).
+    var investmentsAutoSyncEnabled: Bool = UserDefaults.standard.object(forKey: "investments.autoSyncEnabled") == nil
+        ? true
+        : UserDefaults.standard.bool(forKey: "investments.autoSyncEnabled") {
+        didSet { UserDefaults.standard.set(investmentsAutoSyncEnabled, forKey: "investments.autoSyncEnabled") }
+    }
+
     // MARK: - Confidentialité (masquage des montants)
 
     /// Quand `true`, tous les composants `MoneyText` affichent une chaîne masquée

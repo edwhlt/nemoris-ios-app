@@ -194,9 +194,12 @@ actor PriceResolver {
     /// Résultat détaillé d'un fetch historique CoinGecko. `points` peut être
     /// vide si l'API a renvoyé une erreur (HTTP ≠ 200) — `errorReason` contient
     /// alors un message lisible pour le diagnostic / la sync trace.
+    /// `isRateLimited` distingue le 429 (échec TEMPORAIRE, breaker ouvert) d'un
+    /// vrai "pas de données" — consommé par InvestmentAutoSyncService.
     struct HistoryFetchResult {
         let points: [InvestmentPricePoint]
         let errorReason: String?
+        var isRateLimited: Bool = false
     }
 
     /// Récupère l'historique de cours quotidien EUR pour un coin CoinGecko.
@@ -229,21 +232,10 @@ actor PriceResolver {
 
         do {
             var request = URLRequest(url: url)
-            request.timeoutInterval = 20
             request.setValue("application/json", forHTTPHeaderField: "Accept")
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                return .init(points: [], errorReason: "Réponse réseau invalide")
-            }
-            guard http.statusCode == 200 else {
-                // Inclure le body pour diagnostic (CoinGecko renvoie souvent
-                // un JSON `{"status":{"error_message":"..."}}` quand ça plante)
-                let body = String(data: data.prefix(200), encoding: .utf8) ?? ""
-                return .init(
-                    points: [],
-                    errorReason: "HTTP \(http.statusCode) — \(body)"
-                )
-            }
+            // Chantier A : ResilientHTTP = pacing 2.2s (30 req/min free tier)
+            // + breaker après 429 + retry backoff sur 5xx/timeouts.
+            let data = try await ResilientHTTP.send(request, provider: .coinGecko, timeout: 20)
             let decoded = try JSONDecoder().decode(MarketChartResponse.self, from: data)
 
             var points: [InvestmentPricePoint] = []
@@ -265,6 +257,14 @@ actor PriceResolver {
                 points: points.sorted { $0.date < $1.date },
                 errorReason: points.isEmpty ? "Réponse vide" : nil
             )
+        } catch MarketDataFetchError.rateLimited(_, let retryAfter) {
+            return .init(
+                points: [],
+                errorReason: "HTTP 429 — limite de requêtes CoinGecko (réessai dans \(Int(retryAfter))s)",
+                isRateLimited: true
+            )
+        } catch MarketDataFetchError.badStatus(let code) {
+            return .init(points: [], errorReason: "HTTP \(code)")
         } catch {
             return .init(
                 points: [],
@@ -295,8 +295,11 @@ actor PriceResolver {
             throw LiveSyncError.networkError("Réponse HTTP invalide")
         }
         // 429 = rate limit. CoinGecko free n'a pas de header Retry-After fiable, on indique
-        // juste qu'on est limité et l'user devra retry plus tard.
+        // juste qu'on est limité et l'user devra retry plus tard. On alimente aussi
+        // le breaker partagé pour que les fetchs d'HISTORIQUE (InvestmentAutoSyncService)
+        // sachent immédiatement que CoinGecko est indisponible.
         if http.statusCode == 429 {
+            await ProviderRateLimiter.shared.reportRateLimited(.coinGecko, retryAfter: 60)
             throw LiveSyncError.rateLimited(retryAfter: 60)
         }
         guard http.statusCode == 200 else {

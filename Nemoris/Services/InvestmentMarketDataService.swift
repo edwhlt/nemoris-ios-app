@@ -24,6 +24,10 @@ enum InvestmentMarketDataError: LocalizedError {
     /// essayés pour pouvoir afficher un diagnostic verbeux dans la trace de
     /// sync ("Symboles essayés : EUEA.AS, EUEA, IE0008471009 — aucun trouvé").
     case noData(attemptedSymbols: [String])
+    /// Chantier A : 0 points ET au moins un provider a répondu 429 pendant la
+    /// résolution — distinct de noData (l'actif existe peut-être, on est juste
+    /// bloqué temporairement). `retryAfter` = secondes avant retentative possible.
+    case rateLimited(provider: MarketDataProvider, retryAfter: TimeInterval)
 
     var errorDescription: String? {
         switch self {
@@ -34,6 +38,9 @@ enum InvestmentMarketDataError: LocalizedError {
                 return "Aucune donnée marché trouvée."
             }
             return "Aucune donnée marché trouvée. Symboles essayés : \(symbols.joined(separator: ", "))."
+        case .rateLimited(let provider, let retryAfter):
+            let minutes = max(1, Int((retryAfter / 60).rounded(.up)))
+            return "Limite de requêtes atteinte (\(provider.displayName)). Réessaie dans \(minutes) min."
         }
     }
 }
@@ -90,21 +97,63 @@ struct InvestmentMarketDataService {
 
         // Essai séquentiel Yahoo puis Stooq pour chaque candidat. On garde
         // trace de tous les symboles tentés pour la trace de diagnostic.
+        //
+        // Chantier A : plus de `try?` qui avale tout — chaque erreur est
+        // mémorisée. Un provider rate-limité (breaker ouvert) n'est plus
+        // re-tenté pour les candidats suivants (mais l'autre source continue).
+        var yahooBlocked = false
+        var stooqBlocked = false
+        var lastRateLimited: (provider: MarketDataProvider, retryAfter: TimeInterval)?
+        var lastError: Error?
+
         for symbol in unique {
-            if let points = try? await fetchFromYahoo(symbol: symbol), !points.isEmpty {
-                return InvestmentMarketDataFetchResult(
-                    identifier: symbol, source: "yahoo", points: points,
-                    attemptedSymbols: unique
-                )
+            // Les deux sources rate-limitées → inutile de dérouler les candidats restants.
+            if yahooBlocked && stooqBlocked { break }
+
+            if !yahooBlocked {
+                do {
+                    let points = try await fetchFromYahoo(symbol: symbol)
+                    if !points.isEmpty {
+                        return InvestmentMarketDataFetchResult(
+                            identifier: symbol, source: "yahoo", points: points,
+                            attemptedSymbols: unique
+                        )
+                    }
+                } catch MarketDataFetchError.rateLimited(let provider, let retryAfter) {
+                    yahooBlocked = true
+                    lastRateLimited = (provider, retryAfter)
+                } catch {
+                    lastError = error
+                }
             }
-            if let points = try? await fetchFromStooq(symbol: symbol), !points.isEmpty {
-                return InvestmentMarketDataFetchResult(
-                    identifier: symbol, source: "stooq", points: points,
-                    attemptedSymbols: unique
-                )
+            if !stooqBlocked {
+                do {
+                    let points = try await fetchFromStooq(symbol: symbol)
+                    if !points.isEmpty {
+                        return InvestmentMarketDataFetchResult(
+                            identifier: symbol, source: "stooq", points: points,
+                            attemptedSymbols: unique
+                        )
+                    }
+                } catch MarketDataFetchError.rateLimited(let provider, let retryAfter) {
+                    stooqBlocked = true
+                    lastRateLimited = (provider, retryAfter)
+                } catch {
+                    lastError = error
+                }
             }
         }
 
+        // 0 points + au moins un 429 → l'échec est temporaire, pas "pas de données".
+        if let lastRateLimited {
+            throw InvestmentMarketDataError.rateLimited(
+                provider: lastRateLimited.provider,
+                retryAfter: lastRateLimited.retryAfter
+            )
+        }
+        if let lastError {
+            print("[InvestmentMarketDataService] fetchHistory sans résultat pour \(clean) — dernière erreur : \(lastError)")
+        }
         throw InvestmentMarketDataError.noData(attemptedSymbols: unique)
     }
 
@@ -117,8 +166,9 @@ struct InvestmentMarketDataService {
             return []
         }
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return [] }
+            // Best-effort : la recherche sert à générer des candidats — en cas
+            // d'échec (y compris 429, breaker ouvert) on continue sans elle.
+            let data = try await ResilientHTTP.get(url, provider: .yahoo)
             let decoded = try JSONDecoder().decode(YahooSearchResponse.self, from: data)
             // Si on a un ISIN, on privilégie les quotes qui matchent l'ISIN
             // exactement (Yahoo le renvoie quand il est connu)
@@ -158,8 +208,7 @@ struct InvestmentMarketDataService {
             return nil
         }
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            let data = try await ResilientHTTP.get(url, provider: .yahoo)
             let decoded = try JSONDecoder().decode(YahooSearchResponse.self, from: data)
             guard let best = decoded.quotes.first(where: { quote in
                 quote.isin?.uppercased() == clean
@@ -188,8 +237,9 @@ struct InvestmentMarketDataService {
         request.httpBody = "[{\"idType\":\"ID_ISIN\",\"idValue\":\"\(isin)\"}]".data(using: .utf8)
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            // Best-effort (nil si échec) mais via ResilientHTTP pour bénéficier
+            // du pacing 2.5s (25 req/min sans clé) et du breaker 429.
+            let data = try await ResilientHTTP.send(request, provider: .openFIGI)
             let decoded = try JSONDecoder().decode([OpenFIGIResult].self, from: data)
             guard let first = decoded.first?.data?.first else { return nil }
             let name = first.name ?? first.ticker ?? isin
@@ -266,12 +316,13 @@ struct InvestmentMarketDataService {
     private func fetchFromYahoo(symbol: String) async throws -> [InvestmentPricePoint] {
         // range=10y : couvre l'historique complet d'un PEA typique (ouvert il
         //   y a 5-10 ans en moyenne). Donne ~2520 points quotidiens — gros
-        //   par rapport à 1y mais l'UPSERT v32 garantit zéro doublon en base.
+        //   par rapport à 1y mais l'upsert par date du PriceHistoryCache
+        //   garantit zéro doublon.
         // interval=1d : précision quotidienne nécessaire pour les ranges
         //   courts (1J, 1S, 1M) qui sinon afficheraient une ligne quasi vide.
         //
-        // Coût stockage : ~2520 points × 50 positions ≈ 126k rows = qqs MB
-        // en SQLite. Largement acceptable.
+        // Coût stockage : ~2520 points × 50 positions ≈ 126k points = qqs MB
+        // dans le cache JSON disque. Largement acceptable.
         //
         // Si une position est plus ancienne que 10y, le chart "Max" sera
         // tronqué à 10y. Cas marginal (PEA ouvert avant 2015) — on s'en
@@ -280,9 +331,10 @@ struct InvestmentMarketDataService {
               let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?range=10y&interval=1d") else {
             return []
         }
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return [] }
-
+        // ResilientHTTP : pacing + breaker + retry. Un 404 (symbole inconnu)
+        // throw .badStatus → la boucle candidats passe au suivant ; un 429
+        // throw .rateLimited → Yahoo est bloqué pour le reste de la résolution.
+        let data = try await ResilientHTTP.get(url, provider: .yahoo)
         let decoded = try JSONDecoder().decode(YahooChartResponse.self, from: data)
         guard let result = decoded.chart.result?.first,
               let timestamps = result.timestamp,
@@ -306,9 +358,8 @@ struct InvestmentMarketDataService {
     private func fetchFromStooq(symbol: String) async throws -> [InvestmentPricePoint] {
         let sym = symbol.lowercased()
         guard let url = URL(string: "https://stooq.com/q/d/l/?s=\(sym)&i=d") else { return [] }
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-              let csv = String(data: data, encoding: .utf8) else { return [] }
+        let data = try await ResilientHTTP.get(url, provider: .stooq)
+        guard let csv = String(data: data, encoding: .utf8) else { return [] }
 
         let lines = csv
             .replacingOccurrences(of: "\r\n", with: "\n")

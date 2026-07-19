@@ -1,0 +1,420 @@
+import Foundation
+import Observation
+
+// MARK: - Chantier A — Auto-sync des portefeuilles d'investissement
+//
+// Orchestrateur central de la synchronisation Investissements :
+//   1. LiveSync (Binance / EVM / BTC / Solana) via LiveSyncRegistry.syncAll()
+//   2. Historique des cours pour toutes les positions "stale" (dernier point
+//      du cache ≠ aujourd'hui), séquentiel avec pacing géré par ProviderRateLimiter.
+//
+// Déclencheurs : passage de l'app en premier plan (`.appActive`), ouverture du
+// module (`.investmentsOpened`) — gates 4 h + toggle user — et pull-to-refresh
+// (`.pullToRefresh`, bypass de l'intervalle).
+//
+// C'est aussi ici que vit `syncHistory(identifier:)` — le corps déplacé de
+// `InvestmentsViewModel.syncMarketHistory` / `syncCryptoHistory` — SANS AUCUN
+// `load()` : le fix du O(N²) (avant : full reload SQLite main-thread PAR position).
+// Le refresh UI passe par UNE notification `.nemorisInvestmentsDidSync` postée
+// en fin de passe (→ bump de AppState.dataRefreshToken dans NemorisApp).
+
+@Observable
+@MainActor
+final class InvestmentAutoSyncService {
+
+    static let shared = InvestmentAutoSyncService()
+
+    // MARK: - État observable (hooks UI)
+
+    private(set) var isSyncing = false
+    private(set) var lastSyncAt: Date?
+    /// Résumé FR de la dernière passe (ex. "12 cours à jour · 2 sans données · Yahoo limité").
+    private(set) var lastSummary: String?
+    /// Outcome typé par identifier (clé uppercased) — consommé par les vues
+    /// pour afficher un statut par position sans parser de messages.
+    private(set) var outcomesByIdentifier: [String: PositionSyncOutcome] = [:]
+    /// Progression de la passe courante (nil hors sync).
+    private(set) var progress: SyncProgress?
+
+    struct SyncProgress: Equatable, Sendable {
+        let done: Int
+        let total: Int
+    }
+
+    enum Trigger {
+        case appActive
+        case investmentsOpened
+        case pullToRefresh
+    }
+
+    // MARK: - Dépendances & clés
+
+    private let repository = InvestmentRepository()
+    private let marketDataService = InvestmentMarketDataService()
+
+    private static let lastSyncKey = "investments.lastAutoSyncAt"
+    private static let autoSyncEnabledKey = "investments.autoSyncEnabled"
+    /// Intervalle minimal entre 2 passes automatiques.
+    private static let minAutoSyncInterval: TimeInterval = 4 * 3600
+
+    private init() {
+        lastSyncAt = UserDefaults.standard.object(forKey: Self.lastSyncKey) as? Date
+    }
+
+    /// Toggle user "Synchronisation automatique des cours" — défaut TRUE
+    /// (la clé absente vaut activé, cf. AppState.investmentsAutoSyncEnabled).
+    static var autoSyncEnabled: Bool {
+        UserDefaults.standard.object(forKey: autoSyncEnabledKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: autoSyncEnabledKey)
+    }
+
+    // MARK: - Déclencheur gated
+
+    /// Lance une passe complète si toutes les gates passent :
+    ///   - module Investissements activé (feature flag)
+    ///   - toggle auto-sync activé
+    ///   - pas de passe déjà en cours
+    ///   - ≥ 4 h depuis la dernière passe (bypassé par `.pullToRefresh`)
+    func autoSyncIfNeeded(trigger: Trigger) async {
+        guard UserDefaults.standard.bool(forKey: "featureInvestments") else { return }
+        guard Self.autoSyncEnabled else { return }
+        guard !isSyncing else { return }
+        if trigger != .pullToRefresh,
+           let last = lastSyncAt,
+           Date().timeIntervalSince(last) < Self.minAutoSyncInterval {
+            return
+        }
+        await syncNow()
+    }
+
+    // MARK: - Passe complète
+
+    func syncNow() async {
+        guard !isSyncing else { return }
+        isSyncing = true
+        defer {
+            isSyncing = false
+            progress = nil
+            // TOUJOURS posté, même en cas d'échec partiel — c'est ce qui
+            // déclenche le rechargement de l'UI (bump dataRefreshToken).
+            NotificationCenter.default.post(name: .nemorisInvestmentsDidSync, object: nil)
+        }
+        print("[InvestmentAutoSyncService] Passe de sync démarrée")
+
+        // 1. LiveSync exchanges/wallets (séquentiel, rate limits gérés côté providers)
+        let liveSyncResults = await LiveSyncRegistry.shared.syncAll()
+        let liveSyncErrors = liveSyncResults.filter { $0.error != nil }
+
+        // 2. Historique marché : cibles = positions dédupliquées par identifier
+        //    de sync (2 positions même ticker → 1 seul fetch).
+        let accounts = repository.fetchAccounts()
+        let allPositions = accounts.flatMap { repository.fetchPositions(accountId: $0.id) }
+
+        var seen = Set<String>()
+        var targets: [(identifier: String, isCrypto: Bool)] = []
+        for position in allPositions {
+            let identifier = position.bestSyncIdentifier
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !identifier.isEmpty, seen.insert(identifier.uppercased()).inserted else { continue }
+            targets.append((identifier, PriceResolver.coinId(forTicker: identifier) != nil))
+        }
+
+        outcomesByIdentifier = [:]
+        progress = SyncProgress(done: 0, total: targets.count)
+
+        // Familles de providers déjà rate-limitées pendant CETTE passe :
+        // crypto → coinGecko ; titres traditionnels → yahoo/stooq (regroupés
+        // sous .yahoo). Les positions restantes de la même famille sont
+        // marquées .rateLimited SANS être tentées — mais l'autre famille continue.
+        var rateLimitedFamilies = Set<MarketDataProvider>()
+        var done = 0
+
+        for target in targets {
+            let key = target.identifier.uppercased()
+
+            // Raffinement week-end : marchés traditionnels fermés samedi/dimanche,
+            // un dernier point daté de vendredi est le maximum atteignable →
+            // .upToDate sans appel réseau. Ne s'applique PAS aux cryptos (24/7).
+            if !target.isCrypto,
+               let latest = PriceHistoryCache.shared.latestDate(identifier: target.identifier),
+               Self.isWeekendFresh(latest: latest) {
+                outcomesByIdentifier[key] = .upToDate
+                done += 1
+                progress = SyncProgress(done: done, total: targets.count)
+                continue
+            }
+
+            let family: MarketDataProvider = target.isCrypto ? .coinGecko : .yahoo
+            if rateLimitedFamilies.contains(family) {
+                let remaining = await ProviderRateLimiter.shared.cooldownRemaining(family)
+                    ?? family.defaultCooldown
+                outcomesByIdentifier[key] = .rateLimited(provider: family, retryAfter: remaining)
+                done += 1
+                progress = SyncProgress(done: done, total: targets.count)
+                continue
+            }
+
+            let outcome = await syncHistory(identifier: target.identifier)
+            outcomesByIdentifier[key] = outcome
+            if case .rateLimited(let provider, _) = outcome {
+                rateLimitedFamilies.insert(provider == .coinGecko ? .coinGecko : .yahoo)
+            }
+
+            done += 1
+            progress = SyncProgress(done: done, total: targets.count)
+            // Laisse respirer le main actor entre 2 positions (UI fluide).
+            await Task.yield()
+        }
+
+        // 3. Résumé FR + persistance de la date
+        lastSummary = Self.buildSummary(
+            outcomes: Array(outcomesByIdentifier.values),
+            liveSyncTotal: liveSyncResults.count,
+            liveSyncErrors: liveSyncErrors.count
+        )
+        lastSyncAt = Date()
+        UserDefaults.standard.set(lastSyncAt, forKey: Self.lastSyncKey)
+        print("[InvestmentAutoSyncService] Passe terminée — \(lastSummary ?? "aucun résumé")")
+    }
+
+    // MARK: - Sync d'un identifier (corps déplacé depuis InvestmentsViewModel)
+
+    /// Synchronise l'historique de cours d'UN identifier (ticker/ISIN) :
+    /// route crypto → CoinGecko, sinon Yahoo/Stooq. Skip si le cache a déjà
+    /// un point aujourd'hui. Persiste (cache disque + current_value SQLite +
+    /// trace) mais NE recharge AUCUN ViewModel — c'est le cœur du fix O(N²) :
+    /// l'appelant fait UN SEUL reload en fin de passe.
+    func syncHistory(identifier: String) async -> PositionSyncOutcome {
+        let clean = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else {
+            InvestmentSyncTraceStore.record(.init(
+                identifier: identifier, attemptedAt: Date(), status: .invalidId,
+                message: "Identifiant manquant (ticker/ISIN).",
+                symbolsTried: [], source: nil, pointsCount: 0
+            ))
+            return .invalidIdentifier
+        }
+
+        // Route critique : ticker crypto connu → CoinGecko (sinon Yahoo cote
+        // des actions homonymes — l'action "FET" cotée €53 corromprait le
+        // cours Fetch.AI qui vaut €1.50).
+        if let coinId = PriceResolver.coinId(forTicker: clean) {
+            return await syncCryptoHistory(identifier: clean, coinId: coinId)
+        }
+
+        // Skip optimization (Yahoo) : le passé est immuable. Si on a déjà un
+        // point pour aujourd'hui en cache, l'API ne nous apprendra rien.
+        if let latest = PriceHistoryCache.shared.latestDate(identifier: clean),
+           Calendar.current.isDateInToday(latest) {
+            InvestmentSyncTraceStore.record(.init(
+                identifier: clean, attemptedAt: Date(), status: .success,
+                message: "Cours déjà à jour (dernier point aujourd'hui) — appel Yahoo évité.",
+                symbolsTried: [clean], source: "cache", pointsCount: 0
+            ))
+            return .upToDate
+        }
+
+        do {
+            let result = try await marketDataService.fetchHistory(identifier: clean)
+            _ = repository.savePriceHistory(identifier: clean, points: result.points, source: result.source)
+
+            // Update current_value des positions matchant l'identifier ET le
+            // résultat fetché (qui peut différer après résolution OpenFIGI).
+            let touchedA = repository.updatePositionsCurrentValueFromLatestPrice(identifier: result.identifier)
+            let touchedB = result.identifier.uppercased() == clean.uppercased()
+                ? 0
+                : repository.updatePositionsCurrentValueFromLatestPrice(identifier: clean)
+            let totalTouched = touchedA + touchedB
+
+            var msg = "Historique synchronisé via \(result.source) (\(result.points.count) points)."
+            if totalTouched > 0 {
+                msg += " \(totalTouched) position(s) mise(s) à jour."
+            }
+
+            // Trace persistante : TOUS les symboles essayés (pas seulement le
+            // winner) pour montrer le chemin de résolution complet.
+            InvestmentSyncTraceStore.record(.init(
+                identifier: clean, attemptedAt: Date(), status: .success,
+                message: msg, symbolsTried: result.attemptedSymbols,
+                source: result.source, pointsCount: result.points.count
+            ))
+            if result.identifier.uppercased() != clean.uppercased() {
+                InvestmentSyncTraceStore.record(.init(
+                    identifier: result.identifier, attemptedAt: Date(), status: .success,
+                    message: msg, symbolsTried: result.attemptedSymbols,
+                    source: result.source, pointsCount: result.points.count
+                ))
+            }
+            return .success(points: result.points.count, source: result.source)
+        } catch let error as InvestmentMarketDataError {
+            switch error {
+            case .invalidIdentifier:
+                InvestmentSyncTraceStore.record(.init(
+                    identifier: clean, attemptedAt: Date(), status: .invalidId,
+                    message: error.localizedDescription,
+                    symbolsTried: [clean], source: nil, pointsCount: 0
+                ))
+                return .invalidIdentifier
+            case .noData(let symbols):
+                InvestmentSyncTraceStore.record(.init(
+                    identifier: clean, attemptedAt: Date(), status: .noData,
+                    message: error.localizedDescription,
+                    symbolsTried: symbols.isEmpty ? [clean] : symbols,
+                    source: nil, pointsCount: 0
+                ))
+                return .noData(symbolsTried: symbols)
+            case .rateLimited(let provider, let retryAfter):
+                InvestmentSyncTraceStore.record(.init(
+                    identifier: clean, attemptedAt: Date(), status: .rateLimited,
+                    message: error.localizedDescription,
+                    symbolsTried: [clean], source: nil, pointsCount: 0
+                ))
+                return .rateLimited(provider: provider, retryAfter: retryAfter)
+            }
+        } catch let error as MarketDataFetchError {
+            // Peut remonter si le service laisse fuiter une erreur transport brute.
+            switch error {
+            case .rateLimited(let provider, let retryAfter):
+                InvestmentSyncTraceStore.record(.init(
+                    identifier: clean, attemptedAt: Date(), status: .rateLimited,
+                    message: "Limite de requêtes \(provider.displayName) atteinte.",
+                    symbolsTried: [clean], source: nil, pointsCount: 0
+                ))
+                return .rateLimited(provider: provider, retryAfter: retryAfter)
+            case .timeout:
+                InvestmentSyncTraceStore.record(.init(
+                    identifier: clean, attemptedAt: Date(), status: .error,
+                    message: "Délai réseau dépassé.",
+                    symbolsTried: [clean], source: nil, pointsCount: 0
+                ))
+                return .networkError("Délai réseau dépassé.")
+            case .network(let message):
+                InvestmentSyncTraceStore.record(.init(
+                    identifier: clean, attemptedAt: Date(), status: .error,
+                    message: "Erreur réseau : \(message)",
+                    symbolsTried: [clean], source: nil, pointsCount: 0
+                ))
+                return .networkError(message)
+            case .badStatus(let code):
+                InvestmentSyncTraceStore.record(.init(
+                    identifier: clean, attemptedAt: Date(), status: .error,
+                    message: "HTTP \(code)",
+                    symbolsTried: [clean], source: nil, pointsCount: 0
+                ))
+                return .networkError("HTTP \(code)")
+            }
+        } catch {
+            InvestmentSyncTraceStore.record(.init(
+                identifier: clean, attemptedAt: Date(), status: .error,
+                message: error.localizedDescription,
+                symbolsTried: [clean], source: nil, pointsCount: 0
+            ))
+            return .networkError(error.localizedDescription)
+        }
+    }
+
+    /// Sync historique d'une crypto via CoinGecko (corps déplacé depuis
+    /// `InvestmentsViewModel.syncCryptoHistory`, sans `load()`).
+    private func syncCryptoHistory(identifier: String, coinId: String) async -> PositionSyncOutcome {
+        // Skip optimization : déjà un point aujourd'hui → pas de quota brûlé.
+        if let latest = PriceHistoryCache.shared.latestDate(identifier: identifier),
+           Calendar.current.isDateInToday(latest) {
+            InvestmentSyncTraceStore.record(.init(
+                identifier: identifier, attemptedAt: Date(), status: .success,
+                message: "Cours déjà à jour (dernier point aujourd'hui) — appel CoinGecko évité.",
+                symbolsTried: [coinId], source: "cache", pointsCount: 0
+            ))
+            return .upToDate
+        }
+
+        let result = await PriceResolver.shared.fetchHistoryDetailed(
+            coinId: coinId, identifier: identifier
+        )
+        guard !result.points.isEmpty else {
+            if result.isRateLimited {
+                let remaining = await ProviderRateLimiter.shared.cooldownRemaining(.coinGecko)
+                    ?? MarketDataProvider.coinGecko.defaultCooldown
+                InvestmentSyncTraceStore.record(.init(
+                    identifier: identifier, attemptedAt: Date(), status: .rateLimited,
+                    message: "CoinGecko : limite de requêtes atteinte — réessai dans \(Int(remaining))s (coinId \(coinId)).",
+                    symbolsTried: [coinId], source: nil, pointsCount: 0
+                ))
+                return .rateLimited(provider: .coinGecko, retryAfter: remaining)
+            }
+            let reason = result.errorReason ?? "raison inconnue"
+            InvestmentSyncTraceStore.record(.init(
+                identifier: identifier, attemptedAt: Date(), status: .noData,
+                message: "CoinGecko : \(reason) (coinId \(coinId)).",
+                symbolsTried: [coinId], source: nil, pointsCount: 0
+            ))
+            return .noData(symbolsTried: [coinId])
+        }
+
+        _ = repository.savePriceHistory(identifier: identifier, points: result.points, source: "coingecko")
+        let touched = repository.updatePositionsCurrentValueFromLatestPrice(identifier: identifier)
+
+        var msg = "Historique synchronisé via coingecko (\(result.points.count) points)."
+        if touched > 0 { msg += " \(touched) position(s) mise(s) à jour." }
+        InvestmentSyncTraceStore.record(.init(
+            identifier: identifier, attemptedAt: Date(), status: .success,
+            message: msg, symbolsTried: [coinId, identifier],
+            source: "coingecko", pointsCount: result.points.count
+        ))
+        return .success(points: result.points.count, source: "coingecko")
+    }
+
+    // MARK: - Helpers
+
+    /// True si `latest` est le dernier point de cotation atteignable un
+    /// week-end : dernier point = vendredi DE CE week-end, aujourd'hui =
+    /// samedi ou dimanche. Marchés traditionnels fermés → rien à fetcher.
+    private static func isWeekendFresh(latest: Date) -> Bool {
+        let calendar = Calendar.current
+        let todayWeekday = calendar.component(.weekday, from: Date())
+        // Grégorien : 1 = dimanche, 6 = vendredi, 7 = samedi.
+        guard todayWeekday == 1 || todayWeekday == 7 else { return false }
+        guard calendar.component(.weekday, from: latest) == 6 else { return false }
+        let days = calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: latest),
+            to: calendar.startOfDay(for: Date())
+        ).day ?? .max
+        return days <= 2
+    }
+
+    private static func buildSummary(
+        outcomes: [PositionSyncOutcome],
+        liveSyncTotal: Int,
+        liveSyncErrors: Int
+    ) -> String {
+        var synced = 0, upToDate = 0, noData = 0, invalid = 0, netErrors = 0
+        var limitedProviders = Set<String>()
+        for outcome in outcomes {
+            switch outcome {
+            case .success:                       synced += 1
+            case .upToDate:                      upToDate += 1
+            case .noData:                        noData += 1
+            case .invalidIdentifier:             invalid += 1
+            case .networkError:                  netErrors += 1
+            case .rateLimited(let provider, _):  limitedProviders.insert(provider.displayName)
+            }
+        }
+
+        var parts: [String] = []
+        if synced > 0    { parts.append("\(synced) cours synchronisé\(synced > 1 ? "s" : "")") }
+        if upToDate > 0  { parts.append("\(upToDate) à jour") }
+        if noData > 0    { parts.append("\(noData) sans données") }
+        if invalid > 0   { parts.append("\(invalid) sans identifiant") }
+        if netErrors > 0 { parts.append("\(netErrors) erreur\(netErrors > 1 ? "s" : "") réseau") }
+        if !limitedProviders.isEmpty {
+            parts.append("\(limitedProviders.sorted().joined(separator: " + ")) limité")
+        }
+        if liveSyncErrors > 0 {
+            parts.append("\(liveSyncErrors)/\(liveSyncTotal) LiveSync en erreur")
+        } else if liveSyncTotal > 0 {
+            parts.append("\(liveSyncTotal) LiveSync OK")
+        }
+        return parts.isEmpty ? "Rien à synchroniser" : parts.joined(separator: " · ")
+    }
+}

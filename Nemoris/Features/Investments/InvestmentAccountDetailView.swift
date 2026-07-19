@@ -298,7 +298,8 @@ struct InvestmentAccountDetailView: View {
 
     /// Variante de `syncAllPositions` qui ne sync QUE les positions sans
     /// historique — utile depuis la card diagnostic. Route automatiquement
-    /// vers CoinGecko ou Yahoo via syncMarketHistory.
+    /// vers CoinGecko ou Yahoo via InvestmentAutoSyncService (aucun load()
+    /// par position — un seul refresh final).
     private func syncMissingHistoryPositions() async {
         let toSync = positionsWithoutHistory
         guard !toSync.isEmpty, !isSyncingAll else { return }
@@ -308,9 +309,10 @@ struct InvestmentAccountDetailView: View {
         for position in toSync {
             let identifier = position.bestSyncIdentifier
             guard !identifier.isEmpty else { continue }
-            await viewModel.syncMarketHistory(for: identifier)
+            _ = await InvestmentAutoSyncService.shared.syncHistory(identifier: identifier)
         }
         refresh()
+        NotificationCenter.default.post(name: .nemorisInvestmentsDidSync, object: nil)
     }
 
     private var heroAndChartCard: some View {
@@ -573,8 +575,9 @@ struct InvestmentAccountDetailView: View {
     /// Pipeline en 2 étapes :
     ///   1. LiveSync (Binance/EVM/BTC/SOL) si liens rattachés — refresh des
     ///      valeurs et insertion des trades crypto via CoinGecko en interne
-    ///   2. syncMarketHistory pour chaque position → route automatique vers
-    ///      CoinGecko (cryptos) ou Yahoo (titres traditionnels)
+    ///   2. InvestmentAutoSyncService.syncHistory pour chaque position →
+    ///      route automatique CoinGecko (cryptos) vs Yahoo (titres), outcomes
+    ///      typés, AUCUN load() par position — un seul refresh final.
     private func syncAllPositions() async {
         guard !isSyncingAll, !positions.isEmpty else { return }
         isSyncingAll = true
@@ -595,27 +598,32 @@ struct InvestmentAccountDetailView: View {
 
         // 2. Sync historique pour CHAQUE position (route auto CoinGecko vs Yahoo)
         var success = 0
+        var upToDate = 0
+        var rateLimited = 0
         var failed = 0
         for position in positions {
             let identifier = position.bestSyncIdentifier
             guard !identifier.isEmpty else { failed += 1; continue }
-            await viewModel.syncMarketHistory(for: identifier)
-            if let msg = viewModel.marketStatusMessage,
-               msg.localizedCaseInsensitiveContains("aucune donnée") ||
-               msg.localizedCaseInsensitiveContains("error") {
-                failed += 1
-            } else {
-                success += 1
+            switch await InvestmentAutoSyncService.shared.syncHistory(identifier: identifier) {
+            case .success:     success += 1
+            case .upToDate:    upToDate += 1
+            case .rateLimited: rateLimited += 1
+            case .noData, .networkError, .invalidIdentifier: failed += 1
             }
         }
 
         var parts: [String] = []
         if success > 0      { parts.append("\(success) cours sync") }
+        if upToDate > 0     { parts.append("\(upToDate) à jour") }
         if liveSyncOK > 0   { parts.append("\(liveSyncOK) LiveSync OK") }
         if liveSyncErr > 0  { parts.append("\(liveSyncErr) LiveSync KO") }
+        if rateLimited > 0  { parts.append("\(rateLimited) limité\(rateLimited > 1 ? "s" : "") (réessaie plus tard)") }
         if failed > 0       { parts.append("\(failed) sans cours") }
         syncAllStatus = parts.isEmpty ? "Rien à synchroniser" : parts.joined(separator: " · ")
+        // Refresh local + notification globale (→ bump dataRefreshToken dans
+        // NemorisApp → reload du dashboard). Avant : viewModel.load() PAR position.
         refresh()
+        NotificationCenter.default.post(name: .nemorisInvestmentsDidSync, object: nil)
     }
 
     private func recomputeEvolution() {

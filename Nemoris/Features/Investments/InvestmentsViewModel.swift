@@ -534,162 +534,28 @@ final class InvestmentsViewModel {
         repository.fetchPositions(accountId: accountId)
     }
 
-    /// Sync historique d'une crypto via CoinGecko. Cohérent avec syncMarketHistory
-    /// au niveau trace store, sauf qu'on utilise PriceResolver au lieu de Yahoo.
-    private func syncCryptoHistory(identifier: String, coinId: String) async {
-        // Skip optimization : le passé est immuable. Si on a déjà un point
-        // pour aujourd'hui en cache, pas la peine de re-burner du quota
-        // CoinGecko (free tier : 30 req/min). L'user force au pire en
-        // vidant le cache via Réglages → reset.
-        if let latest = PriceHistoryCache.shared.latestDate(identifier: identifier),
-           Calendar.current.isDateInToday(latest) {
-            let msg = "Cours déjà à jour (dernier point aujourd'hui) — appel CoinGecko évité."
-            marketStatusMessage = msg
-            InvestmentSyncTraceStore.record(.init(
-                identifier: identifier, attemptedAt: Date(), status: .success,
-                message: msg, symbolsTried: [coinId], source: "cache", pointsCount: 0
-            ))
-            return
-        }
-
-        let result = await PriceResolver.shared.fetchHistoryDetailed(
-            coinId: coinId, identifier: identifier
-        )
-        guard !result.points.isEmpty else {
-            // Erreur enrichie : on surface le HTTP status / message d'erreur
-            // de CoinGecko pour permettre le diagnostic (ex: "HTTP 401 — interval
-            // not allowed", "HTTP 429 — rate limit").
-            let reason = result.errorReason ?? "raison inconnue"
-            let msg = "CoinGecko : \(reason) (coinId \(coinId))."
-            marketStatusMessage = msg
-            InvestmentSyncTraceStore.record(.init(
-                identifier: identifier, attemptedAt: Date(), status: .noData,
-                message: msg, symbolsTried: [coinId], source: nil, pointsCount: 0
-            ))
-            return
-        }
-        _ = repository.savePriceHistory(identifier: identifier, points: result.points, source: "coingecko")
-        marketHistory = repository.fetchPriceHistory(identifier: identifier)
-
-        // Met aussi à jour current_value des positions matchant ce ticker.
-        let touched = repository.updatePositionsCurrentValueFromLatestPrice(identifier: identifier)
-
-        load()
-
-        var msg = "Historique synchronisé via coingecko (\(result.points.count) points)."
-        if touched > 0 { msg += " \(touched) position(s) mise(s) à jour." }
-        marketStatusMessage = msg
-
-        InvestmentSyncTraceStore.record(.init(
-            identifier: identifier, attemptedAt: Date(), status: .success,
-            message: msg, symbolsTried: [coinId, identifier],
-            source: "coingecko", pointsCount: result.points.count
-        ))
-    }
-
+    /// Chantier A — wrapper fin de compatibilité (InvestmentPositionDetailView
+    /// l'appelle toujours). La logique de sync (routage crypto/Yahoo, skip du
+    /// jour, persistance, trace) vit dans `InvestmentAutoSyncService.syncHistory`
+    /// SANS load() interne : ici on fait UN SEUL load() final. Les passes batch
+    /// (auto-sync, "tout synchroniser") n'appellent plus ce wrapper mais le
+    /// service directement — fini le full reload par position (O(N²)).
     func syncMarketHistory(for identifier: String) async {
-        let clean = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else {
-            let msg = "Identifiant manquant (ticker/ISIN)."
-            marketStatusMessage = msg
-            InvestmentSyncTraceStore.record(.init(
-                identifier: identifier, attemptedAt: Date(), status: .invalidId,
-                message: msg, symbolsTried: [], source: nil, pointsCount: 0
-            ))
-            return
-        }
         isSyncingMarketData = true
         defer { isSyncingMarketData = false }
 
-        // Route critique : si l'identifier est un ticker crypto connu, on
-        // utilise CoinGecko (sinon Yahoo cote des actions homonymes — l'action
-        // "FET" coté €53 corromprait le cours Fetch.AI qui vaut €1.50).
-        if let coinId = PriceResolver.coinId(forTicker: clean) {
-            await syncCryptoHistory(identifier: clean, coinId: coinId)
-            return
-        }
+        let outcome = await InvestmentAutoSyncService.shared.syncHistory(identifier: identifier)
 
-        // Skip optimization (Yahoo) : même principe que pour CoinGecko.
-        // Si on a un point pour aujourd'hui, l'API ne nous apprendra rien
-        // de neuf et on évite une requête.
-        if let latest = PriceHistoryCache.shared.latestDate(identifier: clean),
-           Calendar.current.isDateInToday(latest) {
-            let msg = "Cours déjà à jour (dernier point aujourd'hui) — appel Yahoo évité."
-            marketStatusMessage = msg
-            InvestmentSyncTraceStore.record(.init(
-                identifier: clean, attemptedAt: Date(), status: .success,
-                message: msg, symbolsTried: [clean], source: "cache", pointsCount: 0
-            ))
-            return
-        }
+        let clean = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Les messages détaillés (symboles essayés, source, nb de points) sont
+        // déjà écrits dans la trace par le service — on les réutilise tels quels.
+        marketStatusMessage = InvestmentSyncTraceStore.fetch(identifier: clean)?.message
+            ?? outcome.shortLabel
 
-        do {
-            let result = try await marketDataService.fetchHistory(identifier: clean)
-            _ = repository.savePriceHistory(identifier: clean, points: result.points, source: result.source)
+        if !clean.isEmpty {
             marketHistory = repository.fetchPriceHistory(identifier: clean)
-
-            // Update current_value des positions matchant l'identifier ET le
-            // résultat fetché (qui peut différer après résolution OpenFIGI).
-            let touchedA = repository.updatePositionsCurrentValueFromLatestPrice(identifier: result.identifier)
-            let touchedB = result.identifier.uppercased() == clean.uppercased()
-                ? 0
-                : repository.updatePositionsCurrentValueFromLatestPrice(identifier: clean)
-            let totalTouched = touchedA + touchedB
-
-            load()
-
-            var msg = "Historique synchronisé via \(result.source) (\(result.points.count) points)."
-            if totalTouched > 0 {
-                msg += " \(totalTouched) position(s) mise(s) à jour."
-            }
-            marketStatusMessage = msg
-
-            // Trace persistante : on enregistre TOUS les symboles essayés
-            // (pas seulement le winner) pour montrer le chemin complet de
-            // résolution dans la fiche position. Le `result.identifier` est
-            // le symbole qui a réussi (le 1er dans la liste).
-            let entry = InvestmentSyncTraceStore.Entry(
-                identifier: clean, attemptedAt: Date(), status: .success,
-                message: msg, symbolsTried: result.attemptedSymbols,
-                source: result.source, pointsCount: result.points.count
-            )
-            InvestmentSyncTraceStore.record(entry)
-            if result.identifier.uppercased() != clean.uppercased() {
-                let entryB = InvestmentSyncTraceStore.Entry(
-                    identifier: result.identifier, attemptedAt: Date(),
-                    status: .success, message: msg,
-                    symbolsTried: result.attemptedSymbols,
-                    source: result.source, pointsCount: result.points.count
-                )
-                InvestmentSyncTraceStore.record(entryB)
-            }
-        } catch let error as InvestmentMarketDataError {
-            // Pour noData, on a la liste complète des symboles essayés
-            // intégrée dans l'erreur — on la persiste pour le diagnostic.
-            let status: InvestmentSyncTraceStore.Status
-            let attempted: [String]
-            switch error {
-            case .invalidIdentifier:
-                status = .invalidId
-                attempted = [clean]
-            case .noData(let symbols):
-                status = .noData
-                attempted = symbols.isEmpty ? [clean] : symbols
-            }
-            let msg = error.localizedDescription
-            marketStatusMessage = msg
-            InvestmentSyncTraceStore.record(.init(
-                identifier: clean, attemptedAt: Date(), status: status,
-                message: msg, symbolsTried: attempted, source: nil, pointsCount: 0
-            ))
-        } catch {
-            let msg = error.localizedDescription
-            marketStatusMessage = msg
-            InvestmentSyncTraceStore.record(.init(
-                identifier: clean, attemptedAt: Date(), status: .error,
-                message: msg, symbolsTried: [clean], source: nil, pointsCount: 0
-            ))
         }
+        load()
     }
 
     private func detectSeparator(_ line: String) -> Character {

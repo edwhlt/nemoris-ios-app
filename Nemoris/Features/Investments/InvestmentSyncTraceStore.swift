@@ -14,6 +14,7 @@ enum InvestmentSyncTraceStore {
         case noData       // Yahoo + Stooq ont répondu mais 0 points
         case error        // Réseau, erreur HTTP, parsing
         case invalidId    // Identifier vide
+        case rateLimited  // 429 provider (breaker ouvert) — réessayer plus tard
     }
 
     struct Entry: Codable {
@@ -86,19 +87,21 @@ enum InvestmentSyncTraceStore {
 extension InvestmentSyncTraceStore.Status {
     var icon: String {
         switch self {
-        case .success:   return "checkmark.circle.fill"
-        case .noData:    return "questionmark.circle.fill"
-        case .error:     return "exclamationmark.triangle.fill"
-        case .invalidId: return "xmark.octagon.fill"
+        case .success:     return "checkmark.circle.fill"
+        case .noData:      return "questionmark.circle.fill"
+        case .error:       return "exclamationmark.triangle.fill"
+        case .invalidId:   return "xmark.octagon.fill"
+        case .rateLimited: return "hourglass.circle.fill"
         }
     }
 
     var label: String {
         switch self {
-        case .success:   return "Succès"
-        case .noData:    return "Aucune donnée"
-        case .error:     return "Erreur"
-        case .invalidId: return "ID invalide"
+        case .success:     return "Succès"
+        case .noData:      return "Aucune donnée"
+        case .error:       return "Erreur"
+        case .invalidId:   return "ID invalide"
+        case .rateLimited: return "Limite atteinte"
         }
     }
 }

@@ -578,5 +578,9 @@ struct LiveSyncLinkDetailView: View {
         }
         isSyncing = false
         onChange()
+        // Chantier A : le module Investissements doit refléter la sync manuelle
+        // (positions persistées même en cas d'erreur partielle) → bump du
+        // dataRefreshToken via NemorisApp.
+        NotificationCenter.default.post(name: .nemorisInvestmentsDidSync, object: nil)
     }
 }

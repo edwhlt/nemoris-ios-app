@@ -172,10 +172,14 @@ struct SettingsView: View {
                             Label("Inclure la trésorerie dans la valorisation", systemImage: "eurosign.circle")
                         }
                         .tint(AppTheme.Colors.accent)
+                        Toggle(isOn: $appState.investmentsAutoSyncEnabled) {
+                            Label("Synchronisation automatique des cours", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .tint(AppTheme.Colors.accent)
                     } header: {
                         Text("Investissements")
                     } footer: {
-                        Text("Si activé, la trésorerie (cash disponible) est ajoutée au gros chiffre de valorisation. Le calcul de performance reste basé uniquement sur les positions, peu importe ce réglage.")
+                        Text("Si activé, la trésorerie (cash disponible) est ajoutée au gros chiffre de valorisation. Le calcul de performance reste basé uniquement sur les positions, peu importe ce réglage. La synchronisation automatique actualise portefeuilles et cours à l'ouverture de l'app ou du module, au plus toutes les 4 heures.")
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
                     .listRowBackground(AppTheme.Colors.surface)

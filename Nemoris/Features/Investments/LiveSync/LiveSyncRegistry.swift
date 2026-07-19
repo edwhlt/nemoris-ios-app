@@ -106,12 +106,17 @@ final class LiveSyncRegistry {
     }
 
     /// Lance la sync de tous les liens activés. Séquentiel pour respecter les rate limits
-    /// CoinGecko/Etherscan (pas de bursts).
-    func syncAll() async {
+    /// CoinGecko/Etherscan (pas de bursts). Retourne un statut par lien (error = nil
+    /// si succès) pour que l'appelant (InvestmentAutoSyncService) bâtisse son résumé.
+    @discardableResult
+    func syncAll() async -> [(linkName: String, error: String?)] {
         let links = repo.fetchLinks().filter { $0.enabled }
+        var results: [(linkName: String, error: String?)] = []
         for link in links {
-            _ = await syncLink(link)
+            let error = await syncLink(link)
+            results.append((linkName: link.displayName, error: error))
         }
+        return results
     }
 
     // MARK: - AXE I Couche 4 — Persistance vers investment_positions

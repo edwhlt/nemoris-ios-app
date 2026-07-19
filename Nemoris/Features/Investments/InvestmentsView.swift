@@ -156,6 +156,42 @@ struct InvestmentsView: View {
         // viewModel.load() est appelé dans .task du dashboardTab pour piloter le skeleton.
     }
 
+    // MARK: - Chantier A — statut de sync (hook minimal, restylé au chantier B)
+
+    @MainActor
+    private static let syncRelativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: "fr_FR")
+        formatter.unitsStyle = .short
+        return formatter
+    }()
+
+    @ViewBuilder
+    private var syncStatusLine: some View {
+        let service = InvestmentAutoSyncService.shared
+        HStack(spacing: AppTheme.Spacing.xs) {
+            if service.isSyncing {
+                ProgressView()
+                    .controlSize(.mini)
+                if let progress = service.progress {
+                    Text("Synchronisation… (\(progress.done)/\(progress.total))")
+                } else {
+                    Text("Synchronisation…")
+                }
+            } else if let last = service.lastSyncAt {
+                Text("Actualisé \(Self.syncRelativeFormatter.localizedString(for: last, relativeTo: Date()))")
+                // Erreurs éventuelles de la dernière passe, en une ligne discrète.
+                if let summary = service.lastSummary,
+                   summary.contains("limité") || summary.contains("erreur") || summary.contains("KO") {
+                    Text("· \(summary)")
+                        .lineLimit(1)
+                }
+            }
+        }
+        .font(AppTheme.Typography.labelSmall)
+        .foregroundStyle(AppTheme.Colors.textSecondary)
+    }
+
     // MARK: - Dashboard Tab (AXE J — refonte style Finary, DA Nemoris)
 
     private var dashboardTab: some View {
@@ -211,6 +247,10 @@ struct InvestmentsView: View {
                         height: 200,
                         timeRange: viewModel.selectedTimeRange
                     )
+
+                    // Chantier A — statut de la sync auto (spinner + progression
+                    // pendant, "Actualisé il y a X" après).
+                    syncStatusLine
                 }
                 .padding(.horizontal, AppTheme.Spacing.sm)
 
@@ -258,9 +298,19 @@ struct InvestmentsView: View {
             }
             hasLoaded = true
         }
+        // Chantier A — déclencheur d'auto-sync à l'ouverture du module.
+        // ⚠️ Task SÉPARÉE du .task(id: dataRefreshToken) ci-dessus : la fin de
+        // passe bumpe le token, ce qui annulerait/relancerait cette task et
+        // re-déclencherait la sync en boucle.
+        .task {
+            await InvestmentAutoSyncService.shared.autoSyncIfNeeded(trigger: .investmentsOpened)
+        }
         .refreshable {
-            // Pull-to-refresh : reload synchronisé. Pas de skeleton (l'indicateur
-            // système suffit), mais on recalcule l'évolution dans la foulée.
+            // Pull-to-refresh : force une passe complète (bypass de l'intervalle
+            // 4 h, pas du verrou isSyncing). Le reload principal arrive via
+            // .nemorisInvestmentsDidSync → bump du token ; reloadAll() en filet
+            // si la passe n'a rien fait (toggle off / sync déjà en cours).
+            await InvestmentAutoSyncService.shared.autoSyncIfNeeded(trigger: .pullToRefresh)
             reloadAll()
         }
     }

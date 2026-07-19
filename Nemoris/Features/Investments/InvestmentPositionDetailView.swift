@@ -844,9 +844,10 @@ struct InvestmentPositionDetailView: View {
 
     private func syncTraceColor(_ status: InvestmentSyncTraceStore.Status) -> Color {
         switch status {
-        case .success:                   return AppTheme.Colors.success
-        case .noData, .invalidId:        return AppTheme.Colors.warning
-        case .error:                     return AppTheme.Colors.danger
+        case .success:                      return AppTheme.Colors.success
+        case .noData, .invalidId:           return AppTheme.Colors.warning
+        case .rateLimited:                  return AppTheme.Colors.warning
+        case .error:                        return AppTheme.Colors.danger
         }
     }
 

@@ -106,6 +106,11 @@ struct NemorisApp: App {
                             // Relance le monitor de motion (no-op si l'user n'a
                             // pas activé `hideAmountsOnFaceDown`).
                             PrivacyMotionMonitor.shared.resume()
+                            // Chantier A — auto-sync investissements (LiveSync
+                            // exchanges/wallets + cours). Le service se dégage
+                            // seul : feature off, toggle off, déjà en cours,
+                            // ou dernière passe < 4 h.
+                            Task { await InvestmentAutoSyncService.shared.autoSyncIfNeeded(trigger: .appActive) }
                             // NB: le shortcut iOS "Importer un CSV" écrivait dans pendingCSVKey,
                             // qui était relu par l'ancien ImportView. Le flux V3 prend un fichier
                             // par UIDocumentPicker, donc on ne consomme plus cette clé ici.
@@ -122,6 +127,12 @@ struct NemorisApp: App {
                     .onReceive(NotificationCenter.default.publisher(for: .nemorisSyncDidApplyRemoteChanges)) { _ in
                         // Sync CloudKit (AXE L) : des changements DISTANTS ont
                         // été appliqués à la base → invalide tous les VMs.
+                        appState.dataRefreshToken = UUID()
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .nemorisInvestmentsDidSync)) { _ in
+                        // Chantier A : une passe de sync investissements (auto ou
+                        // manuelle) vient de se terminer → invalide les VMs pour
+                        // que le dashboard reflète les nouvelles valeurs.
                         appState.dataRefreshToken = UUID()
                     }
             } else {
