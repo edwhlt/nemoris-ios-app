@@ -1,0 +1,621 @@
+/* ==========================================================
+   fr.lproj/Localizable.strings
+   Keys = exact French strings used in SwiftUI Text/Label/Button/etc.
+   Values = identity (already French in the source code)
+   Note: if a key is missing, SwiftUI shows the key itself which is
+   already in French, so this file mostly serves as documentation.
+   ========================================================== */
+
+/* MARK: - Navigation titles */
+"Données" = "Données";
+"Console SQL" = "Console SQL";
+"Import CSV" = "Import CSV";
+"Choisir un MDP" = "Choisir un MDP";
+"Analyse filtrée" = "Analyse filtrée";
+"Filtres" = "Filtres";
+"Catégorie" = "Catégorie";
+"Remboursement par" = "Remboursement par";
+"Choisir un tiers" = "Choisir un tiers";
+"Nouveau tiers" = "Nouveau tiers";
+"Modifier la transaction" = "Modifier la transaction";
+"Nouvelle transaction" = "Nouvelle transaction";
+"Remboursements" = "Remboursements";
+"Tags — sélection multiple" = "Tags — sélection multiple";
+"Tags" = "Tags";
+"Dépenses par tag" = "Dépenses par tag";
+"Tricounts" = "Tricounts";
+"Charger un Tricount" = "Charger un Tricount";
+"Détail dépense" = "Détail dépense";
+"Choisir une transaction" = "Choisir une transaction";
+"Nouveau remboursement" = "Nouveau remboursement";
+"Confidentialité" = "Confidentialité";
+"Modifier le groupe" = "Modifier le groupe";
+"Paramètres" = "Paramètres";
+"Créer un compte" = "Créer un compte";
+
+/* MARK: - Buttons */
+"Supprimer" = "Supprimer";
+"Créer" = "Créer";
+"Annuler" = "Annuler";
+"Enregistrer" = "Enregistrer";
+"Modifier" = "Modifier";
+"Confirmer" = "Confirmer";
+"Fermer" = "Fermer";
+"Appliquer" = "Appliquer";
+"Analyser" = "Analyser";
+"Exécuter" = "Exécuter";
+"Valider" = "Valider";
+"Charger" = "Charger";
+"Réessayer" = "Réessayer";
+"Commencer" = "Commencer";
+"Ajouter" = "Ajouter";
+"Effacer" = "Effacer";
+"Réinitialiser" = "Réinitialiser";
+"Réinitialiser les filtres" = "Réinitialiser les filtres";
+"Changer de dossier…" = "Changer de dossier…";
+"Changer le dossier…" = "Changer le dossier…";
+"Choisir un dossier de sync…" = "Choisir un dossier de sync…";
+"Synchroniser maintenant" = "Synchroniser maintenant";
+"Désactiver la synchronisation" = "Désactiver la synchronisation";
+"Réafficher tous les conseils" = "Réafficher tous les conseils";
+"Importer un CSV…" = "Importer un CSV…";
+"Choisir un fichier CSV" = "Choisir un fichier CSV";
+"Lancer l'analyse" = "Lancer l'analyse";
+"Relancer les migrations" = "Relancer les migrations";
+"Tout sélectionner" = "Tout sélectionner";
+"Rembourser" = "Rembourser";
+"Lier" = "Lier";
+"Mettre à jour" = "Mettre à jour";
+"Modifier le lien" = "Modifier le lien";
+"Lier une transaction…" = "Lier une transaction…";
+"Assigner un remboursement…" = "Assigner un remboursement…";
+"Modifier…" = "Modifier…";
+"Aucune catégorie" = "Aucune catégorie";
+"Aucun remboursement" = "Aucun remboursement";
+"Importer CSV" = "Importer CSV";
+"Créer une nouvelle base" = "Créer une nouvelle base";
+"Importer un fichier .sqlite" = "Importer un fichier .sqlite";
+"Confidentialité & données" = "Confidentialité & données";
+"Converti en EUR" = "Converti en EUR";
+
+/* MARK: - Section headers */
+"Fichier CSV" = "Fichier CSV";
+"Paramètres d'import" = "Paramètres d'import";
+"Résultats de l'analyse" = "Résultats de l'analyse";
+"Erreurs d'analyse" = "Erreurs d'analyse";
+"Erreurs d'import SQL" = "Erreurs d'import SQL";
+"Type de compte" = "Type de compte";
+"Catégorie par défaut" = "Catégorie par défaut";
+"Virement interne" = "Virement interne";
+"Catégorie parente" = "Catégorie parente";
+"Colonne libellé" = "Colonne libellé";
+"Rechercher" = "Rechercher";
+"Tiers existants" = "Tiers existants";
+"Regex" = "Regex";
+"Compte" = "Compte";
+"Période" = "Période";
+"Recherche" = "Recherche";
+"Affichage" = "Affichage";
+"Classification" = "Classification";
+"Remboursement" = "Remboursement";
+"Détails" = "Détails";
+"Dépense" = "Dépense";
+"Transaction liée" = "Transaction liée";
+"Personne qui me doit" = "Personne qui me doit";
+"Montant dû" = "Montant dû";
+"Tags disponibles" = "Tags disponibles";
+"Synchronisation automatique" = "Synchronisation automatique";
+"Import" = "Import";
+"Aide" = "Aide";
+"Fonctionnalités optionnelles" = "Fonctionnalités optionnelles";
+"Base de données" = "Base de données";
+"À propos" = "À propos";
+"Scripts SQL" = "Scripts SQL";
+"Apparence" = "Apparence";
+"Vos données" = "Vos données";
+"Ce que nous ne faisons pas" = "Ce que nous ne faisons pas";
+"Synchronisation" = "Synchronisation";
+"Application" = "Application";
+"Lien ou code Tricount" = "Lien ou code Tricount";
+"Tricount chargé" = "Tricount chargé";
+"Je suis…" = "Je suis…";
+"Regex de détection (optionnel)" = "Regex de détection (optionnel)";
+
+/* MARK: - Picker / Toggle labels */
+"Thème" = "Thème";
+"Langue" = "Langue";
+"Système" = "Système";
+"Clair" = "Clair";
+"Sombre" = "Sombre";
+"Français" = "Français";
+"Grouper par catégorie parente" = "Grouper par catégorie parente";
+"Enrichir la regex existante" = "Enrichir la regex existante";
+"Grouper par" = "Grouper par";
+"Granularité" = "Granularité";
+"Colonne" = "Colonne";
+"Action" = "Action";
+"Compte lié" = "Compte lié";
+"Parent" = "Parent";
+"Moyen de paiement" = "Moyen de paiement";
+"Table" = "Table";
+"Type" = "Type";
+
+/* MARK: - DatePicker labels */
+"Du" = "Du";
+"Au" = "Au";
+"Date" = "Date";
+"Année" = "Année";
+
+/* MARK: - TextField placeholders */
+"Nom" = "Nom";
+"Regex (optionnel)" = "Regex (optionnel)";
+"Nom du tiers" = "Nom du tiers";
+"Regex de détection" = "Regex de détection";
+"Nom du tiers…" = "Nom du tiers…";
+"Nouvelle regex à ajouter" = "Nouvelle regex à ajouter";
+"Description" = "Description";
+"Information / description" = "Information / description";
+"Filtrer par tiers ou libellé…" = "Filtrer par tiers ou libellé…";
+"Nouveau tag…" = "Nouveau tag…";
+"Colonne montant" = "Colonne montant";
+"Colonne date" = "Colonne date";
+
+/* MARK: - LabeledContent keys */
+"Dossier" = "Dossier";
+"Dernière sync" = "Dernière sync";
+"Version du schéma" = "Version du schéma";
+"Version" = "Version";
+"Build" = "Build";
+"Dossier actif" = "Dossier actif";
+"Regex actuelle" = "Regex actuelle";
+"Payé par" = "Payé par";
+"Total" = "Total";
+"Ma part" = "Ma part";
+"Libellé bancaire" = "Libellé bancaire";
+"Montant" = "Montant";
+
+/* MARK: - Picker options / Text tags */
+"Toutes" = "Toutes";
+"Tous les tags" = "Tous les tags";
+"Non catégorisé" = "Non catégorisé";
+"Aucun (tiers externe)" = "Aucun (tiers externe)";
+"Aucun (catégorie racine)" = "Aucun (catégorie racine)";
+"Aucun" = "Aucun";
+"Aucune" = "Aucune";
+"Balances" = "Balances";
+"Dépenses" = "Dépenses";
+
+/* MARK: - Status / info text */
+"Aucun compte disponible" = "Aucun compte disponible";
+"Aucune transaction liée" = "Aucune transaction liée";
+"Solde période" = "Solde période";
+"Solde réel" = "Solde réel";
+"équilibré" = "équilibré";
+"partiel" = "partiel";
+"non converti" = "non converti";
+"Sous-total" = "Sous-total";
+"Total à recevoir" = "Total à recevoir";
+"Filtres actifs" = "Filtres actifs";
+"Variables" = "Variables";
+"Sans extension .sql" = "Sans extension .sql";
+"Données stockées localement" = "Données stockées localement";
+"Moi" = "Moi";
+"Votre premier compte" = "Votre premier compte";
+"Récupération des taux de change…" = "Récupération des taux de change…";
+"Authentification RSA en cours" = "Authentification RSA en cours";
+
+/* MARK: - Budget */
+"Aperçu budgétaire" = "Aperçu budgétaire";
+"Enveloppes budgétaires" = "Enveloppes budgétaires";
+"Enveloppes" = "Enveloppes";
+"Gérer les récurrents" = "Gérer les récurrents";
+"Détecter les récurrents" = "Détecter les récurrents";
+"Gérer" = "Gérer";
+"Prévu" = "Prévu";
+"Revenu" = "Revenu";
+"Aucun récurrent" = "Aucun récurrent";
+"Dans les 7 prochains jours" = "Dans les 7 prochains jours";
+"Ignorer" = "Ignorer";
+"Ce mois" = "Ce mois";
+"Revenus → Dépenses par catégorie" = "Revenus → Dépenses par catégorie";
+"Flux budgétaire" = "Flux budgétaire";
+"Utilisez le menu ··· pour détecter vos dépenses récurrentes." = "Utilisez le menu ··· pour détecter vos dépenses récurrentes.";
+
+/* MARK: - Investments */
+"Comptes" = "Comptes";
+"Synthèse" = "Synthèse";
+"Valorisation" = "Valorisation";
+"Investi" = "Investi";
+"Performance" = "Performance";
+"Répartition par type" = "Répartition par type";
+"Répartition par compte" = "Répartition par compte";
+"Évolution portefeuille" = "Évolution portefeuille";
+"Valeur" = "Valeur";
+"Enrichissement ISIN en cours…" = "Enrichissement ISIN en cours…";
+"Avertissements ISIN" = "Avertissements ISIN";
+"Prévisualisation" = "Prévisualisation";
+"Qte:" = "Qte:";
+"Valeur:" = "Valeur:";
+"Importer les positions" = "Importer les positions";
+"Colonne cible" = "Colonne cible";
+"Sélectionner un compte" = "Sélectionner un compte";
+"Source CSV" = "Source CSV";
+"ISIN (obligatoire)" = "ISIN (obligatoire)";
+"Quantité" = "Quantité";
+"Prix d'achat" = "Prix d'achat";
+"Date d'achat (optionnel)" = "Date d'achat (optionnel)";
+"Si date absente" = "Si date absente";
+"Bloquer l'import" = "Bloquer l'import";
+"Utiliser aujourd'hui" = "Utiliser aujourd'hui";
+"Prévisualiser" = "Prévisualiser";
+"Non renseigné" = "Non renseigné";
+"Aucun compte d'investissement" = "Aucun compte d'investissement";
+"Ajoutez un compte PEA, CTO, assurance-vie ou crypto." = "Ajoutez un compte PEA, CTO, assurance-vie ou crypto.";
+"Ajouter une position" = "Ajouter une position";
+"Historique" = "Historique";
+"P/L:" = "P/L:";
+
+/* MARK: - Smart Import */
+"Choisir la colonne" = "Choisir la colonne";
+"Validation des tiers" = "Validation des tiers";
+"Appliquer les décisions ?" = "Appliquer les décisions ?";
+"groupes" = "groupes";
+"en attente" = "en attente";
+"validés" = "validés";
+"Tout valider avec les suggestions" = "Tout valider avec les suggestions";
+"À valider" = "À valider";
+"Validés" = "Validés";
+"Créer « " = "Créer « ";
+"Rattacher à « " = "Rattacher à « ";
+"Ignoré" = "Ignoré";
+"Résultat :" = "Résultat :";
+
+/* MARK: - Paywall */
+"Finance Pro" = "Finance Pro";
+"Passez à Finance Pro" = "Passez à Finance Pro";
+"Débloquez toutes les fonctionnalités et gérez vos finances sans aucune limite." = "Débloquez toutes les fonctionnalités et gérez vos finances sans aucune limite.";
+"Chargement des offres…" = "Chargement des offres…";
+"Impossible de charger les offres.\nVérifiez votre connexion." = "Impossible de charger les offres.\nVérifiez votre connexion.";
+"accès à vie, paiement unique" = "accès à vie, paiement unique";
+"/ mois" = "/ mois";
+"/ an" = "/ an";
+"Continuer · " = "Continuer · ";
+"Continuer" = "Continuer";
+"Restaurer les achats" = "Restaurer les achats";
+"Politique de confidentialité" = "Politique de confidentialité";
+"Conditions d'utilisation" = "Conditions d'utilisation";
+"Les abonnements se renouvellent automatiquement jusqu'à résiliation. Vous pouvez gérer ou annuler votre abonnement à tout moment depuis les Réglages de votre iPhone > Identifiant Apple > Abonnements." = "Les abonnements se renouvellent automatiquement jusqu'à résiliation. Vous pouvez gérer ou annuler votre abonnement à tout moment depuis les Réglages de votre iPhone > Identifiant Apple > Abonnements.";
+"Populaire" = "Populaire";
+"PRO" = "PRO";
+
+/* MARK: - BinanceTax */
+"Test de connexion…" = "Test de connexion…";
+
+/* MARK: - Settings */
+"Compte par défaut" = "Compte par défaut";
+"Premier disponible" = "Premier disponible";
+"Prochainement" = "Prochainement";
+"Budget & Prévisions" = "Budget & Prévisions";
+"Seuil rouge budget" = "Seuil rouge budget";
+"Orange de 0 % à +" = "Orange de 0 % à +";
+"% de dépassement, rouge au-delà." = "% de dépassement, rouge au-delà.";
+"Ordre des onglets" = "Ordre des onglets";
+"Les 3 premiers s'affichent dans la barre du bas. Les suivants vont dans Plus." = "Les 3 premiers s'affichent dans la barre du bas. Les suivants vont dans Plus.";
+"Dossier de destination" = "Dossier de destination";
+"Finance Gratuit" = "Finance Gratuit";
+"Transactions et dashboard de base" = "Transactions et dashboard de base";
+"Toutes les fonctionnalités débloquées" = "Toutes les fonctionnalités débloquées";
+"Passer Pro" = "Passer Pro";
+"Voir les offres Pro" = "Voir les offres Pro";
+"Gérer l'abonnement" = "Gérer l'abonnement";
+
+/* MARK: - Dashboard */
+"Exercice" = "Exercice";
+"Tous comptes" = "Tous comptes";
+"Touchez une barre pour déselectionner" = "Touchez une barre pour déselectionner";
+"Touchez un mois pour filtrer les catégories" = "Touchez un mois pour filtrer les catégories";
+"Filtre actif :" = "Filtre actif :";
+"Répartition par catégorie" = "Répartition par catégorie";
+"Répartition par tag" = "Répartition par tag";
+"Aucune donnée" = "Aucune donnée";
+"Évolution" = "Évolution";
+"Toutes catégories (filtré)" = "Toutes catégories (filtré)";
+"Recettes" = "Recettes";
+"Mois" = "Mois";
+"Dépenses par catégorie" = "Dépenses par catégorie";
+"Tag" = "Tag";
+"Solde" = "Solde";
+"Sélection" = "Sélection";
+
+/* MARK: - Transactions */
+"Aucune transaction" = "Aucune transaction";
+"Aucun résultat" = "Aucun résultat";
+"transaction(s) sans catégorie" = "transaction(s) sans catégorie";
+"transaction(s) sur la période" = "transaction(s) sur la période";
+"Sélectionner" = "Sélectionner";
+"Supprimer (" = "Supprimer (";
+"Vérifiez que le compte selectionné et la plage de temps correspondent. Sinon commencez par ajouter vos transactions ou les importer depuis un fichier sqlite existant ou un fichier csv." = "Vérifiez que le compte selectionné et la plage de temps correspondent. Sinon commencez par ajouter vos transactions ou les importer depuis un fichier sqlite existant ou un fichier csv.";
+
+/* MARK: - Navigation & More */
+"Outils" = "Outils";
+"Rapport fiscal Binance" = "Rapport fiscal Binance";
+"Plus" = "Plus";
+
+/* MARK: - Onboarding */
+"Ex. : Compte courant BNP" = "Ex. : Compte courant BNP";
+
+/* MARK: - Widget */
+"Solde mensuel" = "Solde mensuel";
+"Dépenses et revenus du mois en cours." = "Dépenses et revenus du mois en cours.";
+"utilisé" = "utilisé";
+"Dépassement" = "Dépassement";
+"Économie" = "Économie";
+
+/* MARK: - Tricount */
+"Mes dépenses" = "Mes dépenses";
+"Ma part nette" = "Ma part nette";
+"On me doit" = "On me doit";
+"Je dois" = "Je dois";
+"Aucun Tricount" = "Aucun Tricount";
+"entrées ·" = "entrées ·";
+"Chargement…" = "Chargement…";
+"Titre" = "Titre";
+"Entrées" = "Entrées";
+"Devise" = "Devise";
+
+/* MARK: - Reference Data */
+"Aucune donnée. Importe d'abord un fichier sqlite ou commence à les ajouter." = "Aucune donnée. Importe d'abord un fichier sqlite ou commence à les ajouter.";
+"Aucun résultat pour « " = "Aucun résultat pour « ";
+"Trier par création" = "Trier par création";
+"Trier par ordre alphabétique" = "Trier par ordre alphabétique";
+"Moyen de paiement par défaut introuvable (AUTRE id=9)." = "Moyen de paiement par défaut introuvable (AUTRE id=9).";
+"moyen de paiement disponible. Ajoutez des lignes dans la table mdp." = "moyen de paiement disponible. Ajoutez des lignes dans la table mdp.";
+
+/* MARK: - Import */
+"Lignes détectées" = "Lignes détectées";
+"Colonnes" = "Colonnes";
+"Transactions prêtes" = "Transactions prêtes";
+"Tiers identifiés" = "Tiers identifiés";
+"Sans tiers" = "Sans tiers";
+"Rejets à l'analyse" = "Rejets à l'analyse";
+"Erreurs SQL" = "Erreurs SQL";
+"Import bloqué: corrige les erreurs d'analyse avant d'importer." = "Import bloqué: corrige les erreurs d'analyse avant d'importer.";
+"— toucher tiers / MDP pour assigner" = "— toucher tiers / MDP pour assigner";
+
+/* MARK: - Import V3 / AXE D-E */
+"Une session d'import est déjà en cours" = "Une session d'import est déjà en cours";
+"Vous devez d'abord la terminer ou l'annuler avant d'en démarrer une nouvelle." = "Vous devez d'abord la terminer ou l'annuler avant d'en démarrer une nouvelle.";
+"Annuler la session ?" = "Annuler la session ?";
+"Annuler la session" = "Annuler la session";
+"Annuler la précédente" = "Annuler la précédente";
+"Import terminé" = "Import terminé";
+"Les lignes non importées seront perdues." = "Les lignes non importées seront perdues.";
+"Les transactions seront ajoutées au compte. Les lignes en attente seront ignorées." = "Les transactions seront ajoutées au compte. Les lignes en attente seront ignorées.";
+"Format connu — mapping pré-rempli depuis un import précédent." = "Format connu — mapping pré-rempli depuis un import précédent.";
+"Format détecté" = "Format détecté";
+"Séparateur CSV" = "Séparateur CSV";
+"Décimal du montant" = "Décimal du montant";
+"Aperçu (3 premières lignes)" = "Aperçu (3 premières lignes)";
+"Libellé" = "Libellé";
+"Libellé d'import" = "Libellé d'import";
+"Libellé à classer" = "Libellé à classer";
+"Compte cible" = "Compte cible";
+"Importer" = "Importer";
+"Importer un CSV" = "Importer un CSV";
+"Importer un fichier CSV" = "Importer un fichier CSV";
+"Exportez le relevé de votre compte bancaire au format CSV depuis votre banque en ligne, puis importez-le ici pour commencer à suivre vos finances." = "Exportez le relevé de votre compte bancaire au format CSV depuis votre banque en ligne, puis importez-le ici pour commencer à suivre vos finances.";
+"Une fois le fichier choisi, vous mapperez les colonnes (date / montant / libellé). Le mapping est mémorisé pour les prochains imports du même format." = "Une fois le fichier choisi, vous mapperez les colonnes (date / montant / libellé). Le mapping est mémorisé pour les prochains imports du même format.";
+"Choisir un CSV" = "Choisir un CSV";
+"Choisir un dossier" = "Choisir un dossier";
+"Import & Données" = "Import & Données";
+
+/* MARK: - Enrichment / AXE B.1 */
+"Aide à l'identification" = "Aide à l'identification";
+"Enrichir cette ligne" = "Enrichir cette ligne";
+"Enrichir les non-résolus (Sirene + IA + Maps)" = "Enrichir les non-résolus (Sirene + IA + Maps)";
+"Recherche personnalisée" = "Recherche personnalisée";
+"Carte des résultats" = "Carte des résultats";
+"Aucune source n'a trouvé de correspondance. Essaie de simplifier la recherche." = "Aucune source n'a trouvé de correspondance. Essaie de simplifier la recherche.";
+"Aucun résultat. Affine la recherche." = "Aucun résultat. Affine la recherche.";
+"Choisir ce candidat" = "Choisir ce candidat";
+"Plein écran" = "Plein écran";
+"Rétablir le libellé brut" = "Rétablir le libellé brut";
+"La recherche utilise le libellé bancaire tel quel (les codes pays et noms de ville aident l'IA). Tu peux l'affiner si nécessaire." = "La recherche utilise le libellé bancaire tel quel (les codes pays et noms de ville aident l'IA). Tu peux l'affiner si nécessaire.";
+"Optionnel : si tu ne te souviens pas du marchand, lance une recherche multi-sources. Tap un candidat pour pré-remplir la fiche au-dessus." = "Optionnel : si tu ne te souviens pas du marchand, lance une recherche multi-sources. Tap un candidat pour pré-remplir la fiche au-dessus.";
+"Ces sources fonctionnent indépendamment de l'IA. Si l'IA n'est pas disponible, l'enrichissement reste fonctionnel." = "Ces sources fonctionnent indépendamment de l'IA. Si l'IA n'est pas disponible, l'enrichissement reste fonctionnel.";
+
+/* MARK: - Payee creation & update / AXE B.1 */
+"Vérifier le tier" = "Vérifier le tier";
+"Créer un nouveau tier…" = "Créer un nouveau tier…";
+"Lier à un tier existant…" = "Lier à un tier existant…";
+"Lier à un tiers existant" = "Lier à un tiers existant";
+"Résolution moteur" = "Résolution moteur";
+"La regex pré-remplie matche le libellé exact. Ajoute |…|… pour gérer d'autres variantes." = "La regex pré-remplie matche le libellé exact. Ajoute |…|… pour gérer d'autres variantes.";
+"Créez d'abord un tiers depuis la liste des données de référence." = "Créez d'abord un tiers depuis la liste des données de référence.";
+"Création depuis import" = "Création depuis import";
+
+/* MARK: - Payees / AXE C & F */
+"Identité" = "Identité";
+"Catégorisation" = "Catégorisation";
+"Avancé" = "Avancé";
+"ID moteur (avancé)" = "ID moteur (avancé)";
+"Délier du moteur" = "Délier du moteur";
+"Tiers" = "Tiers";
+"Tiers personnalisé" = "Tiers personnalisé";
+"Tier personnalisé (sans lien moteur)" = "Tier personnalisé (sans lien moteur)";
+"Tier associé" = "Tier associé";
+"Optionnel — facilite l'auto-matching d'une transaction réelle à cette échéance et permet d'afficher le logo du marchand." = "Optionnel — facilite l'auto-matching d'une transaction réelle à cette échéance et permet d'afficher le logo du marchand.";
+"Commerce identifié par une marque canonique (Carrefour, Apple…)." = "Commerce identifié par une marque canonique (Carrefour, Apple…).";
+"Personne physique. Tu peux lier ce tier à un contact iOS pour récupérer sa photo." = "Personne physique. Tu peux lier ce tier à un contact iOS pour récupérer sa photo.";
+"Représente un de tes propres comptes (virement interne)." = "Représente un de tes propres comptes (virement interne).";
+"CAF, école, employeur — entité publique ou privée non commerciale." = "CAF, école, employeur — entité publique ou privée non commerciale.";
+"Un tiers personnalisé ne sera pas réassigné automatiquement par le moteur lors des futurs imports." = "Un tiers personnalisé ne sera pas réassigné automatiquement par le moteur lors des futurs imports.";
+"Le compte interne lié indique que ce tiers représente un virement entre vos propres comptes." = "Le compte interne lié indique que ce tiers représente un virement entre vos propres comptes.";
+"Aucun groupe" = "Aucun groupe";
+"Rassemble plusieurs tiers de la même enseigne (ex. tous les Carrefour Market)." = "Rassemble plusieurs tiers de la même enseigne (ex. tous les Carrefour Market).";
+"Regroupe plusieurs tiers d'une même enseigne (ex. tous les Carrefour Market)." = "Regroupe plusieurs tiers d'une même enseigne (ex. tous les Carrefour Market).";
+"Choisir une icône" = "Choisir une icône";
+"Si tu ne choisis rien, l'icône est calculée automatiquement depuis le nom. Toute icône choisie est mémorisée et a la priorité." = "Si tu ne choisis rien, l'icône est calculée automatiquement depuis le nom. Toute icône choisie est mémorisée et a la priorité.";
+"Choisir…" = "Choisir…";
+
+/* MARK: - Contacts / AXE F */
+"100% local — aucune donnée n'est envoyée. La permission est demandée au premier lien." = "100% local — aucune donnée n'est envoyée. La permission est demandée au premier lien.";
+"Accès au carnet refusé" = "Accès au carnet refusé";
+"Va dans Réglages > Nemoris > Contacts pour autoriser l'accès." = "Va dans Réglages > Nemoris > Contacts pour autoriser l'accès.";
+"Photo et nom synchronisés depuis ton carnet iOS" = "Photo et nom synchronisés depuis ton carnet iOS";
+
+/* MARK: - Budget / AXE G */
+"Budget" = "Budget";
+"Prévisions" = "Prévisions";
+"Récurrents" = "Récurrents";
+"Récurrents détectés" = "Récurrents détectés";
+"Fréquence" = "Fréquence";
+"Créer une enveloppe" = "Créer une enveloppe";
+"Ignorer cette échéance" = "Ignorer cette échéance";
+"Ces dépenses semblent récurrentes dans votre historique. Confirmez celles que vous souhaitez suivre." = "Ces dépenses semblent récurrentes dans votre historique. Confirmez celles que vous souhaitez suivre.";
+"Importez plus de transactions ou créez des enveloppes manuellement. Il faut au moins 3 transactions et 30 € sur 90 jours par catégorie pour être suggéré." = "Importez plus de transactions ou créez des enveloppes manuellement. Il faut au moins 3 transactions et 30 € sur 90 jours par catégorie pour être suggéré.";
+"Basé sur les **90 derniers jours**. Budget suggéré = moyenne mensuelle observée + 10 % de marge, arrondi à la dizaine supérieure." = "Basé sur les **90 derniers jours**. Budget suggéré = moyenne mensuelle observée + 10 % de marge, arrondi à la dizaine supérieure.";
+"Suggérer (90 j)" = "Suggérer (90 j)";
+"Aucune donnée ce mois" = "Aucune donnée ce mois";
+"Aucune dépense ce mois" = "Aucune dépense ce mois";
+"Commencez par importer vos données" = "Commencez par importer vos données";
+"Récap" = "Récap";
+"Début" = "Début";
+
+/* MARK: - Investments / AXE I, J, K */
+"Investissements" = "Investissements";
+"Valorisation totale" = "Valorisation totale";
+"Montant investi" = "Montant investi";
+"Valeur actuelle (marché)" = "Valeur actuelle (marché)";
+"Trésorerie disponible" = "Trésorerie disponible";
+"Inclure la trésorerie dans la valorisation" = "Inclure la trésorerie dans la valorisation";
+"Si activé, la trésorerie (cash disponible) est ajoutée au gros chiffre de valorisation. Le calcul de performance reste basé uniquement sur les positions, peu importe ce réglage." = "Si activé, la trésorerie (cash disponible) est ajoutée au gros chiffre de valorisation. Le calcul de performance reste basé uniquement sur les positions, peu importe ce réglage.";
+"Compte d'investissement" = "Compte d'investissement";
+"Ajouter un compte" = "Ajouter un compte";
+"Modifier le compte" = "Modifier le compte";
+"Supprimer le compte" = "Supprimer le compte";
+"Toutes les positions et ordres rattachés à ce compte seront aussi supprimés (cascade)." = "Toutes les positions et ordres rattachés à ce compte seront aussi supprimés (cascade).";
+"Compte interne lié (virement)" = "Compte interne lié (virement)";
+"La valeur et le montant investi du compte seront calculés depuis les positions et leurs ordres" = "La valeur et le montant investi du compte seront calculés depuis les positions et leurs ordres";
+"Les positions et la performance sont calculées automatiquement depuis les ordres. La trésorerie est éditable ci-dessus." = "Les positions et la performance sont calculées automatiquement depuis les ordres. La trésorerie est éditable ci-dessus.";
+"P&L disponible après synchronisation du cours" = "P&L disponible après synchronisation du cours";
+"Performance disponible après synchronisation des cours" = "Performance disponible après synchronisation des cours";
+"Cours non synchronisé — la valeur affichée correspond au coût d'acquisition. Synchronise pour voir le P&L réel." = "Cours non synchronisé — la valeur affichée correspond au coût d'acquisition. Synchronise pour voir le P&L réel.";
+"Cours des positions non synchronisés — la valeur correspond au coût total investi. Synchronise chaque position pour voir le P&L réel." = "Cours des positions non synchronisés — la valeur correspond au coût total investi. Synchronise chaque position pour voir le P&L réel.";
+"Ces positions ne contribuent pas au chart parce qu'aucun cours n'a été récupéré. Synchronise-les ou édite-les pour renseigner un ISIN valide." = "Ces positions ne contribuent pas au chart parce qu'aucun cours n'a été récupéré. Synchronise-les ou édite-les pour renseigner un ISIN valide.";
+"Modifier la position" = "Modifier la position";
+"Supprimer la position" = "Supprimer la position";
+"Toutes les positions et les ordres rattachés seront supprimés en cascade. Cette action est irréversible." = "Toutes les positions et les ordres rattachés seront supprimés en cascade. Cette action est irréversible.";
+"Ces valeurs sont recalculées automatiquement à partir des ordres (achats, ventes, dividendes) rattachés à cette position. Pour les modifier, édite ou ajoute un ordre depuis la fiche de la position." = "Ces valeurs sont recalculées automatiquement à partir des ordres (achats, ventes, dividendes) rattachés à cette position. Pour les modifier, édite ou ajoute un ordre depuis la fiche de la position.";
+"Dérivé des ordres" = "Dérivé des ordres";
+"Quantité et prix" = "Quantité et prix";
+"Quantité, PRU et date d'achat seront calculés depuis les ordres" = "Quantité, PRU et date d'achat seront calculés depuis les ordres";
+"L'ISIN est l'identifiant universel d'un actif (12 caractères, ex : FR0000121329). C'est ce qu'utilise la sync de cours pour trouver le bon symbole boursier — bien plus fiable que le ticker. Si tu l'as, renseigne-le." = "L'ISIN est l'identifiant universel d'un actif (12 caractères, ex : FR0000121329). C'est ce qu'utilise la sync de cours pour trouver le bon symbole boursier — bien plus fiable que le ticker. Si tu l'as, renseigne-le.";
+"Mise à jour automatiquement par la synchronisation de cours, ou modifiable manuellement." = "Mise à jour automatiquement par la synchronisation de cours, ou modifiable manuellement.";
+"Date d'exécution" = "Date d'exécution";
+"Type d'opération" = "Type d'opération";
+"Ex: courtier, raison de l'opération…" = "Ex: courtier, raison de l'opération…";
+"Achat : qty + PRU ajoutés à la position. Frais inclus dans le PRU pondéré." = "Achat : qty + PRU ajoutés à la position. Frais inclus dans le PRU pondéré.";
+"Vente : réduit la quantité de la position. Le PRU moyen reste inchangé (calculé sur les achats uniquement)." = "Vente : réduit la quantité de la position. Le PRU moyen reste inchangé (calculé sur les achats uniquement).";
+"Dividende : tracking du revenu reçu. N'affecte ni la quantité ni le PRU." = "Dividende : tracking du revenu reçu. N'affecte ni la quantité ni le PRU.";
+"Aucun ordre détecté" = "Aucun ordre détecté";
+"Aucun ordre enregistré. Tape + pour ajouter un achat, une vente ou un dividende." = "Aucun ordre enregistré. Tape + pour ajouter un achat, une vente ou un dividende.";
+"Tous les ordres rattachés seront aussi supprimés." = "Tous les ordres rattachés seront aussi supprimés.";
+"Une fois la position créée, ajoute un ou plusieurs ordres (BUY/SELL/DIV) — la quantité nette et le PRU pondéré seront calculés automatiquement." = "Une fois la position créée, ajoute un ou plusieurs ordres (BUY/SELL/DIV) — la quantité nette et le PRU pondéré seront calculés automatiquement.";
+"Aucun historique disponible" = "Aucun historique disponible";
+"Aucun historique synchronisé" = "Aucun historique synchronisé";
+"Pas assez de données" = "Pas assez de données";
+
+/* MARK: - PDF Import / AXE I */
+"Importer un PDF (IA)" = "Importer un PDF (IA)";
+"PDF, image (photo d'un relevé), CSV, texte… Le format est détecté automatiquement. L'IA analyse le contenu pour identifier les ordres." = "PDF, image (photo d'un relevé), CSV, texte… Le format est détecté automatiquement. L'IA analyse le contenu pour identifier les ordres.";
+"L'import PDF utilise l'IA on-device pour comprendre les relevés de n'importe quelle banque. iOS 26+ avec Apple Intelligence activée est requis." = "L'import PDF utilise l'IA on-device pour comprendre les relevés de n'importe quelle banque. iOS 26+ avec Apple Intelligence activée est requis.";
+"Le PDF ne semble pas contenir d'ordres d'investissement reconnaissables, ou le format n'a pas pu être interprété." = "Le PDF ne semble pas contenir d'ordres d'investissement reconnaissables, ou le format n'a pas pu être interprété.";
+"L'assistant réfléchit…" = "L'assistant réfléchit…";
+"Création des positions et rattachement des ordres." = "Création des positions et rattachement des ordres.";
+"Importée" = "Importée";
+"Les ordres importés seront rattachés aux positions de ce compte. Les nouvelles positions seront créées automatiquement." = "Les ordres importés seront rattachés aux positions de ce compte. Les nouvelles positions seront créées automatiquement.";
+"Résumé" = "Résumé";
+"Statut" = "Statut";
+
+/* MARK: - Live Sync / AXE I */
+"Synchronisation auto" = "Synchronisation auto";
+"Synchronisation en cours…" = "Synchronisation en cours…";
+"Synchroniser uniquement celles-ci" = "Synchroniser uniquement celles-ci";
+"Sources synchronisées" = "Sources synchronisées";
+"Aucune source synchronisée" = "Aucune source synchronisée";
+"Touchez + en haut à droite pour lier un exchange ou un wallet." = "Touchez + en haut à droite pour lier un exchange ou un wallet.";
+"Choisir une source" = "Choisir une source";
+"Ajouter une source" = "Ajouter une source";
+"Modifier les identifiants" = "Modifier les identifiants";
+"Supprimer ce lien" = "Supprimer ce lien";
+"Supprimer ce lien ?" = "Supprimer ce lien ?";
+"Chaîne" = "Chaîne";
+"Vos clés restent sur cet iPhone" = "Vos clés restent sur cet iPhone";
+"100% on-device. Aucune donnée bancaire ne quitte l'appareil." = "100% on-device. Aucune donnée bancaire ne quitte l'appareil.";
+"Les clés API et adresses publiques sont stockées dans le Keychain iOS, chiffrées par le système. Aucune donnée n'est envoyée à un serveur Nemoris — les appels vont directement à Binance, Etherscan, CoinGecko, etc." = "Les clés API et adresses publiques sont stockées dans le Keychain iOS, chiffrées par le système. Aucune donnée n'est envoyée à un serveur Nemoris — les appels vont directement à Binance, Etherscan, CoinGecko, etc.";
+"Les credentials seront effacés du Keychain. Les positions déjà synchronisées dans Nemoris ne sont pas supprimées." = "Les credentials seront effacés du Keychain. Les positions déjà synchronisées dans Nemoris ne sont pas supprimées.";
+"Choisissez la source à lier. Vous serez ensuite invité à saisir les identifiants (clé API ou adresse publique)." = "Choisissez la source à lier. Vous serez ensuite invité à saisir les identifiants (clé API ou adresse publique).";
+"⚠️ Avant de sauvegarder, vérifiez bien que vos clés API sont **read-only**. Les permissions d'écriture (trading, withdraw) ne sont JAMAIS nécessaires pour la synchronisation Nemoris." = "⚠️ Avant de sauvegarder, vérifiez bien que vos clés API sont **read-only**. Les permissions d'écriture (trading, withdraw) ne sont JAMAIS nécessaires pour la synchronisation Nemoris.";
+"Réparer les valeurs crypto" = "Réparer les valeurs crypto";
+
+/* MARK: - Settings / AXE H */
+"Général" = "Général";
+"Sécurité" = "Sécurité";
+"Données & vie privée" = "Données & vie privée";
+"Développeur" = "Développeur";
+"Visible uniquement en Debug. Force l'accès Lifetime sans achat réel." = "Visible uniquement en Debug. Force l'accès Lifetime sans achat réel.";
+"Icône" = "Icône";
+"Densité" = "Densité";
+"Activé" = "Activé";
+"Désactiver" = "Désactiver";
+"Désactivé" = "Désactivé";
+"Réactiver" = "Réactiver";
+"Activez les fonctionnalités que vous souhaitez voir dans l'app." = "Activez les fonctionnalités que vous souhaitez voir dans l'app.";
+"Terminé" = "Terminé";
+"Déplacer" = "Déplacer";
+
+/* MARK: - Database & SQL Console */
+"Base de données & Console SQL" = "Base de données & Console SQL";
+"Schéma de la base" = "Schéma de la base";
+"Schéma" = "Schéma";
+"Recettes prêtes à copier" = "Recettes prêtes à copier";
+"Texte à rechercher" = "Texte à rechercher";
+"Utiliser cette requête" = "Utiliser cette requête";
+"Appuyez sur + pour créer un fichier ou un dossier." = "Appuyez sur + pour créer un fichier ou un dossier.";
+"Nemoris stocke toutes tes données dans une base SQLite locale (`finance.sqlite` dans Application Support). Voici les tables disponibles pour tes requêtes — tape sur une table pour voir ses colonnes et un exemple." = "Nemoris stocke toutes tes données dans une base SQLite locale (`finance.sqlite` dans Application Support). Voici les tables disponibles pour tes requêtes — tape sur une table pour voir ses colonnes et un exemple.";
+"• Foreign keys non strictement enforcées par SQLite — vérifie tes jointures." = "• Foreign keys non strictement enforcées par SQLite — vérifie tes jointures.";
+"• IDs auto-incrémentés (INTEGER PRIMARY KEY)." = "• IDs auto-incrémentés (INTEGER PRIMARY KEY).";
+"• Montants en EUR (Double). Négatif = dépense, positif = revenu." = "• Montants en EUR (Double). Négatif = dépense, positif = revenu.";
+"Décrivez en français ce que vous voulez extraire de votre base. L'assistant génère la requête SQL pour vous. Vous pouvez la raffiner par questions successives." = "Décrivez en français ce que vous voulez extraire de votre base. L'assistant génère la requête SQL pour vous. Vous pouvez la raffiner par questions successives.";
+"Décrivez votre requête…" = "Décrivez votre requête…";
+
+/* MARK: - Backups */
+"Dernière sauvegarde" = "Dernière sauvegarde";
+"Aucune sauvegarde disponible." = "Aucune sauvegarde disponible.";
+"Aucune sauvegarde pour l'instant." = "Aucune sauvegarde pour l'instant.";
+"Une sauvegarde est créée automatiquement chaque jour au lancement de l'app si plus de 24 h se sont écoulées depuis la précédente. Les 30 plus récentes sont conservées (les plus anciennes sont supprimées automatiquement)." = "Une sauvegarde est créée automatiquement chaque jour au lancement de l'app si plus de 24 h se sont écoulées depuis la précédente. Les 30 plus récentes sont conservées (les plus anciennes sont supprimées automatiquement).";
+"La base actuelle sera remplacée. Une sauvegarde de sécurité « pre-restore » est créée automatiquement avant écrasement." = "La base actuelle sera remplacée. Une sauvegarde de sécurité « pre-restore » est créée automatiquement avant écrasement.";
+"Glissez vers la gauche pour restaurer ou supprimer. La restauration crée d'abord une sauvegarde de sécurité de la base actuelle." = "Glissez vers la gauche pour restaurer ou supprimer. La restauration crée d'abord une sauvegarde de sécurité de la base actuelle.";
+"Les sauvegardes sont synchronisées vers iCloud et accessibles depuis l'app Fichiers (Nemoris → Backups)." = "Les sauvegardes sont synchronisées vers iCloud et accessibles depuis l'app Fichiers (Nemoris → Backups).";
+"Les sauvegardes resteront uniquement sur ce téléphone tant qu'iCloud n'est pas connecté. Activez iCloud Drive dans Réglages pour les protéger en cas de perte ou de réinstallation." = "Les sauvegardes resteront uniquement sur ce téléphone tant qu'iCloud n'est pas connecté. Activez iCloud Drive dans Réglages pour les protéger en cas de perte ou de réinstallation.";
+"Réinitialiser le dossier" = "Réinitialiser le dossier";
+
+/* MARK: - Security & biometry */
+"Aucune biométrie ni code d'accès n'est configuré sur cet appareil. Activez Face ID, Touch ID ou un code d'accès dans Réglages iOS pour utiliser cette fonctionnalité." = "Aucune biométrie ni code d'accès n'est configuré sur cet appareil. Activez Face ID, Touch ID ou un code d'accès dans Réglages iOS pour utiliser cette fonctionnalité.";
+"Le masquage manuel se réinitialise au redémarrage de l'app. Quand le geste est activé, poser l'iPhone face cachée bascule l'affichage des montants. Le relever ne change rien — l'état reste actif jusqu'au prochain geste." = "Le masquage manuel se réinitialise au redémarrage de l'app. Quand le geste est activé, poser l'iPhone face cachée bascule l'affichage des montants. Le relever ne change rien — l'état reste actif jusqu'au prochain geste.";
+"Ouvrir Réglages" = "Ouvrir Réglages";
+
+/* MARK: - Dashboard */
+"Flux net période · tous comptes" = "Flux net période · tous comptes";
+"Mode tous comptes : les transactions de tous les comptes sont mélangées. Le solde réel est masqué (incohérent inter-comptes) ; seul le flux net de la période est affiché." = "Mode tous comptes : les transactions de tous les comptes sont mélangées. Le solde réel est masqué (incohérent inter-comptes) ; seul le flux net de la période est affiché.";
+"Épargne" = "Épargne";
+"Remboursé par" = "Remboursé par";
+
+/* MARK: - AI Settings */
+"Comment ça marche" = "Comment ça marche";
+"État actuel" = "État actuel";
+"À savoir" = "À savoir";
+
+/* MARK: - Common UI */
+"Sélectionner…" = "Sélectionner…";

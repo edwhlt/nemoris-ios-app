@@ -1,0 +1,659 @@
+/* ==========================================================
+   en.lproj/Localizable.strings
+   Keys = exact French strings used in SwiftUI Text/Label/Button/etc.
+   Values = English translations
+   ========================================================== */
+
+/* MARK: - Navigation titles */
+"Données" = "Data";
+"Console SQL" = "SQL Console";
+"Import CSV" = "Import CSV";
+"Choisir un MDP" = "Choose Payment Method";
+"Analyse filtrée" = "Filtered Analysis";
+"Filtres" = "Filters";
+"Catégorie" = "Category";
+"Remboursement par" = "Reimbursed By";
+"Choisir un tiers" = "Choose Payee";
+"Nouveau tiers" = "New Payee";
+"Modifier la transaction" = "Edit Transaction";
+"Nouvelle transaction" = "New Transaction";
+"Remboursements" = "Reimbursements";
+"Tags — sélection multiple" = "Tags — Multiple Selection";
+"Tags" = "Tags";
+"Dépenses par tag" = "Expenses by Tag";
+"Tricounts" = "Tricounts";
+"Charger un Tricount" = "Load a Tricount";
+"Détail dépense" = "Expense Detail";
+"Choisir une transaction" = "Choose Transaction";
+"Nouveau remboursement" = "New Reimbursement";
+"Confidentialité" = "Privacy";
+"Modifier le groupe" = "Edit Group";
+"Paramètres" = "Settings";
+"Créer un compte" = "Create Account";
+
+/* MARK: - Tab bar */
+"Dashboard" = "Dashboard";
+"Transactions" = "Transactions";
+"Tricount" = "Tricount";
+
+/* MARK: - Buttons */
+"Supprimer" = "Delete";
+"Créer" = "Create";
+"Annuler" = "Cancel";
+"Enregistrer" = "Save";
+"Modifier" = "Edit";
+"Confirmer" = "Confirm";
+"Fermer" = "Close";
+"Appliquer" = "Apply";
+"Analyser" = "Analyze";
+"Exécuter" = "Execute";
+"Valider" = "Validate";
+"Charger" = "Load";
+"Réessayer" = "Retry";
+"Commencer" = "Get Started";
+"Ajouter" = "Add";
+"Effacer" = "Clear";
+"Réinitialiser les filtres" = "Reset Filters";
+"Changer de dossier…" = "Change Folder…";
+"Changer le dossier…" = "Change folder…";
+"Choisir un dossier de sync…" = "Choose Sync Folder…";
+"Synchroniser maintenant" = "Sync Now";
+"Désactiver la synchronisation" = "Disable Sync";
+"Réafficher tous les conseils" = "Show All Tips Again";
+"Importer un CSV…" = "Import CSV…";
+"Choisir un fichier CSV" = "Choose CSV File";
+"Lancer l'analyse" = "Run Analysis";
+"Relancer les migrations" = "Re-run Migrations";
+"Tout sélectionner" = "Select All";
+"Rembourser" = "Reimburse";
+"Lier" = "Link";
+"Mettre à jour" = "Update";
+"Réinitialiser" = "Reset";
+"Modifier le lien" = "Edit Link";
+"Lier une transaction…" = "Link a Transaction…";
+"Assigner un remboursement…" = "Assign a Reimbursement…";
+"Modifier…" = "Edit…";
+"Aucune catégorie" = "No Category";
+"Importer CSV" = "Import CSV";
+"Créer une nouvelle base" = "Create New Database";
+"Importer un fichier .sqlite" = "Import .sqlite File";
+"Confidentialité & données" = "Privacy & Data";
+"Converti en EUR" = "Converted to EUR";
+
+/* MARK: - Section headers */
+"Fichier CSV" = "CSV File";
+"Paramètres d'import" = "Import Settings";
+"Résultats de l'analyse" = "Analysis Results";
+"Erreurs d'analyse" = "Analysis Errors";
+"Erreurs d'import SQL" = "SQL Import Errors";
+"Type de compte" = "Account Type";
+"Catégorie par défaut" = "Default Category";
+"Virement interne" = "Internal Transfer";
+"Catégorie parente" = "Parent Category";
+"Rechercher" = "Search";
+"Tiers existants" = "Existing Payees";
+"Regex" = "Regex";
+"Compte" = "Account";
+"Période" = "Period";
+"Recherche" = "Search";
+"Affichage" = "Display";
+"Classification" = "Classification";
+"Remboursement" = "Reimbursement";
+"Détails" = "Details";
+"Dépense" = "Expense";
+"Transaction liée" = "Linked Transaction";
+"Personne qui me doit" = "Person Who Owes Me";
+"Montant dû" = "Amount Owed";
+"Tags disponibles" = "Available Tags";
+"Synchronisation automatique" = "Automatic Sync";
+"Import" = "Import";
+"Aide" = "Help";
+"Fonctionnalités optionnelles" = "Optional Features";
+"Base de données" = "Database";
+"À propos" = "About";
+"Scripts SQL" = "SQL Scripts";
+"Apparence" = "Appearance";
+"Vos données" = "Your Data";
+"Ce que nous ne faisons pas" = "What We Don't Do";
+"Synchronisation" = "Sync";
+"Application" = "Application";
+"Lien ou code Tricount" = "Tricount Link or Code";
+"Tricount chargé" = "Tricount Loaded";
+"Je suis…" = "I am…";
+"Regex de détection (optionnel)" = "Detection Regex (optional)";
+
+/* MARK: - Picker / Toggle labels */
+"Thème" = "Theme";
+"Langue" = "Language";
+"Système" = "System";
+"Clair" = "Light";
+"Sombre" = "Dark";
+"Français" = "French";
+"Grouper par catégorie parente" = "Group by parent category";
+"Enrichir la regex existante" = "Enrich existing regex";
+"Grouper par" = "Group by";
+"Granularité" = "Granularity";
+"Colonne" = "Column";
+"Action" = "Action";
+"Compte lié" = "Linked Account";
+"Parent" = "Parent";
+"Moyen de paiement" = "Payment Method";
+"Table" = "Table";
+"Type" = "Type";
+
+/* MARK: - DatePicker labels */
+"Du" = "From";
+"Au" = "To";
+"Date" = "Date";
+"Année" = "Year";
+
+/* MARK: - TextField placeholders */
+"Nom" = "Name";
+"Regex (optionnel)" = "Regex (optional)";
+"Nom du tiers" = "Payee name";
+"Regex de détection" = "Detection regex";
+"Nom du tiers…" = "Payee name…";
+"Nouvelle regex à ajouter" = "New regex to add";
+"Description" = "Description";
+"Information / description" = "Information / description";
+"Filtrer par tiers ou libellé…" = "Filter by payee or label…";
+"Nouveau tag…" = "New tag…";
+"Colonne libellé" = "Label column";
+"Colonne montant" = "Amount column";
+"Colonne date" = "Date column";
+
+/* MARK: - LabeledContent keys */
+"Dossier" = "Folder";
+"Dernière sync" = "Last Sync";
+"Version du schéma" = "Schema Version";
+"Version" = "Version";
+"Build" = "Build";
+"Dossier actif" = "Active Folder";
+"Regex actuelle" = "Current Regex";
+"Payé par" = "Paid By";
+"Total" = "Total";
+"Ma part" = "My Share";
+"Libellé bancaire" = "Bank Label";
+"Montant" = "Amount";
+
+/* MARK: - Picker options / Text tags */
+"Toutes" = "All";
+"Tous les tags" = "All Tags";
+"Non catégorisé" = "Uncategorized";
+"Aucun (tiers externe)" = "None (external payee)";
+"Aucun (catégorie racine)" = "None (root category)";
+"Aucun" = "None";
+"Aucune" = "None";
+"Balances" = "Balances";
+"Dépenses" = "Expenses";
+
+/* MARK: - Status / info text */
+"Aucun compte disponible" = "No accounts available";
+"Aucune transaction liée" = "No linked transaction";
+"Aucun remboursement" = "No reimbursement";
+"Solde période" = "Period Balance";
+"Solde réel" = "Real Balance";
+"équilibré" = "balanced";
+"partiel" = "partial";
+"non converti" = "not converted";
+"Sous-total" = "Subtotal";
+"Total à recevoir" = "Total to receive";
+"Filtres actifs" = "Active Filters";
+"Variables" = "Variables";
+"Sans extension .sql" = "Without .sql extension";
+"Données stockées localement" = "Data Stored Locally";
+"Moi" = "Me";
+"Votre premier compte" = "Your First Account";
+"Récupération des taux de change…" = "Fetching exchange rates…";
+"Authentification RSA en cours" = "RSA Authentication in progress";
+
+/* MARK: - Long descriptive strings */
+"Aucun compte disponible — importe d'abord un fichier finance.sqlite dans Paramètres." = "No accounts available — first import a finance.sqlite file in Settings.";
+"Les transactions associées seront conservées mais sans tiers assigné." = "Associated transactions will be kept but without an assigned payee.";
+"Sélectionne la colonne qui contient les libellés bancaires bruts. L'analyse intelligente extraira les vrais noms de tiers." = "Select the column containing raw bank labels. Smart analysis will extract real payee names.";
+"Validez tous les groupes pour pouvoir confirmer." = "Validate all groups before confirming.";
+"Tous les groupes sont validés. Appuyez sur Confirmer." = "All groups validated. Tap Confirm.";
+"Les transactions seront importées sans tiers assigné." = "Transactions will be imported without an assigned payee.";
+"Appuyez sur + pour créer un fichier" = "Tap + to create a file";
+"Appuyez sur Exécuter pour lancer la requête" = "Tap Execute to run the query";
+"Requête exécutée avec succès" = "Query executed successfully";
+"Appuyez sur + pour charger un Tricount" = "Tap + to load a Tricount";
+"Importe d'abord un fichier finance.sqlite ou ajuste la période." = "First import a finance.sqlite file or adjust the period.";
+"Aucune transaction ne correspond aux filtres actifs." = "No transactions match the active filters.";
+"Importe une base de données ou sélectionne un compte." = "Import a database or select an account.";
+"Ajoutez des remboursements depuis le détail d'une dépense." = "Add reimbursements from an expense detail.";
+"Assignez des tags à vos transactions ou dépenses Tricount." = "Assign tags to your transactions or Tricount expenses.";
+"Aucune transaction avec remboursement sur cette période." = "No transactions with reimbursement for this period.";
+"Toucher pour les afficher et catégoriser" = "Tap to display and categorize";
+"Suivez vos dépenses, revenus et budgets depuis votre iPhone." = "Track your expenses, income and budgets from your iPhone.";
+"Vous pourrez ajouter d'autres comptes plus tard dans Données de référence." = "You can add more accounts later in Reference Data.";
+"Collez le lien de partage du Tricount." = "Paste the Tricount sharing link.";
+"Sélectionnez votre nom pour calculer vos parts." = "Select your name to calculate your shares.";
+"Dossier par défaut : Documents/SQLRequests/" = "Default folder: Documents/SQLRequests/";
+"Choisissez un dossier (iCloud Drive, OneDrive, local…) vers lequel la base sera automatiquement copiée." = "Choose a folder (iCloud Drive, OneDrive, local…) where the database will be automatically copied.";
+"La base est copiée automatiquement dans ce dossier à chaque modification et quand l'application passe en arrière-plan." = "The database is automatically copied to this folder on every change and when the app goes to background.";
+"Les bulles d'aide sont affichées une seule fois. Appuyez ici pour les réinitialiser." = "Tips are shown only once. Tap here to reset them.";
+"Tricount permet de suivre les dépenses partagées en groupe. Désactivez-le si vous ne l'utilisez pas." = "Tricount lets you track shared group expenses. Disable it if you don't use it.";
+"Toutes vos données financières restent sur votre appareil." = "All your financial data stays on your device.";
+"Aucune donnée envoyée à des serveurs externes." = "No data sent to external servers.";
+"Aucun compte utilisateur requis." = "No user account required.";
+"Aucun traceur ni publicité." = "No tracking or advertising.";
+"La synchronisation (optionnelle) copie votre base de données vers le dossier de votre choix — iCloud Drive, OneDrive, ou tout autre stockage local. Vous seul contrôlez où vont vos données." = "The sync (optional) copies your database to a folder of your choice — iCloud Drive, OneDrive, or any local storage. Only you control where your data goes.";
+"Les fichiers .sql seront lus et créés dans ce dossier." = ".sql files will be read and created in this folder.";
+"Le montant par défaut est votre part sur cette dépense." = "The default amount is your share of this expense.";
+
+/* MARK: - Budget */
+"Aperçu budgétaire" = "Budget Overview";
+"Enveloppes budgétaires" = "Budget Envelopes";
+"Enveloppes" = "Envelopes";
+"Gérer les récurrents" = "Manage Recurring";
+"Détecter les récurrents" = "Detect Recurring";
+"Gérer" = "Manage";
+"Prévu" = "Planned";
+"Revenu" = "Income";
+"Aucun récurrent" = "No recurring items";
+"Dans les 7 prochains jours" = "In the next 7 days";
+"Ignorer" = "Dismiss";
+"Ce mois" = "This month";
+"Revenus → Dépenses par catégorie" = "Income → Expenses by category";
+"Flux budgétaire" = "Budget flow";
+"Utilisez le menu ··· pour détecter vos dépenses récurrentes." = "Use the ··· menu to detect your recurring expenses.";
+
+/* MARK: - Investments */
+"Comptes" = "Accounts";
+"Synthèse" = "Overview";
+"Valorisation" = "Valuation";
+"Investi" = "Invested";
+"Performance" = "Performance";
+"Répartition par type" = "Allocation by type";
+"Répartition par compte" = "Allocation by account";
+"Évolution portefeuille" = "Portfolio evolution";
+"Valeur" = "Value";
+"Enrichissement ISIN en cours…" = "Enriching ISIN data…";
+"Avertissements ISIN" = "ISIN warnings";
+"Prévisualisation" = "Preview";
+"Qte:" = "Qty:";
+"Valeur:" = "Value:";
+"Importer les positions" = "Import positions";
+"Colonne cible" = "Target column";
+"Sélectionner un compte" = "Select account";
+"Source CSV" = "CSV source";
+"ISIN (obligatoire)" = "ISIN (required)";
+"Quantité" = "Quantity";
+"Prix d'achat" = "Purchase price";
+"Date d'achat (optionnel)" = "Purchase date (optional)";
+"Si date absente" = "If date missing";
+"Bloquer l'import" = "Block import";
+"Utiliser aujourd'hui" = "Use today";
+"Prévisualiser" = "Preview";
+"Non renseigné" = "Not specified";
+"Aucun compte d'investissement" = "No investment account";
+"Ajoutez un compte PEA, CTO, assurance-vie ou crypto." = "Add a PEA, CTO, life insurance or crypto account.";
+"Ajouter une position" = "Add position";
+"Historique" = "History";
+"P/L:" = "P/L:";
+
+/* MARK: - Smart Import */
+"Choisir la colonne" = "Choose column";
+"Validation des tiers" = "Payee validation";
+"Appliquer les décisions ?" = "Apply decisions?";
+"groupes" = "groups";
+"en attente" = "pending";
+"validés" = "validated";
+"Tout valider avec les suggestions" = "Validate all with suggestions";
+"À valider" = "To validate";
+"Validés" = "Validated";
+"Créer « " = "Create «";
+"Rattacher à « " = "Attach to «";
+"Ignoré" = "Ignored";
+"Résultat :" = "Result:";
+
+/* MARK: - Paywall */
+"Finance Pro" = "Finance Pro";
+"Passez à Finance Pro" = "Upgrade to Finance Pro";
+"Débloquez toutes les fonctionnalités et gérez vos finances sans aucune limite." = "Unlock all features and manage your finances without any limits.";
+"Chargement des offres…" = "Loading offers…";
+"Impossible de charger les offres.\nVérifiez votre connexion." = "Unable to load offers.\nCheck your connection.";
+"accès à vie, paiement unique" = "lifetime access, one-time payment";
+"/ mois" = "/ month";
+"/ an" = "/ year";
+"Continuer · " = "Continue · ";
+"Continuer" = "Continue";
+"Restaurer les achats" = "Restore purchases";
+"Politique de confidentialité" = "Privacy Policy";
+"Conditions d'utilisation" = "Terms of Use";
+"Les abonnements se renouvellent automatiquement jusqu'à résiliation. Vous pouvez gérer ou annuler votre abonnement à tout moment depuis les Réglages de votre iPhone > Identifiant Apple > Abonnements." = "Subscriptions automatically renew until cancelled. You can manage or cancel your subscription at any time from iPhone Settings > Apple ID > Subscriptions.";
+"Populaire" = "Popular";
+"PRO" = "PRO";
+
+/* MARK: - BinanceTax */
+"Test de connexion…" = "Testing connection…";
+
+/* MARK: - Settings */
+"Compte par défaut" = "Default account";
+"Premier disponible" = "First available";
+"Prochainement" = "Coming soon";
+"Budget & Prévisions" = "Budget & Forecasts";
+"Seuil rouge budget" = "Budget red threshold";
+"Orange de 0 % à +" = "Orange from 0% to +";
+"% de dépassement, rouge au-delà." = "% over budget, red beyond.";
+"Ordre des onglets" = "Tab order";
+"Les 3 premiers s'affichent dans la barre du bas. Les suivants vont dans Plus." = "The first 3 appear in the bottom bar. The rest go to More.";
+"Dossier de destination" = "Destination folder";
+"Finance Gratuit" = "Finance Free";
+"Transactions et dashboard de base" = "Basic transactions and dashboard";
+"Toutes les fonctionnalités débloquées" = "All features unlocked";
+"Passer Pro" = "Go Pro";
+"Voir les offres Pro" = "See Pro offers";
+"Gérer l'abonnement" = "Manage subscription";
+
+/* MARK: - Dashboard */
+"Exercice" = "Fiscal year";
+"Tous comptes" = "All accounts";
+"Touchez une barre pour déselectionner" = "Tap a bar to deselect";
+"Touchez un mois pour filtrer les catégories" = "Tap a month to filter categories";
+"Filtre actif :" = "Active filter:";
+"Répartition par catégorie" = "Breakdown by category";
+"Répartition par tag" = "Breakdown by tag";
+"Aucune donnée" = "No data";
+"Évolution" = "Evolution";
+"Toutes catégories (filtré)" = "All categories (filtered)";
+"Recettes" = "Income";
+"Mois" = "Month";
+"Dépenses par catégorie" = "Expenses by category";
+"Tag" = "Tag";
+"Solde" = "Balance";
+"Sélection" = "Selection";
+
+/* MARK: - Transactions */
+"Aucune transaction" = "No transactions";
+"Aucun résultat" = "No results";
+"transaction(s) sans catégorie" = "transaction(s) without category";
+"transaction(s) sur la période" = "transaction(s) for the period";
+"Sélectionner" = "Select";
+"Supprimer (" = "Delete (";
+"Vérifiez que le compte selectionné et la plage de temps correspondent. Sinon commencez par ajouter vos transactions ou les importer depuis un fichier sqlite existant ou un fichier csv." = "Check that the selected account and time range match. Otherwise start by adding your transactions or importing them from an existing sqlite or csv file.";
+
+/* MARK: - Navigation & More */
+"Outils" = "Tools";
+"Rapport fiscal Binance" = "Binance Tax Report";
+"Plus" = "More";
+
+/* MARK: - Onboarding */
+"Ex. : Compte courant BNP" = "E.g.: Main checking account";
+
+/* MARK: - Widget */
+"Solde mensuel" = "Monthly balance";
+"Dépenses et revenus du mois en cours." = "Expenses and income for the current month.";
+"utilisé" = "used";
+"Dépassement" = "Overage";
+"Économie" = "Savings";
+
+/* MARK: - Tricount */
+"Mes dépenses" = "My expenses";
+"Ma part nette" = "Net share";
+"On me doit" = "I'm owed";
+"Je dois" = "I owe";
+"Aucun Tricount" = "No Tricount";
+"entrées ·" = "entries ·";
+"Chargement…" = "Loading…";
+"Titre" = "Title";
+"Entrées" = "Entries";
+"Devise" = "Currency";
+
+/* MARK: - Reference Data */
+"Aucune donnée. Importe d'abord un fichier sqlite ou commence à les ajouter." = "No data. First import a sqlite file or start adding some.";
+"Aucun résultat pour « " = "No results for «";
+"Trier par création" = "Sort by creation date";
+"Trier par ordre alphabétique" = "Sort alphabetically";
+"Moyen de paiement par défaut introuvable (AUTRE id=9)." = "Default payment method not found (AUTRE id=9).";
+"moyen de paiement disponible. Ajoutez des lignes dans la table mdp." = "payment method available. Add rows in the mdp table.";
+
+/* MARK: - Import */
+"Lignes détectées" = "Detected rows";
+"Colonnes" = "Columns";
+"Transactions prêtes" = "Transactions ready";
+"Tiers identifiés" = "Identified payees";
+"Sans tiers" = "Without payee";
+"Rejets à l'analyse" = "Analysis rejections";
+"Erreurs SQL" = "SQL errors";
+"Import bloqué: corrige les erreurs d'analyse avant d'importer." = "Import blocked: fix analysis errors before importing.";
+"— toucher tiers / MDP pour assigner" = "— tap payee / payment method to assign";
+
+/* MARK: - Import V3 / AXE D-E */
+"Une session d'import est déjà en cours" = "An import session is already in progress";
+"Vous devez d'abord la terminer ou l'annuler avant d'en démarrer une nouvelle." = "You must first complete or cancel it before starting a new one.";
+"Annuler la session ?" = "Cancel Session?";
+"Annuler la session" = "Cancel Session";
+"Annuler la précédente" = "Cancel Previous";
+"Import terminé" = "Import complete";
+"Les lignes non importées seront perdues." = "Unimported rows will be lost.";
+"Les transactions seront ajoutées au compte. Les lignes en attente seront ignorées." = "Transactions will be added to the account. Pending rows will be ignored.";
+"Format connu — mapping pré-rempli depuis un import précédent." = "Known format — mapping pre-filled from a previous import.";
+"Format détecté" = "Detected format";
+"Séparateur CSV" = "CSV Separator";
+"Décimal du montant" = "Amount decimal";
+"Aperçu (3 premières lignes)" = "Preview (first 3 rows)";
+"Libellé" = "Label";
+"Libellé d'import" = "Import label";
+"Libellé à classer" = "Label to classify";
+"Compte cible" = "Target Account";
+"Importer" = "Import";
+"Importer un CSV" = "Import CSV";
+"Importer un fichier CSV" = "Import CSV File";
+"Exportez le relevé de votre compte bancaire au format CSV depuis votre banque en ligne, puis importez-le ici pour commencer à suivre vos finances." = "Export your bank statement in CSV format from your online banking, then import it here to start tracking your finances.";
+"Une fois le fichier choisi, vous mapperez les colonnes (date / montant / libellé). Le mapping est mémorisé pour les prochains imports du même format." = "Once the file is chosen, you'll map the columns (date / amount / label). The mapping is remembered for future imports of the same format.";
+"Choisir un CSV" = "Choose CSV";
+"Choisir un dossier" = "Choose Folder";
+"Import & Données" = "Import & Data";
+
+/* MARK: - Enrichment / AXE B.1 */
+"Aide à l'identification" = "Identification Help";
+"Enrichir cette ligne" = "Enrich this row";
+"Enrichir les non-résolus (Sirene + IA + Maps)" = "Enrich unresolved (Sirene + AI + Maps)";
+"Recherche personnalisée" = "Custom Search";
+"Carte des résultats" = "Results Map";
+"Aucune source n'a trouvé de correspondance. Essaie de simplifier la recherche." = "No source found a match. Try simplifying your search.";
+"Aucun résultat. Affine la recherche." = "No results. Refine your search.";
+"Choisir ce candidat" = "Select this candidate";
+"Plein écran" = "Full Screen";
+"Rétablir le libellé brut" = "Restore Raw Label";
+"La recherche utilise le libellé bancaire tel quel (les codes pays et noms de ville aident l'IA). Tu peux l'affiner si nécessaire." = "The search uses the raw bank label (country codes and city names help the AI). You can refine it if needed.";
+"Optionnel : si tu ne te souviens pas du marchand, lance une recherche multi-sources. Tap un candidat pour pré-remplir la fiche au-dessus." = "Optional: if you don't remember the merchant, launch a multi-source search. Tap a candidate to pre-fill the form above.";
+"Ces sources fonctionnent indépendamment de l'IA. Si l'IA n'est pas disponible, l'enrichissement reste fonctionnel." = "These sources work independently of AI. If AI is unavailable, enrichment remains functional.";
+
+/* MARK: - Payee creation & update / AXE B.1 */
+"Vérifier le tier" = "Verify Payee";
+"Créer un nouveau tier…" = "Create new payee…";
+"Lier à un tier existant…" = "Link to existing payee…";
+"Lier à un tiers existant" = "Link to existing payee";
+"Résolution moteur" = "Engine resolution";
+"La regex pré-remplie matche le libellé exact. Ajoute |…|… pour gérer d'autres variantes." = "The pre-filled regex matches the exact label. Add |…|… to handle other variants.";
+"Créez d'abord un tiers depuis la liste des données de référence." = "First create a payee from the reference data list.";
+"Création depuis import" = "Created from import";
+
+/* MARK: - Payees / AXE C & F */
+"Identité" = "Identity";
+"Catégorisation" = "Categorization";
+"Avancé" = "Advanced";
+"ID moteur (avancé)" = "Engine ID (advanced)";
+"Délier du moteur" = "Unlink from engine";
+"Tiers" = "Payees";
+"Tiers personnalisé" = "Custom payee";
+"Tier personnalisé (sans lien moteur)" = "Custom payee (no engine link)";
+"Tier associé" = "Associated payee";
+"Optionnel — facilite l'auto-matching d'une transaction réelle à cette échéance et permet d'afficher le logo du marchand." = "Optional — makes auto-matching a real transaction to this due date easier and allows displaying the merchant logo.";
+"Commerce identifié par une marque canonique (Carrefour, Apple…)." = "Business identified by a canonical brand (Carrefour, Apple…).";
+"Personne physique. Tu peux lier ce tier à un contact iOS pour récupérer sa photo." = "Individual person. You can link this payee to an iOS contact to retrieve their photo.";
+"Représente un de tes propres comptes (virement interne)." = "Represents one of your own accounts (internal transfer).";
+"CAF, école, employeur — entité publique ou privée non commerciale." = "Government agency, school, employer — public or non-commercial private entity.";
+"Un tiers personnalisé ne sera pas réassigné automatiquement par le moteur lors des futurs imports." = "A custom payee will not be automatically reassigned by the engine during future imports.";
+"Le compte interne lié indique que ce tiers représente un virement entre vos propres comptes." = "The linked internal account indicates this payee represents a transfer between your own accounts.";
+"Aucun groupe" = "No group";
+"Rassemble plusieurs tiers de la même enseigne (ex. tous les Carrefour Market)." = "Groups multiple payees of the same brand (e.g. all Carrefour Market stores).";
+"Regroupe plusieurs tiers d'une même enseigne (ex. tous les Carrefour Market)." = "Groups multiple payees of the same brand (e.g. all Carrefour Market stores).";
+"Choisir une icône" = "Choose Icon";
+"Si tu ne choisis rien, l'icône est calculée automatiquement depuis le nom. Toute icône choisie est mémorisée et a la priorité." = "If you choose nothing, the icon is automatically calculated from the name. Any chosen icon is remembered and takes priority.";
+"Choisir…" = "Choose…";
+
+/* MARK: - Contacts / AXE F */
+"100% local — aucune donnée n'est envoyée. La permission est demandée au premier lien." = "100% local — no data is sent. Permission is requested on first link.";
+"Accès au carnet refusé" = "Address Book access denied";
+"Va dans Réglages > Nemoris > Contacts pour autoriser l'accès." = "Go to Settings > Nemoris > Contacts to grant access.";
+"Photo et nom synchronisés depuis ton carnet iOS" = "Photo and name synced from your iOS contacts";
+
+/* MARK: - Budget / AXE G */
+"Budget" = "Budget";
+"Prévisions" = "Forecasts";
+"Récurrents" = "Recurring";
+"Récurrents détectés" = "Recurring detected";
+"Fréquence" = "Frequency";
+"Créer une enveloppe" = "Create envelope";
+"Ignorer cette échéance" = "Skip this due date";
+"Ces dépenses semblent récurrentes dans votre historique. Confirmez celles que vous souhaitez suivre." = "These expenses appear recurring in your history. Confirm the ones you want to track.";
+"Importez plus de transactions ou créez des enveloppes manuellement. Il faut au moins 3 transactions et 30 € sur 90 jours par catégorie pour être suggéré." = "Import more transactions or create envelopes manually. At least 3 transactions and €30 over 90 days per category are needed to be suggested.";
+"Basé sur les **90 derniers jours**. Budget suggéré = moyenne mensuelle observée + 10 % de marge, arrondi à la dizaine supérieure." = "Based on the **last 90 days**. Suggested budget = observed monthly average + 10% margin, rounded up to the nearest ten.";
+"Suggérer (90 j)" = "Suggest (90 days)";
+"Aucune donnée ce mois" = "No data this month";
+"Aucune dépense ce mois" = "No expenses this month";
+"Commencez par importer vos données" = "Start by importing your data";
+"Récap" = "Summary";
+"Début" = "Start";
+
+/* MARK: - Investments / AXE I, J, K */
+"Investissements" = "Investments";
+"Valorisation totale" = "Total Valuation";
+"Montant investi" = "Invested Amount";
+"Valeur actuelle (marché)" = "Current value (market)";
+"Trésorerie disponible" = "Available Cash";
+"Inclure la trésorerie dans la valorisation" = "Include cash in valuation";
+"Si activé, la trésorerie (cash disponible) est ajoutée au gros chiffre de valorisation. Le calcul de performance reste basé uniquement sur les positions, peu importe ce réglage." = "If enabled, cash (available funds) is added to the valuation total. Performance calculation remains based only on positions, regardless of this setting.";
+"Compte d'investissement" = "Investment Account";
+"Ajouter un compte" = "Add Account";
+"Modifier le compte" = "Edit Account";
+"Supprimer le compte" = "Delete Account";
+"Toutes les positions et ordres rattachés à ce compte seront aussi supprimés (cascade)." = "All positions and orders linked to this account will also be deleted (cascade).";
+"Compte interne lié (virement)" = "Linked internal account (transfer)";
+"La valeur et le montant investi du compte seront calculés depuis les positions et leurs ordres" = "The account's value and invested amount will be calculated from positions and their orders";
+"Les positions et la performance sont calculées automatiquement depuis les ordres. La trésorerie est éditable ci-dessus." = "Positions and performance are automatically calculated from orders. Cash is editable above.";
+"P&L disponible après synchronisation du cours" = "P&L available after price sync";
+"Performance disponible après synchronisation des cours" = "Performance available after price sync";
+"Cours non synchronisé — la valeur affichée correspond au coût d'acquisition. Synchronise pour voir le P&L réel." = "Price not synced — displayed value corresponds to acquisition cost. Sync to see real P&L.";
+"Cours des positions non synchronisés — la valeur correspond au coût total investi. Synchronise chaque position pour voir le P&L réel." = "Position prices not synced — value corresponds to total invested cost. Sync each position to see real P&L.";
+"Ces positions ne contribuent pas au chart parce qu'aucun cours n'a été récupéré. Synchronise-les ou édite-les pour renseigner un ISIN valide." = "These positions don't contribute to the chart because no price was retrieved. Sync them or edit them to enter a valid ISIN.";
+"Modifier la position" = "Edit Position";
+"Supprimer la position" = "Delete Position";
+"Toutes les positions et les ordres rattachés seront supprimés en cascade. Cette action est irréversible." = "All positions and linked orders will be deleted in cascade. This action is irreversible.";
+"Ces valeurs sont recalculées automatiquement à partir des ordres (achats, ventes, dividendes) rattachés à cette position. Pour les modifier, édite ou ajoute un ordre depuis la fiche de la position." = "These values are automatically recalculated from orders (buys, sells, dividends) linked to this position. To modify them, edit or add an order from the position detail.";
+"Dérivé des ordres" = "Derived from orders";
+"Quantité et prix" = "Quantity and price";
+"Quantité, PRU et date d'achat seront calculés depuis les ordres" = "Quantity, weighted avg price and purchase date will be calculated from orders";
+"L'ISIN est l'identifiant universel d'un actif (12 caractères, ex : FR0000121329). C'est ce qu'utilise la sync de cours pour trouver le bon symbole boursier — bien plus fiable que le ticker. Si tu l'as, renseigne-le." = "ISIN is the universal identifier for an asset (12 characters, e.g.: FR0000121329). It's what the price sync uses to find the correct stock symbol — far more reliable than the ticker. If you have it, enter it.";
+"Mise à jour automatiquement par la synchronisation de cours, ou modifiable manuellement." = "Automatically updated by price sync, or editable manually.";
+"Date d'exécution" = "Execution date";
+"Type d'opération" = "Operation Type";
+"Ex: courtier, raison de l'opération…" = "E.g.: broker, reason for the operation…";
+"Achat : qty + PRU ajoutés à la position. Frais inclus dans le PRU pondéré." = "Buy: qty + weighted avg price added to position. Fees included in weighted avg price.";
+"Vente : réduit la quantité de la position. Le PRU moyen reste inchangé (calculé sur les achats uniquement)." = "Sell: reduces the position quantity. The weighted avg price remains unchanged (calculated on buys only).";
+"Dividende : tracking du revenu reçu. N'affecte ni la quantité ni le PRU." = "Dividend: tracks received income. Does not affect quantity or weighted avg price.";
+"Aucun ordre détecté" = "No orders detected";
+"Aucun ordre enregistré. Tape + pour ajouter un achat, une vente ou un dividende." = "No orders recorded. Tap + to add a buy, sell or dividend.";
+"Tous les ordres rattachés seront aussi supprimés." = "All linked orders will also be deleted.";
+"Une fois la position créée, ajoute un ou plusieurs ordres (BUY/SELL/DIV) — la quantité nette et le PRU pondéré seront calculés automatiquement." = "Once the position is created, add one or more orders (BUY/SELL/DIV) — net quantity and weighted avg price will be calculated automatically.";
+"Aucun historique disponible" = "No history available";
+"Aucun historique synchronisé" = "No history synced";
+"Pas assez de données" = "Not enough data";
+
+/* MARK: - PDF Import / AXE I */
+"Importer un PDF (IA)" = "Import PDF (AI)";
+"PDF, image (photo d'un relevé), CSV, texte… Le format est détecté automatiquement. L'IA analyse le contenu pour identifier les ordres." = "PDF, image (photo of a statement), CSV, text… The format is automatically detected. AI analyzes the content to identify orders.";
+"L'import PDF utilise l'IA on-device pour comprendre les relevés de n'importe quelle banque. iOS 26+ avec Apple Intelligence activée est requis." = "PDF import uses on-device AI to understand statements from any bank. iOS 26+ with Apple Intelligence enabled is required.";
+"Le PDF ne semble pas contenir d'ordres d'investissement reconnaissables, ou le format n'a pas pu être interprété." = "The PDF doesn't appear to contain recognizable investment orders, or the format couldn't be interpreted.";
+"L'assistant réfléchit…" = "Assistant thinking…";
+"Création des positions et rattachement des ordres." = "Creating positions and attaching orders.";
+"Importée" = "Imported";
+"Les ordres importés seront rattachés aux positions de ce compte. Les nouvelles positions seront créées automatiquement." = "Imported orders will be attached to this account's positions. New positions will be created automatically.";
+"Résumé" = "Summary";
+"Statut" = "Status";
+
+/* MARK: - Live Sync / AXE I */
+"Synchronisation auto" = "Auto Sync";
+"Synchronisation en cours…" = "Syncing…";
+"Synchroniser uniquement celles-ci" = "Sync only these";
+"Sources synchronisées" = "Synced Sources";
+"Aucune source synchronisée" = "No synced sources";
+"Touchez + en haut à droite pour lier un exchange ou un wallet." = "Tap + in the top right to link an exchange or wallet.";
+"Choisir une source" = "Choose Source";
+"Ajouter une source" = "Add Source";
+"Modifier les identifiants" = "Edit Credentials";
+"Supprimer ce lien" = "Delete Link";
+"Supprimer ce lien ?" = "Delete Link?";
+"Chaîne" = "Chain";
+"Vos clés restent sur cet iPhone" = "Your keys stay on this iPhone";
+"100% on-device. Aucune donnée bancaire ne quitte l'appareil." = "100% on-device. No banking data leaves the device.";
+"Les clés API et adresses publiques sont stockées dans le Keychain iOS, chiffrées par le système. Aucune donnée n'est envoyée à un serveur Nemoris — les appels vont directement à Binance, Etherscan, CoinGecko, etc." = "API keys and public addresses are stored in the iOS Keychain, encrypted by the system. No data is sent to a Nemoris server — calls go directly to Binance, Etherscan, CoinGecko, etc.";
+"Les credentials seront effacés du Keychain. Les positions déjà synchronisées dans Nemoris ne sont pas supprimées." = "Credentials will be erased from the Keychain. Positions already synced in Nemoris are not deleted.";
+"Choisissez la source à lier. Vous serez ensuite invité à saisir les identifiants (clé API ou adresse publique)." = "Choose the source to link. You'll then be prompted to enter credentials (API key or public address).";
+"⚠️ Avant de sauvegarder, vérifiez bien que vos clés API sont **read-only**. Les permissions d'écriture (trading, withdraw) ne sont JAMAIS nécessaires pour la synchronisation Nemoris." = "⚠️ Before saving, make sure your API keys are **read-only**. Write permissions (trading, withdraw) are NEVER needed for Nemoris sync.";
+"Réparer les valeurs crypto" = "Repair Crypto Values";
+
+/* MARK: - Settings / AXE H */
+"Général" = "General";
+"Sécurité" = "Security";
+"Données & vie privée" = "Data & Privacy";
+"Développeur" = "Developer";
+"Visible uniquement en Debug. Force l'accès Lifetime sans achat réel." = "Visible in Debug only. Forces Lifetime access without a real purchase.";
+"Icône" = "Icon";
+"Densité" = "Density";
+"Activé" = "Enabled";
+"Désactiver" = "Disable";
+"Désactivé" = "Disabled";
+"Réactiver" = "Re-enable";
+"Activez les fonctionnalités que vous souhaitez voir dans l'app." = "Enable the features you want to see in the app.";
+"Terminé" = "Done";
+"Déplacer" = "Move";
+
+/* MARK: - Database & SQL Console */
+"Base de données & Console SQL" = "Database & SQL Console";
+"Schéma de la base" = "Database Schema";
+"Schéma" = "Schema";
+"Recettes prêtes à copier" = "Ready-to-copy Recipes";
+"Texte à rechercher" = "Search text";
+"Utiliser cette requête" = "Use this query";
+"Appuyez sur + pour créer un fichier ou un dossier." = "Tap + to create a file or folder.";
+"Nemoris stocke toutes tes données dans une base SQLite locale (`finance.sqlite` dans Application Support). Voici les tables disponibles pour tes requêtes — tape sur une table pour voir ses colonnes et un exemple." = "Nemoris stores all your data in a local SQLite database (`finance.sqlite` in Application Support). Here are the tables available for your queries — tap a table to see its columns and an example.";
+"• Foreign keys non strictement enforcées par SQLite — vérifie tes jointures." = "• Foreign keys not strictly enforced by SQLite — check your joins.";
+"• IDs auto-incrémentés (INTEGER PRIMARY KEY)." = "• Auto-incremented IDs (INTEGER PRIMARY KEY).";
+"• Montants en EUR (Double). Négatif = dépense, positif = revenu." = "• Amounts in EUR (Double). Negative = expense, positive = income.";
+"Décrivez en français ce que vous voulez extraire de votre base. L'assistant génère la requête SQL pour vous. Vous pouvez la raffiner par questions successives." = "Describe what you want to extract from your database. The assistant generates the SQL query for you. You can refine it through follow-up questions.";
+"Décrivez votre requête…" = "Describe your query…";
+
+/* MARK: - Backups */
+"Dernière sauvegarde" = "Last Backup";
+"Aucune sauvegarde disponible." = "No backup available.";
+"Aucune sauvegarde pour l'instant." = "No backups yet.";
+"Une sauvegarde est créée automatiquement chaque jour au lancement de l'app si plus de 24 h se sont écoulées depuis la précédente. Les 30 plus récentes sont conservées (les plus anciennes sont supprimées automatiquement)." = "A backup is automatically created each day when the app launches if more than 24 hours have passed since the previous one. The 30 most recent are kept (older ones are automatically deleted).";
+"La base actuelle sera remplacée. Une sauvegarde de sécurité « pre-restore » est créée automatiquement avant écrasement." = "The current database will be replaced. A 'pre-restore' safety backup is automatically created before overwriting.";
+"Glissez vers la gauche pour restaurer ou supprimer. La restauration crée d'abord une sauvegarde de sécurité de la base actuelle." = "Swipe left to restore or delete. Restoring first creates a safety backup of the current database.";
+"Les sauvegardes sont synchronisées vers iCloud et accessibles depuis l'app Fichiers (Nemoris → Backups)." = "Backups are synced to iCloud and accessible from the Files app (Nemoris → Backups).";
+"Les sauvegardes resteront uniquement sur ce téléphone tant qu'iCloud n'est pas connecté. Activez iCloud Drive dans Réglages pour les protéger en cas de perte ou de réinstallation." = "Backups will remain only on this phone until iCloud is connected. Enable iCloud Drive in Settings to protect them in case of loss or reinstallation.";
+"Réinitialiser le dossier" = "Reset Folder";
+
+/* MARK: - Security & biometry */
+"Aucune biométrie ni code d'accès n'est configuré sur cet appareil. Activez Face ID, Touch ID ou un code d'accès dans Réglages iOS pour utiliser cette fonctionnalité." = "No biometry or passcode configured on this device. Enable Face ID, Touch ID or a passcode in iOS Settings to use this feature.";
+"Le masquage manuel se réinitialise au redémarrage de l'app. Quand le geste est activé, poser l'iPhone face cachée bascule l'affichage des montants. Le relever ne change rien — l'état reste actif jusqu'au prochain geste." = "Manual hiding resets on app restart. When the gesture is active, placing the iPhone face down toggles amount display. Lifting it does nothing — the state stays active until the next gesture.";
+"Ouvrir Réglages" = "Open Settings";
+
+/* MARK: - Dashboard / AXE */
+"Flux net période · tous comptes" = "Net flow for period · all accounts";
+"Mode tous comptes : les transactions de tous les comptes sont mélangées. Le solde réel est masqué (incohérent inter-comptes) ; seul le flux net de la période est affiché." = "All accounts mode: transactions from all accounts are mixed. Real balance is hidden (inconsistent across accounts); only the net flow for the period is shown.";
+"Épargne" = "Savings";
+"Remboursé par" = "Reimbursed by";
+
+/* MARK: - AI Settings */
+"Comment ça marche" = "How it works";
+"État actuel" = "Current Status";
+"À savoir" = "Good to Know";
+
+/* MARK: - Common UI */
+"Sélectionner…" = "Select…";

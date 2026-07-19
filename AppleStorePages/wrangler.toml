@@ -1,0 +1,13 @@
+name = "finance-mobile-lang-redirect"
+type = "javascript"
+
+# Replace the following with your Cloudflare account values
+account_id = "909af57a74f755e4d5122674a8c66e13"
+zone_id = "2f0f5469c12befb701f4633e502dca9b"
+
+# Route: map this worker to your domain
+route = "nemoris.hedwin.fr/*"
+
+# Entry point (defaults to worker script file)
+main = "cloudflare-worker.js"
+pages_build_output_dir = "."

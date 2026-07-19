@@ -1,0 +1,127 @@
+import Foundation
+
+// MARK: - ImportSession (AXE D + E)
+
+/// Statut d'une session d'import. Une seule session 'active' à la fois en DB.
+enum ImportSessionStatus: String, Codable {
+    case active, completed, cancelled
+}
+
+/// Action utilisateur sur une ligne d'import.
+enum ImportUserAction: String, Codable {
+    case pending        // pas encore décidé
+    case confirmed      // accepte la suggestion engine
+    case manuallySet    // payee assigné manuellement
+    case skipped        // ne sera pas importé
+    case committed      // déjà insérée en base
+}
+
+/// Snapshot Codable d'une résolution moteur, pour persister dans rows_json.
+/// On ne stocke pas directement `TierResolution` (enum à associated types non Codable).
+enum TierResolutionSnapshot: Codable, Hashable {
+    case pending                                          // engine pas encore appelé
+    case matched(payeeId: Int?, engineMerchantId: String?,
+                 displayName: String, city: String?, score: Double)
+    case suggestCreate(engineMerchantId: String, displayName: String,
+                       city: String?, country: String?, score: Double)
+    case suggestContact(name: String, hint: String?)
+    case systemOperation(category: String, displayName: String)
+    case needsManualPick(reason: String, topMerchantId: String?,
+                         topName: String?, topScore: Double?)
+}
+
+/// Une ligne d'un import en cours. Tout est Codable pour la persistance JSON.
+struct ImportSessionRow: Identifiable, Codable, Hashable {
+    let id: UUID
+    /// Numéro de ligne dans le CSV source (1-indexed, sans le header).
+    let sourceRowNumber: Int
+    let rawLabel: String
+    let date: Date
+    let amount: Double
+    let paymentTypeHint: String?
+
+    var resolution: TierResolutionSnapshot
+    var assignedPayeeId: Int?
+    var assignedPayeeName: String?
+    var assignedCategoryId: Int?
+    var assignedPaymentTypeId: Int?
+    var userAction: ImportUserAction
+    /// Identifiant de cluster (pour grouper les libellés similaires). Optionnel.
+    var clusterId: String?
+    /// Id d'un tier CRÉÉ par cette ligne pendant la session (via « Créer un nouveau tier »).
+    /// Permet de proposer sa suppression si la session est annulée (nettoyage des tiers fantômes).
+    /// nil = aucun tier créé par cette ligne (lien vers un tier existant, ou pas encore décidé).
+    var createdPayeeId: Int? = nil
+
+    init(id: UUID = UUID(),
+         sourceRowNumber: Int,
+         rawLabel: String,
+         date: Date,
+         amount: Double,
+         paymentTypeHint: String? = nil)
+    {
+        self.id = id
+        self.sourceRowNumber = sourceRowNumber
+        self.rawLabel = rawLabel
+        self.date = date
+        self.amount = amount
+        self.paymentTypeHint = paymentTypeHint
+        self.resolution = .pending
+        self.userAction = .pending
+    }
+}
+
+/// Représentation lourde d'une session : toutes les rows. Pour l'édition.
+struct ImportSession: Identifiable, Codable {
+    let id: UUID
+    let createdAt: Date
+    var updatedAt: Date
+    var status: ImportSessionStatus
+    var sourceFile: String?
+    var accountId: Int?
+    var rows: [ImportSessionRow]
+
+    var totalRows: Int { rows.count }
+    var pendingRows: Int { rows.filter { $0.userAction == .pending }.count }
+    var readyRows: Int { rows.filter { [.confirmed, .manuallySet].contains($0.userAction) }.count }
+    var skippedRows: Int { rows.filter { $0.userAction == .skipped }.count }
+}
+
+/// Représentation légère utilisée pour le bandeau / l'index global.
+/// Évite de charger tout le JSON quand on a juste besoin d'afficher "N lignes restantes".
+struct ImportSessionSummary: Identifiable, Hashable {
+    let id: UUID
+    let createdAt: Date
+    let updatedAt: Date
+    let status: ImportSessionStatus
+    let sourceFile: String?
+    let accountId: Int?
+    let totalRows: Int
+    let pendingRows: Int
+}
+
+// MARK: - ColumnMapping
+
+/// Mapping des colonnes d'un CSV. Indexé par signature (concat des headers).
+struct ColumnMapping: Codable, Hashable {
+    let headerSignature: String
+    var dateColumnIndex: Int
+    var amountColumnIndex: Int
+    var labelColumnIndex: Int
+    var separator: String        // ";", ",", "\t"
+    var dateFormat: String?      // "dd/MM/yyyy", "yyyy-MM-dd", etc. (nil = autodétection)
+    var amountDecimal: String    // "," ou "."
+}
+
+/// Signature stable d'un header CSV : tous les noms en minuscules sans accents, joints par "|".
+enum ColumnMappingSignature {
+    static func compute(headers: [String]) -> String {
+        headers
+            .map { $0
+                .folding(options: .diacriticInsensitive, locale: .current)
+                .lowercased()
+                .trimmingCharacters(in: .whitespaces)
+            }
+            .joined(separator: "|")
+    }
+}

@@ -1,0 +1,250 @@
+import SwiftUI
+
+/// Étape 2 du nouveau parcours d'import (AXE D) : mapping des colonnes.
+/// Affiche les en-têtes détectés + 3 pickers (date / montant / libellé) + preview.
+/// Si un mapping existe déjà pour la signature du header, il est préchargé et
+/// l'utilisateur peut juste valider.
+struct ColumnMappingView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let parsed: CSVParserV3.Parsed
+    let accountId: Int
+    let sourceFile: String?
+    let onSessionCreated: (ImportSessionSummary) -> Void
+
+    @State private var dateColumn: Int? = nil
+    @State private var amountColumn: Int? = nil
+    @State private var labelColumn: Int? = nil
+    @State private var amountDecimal: String = ","
+    @State private var dateFormat: String?
+    @State private var mappingFound = false
+    @State private var savingError: String?
+
+    private let sessionRepo = ImportSessionRepository()
+
+    private var headers: [String] { parsed.headers }
+    private var signature: String { ColumnMappingSignature.compute(headers: headers) }
+
+    private var canConfirm: Bool {
+        dateColumn != nil && amountColumn != nil && labelColumn != nil
+            && dateColumn != amountColumn && dateColumn != labelColumn && amountColumn != labelColumn
+    }
+
+    var body: some View {
+        Form {
+            if mappingFound {
+                Section {
+                    Label("Format connu — mapping pré-rempli depuis un import précédent.",
+                          systemImage: "checkmark.seal.fill")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.success)
+                }
+            }
+
+            Section("Mapping des colonnes") {
+                columnPicker("Date", selection: $dateColumn)
+                columnPicker("Montant", selection: $amountColumn)
+                columnPicker("Libellé", selection: $labelColumn)
+            }
+
+            Section("Format détecté") {
+                Picker("Décimal du montant", selection: $amountDecimal) {
+                    Text("Virgule (1,23)").tag(",")
+                    Text("Point (1.23)").tag(".")
+                }
+                .pickerStyle(.segmented)
+
+                LabeledContent("Format de date") {
+                    Text(dateFormat ?? "Auto")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                }
+                LabeledContent("Séparateur CSV") {
+                    Text(separatorLabel(parsed.separator))
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                }
+            }
+
+            Section("Aperçu (3 premières lignes)") {
+                ForEach(Array(parsed.rows.prefix(3).enumerated()), id: \.offset) { _, row in
+                    previewRow(row)
+                }
+            }
+
+            if let savingError {
+                Section { Text(savingError).foregroundStyle(AppTheme.Colors.danger) }
+            }
+        }
+        .navigationTitle("Mapping CSV")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Continuer") { createSession() }
+                    .disabled(!canConfirm)
+            }
+        }
+        .task { loadOrAutoDetect() }
+    }
+
+    // MARK: Sub-views
+
+    @ViewBuilder
+    private func columnPicker(_ title: String, selection: Binding<Int?>) -> some View {
+        Picker(title, selection: selection) {
+            Text("—").tag(Int?.none)
+            ForEach(Array(headers.enumerated()), id: \.offset) { idx, name in
+                Text("\(name) (col \(idx + 1))").tag(Int?.some(idx))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func previewRow(_ row: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top) {
+                preview("Date", value: cell(row, dateColumn))
+                preview("Montant", value: cell(row, amountColumn))
+            }
+            preview("Libellé", value: cell(row, labelColumn), monospaced: true)
+            // Tentative de parsing live
+            if let dateRaw = cell(row, dateColumn),
+               let parsedDate = CSVParserV3.parseDate(dateRaw, hintFormat: dateFormat) {
+                Text("→ \(parsedDate.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption2).foregroundStyle(AppTheme.Colors.success)
+            }
+            if let amountRaw = cell(row, amountColumn),
+               let parsedAmount = CSVParserV3.parseAmount(amountRaw, decimal: amountDecimal) {
+                Text("→ \(parsedAmount.formatted(.currency(code: "EUR")))")
+                    .font(.caption2).foregroundStyle(parsedAmount >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func preview(_ label: String, value: String?, monospaced: Bool = false) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(label).font(.caption2.bold()).foregroundStyle(AppTheme.Colors.textSecondary)
+            if let value, !value.isEmpty {
+                Text(value)
+                    .font(monospaced ? .system(.caption, design: .monospaced) : .caption)
+                    .lineLimit(2)
+            } else {
+                Text("—").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
+            }
+        }
+    }
+
+    private func cell(_ row: [String], _ index: Int?) -> String? {
+        guard let i = index, i >= 0, i < row.count else { return nil }
+        return row[i]
+    }
+
+    private func separatorLabel(_ sep: String) -> String {
+        switch sep {
+        case ";": return "Point-virgule (;)"
+        case ",": return "Virgule (,)"
+        case "\t": return "Tabulation"
+        default: return sep
+        }
+    }
+
+    // MARK: Logic
+
+    private func loadOrAutoDetect() {
+        if let existing = sessionRepo.findMapping(headerSignature: signature) {
+            dateColumn = existing.dateColumnIndex
+            amountColumn = existing.amountColumnIndex
+            labelColumn = existing.labelColumnIndex
+            amountDecimal = existing.amountDecimal
+            dateFormat = existing.dateFormat
+            mappingFound = true
+            return
+        }
+        // Heuristique simple sur les noms d'en-têtes.
+        let lower = headers.map { $0.lowercased().folding(options: .diacriticInsensitive, locale: .current) }
+        dateColumn = lower.firstIndex(where: { $0.contains("date") })
+        amountColumn = lower.firstIndex(where: { $0.contains("montant") || $0.contains("amount") || $0.contains("debit") || $0.contains("credit") })
+        labelColumn = lower.firstIndex(where: { $0.contains("libelle") || $0.contains("label") || $0.contains("description") || $0.contains("wording") || $0.contains("operation") })
+
+        // Détection du format de date sur 5 premières lignes
+        if let dCol = dateColumn {
+            let samples = parsed.rows.prefix(5).compactMap { row -> String? in
+                guard dCol < row.count else { return nil }
+                return row[dCol]
+            }
+            dateFormat = CSVParserV3.detectDateFormat(samples: samples)
+        }
+    }
+
+    private func createSession() {
+        guard let dCol = dateColumn, let aCol = amountColumn, let lCol = labelColumn else { return }
+
+        // 1. Persiste le mapping pour la prochaine fois
+        let mapping = ColumnMapping(
+            headerSignature: signature,
+            dateColumnIndex: dCol,
+            amountColumnIndex: aCol,
+            labelColumnIndex: lCol,
+            separator: parsed.separator,
+            dateFormat: dateFormat,
+            amountDecimal: amountDecimal
+        )
+        sessionRepo.saveMapping(mapping)
+
+        // 2. Construit les rows
+        var rows: [ImportSessionRow] = []
+        rows.reserveCapacity(parsed.rows.count)
+        var rejected = 0
+        for (idx, raw) in parsed.rows.enumerated() {
+            let dateRaw = (dCol < raw.count) ? raw[dCol] : ""
+            let amountRaw = (aCol < raw.count) ? raw[aCol] : ""
+            let labelRaw = (lCol < raw.count) ? raw[lCol] : ""
+            guard let date = CSVParserV3.parseDate(dateRaw, hintFormat: dateFormat),
+                  let amount = CSVParserV3.parseAmount(amountRaw, decimal: amountDecimal),
+                  !labelRaw.isEmpty
+            else { rejected += 1; continue }
+
+            rows.append(ImportSessionRow(
+                sourceRowNumber: idx + 1,
+                rawLabel: labelRaw,
+                date: date,
+                amount: amount
+            ))
+        }
+
+        guard !rows.isEmpty else {
+            savingError = "Aucune ligne exploitable (vérifiez le format date/montant)."
+            return
+        }
+
+        let session = ImportSession(
+            id: UUID(),
+            createdAt: Date(),
+            updatedAt: Date(),
+            status: .active,
+            sourceFile: sourceFile,
+            accountId: accountId,
+            rows: rows
+        )
+
+        guard sessionRepo.insertSession(session) else {
+            savingError = "Échec de la sauvegarde de la session."
+            return
+        }
+
+        let summary = ImportSessionSummary(
+            id: session.id,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+            status: .active,
+            sourceFile: session.sourceFile,
+            accountId: session.accountId,
+            totalRows: session.rows.count,
+            pendingRows: session.rows.count
+        )
+
+        // 3. Notification rappel 12h + ouverture de la session
+        Task { await ImportNotificationService.scheduleReminder(forSessionId: session.id, pendingRows: rows.count) }
+        onSessionCreated(summary)
+    }
+}

@@ -1,0 +1,130 @@
+
+==================== HAPTIC ====================
+143:		E9E9E9F200000000ABCDABCD /* HapticService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E9E9F300000000ABCDABCD /* HapticService.swift */; };
+311:		E9E9E9F300000000ABCDABCD /* HapticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticService.swift; sourceTree = "<group>"; };
+599:				E9E9E9F300000000ABCDABCD /* HapticService.swift */,
+1034:				E9E9E9F200000000ABCDABCD /* HapticService.swift in Sources */,
+
+==================== TRANSACTION DENSITY ====================
+144:		E9E9E9F400000000ABCDABCD /* TransactionDensity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E9E9F500000000ABCDABCD /* TransactionDensity.swift */; };
+312:		E9E9E9F500000000ABCDABCD /* TransactionDensity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionDensity.swift; sourceTree = "<group>"; };
+600:				E9E9E9F500000000ABCDABCD /* TransactionDensity.swift */,
+1035:				E9E9E9F400000000ABCDABCD /* TransactionDensity.swift in Sources */,
+
+==================== UUID HAPTIC ====================
+109:		E9E9E9F301000000ABCDABCD /* InvestmentAccountDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E9E9F300000000ABCDABCD /* InvestmentAccountDetailView.swift */; };
+143:		E9E9E9F200000000ABCDABCD /* HapticService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E9E9F300000000ABCDABCD /* HapticService.swift */; };
+276:		E9E9E9F300000000ABCDABCD /* InvestmentAccountDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentAccountDetailView.swift; sourceTree = "<group>"; };
+311:		E9E9E9F300000000ABCDABCD /* HapticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticService.swift; sourceTree = "<group>"; };
+548:				E9E9E9F300000000ABCDABCD /* InvestmentAccountDetailView.swift */,
+599:				E9E9E9F300000000ABCDABCD /* HapticService.swift */,
+
+==================== UUID TRANSACTION ====================
+112:		E9E9E9F501000000ABCDABCD /* InvestmentLiveSyncProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E9E9F500000000ABCDABCD /* InvestmentLiveSyncProvider.swift */; };
+144:		E9E9E9F400000000ABCDABCD /* TransactionDensity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E9E9F500000000ABCDABCD /* TransactionDensity.swift */; };
+279:		E9E9E9F500000000ABCDABCD /* InvestmentLiveSyncProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentLiveSyncProvider.swift; sourceTree = "<group>"; };
+312:		E9E9E9F500000000ABCDABCD /* TransactionDensity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionDensity.swift; sourceTree = "<group>"; };
+600:				E9E9E9F500000000ABCDABCD /* TransactionDensity.swift */,
+745:				E9E9E9F500000000ABCDABCD /* InvestmentLiveSyncProvider.swift */,
+
+==================== PBXFILESYSTEM ====================
+295-		E9F0F0F100000001ABCDABCD /* SQLAssistantService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLAssistantService.swift; sourceTree = "<group>"; };
+296-		E9F0F0F100000003ABCDABCD /* SQLAssistantSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLAssistantSheet.swift; sourceTree = "<group>"; };
+297-		EA1EFF186F52527F7E43FE44 /* SwipeableRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeableRow.swift; sourceTree = "<group>"; };
+298-		F4DB50E1206BA1589716A420 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+299-		E9E9E9AF00000000ABCDABCD /* MoneyText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoneyText.swift; sourceTree = "<group>"; };
+300-		E9E9E9C500000000ABCDABCD /* PrivacyMotionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyMotionMonitor.swift; sourceTree = "<group>"; };
+301-		E9E9E9D100000000ABCDABCD /* GoalModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalModels.swift; sourceTree = "<group>"; };
+302-		E9E9E9D300000000ABCDABCD /* GoalRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalRepository.swift; sourceTree = "<group>"; };
+303-		E9E9E9D500000000ABCDABCD /* GoalCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalCalculator.swift; sourceTree = "<group>"; };
+304-		E9E9E9D700000000ABCDABCD /* GoalFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalFormView.swift; sourceTree = "<group>"; };
+305-		E9E9E9DB00000000ABCDABCD /* ProjectionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectionEngine.swift; sourceTree = "<group>"; };
+306-		E9E9E9DD00000000ABCDABCD /* ProjectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectionView.swift; sourceTree = "<group>"; };
+307-		E9E9E9E100000000ABCDABCD /* SearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchService.swift; sourceTree = "<group>"; };
+308-		E9E9E9E300000000ABCDABCD /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
+309-		E9E9E9E500000000ABCDABCD /* AlertEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertEngine.swift; sourceTree = "<group>"; };
+310-		E9E9E9E700000000ABCDABCD /* AlertsBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertsBanner.swift; sourceTree = "<group>"; };
+311-		E9E9E9F300000000ABCDABCD /* HapticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticService.swift; sourceTree = "<group>"; };
+312-		E9E9E9F500000000ABCDABCD /* TransactionDensity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionDensity.swift; sourceTree = "<group>"; };
+313-/* End PBXFileReference section */
+314-
+315:/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+316-		E826BC112FBDA3590095EC62 /* Exceptions for "NemorisWidget" folder in "NemorisWidgetExtension" target */ = {
+317:			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+318-			membershipExceptions = (
+319-				Info.plist,
+320-			);
+321-			target = E826BBFB2FBDA3580095EC62 /* NemorisWidgetExtension */;
+322-		};
+323:/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+324-
+325:/* Begin PBXFileSystemSynchronizedRootGroup section */
+326-		E826BBFF2FBDA3580095EC62 /* NemorisWidget */ = {
+327:			isa = PBXFileSystemSynchronizedRootGroup;
+328-			exceptions = (
+329-				E826BC112FBDA3590095EC62 /* Exceptions for "NemorisWidget" folder in "NemorisWidgetExtension" target */,
+330-			);
+331-			path = NemorisWidget;
+332-			sourceTree = "<group>";
+333-		};
+334-		E8DC34472FC9ED69003EF244 /* Services */ = {
+335:			isa = PBXFileSystemSynchronizedRootGroup;
+336-			path = Services;
+337-			sourceTree = "<group>";
+338-		};
+339-		E8DC34492FC9EF25003EF244 /* Sirene */ = {
+340:			isa = PBXFileSystemSynchronizedRootGroup;
+341-			path = Sirene;
+342-			sourceTree = "<group>";
+343-		};
+344:/* End PBXFileSystemSynchronizedRootGroup section */
+345-
+346-/* Begin PBXFrameworksBuildPhase section */
+347-		E826BBF92FBDA3580095EC62 /* Frameworks */ = {
+348-			isa = PBXFrameworksBuildPhase;
+349-			buildActionMask = 2147483647;
+350-			files = (
+351-				E826BBFE2FBDA3580095EC62 /* SwiftUI.framework in Frameworks */,
+352-				E826BBFD2FBDA3580095EC62 /* WidgetKit.framework in Frameworks */,
+353-			);
+354-			runOnlyForDeploymentPostprocessing = 0;
+355-		};
+356-		E9E9E9E910000000ABCDABCD /* Frameworks */ = {
+357-			isa = PBXFrameworksBuildPhase;
+358-			buildActionMask = 2147483647;
+359-			files = (
+360-				E9E9E9E911000000ABCDABCD /* NemorisEngine in Frameworks */,
+361-			);
+362-			runOnlyForDeploymentPostprocessing = 0;
+363-		};
+364-/* End PBXFrameworksBuildPhase section */
+365-
+366-/* Begin PBXGroup section */
+367-		21F2BEA5256040AA194529C1 /* Database */ = {
+368-			isa = PBXGroup;
+369-			children = (
+370-				D5C61F11CFB2CEAEBFB98D7B /* DatabaseManager.swift */,
+371-			);
+372-			path = Database;
+373-			sourceTree = "<group>";
+374-		};
+375-		395BDB2DAC06A5BFB531B355 /* Resources */ = {
+376-			isa = PBXGroup;
+377-			children = (
+378-				43E6D10DA96A34017839D4D0 /* Assets.xcassets */,
+379-				0743F20B94652EF4FEECD343 /* Info.plist */,
+380-				E881B2102FAC2DE100B58D3C /* fr.lproj */,
+381-				E881B2112FAC2DE700B58D3C /* en.lproj */,
+382-			);
+383-			path = Resources;
+384-			sourceTree = "<group>";
+385-		};
+386-		4C7D93FB38A1EE652E3C0C09 /* Dashboard */ = {
+387-			isa = PBXGroup;
+388-			children = (
+389-				A8B9F03BE984E529A7D91659 /* DashboardView.swift */,
+390-				E8E71A772FA21E0B00232023 /* DashboardCharts.swift */,
+391-				E8E71A792FA21E2000232023 /* AnnualDashboardViewModel.swift */,
+392-				E8E71A7B2FA21E3400232023 /* FilteredDashboardViewModel.swift */,
+393-				E8E71A7D2FA220AB00232023 /* FilteredDashboardView.swift */,
+394-				E9E9E9E500000000ABCDABCD /* AlertEngine.swift */,
