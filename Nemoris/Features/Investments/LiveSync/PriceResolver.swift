@@ -280,6 +280,64 @@ actor PriceResolver {
         return result.points.isEmpty ? nil : result.points
     }
 
+    /// Historique INTRADAY pour la plage 1J : `market_chart?days=1` (granularité
+    /// auto ≈ 5 min sur le free tier), SOUS-ÉCHANTILLONNÉ à un point / 30 min
+    /// (~48 points / 24 h au lieu de ~288 — on adapte la fréquence à la plage
+    /// pour limiter le volume stocké).
+    func fetchIntradayDetailed(coinId: String, identifier: String) async -> HistoryFetchResult {
+        let urlString = "https://api.coingecko.com/api/v3/coins/\(coinId)/market_chart?vs_currency=eur&days=1"
+        guard let url = URL(string: urlString) else {
+            return .init(points: [], errorReason: "URL invalide")
+        }
+
+        struct MarketChartResponse: Decodable {
+            let prices: [[Double]]
+        }
+
+        do {
+            var request = URLRequest(url: url)
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            let data = try await ResilientHTTP.send(request, provider: .coinGecko, timeout: 20)
+            let decoded = try JSONDecoder().decode(MarketChartResponse.self, from: data)
+
+            var points: [InvestmentPricePoint] = []
+            var lastBucket: Double = -1
+            for entry in decoded.prices {
+                guard entry.count >= 2 else { continue }
+                let timestampMs = entry[0]
+                let priceEUR = entry[1]
+                guard priceEUR > 0 else { continue }
+                // Bucket 30 min : on ne garde que le premier point de chaque bucket.
+                let bucket = (timestampMs / 1000 / 1800).rounded(.down)
+                guard bucket != lastBucket else { continue }
+                lastBucket = bucket
+                points.append(InvestmentPricePoint(
+                    id: "\(identifier)-i30-\(Int(timestampMs))",
+                    identifier: identifier,
+                    date: Date(timeIntervalSince1970: timestampMs / 1000),
+                    close: priceEUR
+                ))
+            }
+            return .init(
+                points: points.sorted { $0.date < $1.date },
+                errorReason: points.isEmpty ? "Réponse vide" : nil
+            )
+        } catch MarketDataFetchError.rateLimited(_, let retryAfter) {
+            return .init(
+                points: [],
+                errorReason: "HTTP 429 — limite de requêtes CoinGecko (réessai dans \(Int(retryAfter))s)",
+                isRateLimited: true
+            )
+        } catch MarketDataFetchError.badStatus(let code) {
+            return .init(points: [], errorReason: "HTTP \(code)")
+        } catch {
+            return .init(
+                points: [],
+                errorReason: "Parse/réseau : \(error.localizedDescription)"
+            )
+        }
+    }
+
     // MARK: - Helpers
 
     /// Parse la réponse CoinGecko `/simple/price` (et `/token_price`) qui a la forme :

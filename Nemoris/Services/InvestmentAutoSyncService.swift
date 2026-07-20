@@ -364,6 +364,73 @@ final class InvestmentAutoSyncService {
         return .success(points: result.points.count, source: "coingecko")
     }
 
+    // MARK: - Intraday (plage 1J — points 30 min sur 24-48 h glissantes)
+
+    /// Sync de l'historique INTRADAY d'un identifier, déclenchée quand l'user
+    /// sélectionne la plage 1J. Adapte la fréquence à la plage : points 30 min,
+    /// rétention 48 h (purge auto côté cache) — le quotidien 10 ans reste la
+    /// série de référence pour toutes les autres plages.
+    /// Skip si le dernier point intraday a moins de 25 min (fraîcheur ≈ pas).
+    func syncIntradayHistory(identifier: String) async -> PositionSyncOutcome {
+        let clean = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return .invalidIdentifier }
+
+        if let latest = PriceHistoryCache.shared.latestDate(identifier: clean, resolution: .intraday30m),
+           Date().timeIntervalSince(latest) < 25 * 60 {
+            return .upToDate
+        }
+
+        // Crypto → CoinGecko days=1 (sous-échantillonné 30 min).
+        if let coinId = PriceResolver.coinId(forTicker: clean) {
+            let result = await PriceResolver.shared.fetchIntradayDetailed(coinId: coinId, identifier: clean)
+            guard !result.points.isEmpty else {
+                if result.isRateLimited {
+                    let remaining = await ProviderRateLimiter.shared.cooldownRemaining(.coinGecko)
+                        ?? MarketDataProvider.coinGecko.defaultCooldown
+                    return .rateLimited(provider: .coinGecko, retryAfter: remaining)
+                }
+                return .noData(symbolsTried: [coinId])
+            }
+            PriceHistoryCache.shared.save(identifier: clean, points: result.points, resolution: .intraday30m)
+            return .success(points: result.points.count, source: "coingecko")
+        }
+
+        // Titres traditionnels → Yahoo interval=30m, avec le symbole DÉJÀ RÉSOLU
+        // par la sync quotidienne : les points quotidiens portent le symbole
+        // gagnant dans leur champ `identifier` (ex. ISIN → "EWLD.PA"). Pas de
+        // re-résolution OpenFIGI ici.
+        let dailySymbol = PriceHistoryCache.shared.fetch(identifier: clean).last?.identifier ?? clean
+        do {
+            let points = try await marketDataService.fetchIntradayHistory(symbol: dailySymbol)
+            guard !points.isEmpty else { return .noData(symbolsTried: [dailySymbol]) }
+            PriceHistoryCache.shared.save(identifier: clean, points: points, resolution: .intraday30m)
+            return .success(points: points.count, source: "yahoo")
+        } catch MarketDataFetchError.rateLimited(let provider, let retryAfter) {
+            return .rateLimited(provider: provider, retryAfter: retryAfter)
+        } catch {
+            return .networkError(error.localizedDescription)
+        }
+    }
+
+    /// Sync intraday séquentielle d'un lot d'identifiers (tap sur la chip 1J
+    /// du dashboard ou d'un compte). Même politique que la passe quotidienne :
+    /// skip de toute la famille de provider dès qu'elle est rate-limitée.
+    func syncIntradayIfNeeded(identifiers: [String]) async {
+        var seen = Set<String>()
+        var rateLimitedFamilies = Set<MarketDataProvider>()
+        for identifier in identifiers {
+            let clean = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !clean.isEmpty, seen.insert(clean.uppercased()).inserted else { continue }
+            let family: MarketDataProvider = PriceResolver.coinId(forTicker: clean) != nil ? .coinGecko : .yahoo
+            guard !rateLimitedFamilies.contains(family) else { continue }
+            let outcome = await syncIntradayHistory(identifier: clean)
+            if case .rateLimited(let provider, _) = outcome {
+                rateLimitedFamilies.insert(provider)
+            }
+            await Task.yield()
+        }
+    }
+
     // MARK: - Helpers
 
     /// True si `latest` est le dernier point de cotation atteignable un

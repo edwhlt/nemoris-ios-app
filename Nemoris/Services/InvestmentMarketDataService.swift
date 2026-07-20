@@ -355,6 +355,36 @@ struct InvestmentMarketDataService {
         return points.sorted { $0.date < $1.date }
     }
 
+    /// Cours INTRADAY ~30 min sur les dernières 48 h (Yahoo `range=2d&interval=30m`).
+    /// Prend un symbole Yahoo DÉJÀ RÉSOLU — celui porté par les points quotidiens
+    /// synchronisés (`point.identifier`) — pour éviter de repayer la résolution
+    /// OpenFIGI/search à chaque tap sur la plage 1J. Stooq n'a pas d'intraday :
+    /// pas de fallback, un échec = pas de vue 1J pour ce titre (dégradation propre).
+    func fetchIntradayHistory(symbol: String) async throws -> [InvestmentPricePoint] {
+        guard let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?range=2d&interval=30m") else {
+            return []
+        }
+        let data = try await ResilientHTTP.get(url, provider: .yahoo)
+        let decoded = try JSONDecoder().decode(YahooChartResponse.self, from: data)
+        guard let result = decoded.chart.result?.first,
+              let timestamps = result.timestamp,
+              let quotes = result.indicators.quote.first?.close,
+              !timestamps.isEmpty else { return [] }
+
+        var points: [InvestmentPricePoint] = []
+        for (idx, ts) in timestamps.enumerated() {
+            guard idx < quotes.count, let close = quotes[idx], close > 0 else { continue }
+            points.append(InvestmentPricePoint(
+                id: "\(symbol)-i30-\(Int(ts))",
+                identifier: symbol,
+                date: Date(timeIntervalSince1970: TimeInterval(ts)),
+                close: close
+            ))
+        }
+        return points.sorted { $0.date < $1.date }
+    }
+
     private func fetchFromStooq(symbol: String) async throws -> [InvestmentPricePoint] {
         let sym = symbol.lowercased()
         guard let url = URL(string: "https://stooq.com/q/d/l/?s=\(sym)&i=d") else { return [] }

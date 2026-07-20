@@ -32,7 +32,7 @@ enum MainTabItem: String, CaseIterable, Identifiable {
         case .dashboard:    return "chart.pie"
         case .transactions: return "list.bullet.rectangle"
         case .investments:  return "chart.line.uptrend.xyaxis"
-        case .patrimoine:   return "house.lodge.fill"
+        case .patrimoine:   return "house.fill"
         case .tricount:     return "person.2.fill"
         case .budget:       return "chart.bar.fill"
         case .referenceData: return "square.grid.2x2"

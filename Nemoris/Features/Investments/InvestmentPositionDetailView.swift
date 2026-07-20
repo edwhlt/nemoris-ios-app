@@ -21,6 +21,9 @@ struct InvestmentPositionDetailView: View {
 
     @State private var localTimeRange: InvestmentTimeRange = .all
     @State private var priceHistory: [InvestmentPricePoint] = []
+    /// Série INTRADAY 30 min (plage 1J uniquement) — chargée on-demand quand
+    /// l'user sélectionne 1J, cache 48 h avec skip fraîcheur < 25 min.
+    @State private var intradayHistory: [InvestmentPricePoint] = []
     @State private var isSyncing = false
     @State private var statusMessage: String?
     @State private var showEditForm = false
@@ -124,32 +127,49 @@ struct InvestmentPositionDetailView: View {
     }
 
     /// Points ASSAINIS pour le rendu du chart : triés par date, un seul point
-    /// par jour, `close` fini et strictement positif, ET valeurs aberrantes
-    /// rejetées (voir plus bas).
+    /// par pas de temps, `close` fini et strictement positif, ET valeurs
+    /// aberrantes rejetées (`rejectOutliers`).
     ///
-    /// Prévention "code-barres" : une série de cours peut être CONTAMINÉE par
-    /// deux échelles de prix incompatibles fusionnées sous le même identifiant
-    /// — ex. un ticker qui résout vers le mauvais instrument Yahoo, ou (en démo)
-    /// un cours seedé irréaliste mélangé aux vrais cours synchronisés. Le chart
-    /// alterne alors entre 35 € et 300 € d'un point à l'autre → un peigne.
-    /// On se défend en écartant tout point hors de l'intervalle
-    /// [médiane / 4, médiane × 4] : une seule échelle survit, le rendu reste lisse.
+    /// Granularité adaptée à la plage : en 1J on trace la série INTRADAY 30 min
+    /// des dernières 24 h glissantes (la série quotidienne n'a qu'un point sur
+    /// cette fenêtre — rien à tracer) ; sinon la série quotidienne, dédupliquée
+    /// par jour calendaire (prévention "code-barres").
     private var chartPoints: [InvestmentPricePoint] {
+        if localTimeRange == .oneDay && !intradayHistory.isEmpty {
+            // Intraday : un point par HORODATAGE (pas par jour !), fenêtre 24 h.
+            let cutoff = Date().addingTimeInterval(-24 * 3600)
+            var seen = Set<Date>()
+            let deduped = intradayHistory
+                .filter { $0.close.isFinite && $0.close > 0 && $0.date >= cutoff }
+                .sorted { $0.date < $1.date }
+                .filter { seen.insert($0.date).inserted }
+            return rejectOutliers(deduped)
+        }
+
         var seenDays = Set<Date>()
         let cal = Calendar.current
         let deduped = positionPricePoints
             .filter { $0.close.isFinite && $0.close > 0 }
             .filter { seenDays.insert(cal.startOfDay(for: $0.date)).inserted }
-        guard deduped.count >= 4 else { return deduped }
+        return rejectOutliers(deduped)
+    }
 
-        let sortedCloses = deduped.map(\.close).sorted()
+    /// Prévention "code-barres" (2e ligne de défense) : une série de cours peut
+    /// être CONTAMINÉE par deux échelles de prix incompatibles fusionnées sous
+    /// le même identifiant — ex. un ticker qui résout vers le mauvais instrument
+    /// Yahoo. Le chart alternerait alors entre 35 € et 300 € d'un point à
+    /// l'autre → un peigne. On écarte tout point hors de l'intervalle
+    /// [médiane / 4, médiane × 4] : une seule échelle survit, le rendu reste lisse.
+    private func rejectOutliers(_ points: [InvestmentPricePoint]) -> [InvestmentPricePoint] {
+        guard points.count >= 4 else { return points }
+        let sortedCloses = points.map(\.close).sorted()
         let median = sortedCloses[sortedCloses.count / 2]
-        guard median > 0 else { return deduped }
+        guard median > 0 else { return points }
         let lower = median / 4, upper = median * 4
-        let cleaned = deduped.filter { $0.close >= lower && $0.close <= upper }
+        let cleaned = points.filter { $0.close >= lower && $0.close <= upper }
         // Si le filtre écarte tout (médiane pathologique), on retombe sur la
         // série dédupliquée plutôt que d'afficher un chart vide.
-        return cleaned.isEmpty ? deduped : cleaned
+        return cleaned.isEmpty ? points : cleaned
     }
 
     /// Domaine Y du chart calculé à partir des valeurs MEANINGFUL pour le cours :
@@ -158,7 +178,9 @@ struct InvestmentPositionDetailView: View {
     /// quelques euros par titre, écrasaient l'axe Y vers 0 si inclus).
     /// Padding de ±8% pour ne pas coller aux bords.
     private var chartYDomain: ClosedRange<Double> {
-        var values: [Double] = positionPricePoints.map(\.close)
+        // chartPoints (et pas positionPricePoints) : en 1J le domaine doit
+        // suivre la série intraday effectivement tracée.
+        var values: [Double] = chartPoints.map(\.close)
         values.append(contentsOf:
             visibleOrders
                 .filter { $0.orderType != .dividend }
@@ -393,7 +415,36 @@ struct InvestmentPositionDetailView: View {
             loadCachedHistory()
             loadOrders()
             hasLoaded = true
+            // Si la vue s'ouvre déjà sur 1J (état restauré), charge l'intraday.
+            if localTimeRange == .oneDay {
+                await loadIntradayHistory()
+            }
         }
+        .onChange(of: localTimeRange) { _, newRange in
+            // Plage 1J → fetch on-demand de la série intraday 30 min (skip si
+            // fraîche < 25 min côté service). Les autres plages n'en ont pas besoin.
+            if newRange == .oneDay {
+                Task { await loadIntradayHistory() }
+            }
+        }
+    }
+
+    /// Chargement de la série intraday : sync réseau (avec skip fraîcheur) puis
+    /// lecture du cache sous les identifiants candidats (ISIN puis ticker —
+    /// le service stocke sous `bestSyncIdentifier`).
+    private func loadIntradayHistory() async {
+        let identifier = position.bestSyncIdentifier
+        guard !identifier.isEmpty else { return }
+        _ = await InvestmentAutoSyncService.shared.syncIntradayHistory(identifier: identifier)
+        let candidates = [position.isin, position.ticker].filter { !$0.isEmpty }
+        for candidate in candidates {
+            let points = PriceHistoryCache.shared.fetch(identifier: candidate, resolution: .intraday30m)
+            if !points.isEmpty {
+                intradayHistory = points
+                return
+            }
+        }
+        intradayHistory = []
     }
 
     // MARK: - Skeleton

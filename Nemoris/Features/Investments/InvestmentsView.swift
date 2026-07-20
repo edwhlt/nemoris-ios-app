@@ -286,6 +286,17 @@ struct InvestmentsView: View {
                             set: { newValue in
                                 viewModel.selectedTimeRange = newValue
                                 viewModel.recomputePortfolioEvolution()
+                                // Plage 1J → il faut la série INTRADAY (30 min).
+                                // Fetch on-demand (skip si fraîche < 25 min) puis
+                                // recalcul quand les points sont arrivés.
+                                if newValue == .oneDay {
+                                    Task {
+                                        await InvestmentAutoSyncService.shared.syncIntradayIfNeeded(
+                                            identifiers: viewModel.allPositions.map(\.bestSyncIdentifier)
+                                        )
+                                        viewModel.recomputePortfolioEvolution()
+                                    }
+                                }
                             }
                         ),
                         // Compte le plus ancien comme référence : pas de sens

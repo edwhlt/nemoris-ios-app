@@ -324,11 +324,22 @@ final class InvestmentsViewModel {
         //    ("Aucun historique") alors que les écrans compte/position — qui
         //    utilisaient déjà la résolution complète — affichaient bien la courbe.
         let cutoff = selectedTimeRange.startDate
+        // Granularité adaptée à la plage : la vue 1J utilise la série INTRADAY
+        // 30 min (la série quotidienne n'a qu'un seul point sur 24 h glissantes
+        // — rien à tracer). Les autres plages restent sur le quotidien.
+        let resolution: PriceResolution = selectedTimeRange == .oneDay ? .intraday30m : .daily
         var historyByPositionId: [Int: [InvestmentPricePoint]] = [:]
+        // Prix de secours par position : en 1J, une position SANS intraday mais
+        // AVEC un quotidien reste valorisée à son dernier close réel (ligne
+        // plate) au lieu de retomber sur le PRU (qui fausserait le total).
+        var fallbackPrice: [Int: Double] = [:]
         for position in allPositions {
-            let history = resolveHistory(for: position, cutoff: cutoff)
+            let history = resolveHistory(for: position, cutoff: cutoff, resolution: resolution)
             if !history.isEmpty {
                 historyByPositionId[position.id] = history
+            } else if resolution == .intraday30m,
+                      let lastDaily = resolveHistory(for: position, cutoff: nil, resolution: .daily).last?.close {
+                fallbackPrice[position.id] = lastDaily
             }
         }
 
@@ -352,8 +363,10 @@ final class InvestmentsViewModel {
                    let latestBeforeDate = history.last(where: { $0.date <= date }) {
                     lastKnownPrice[position.id] = latestBeforeDate.close
                 }
-                // Fallback : dernier prix connu OU PRU si jamais syncé
-                let price = lastKnownPrice[position.id] ?? position.averageBuyPrice
+                // Fallback : dernier prix connu > dernier close quotidien > PRU
+                let price = lastKnownPrice[position.id]
+                    ?? fallbackPrice[position.id]
+                    ?? position.averageBuyPrice
                 total += position.quantity * price
             }
             points.append(PortfolioEvolutionPoint(date: date, value: total))
@@ -368,9 +381,10 @@ final class InvestmentsViewModel {
     /// sous ce symbole). Source unique utilisée par TOUS les niveaux de chart
     /// (global, compte, position) — sinon le parent peut rester vide alors que
     /// l'enfant s'affiche.
-    private func resolveHistory(for position: InvestmentPosition, cutoff: Date?) -> [InvestmentPricePoint] {
+    private func resolveHistory(for position: InvestmentPosition, cutoff: Date?,
+                                resolution: PriceResolution = .daily) -> [InvestmentPricePoint] {
         func load(_ identifier: String) -> [InvestmentPricePoint] {
-            repository.fetchPriceHistory(identifier: identifier)
+            PriceHistoryCache.shared.fetch(identifier: identifier, resolution: resolution)
                 .sorted { $0.date < $1.date }
                 .filter { point in
                     guard let cutoff else { return true }
@@ -471,51 +485,30 @@ final class InvestmentsViewModel {
         }
 
         let cutoff = range.startDate
+        // Granularité adaptée à la plage (cf. recomputePortfolioEvolution) :
+        // 1J → série intraday 30 min, sinon quotidien.
+        let resolution: PriceResolution = range == .oneDay ? .intraday30m : .daily
         // historyByPositionId : on indexe par position.id (pas par ticker) car
         // 2 positions peuvent avoir le même ticker (rare mais possible).
         var historyByPositionId: [Int: [InvestmentPricePoint]] = [:]
         var positionsWithoutHistory: [InvestmentPosition] = []
+        var fallbackPrice: [Int: Double] = [:]
 
         for position in positions {
-            // Essaie plusieurs identifiers : ISIN > ticker > rien.
-            // Cohérent avec le loadCachedHistory de PositionDetailView.
-            let candidates = [position.isin, position.ticker].filter { !$0.isEmpty }
-            var found: [InvestmentPricePoint] = []
-            for candidate in candidates {
-                let history = repository.fetchPriceHistory(identifier: candidate)
-                    .sorted { $0.date < $1.date }
-                    .filter { point in
-                        guard let cutoff else { return true }
-                        return point.date >= cutoff
-                    }
-                if !history.isEmpty {
-                    found = history
-                    break
-                }
-            }
-            // Fallback : symbole résolu via la dernière trace de sync (ex:
-            // ISIN FR0011871110 → PUST.PA stocké sous PUST.PA)
-            if found.isEmpty {
-                if let trace = InvestmentSyncTraceStore.fetchBest(identifiers: candidates),
-                   trace.status == .success {
-                    for symbol in trace.symbolsTried {
-                        let history = repository.fetchPriceHistory(identifier: symbol)
-                            .sorted { $0.date < $1.date }
-                            .filter { point in
-                                guard let cutoff else { return true }
-                                return point.date >= cutoff
-                            }
-                        if !history.isEmpty {
-                            found = history
-                            break
-                        }
-                    }
-                }
-            }
-            if found.isEmpty {
-                positionsWithoutHistory.append(position)
-            } else {
+            // Résolution ISIN → ticker → symbole de la dernière sync réussie,
+            // PARTAGÉE avec le chart global (resolveHistory) — sinon le parent
+            // et l'enfant peuvent diverger sur ce qu'ils trouvent.
+            let found = resolveHistory(for: position, cutoff: cutoff, resolution: resolution)
+            if !found.isEmpty {
                 historyByPositionId[position.id] = found
+            } else if resolution == .intraday30m,
+                      let lastDaily = resolveHistory(for: position, cutoff: nil, resolution: .daily).last?.close {
+                // Pas d'intraday mais un quotidien existe : valorisée à son
+                // dernier close réel (ligne plate) — PAS dans le diagnostic
+                // "sans historique" qui parle de l'historique tout court.
+                fallbackPrice[position.id] = lastDaily
+            } else {
+                positionsWithoutHistory.append(position)
             }
         }
 
@@ -534,7 +527,9 @@ final class InvestmentsViewModel {
                    let latestBeforeDate = history.last(where: { $0.date <= date }) {
                     lastKnownPrice[position.id] = latestBeforeDate.close
                 }
-                let price = lastKnownPrice[position.id] ?? position.averageBuyPrice
+                let price = lastKnownPrice[position.id]
+                    ?? fallbackPrice[position.id]
+                    ?? position.averageBuyPrice
                 total += position.quantity * price
             }
             points.append(PortfolioEvolutionPoint(date: date, value: total))

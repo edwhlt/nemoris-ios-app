@@ -174,7 +174,19 @@ struct InvestmentAccountDetailView: View {
             refresh()
             hasLoaded = true
         }
-        .onChange(of: localTimeRange) { _, _ in recomputeEvolution() }
+        .onChange(of: localTimeRange) { _, newRange in
+            recomputeEvolution()
+            // Plage 1J → fetch on-demand de la série intraday 30 min des
+            // positions du compte, puis recalcul quand les points sont là.
+            if newRange == .oneDay {
+                Task {
+                    await InvestmentAutoSyncService.shared.syncIntradayIfNeeded(
+                        identifiers: positions.map(\.bestSyncIdentifier)
+                    )
+                    recomputeEvolution()
+                }
+            }
+        }
     }
 
     // MARK: - Toolbar (sortie en ViewBuilder pour aider le type-checker)
