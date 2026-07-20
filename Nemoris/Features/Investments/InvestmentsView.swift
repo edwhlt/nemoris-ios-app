@@ -192,6 +192,26 @@ struct InvestmentsView: View {
         .foregroundStyle(AppTheme.Colors.textSecondary)
     }
 
+    /// Ligne KPI compacte "Investi X · Plus-value Y" (remplace la carte 2 badges).
+    @ViewBuilder
+    private func kpiInlineLine(invested: Double, performance: Double) -> some View {
+        HStack(spacing: 6) {
+            Text("Investi")
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+            Text(invested, format: .currency(code: "EUR"))
+                .foregroundStyle(AppTheme.Colors.textPrimary)
+            Text("·")
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+            Text("Plus-value")
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+            Text(performance, format: .currency(code: "EUR"))
+                .foregroundStyle(performance >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
+        }
+        .font(AppTheme.Typography.bodySmall)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+    }
+
     // MARK: - Dashboard Tab (AXE J — refonte style Finary, DA Nemoris)
 
     private var dashboardTab: some View {
@@ -208,10 +228,10 @@ struct InvestmentsView: View {
                     .padding(.horizontal, AppTheme.Spacing.md)
                     .padding(.top, AppTheme.Spacing.sm)
 
-                // ── Hero (sans carte, plus premium) ──────────────────────
-                // Le hero + chips + chart vivent directement sur le fond pour un
-                // effet "Robinhood/Finary" : grand espace blanc, chart qui respire.
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                // ── Hero + chart + chips (style Apple Stocks épuré) ──────
+                // Tout vit directement sur le fond : grand chiffre, chart qui
+                // respire bord-à-bord, chips SOUS le chart (pattern Stocks).
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
                     InvestmentHeroCard(
                         title: "Valorisation totale",
                         currentValue: viewModel.portfolioCurrentValue
@@ -222,6 +242,19 @@ struct InvestmentsView: View {
                         // basis variation = positions seules pour cohérence avec portfolioStartValue
                         variationBasisValue: viewModel.portfolioCurrentValue
                     )
+
+                    // KPI en ligne discrète (remplace la carte 2 StatBadge).
+                    kpiInlineLine(invested: stats.totalInvested, performance: stats.performance)
+                        .padding(.top, 2)
+
+                    // Chart sur fond direct. PAS de .clipped() ici : ça couperait
+                    // les labels d'axe X qui sont positionnés sous le plot area.
+                    EvolutionChart(
+                        points: viewModel.portfolioEvolution,
+                        height: 210,
+                        timeRange: viewModel.selectedTimeRange
+                    )
+                    .padding(.top, AppTheme.Spacing.xs)
 
                     TimeRangeChips(
                         selection: Binding(
@@ -238,44 +271,19 @@ struct InvestmentsView: View {
                         )
                     )
 
-                    // Chart sur fond direct. PAS de .clipped() ici : ça couperait
-                    // les labels d'axe X qui sont positionnés sous le plot area.
-                    // Le débordement du gradient AreaMark est géré par le chartYScale
-                    // qui réserve un padding visuel propre.
-                    EvolutionChart(
-                        points: viewModel.portfolioEvolution,
-                        height: 200,
-                        timeRange: viewModel.selectedTimeRange
-                    )
-
                     // Chantier A — statut de la sync auto (spinner + progression
                     // pendant, "Actualisé il y a X" après).
                     syncStatusLine
+                        .padding(.top, 2)
                 }
                 .padding(.horizontal, AppTheme.Spacing.sm)
 
-                // ── KPIs (carte distincte pour séparer du chart) ─────────
-                AppCard {
-                    HStack(spacing: AppTheme.Spacing.sm) {
-                        StatBadge(
-                            label: "Investi",
-                            value: stats.totalInvested.formatted(.currency(code: "EUR")),
-                            valueColor: AppTheme.Colors.textSecondary
-                        )
-                        StatBadge(
-                            label: "Performance",
-                            value: stats.performance.formatted(.currency(code: "EUR")),
-                            valueColor: stats.performance >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger
-                        )
-                    }
-                }
-
-                // ── Allocation (donut chart avec toggle type/compte) ─────
-                allocationCard
+                // ── Allocation (donut à plat, sans carte) ────────────────
+                allocationSection
 
                 // ── Liste comptes (NavigationLink vers AccountDetailView) ─
                 if !viewModel.accounts.isEmpty {
-                    accountsListCard()
+                    accountsListSection()
                 } else {
                     emptyAccountsCard
                 }
@@ -325,148 +333,142 @@ struct InvestmentsView: View {
 
     @ViewBuilder private var investmentsSkeleton: some View {
         VStack(spacing: AppTheme.Spacing.md) {
-            // Hero + chart (sans carte)
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            // Hero + KPI line + chart + chips (à plat, style Apple Stocks)
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
                 SkeletonHero()
-                // TimeRange chips
-                HStack(spacing: 6) {
-                    ForEach(0..<6, id: \.self) { _ in
-                        SkeletonBlock(width: 38, height: 26, cornerRadius: 13)
+                SkeletonLine(width: 200, height: 13)
+                SkeletonChart(height: 210)
+                // TimeRange chips SOUS le chart, pleine largeur
+                HStack(spacing: 4) {
+                    ForEach(0..<7, id: \.self) { _ in
+                        SkeletonBlock(width: 40, height: 28, cornerRadius: 14)
+                            .frame(maxWidth: .infinity)
                     }
-                    Spacer()
                 }
-                SkeletonChart(height: 200)
             }
             .padding(.horizontal, AppTheme.Spacing.sm)
 
-            // KPIs card
-            AppCard {
-                HStack(spacing: AppTheme.Spacing.sm) {
-                    SkeletonStatBadge()
-                    SkeletonStatBadge()
+            // Allocation donut à plat
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                HStack {
+                    SkeletonLine(width: 110, height: 15)
+                    Spacer()
+                    SkeletonBlock(width: 150, height: 26, cornerRadius: 13)
                 }
+                SkeletonDonut(size: 150)
             }
+            .padding(.horizontal, AppTheme.Spacing.sm)
 
-            // Allocation donut card
-            AppCard {
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                    HStack {
-                        SkeletonLine(width: 110, height: 15)
-                        Spacer()
-                        SkeletonBlock(width: 140, height: 26, cornerRadius: 13)
-                    }
-                    SkeletonDonut(size: 170)
-                }
+            // Liste comptes à plat
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+                SkeletonLine(width: 130, height: 15)
+                SkeletonAccountRow()
+                SkeletonAccountRow()
+                SkeletonAccountRow()
             }
-
-            // Accounts list card
-            AppCard {
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                    SkeletonLine(width: 130, height: 15)
-                    SkeletonAccountRow()
-                    SkeletonAccountRow()
-                    SkeletonAccountRow()
-                }
-            }
+            .padding(.horizontal, AppTheme.Spacing.sm)
         }
     }
 
-    /// Donut allocation + toggle entre "Par type" et "Par compte"
+    /// Donut allocation à plat (sans carte) + toggle "Par type"/"Par compte".
     @ViewBuilder
-    private var allocationCard: some View {
+    private var allocationSection: some View {
         let slices = viewModel.allocationGroupByAccount
             ? viewModel.allocationByAccount
             : viewModel.allocationByAssetType
         if !slices.isEmpty {
-            AppCard {
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                    HStack {
-                        SectionHeader(title: "Allocation")
-                        Spacer()
-                        // Toggle compact type ↔ compte
-                        Picker("", selection: Binding(
-                            get: { viewModel.allocationGroupByAccount },
-                            set: { viewModel.allocationGroupByAccount = $0 }
-                        )) {
-                            Text("Type").tag(false)
-                            Text("Compte").tag(true)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 140)
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+                HStack {
+                    SectionHeader(title: "Répartition")
+                    Spacer()
+                    // Toggle compact type ↔ compte
+                    Picker("", selection: Binding(
+                        get: { viewModel.allocationGroupByAccount },
+                        set: { viewModel.allocationGroupByAccount = $0 }
+                    )) {
+                        Text("Type").tag(false)
+                        Text("Compte").tag(true)
                     }
-                    AllocationDonutChart(slices: slices, currency: "EUR", size: 170)
+                    .pickerStyle(.segmented)
+                    .frame(width: 150)
                 }
+                AllocationDonutChart(slices: slices, currency: "EUR", size: 150)
             }
+            .padding(.horizontal, AppTheme.Spacing.sm)
+            .padding(.top, AppTheme.Spacing.sm)
         }
     }
 
-    /// Carte récapitulative des comptes avec NavigationLink vers AccountDetailView.
-    /// AXE J Phase 2 : tap sur un compte → drill-down vers son détail (chart + positions).
-    /// AXE M : utilise une `List` scrollDisabled pour bénéficier de `.swipeActions` natif
-    /// — comportement identique à Transactions et ReferenceData.
+    /// Section comptes à plat (sans carte) avec NavigationLink vers AccountDetailView.
+    /// Chantier B : style Apple Stocks — rows aérées, sparkline 1M au centre,
+    /// valeur en chiffres alignés à droite. `.swipeActions` natif conservé (AXE M).
     @ViewBuilder
-    private func accountsListCard() -> some View {
-        AppCard {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                SectionHeader(title: "Comptes (\(viewModel.accounts.count))")
-                List {
-                    ForEach(viewModel.accounts) { account in
-                        NavigationLink {
-                            InvestmentAccountDetailView(viewModel: viewModel, account: account)
+    private func accountsListSection() -> some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            SectionHeader(title: "Comptes (\(viewModel.accounts.count))")
+                .padding(.horizontal, AppTheme.Spacing.sm)
+            List {
+                ForEach(viewModel.accounts) { account in
+                    NavigationLink {
+                        InvestmentAccountDetailView(viewModel: viewModel, account: account)
+                    } label: {
+                        accountRow(account)
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 6, leading: AppTheme.Spacing.sm, bottom: 6, trailing: AppTheme.Spacing.sm))
+                    .listRowSeparatorTint(AppTheme.Colors.textSecondary.opacity(0.12))
+                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                        Button {
+                            // .sheet(item:) s'ouvre dès qu'editingAccount devient non-nil
+                            editingAccount = account
                         } label: {
-                            accountRow(account)
+                            Label("Modifier", systemImage: "pencil")
                         }
-                        .listRowBackground(AppTheme.Colors.surface)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                        .listRowSeparatorTint(AppTheme.Colors.textSecondary.opacity(0.1))
-                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            Button {
-                                // .sheet(item:) s'ouvre dès qu'editingAccount devient non-nil
-                                editingAccount = account
-                            } label: {
-                                Label("Modifier", systemImage: "pencil")
-                            }
-                            .tint(AppTheme.Colors.accent)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                accountToDelete = account
-                            } label: {
-                                Label("Supprimer", systemImage: "trash")
-                            }
+                        .tint(AppTheme.Colors.accent)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            accountToDelete = account
+                        } label: {
+                            Label("Supprimer", systemImage: "trash")
                         }
                     }
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .scrollDisabled(true)
-                // Hauteur estimée : ~68pt par row d'un compte (titre + sous-titre + paddings).
-                .frame(height: CGFloat(viewModel.accounts.count) * 68)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .scrollDisabled(true)
+            // Hauteur estimée : ~64pt par row (titre + sous-titre + paddings aérés).
+            .frame(height: CGFloat(viewModel.accounts.count) * 64)
         }
     }
 
-    /// Row d'un compte dans la liste du dashboard global.
-    /// Affiche : pastille couleur (cohérente donut) · nom · broker/type · valeur courante · chevron.
+    /// Row d'un compte dans la liste du dashboard global (style Apple Stocks).
+    /// Affiche : nom · broker/type · sparkline 1M · valeur courante alignée.
     private func accountRow(_ account: InvestmentAccount) -> some View {
         HStack(spacing: AppTheme.Spacing.md) {
-            Circle()
-                .fill(AppTheme.Colors.accent.opacity(0.7))
-                .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 3) {
                 Text(account.name)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(AppTheme.Colors.textPrimary)
+                    .lineLimit(1)
                 Text("\(account.broker.isEmpty ? account.accountType : account.broker) · \(account.accountType)")
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(AppTheme.Colors.textSecondary)
                     .lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            // Sparkline 1 mois (enfin utilisée) — masquée si pas assez d'historique.
+            if let spark = viewModel.accountSparklines[account.id] {
+                InvestmentSparkline(points: spark, height: 28, width: 56)
+            }
+
             VStack(alignment: .trailing, spacing: 2) {
                 // Total = positions + trésorerie (cohérent avec le hero compte)
                 Text(account.totalValuation, format: .currency(code: account.currency))
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
+                    .monospacedDigit()
                     .foregroundStyle(AppTheme.Colors.textPrimary)
                 // Cash en sous-ligne discrète si > 0 — l'user voit que sur ce
                 // compte une partie du capital est en trésorerie
@@ -479,7 +481,7 @@ struct InvestmentsView: View {
             // Chevron supprimé : depuis le passage en List + NavigationLink (AXE M),
             // iOS ajoute son propre chevron natif en bout de row. On évite le doublon.
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
     }
 

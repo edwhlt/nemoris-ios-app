@@ -31,6 +31,11 @@ final class InvestmentsViewModel {
     /// n'est jamais resynchronisé quand les positions sont updated.
     var allPositions: [InvestmentPosition] = []
 
+    /// Chantier B — sparkline 1 mois par compte (id → points), affichée dans la
+    /// liste des comptes du dashboard (style Apple Stocks). Calculée en fin de
+    /// `load()` depuis le PriceHistoryCache (RAM) — coût négligeable.
+    var accountSparklines: [Int: [PortfolioEvolutionPoint]] = [:]
+
     private let repository = InvestmentRepository()
     private let marketDataService = InvestmentMarketDataService()
 
@@ -87,6 +92,13 @@ final class InvestmentsViewModel {
         allPositions = accounts.flatMap { repository.fetchPositions(accountId: $0.id) }
         // AXE J : refresh l'évolution pour le dashboard graphique
         recomputePortfolioEvolution()
+        // Chantier B : sparkline 1 mois par compte pour la liste du dashboard.
+        var sparklines: [Int: [PortfolioEvolutionPoint]] = [:]
+        for account in accounts {
+            let points = computeAccountEvolution(accountId: account.id, range: .oneMonth)
+            if points.count >= 2 { sparklines[account.id] = points }
+        }
+        accountSparklines = sparklines
     }
 
     func loadPositions() {

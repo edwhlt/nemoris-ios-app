@@ -421,56 +421,57 @@ struct InvestmentPositionDetailView: View {
 
     // AXE M : `syncIconButton` retiré — la sync est désormais déclenchée par le
     // bouton refresh dans la toolbar (à gauche du menu ⋯), pas dans le hero.
+    /// Chantier B — hero + chart à plat (sans carte), chips SOUS le chart.
     private var heroAndChartCard: some View {
-        AppCard {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                InvestmentHeroCard(
-                    title: heroTitle,
-                    currentValue: heroValue,
-                    // Pas de variation visible quand on est sur l'estimation
-                    // ou la position fermée — ce serait trompeur.
-                    previousValue: (valuationIsEstimated || isClosedPosition)
-                        ? heroValue
-                        : positionValuePoints.first?.value,
-                    currency: account.currency,
-                    rangeLabel: variationRangeLabel(localTimeRange)
-                )
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            InvestmentHeroCard(
+                title: heroTitle,
+                currentValue: heroValue,
+                // Pas de variation visible quand on est sur l'estimation
+                // ou la position fermée — ce serait trompeur.
+                previousValue: (valuationIsEstimated || isClosedPosition)
+                    ? heroValue
+                    : positionValuePoints.first?.value,
+                currency: account.currency,
+                rangeLabel: variationRangeLabel(localTimeRange)
+            )
 
-                if isClosedPosition {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .foregroundStyle(AppTheme.Colors.accent)
-                        Text("Position clôturée — \(realizedPnL >= 0 ? "plus-value" : "moins-value") réalisée \(realizedPnL, format: .currency(code: account.currency))")
-                            .font(AppTheme.Typography.bodySmall)
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                } else if valuationIsEstimated {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundStyle(AppTheme.Colors.warning)
-                        Text("Cours non synchronisé — la valeur affichée correspond au coût d'acquisition. Synchronise pour voir le P&L réel.")
-                            .font(AppTheme.Typography.bodySmall)
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                TimeRangeChips(selection: $localTimeRange)
-
-                positionChart
-
-                // Info sur la profondeur de données disponible. Permet à l'user
-                // de comprendre qu'un chart 10A tronqué n'est pas un bug mais
-                // simplement que l'ETF/action est récent (Yahoo ne fournit que
-                // l'historique depuis l'inception du titre).
-                if let earliest = priceHistoryEarliestDate {
-                    Text("Données disponibles depuis \(earliest, format: .dateTime.day().month(.abbreviated).year())")
-                        .font(AppTheme.Typography.labelMedium)
+            if isClosedPosition {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(AppTheme.Colors.accent)
+                    Text("Position clôturée — \(realizedPnL >= 0 ? "plus-value" : "moins-value") réalisée \(realizedPnL, format: .currency(code: account.currency))")
+                        .font(AppTheme.Typography.bodySmall)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else if valuationIsEstimated {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(AppTheme.Colors.warning)
+                    Text("Cours non synchronisé — la valeur affichée correspond au coût d'acquisition. Synchronise pour voir le P&L réel.")
+                        .font(AppTheme.Typography.bodySmall)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+
+            positionChart
+                .padding(.top, AppTheme.Spacing.xs)
+
+            TimeRangeChips(selection: $localTimeRange)
+
+            // Info sur la profondeur de données disponible. Permet à l'user
+            // de comprendre qu'un chart 10A tronqué n'est pas un bug mais
+            // simplement que l'ETF/action est récent (Yahoo ne fournit que
+            // l'historique depuis l'inception du titre).
+            if let earliest = priceHistoryEarliestDate {
+                Text("Données disponibles depuis \(earliest, format: .dateTime.day().month(.abbreviated).year())")
+                    .font(AppTheme.Typography.labelMedium)
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+            }
         }
+        .padding(.horizontal, AppTheme.Spacing.sm)
     }
 
     /// Date du plus ancien point de cours stocké pour cette position. Utilisé

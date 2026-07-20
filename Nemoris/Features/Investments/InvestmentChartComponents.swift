@@ -159,7 +159,7 @@ struct TimeRangeChips: View {
     var ranges: [InvestmentTimeRange] = InvestmentTimeRange.allCases
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             ForEach(ranges) { range in
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) {
@@ -167,14 +167,15 @@ struct TimeRangeChips: View {
                     }
                 } label: {
                     Text(range.label)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(selection == range ? AppTheme.Colors.background : AppTheme.Colors.textSecondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
                         .background(
                             Capsule()
                                 .fill(selection == range ? AppTheme.Colors.accent : Color.clear)
                         )
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
             }
@@ -232,12 +233,11 @@ struct InvestmentHeroCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Label "Valorisation totale" ou "Valeur du compte"
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .semibold))
+        VStack(alignment: .leading, spacing: 6) {
+            // Label discret (plus de capitales criardes — style Apple Stocks)
+            Text(title)
+                .font(AppTheme.Typography.labelMedium)
                 .foregroundStyle(AppTheme.Colors.textSecondary)
-                .tracking(0.5)
 
             // Valeur en très gros — passe par MoneyText pour respecter le masquage global
             MoneyText(
@@ -251,22 +251,30 @@ struct InvestmentHeroCard: View {
             .lineLimit(1)
             .minimumScaleFactor(0.6)
 
-            // Variation : Δ absolu + % + plage
+            // Variation : pastille capsule teintée (vert/rouge) + label de plage à côté.
             if let abs = variationAbs, let pct = variationPct {
-                HStack(spacing: 6) {
-                    Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
-                        .font(.system(size: 11, weight: .bold))
-                    Text(abs, format: .currency(code: currency))
-                        .font(.system(size: 14, weight: .semibold))
-                    Text(String(format: "%@%.2f %%", isPositive ? "+" : "", pct))
-                        .font(.system(size: 14, weight: .semibold))
+                HStack(spacing: 8) {
+                    HStack(spacing: 4) {
+                        Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
+                            .font(.system(size: 11, weight: .bold))
+                        Text(abs, format: .currency(code: currency))
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(String(format: "%@%.2f %%", isPositive ? "+" : "", pct))
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .foregroundStyle(variationColor)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule().fill(variationColor.opacity(0.12))
+                    )
+
                     if let rangeLabel {
-                        Text("· \(rangeLabel)")
+                        Text(rangeLabel)
                             .font(.system(size: 13))
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
                 }
-                .foregroundStyle(variationColor)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -412,13 +420,13 @@ struct EvolutionChart: View {
                         .font(.system(size: 10))
                 }
             }
+            // Style Apple Stocks : pas de grille Y, juste 2-3 repères de valeur
+            // discrets à droite. Le chart respire, la ligne est la vedette.
             .chartYAxis {
-                AxisMarks(position: .trailing) { _ in
+                AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { _ in
                     AxisValueLabel()
-                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
+                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.55))
                         .font(.system(size: 10))
-                    AxisGridLine()
-                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.08))
                 }
             }
             .chartOverlay { proxy in

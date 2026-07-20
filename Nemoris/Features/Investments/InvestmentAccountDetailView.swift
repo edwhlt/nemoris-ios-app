@@ -228,61 +228,34 @@ struct InvestmentAccountDetailView: View {
     /// Diagnostic critique : explique à l'user que le graphique est incomplet
     /// parce que ces positions ne contribuent pas (rien à multiplier par leur
     /// quantity), donc la valeur agrégée est tronquée.
+    /// Chantier B — réduite à une ligne discrète tappable (au lieu d'une carte
+    /// verbeuse listant chaque position). Tap → sync ciblée des positions
+    /// sans historique.
     private var missingHistoryDiagnosticCard: some View {
-        AppCard {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(AppTheme.Colors.warning)
-                    Text("Graphique incomplet — \(positionsWithoutHistory.count) position(s) sans historique de cours")
-                        .font(AppTheme.Typography.titleSmall)
-                        .foregroundStyle(AppTheme.Colors.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Text("Ces positions ne contribuent pas au chart parce qu'aucun cours n'a été récupéré. Synchronise-les ou édite-les pour renseigner un ISIN valide.")
+        Button {
+            Task { await syncMissingHistoryPositions() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(AppTheme.Colors.warning)
+                    .font(.system(size: 13))
+                Text("\(positionsWithoutHistory.count) position(s) sans historique de cours")
                     .font(AppTheme.Typography.bodySmall)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                VStack(spacing: 4) {
-                    ForEach(positionsWithoutHistory.prefix(5)) { position in
-                        HStack {
-                            Text(position.assetName.isEmpty ? position.ticker : position.assetName)
-                                .font(AppTheme.Typography.bodySmall)
-                                .foregroundStyle(AppTheme.Colors.textPrimary)
-                                .lineLimit(1)
-                            Spacer()
-                            // Indique pourquoi la sync va probablement marcher (ou pas)
-                            if position.isin.isEmpty {
-                                Text("Pas d'ISIN")
-                                    .font(AppTheme.Typography.labelMedium)
-                                    .foregroundStyle(AppTheme.Colors.danger)
-                            } else {
-                                Text(position.isin)
-                                    .font(AppTheme.Typography.labelMedium)
-                                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                            }
-                        }
-                    }
-                    if positionsWithoutHistory.count > 5 {
-                        Text("+ \(positionsWithoutHistory.count - 5) autre(s)")
-                            .font(AppTheme.Typography.labelMedium)
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
-                    }
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if isSyncingAll {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Text("Synchroniser")
+                        .font(AppTheme.Typography.labelMedium)
+                        .foregroundStyle(AppTheme.Colors.accent)
                 }
-                .padding(.vertical, AppTheme.Spacing.xs)
-                Button {
-                    Task { await syncMissingHistoryPositions() }
-                } label: {
-                    Label("Synchroniser uniquement celles-ci",
-                          systemImage: "arrow.triangle.2.circlepath")
-                        .font(AppTheme.Typography.titleSmall)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(AppTheme.Colors.accent)
-                .disabled(isSyncingAll)
             }
+            .padding(.horizontal, AppTheme.Spacing.sm)
         }
+        .buttonStyle(.plain)
+        .disabled(isSyncingAll)
     }
 
     /// Purge les price_history scrappés à tort sur Yahoo pour les tickers
@@ -344,120 +317,122 @@ struct InvestmentAccountDetailView: View {
                 }
             }
 
+            // Chart bord-à-bord, chips SOUS le chart (pattern Apple Stocks).
+            // PAS de .clipped() — ça couperait les labels d'axe X (cf. EvolutionChart)
+            EvolutionChart(points: evolution, height: 190, timeRange: localTimeRange)
+                .padding(.top, AppTheme.Spacing.xs)
+
             TimeRangeChips(
                 selection: $localTimeRange,
                 ranges: InvestmentTimeRange.availableRanges(since: account.openedAt)
             )
-
-            // PAS de .clipped() — ça couperait les labels d'axe X (cf. EvolutionChart)
-            EvolutionChart(points: evolution, height: 180, timeRange: localTimeRange)
         }
         .padding(.horizontal, AppTheme.Spacing.sm)
     }
 
-    /// KPIs (investi + performance + trésorerie) — la trésorerie est affichée
-    /// en sous-ligne discrète seulement quand > 0, pour ne pas encombrer.
+    /// KPIs en ligne (investi · performance) + trésorerie si > 0. Style épuré
+    /// à plat, plus de carte StatBadge.
     private var kpisCard: some View {
-        AppCard {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                if valuationIsEstimated {
-                    HStack(spacing: AppTheme.Spacing.sm) {
-                        Image(systemName: "chart.line.uptrend.xyaxis")
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
-                        Text("Performance disponible après synchronisation des cours")
-                            .font(AppTheme.Typography.bodySmall)
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
-                    }
-                    .padding(.vertical, AppTheme.Spacing.xs)
-                } else {
-                    HStack(spacing: AppTheme.Spacing.sm) {
-                        StatBadge(
-                            label: "Investi",
-                            value: invested.formatted(.currency(code: account.currency)),
-                            valueColor: AppTheme.Colors.textSecondary
-                        )
-                        StatBadge(
-                            label: "Performance",
-                            value: performance.formatted(.currency(code: account.currency)),
-                            valueColor: performanceColor
-                        )
-                    }
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            if valuationIsEstimated {
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                    Text("Performance disponible après synchronisation des cours")
+                        .font(AppTheme.Typography.bodySmall)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
+            } else {
+                HStack(spacing: 6) {
+                    Text("Investi")
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                    Text(invested, format: .currency(code: account.currency))
+                        .foregroundStyle(AppTheme.Colors.textPrimary)
+                    Text("·")
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                    Text("Plus-value")
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                    Text(performance, format: .currency(code: account.currency))
+                        .foregroundStyle(performanceColor)
+                }
+                .font(AppTheme.Typography.bodySmall)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            }
 
-                // Trésorerie : visible seulement si > 0 pour ne pas encombrer
-                // les comptes sans cash. Tap-to-edit ouvre le form compte.
-                if account.cashBalance > 0 {
-                    HStack(spacing: 8) {
-                        Image(systemName: "eurosign.circle.fill")
-                            .foregroundStyle(AppTheme.Colors.accentSecondary)
-                            .font(.system(size: 14))
-                        Text("Trésorerie disponible")
-                            .font(AppTheme.Typography.labelMedium)
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
-                        Spacer()
-                        Text(account.cashBalance, format: .currency(code: account.currency))
-                            .font(AppTheme.Typography.titleSmall)
-                            .foregroundStyle(AppTheme.Colors.textPrimary)
-                    }
-                    .padding(.top, AppTheme.Spacing.xs)
+            // Trésorerie : visible seulement si > 0 pour ne pas encombrer
+            // les comptes sans cash.
+            if account.cashBalance > 0 {
+                HStack(spacing: 8) {
+                    Image(systemName: "eurosign.circle.fill")
+                        .foregroundStyle(AppTheme.Colors.accentSecondary)
+                        .font(.system(size: 14))
+                    Text("Trésorerie disponible")
+                        .font(AppTheme.Typography.labelMedium)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                    Spacer()
+                    Text(account.cashBalance, format: .currency(code: account.currency))
+                        .font(AppTheme.Typography.titleSmall)
+                        .foregroundStyle(AppTheme.Colors.textPrimary)
                 }
+                .padding(.top, AppTheme.Spacing.xs)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, AppTheme.Spacing.sm)
     }
 
     private var allocationCard: some View {
-        AppCard {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                SectionHeader(title: "Allocation interne")
-                AllocationDonutChart(slices: allocation, currency: account.currency, size: 160)
-            }
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SectionHeader(title: "Répartition interne")
+            AllocationDonutChart(slices: allocation, currency: account.currency, size: 150)
         }
+        .padding(.horizontal, AppTheme.Spacing.sm)
     }
 
     private var positionsCard: some View {
-        AppCard {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                SectionHeader(title: "Positions (\(positions.count))")
-                // AXE M : List scrollDisabled pour bénéficier de .swipeActions natif
-                // (cohérent avec Transactions et ReferenceData).
-                List {
-                    ForEach(positions) { position in
-                        NavigationLink {
-                            InvestmentPositionDetailView(
-                                viewModel: viewModel,
-                                account: account,
-                                position: position
-                            )
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            SectionHeader(title: "Positions (\(positions.count))")
+                .padding(.horizontal, AppTheme.Spacing.sm)
+            // AXE M : List scrollDisabled pour bénéficier de .swipeActions natif
+            // (cohérent avec Transactions et ReferenceData).
+            List {
+                ForEach(positions) { position in
+                    NavigationLink {
+                        InvestmentPositionDetailView(
+                            viewModel: viewModel,
+                            account: account,
+                            position: position
+                        )
+                    } label: {
+                        positionRow(position)
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 6, leading: AppTheme.Spacing.sm, bottom: 6, trailing: AppTheme.Spacing.sm))
+                    .listRowSeparatorTint(AppTheme.Colors.textSecondary.opacity(0.12))
+                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                        Button {
+                            // .sheet(item:) s'ouvre dès qu'editingPosition devient non-nil
+                            editingPosition = position
                         } label: {
-                            positionRow(position)
+                            Label("Modifier", systemImage: "pencil")
                         }
-                        .listRowBackground(AppTheme.Colors.surface)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                        .listRowSeparatorTint(AppTheme.Colors.textSecondary.opacity(0.1))
-                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            Button {
-                                // .sheet(item:) s'ouvre dès qu'editingPosition devient non-nil
-                                editingPosition = position
-                            } label: {
-                                Label("Modifier", systemImage: "pencil")
-                            }
-                            .tint(AppTheme.Colors.accent)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                positionToDelete = position
-                            } label: {
-                                Label("Supprimer", systemImage: "trash")
-                            }
+                        .tint(AppTheme.Colors.accent)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            positionToDelete = position
+                        } label: {
+                            Label("Supprimer", systemImage: "trash")
                         }
                     }
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .scrollDisabled(true)
-                // Hauteur estimée : ~70pt par position (ticker + asset_name + valeur + PnL).
-                .frame(height: CGFloat(positions.count) * 70)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .scrollDisabled(true)
+            // Hauteur estimée : ~66pt par position (ticker + asset_name + valeur + PnL).
+            .frame(height: CGFloat(positions.count) * 66)
         }
     }
 
@@ -515,53 +490,49 @@ struct InvestmentAccountDetailView: View {
             ? (position.pnl / position.investedAmount) * 100
             : 0
         let isPositive = position.pnl >= 0
+        let color = isPositive ? AppTheme.Colors.success : AppTheme.Colors.danger
         return HStack(spacing: 3) {
             Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
                 .font(.system(size: 9, weight: .bold))
             Text(String(format: "%@%.2f %%", isPositive ? "+" : "", pct))
                 .font(.system(size: 11, weight: .semibold))
         }
-        .foregroundStyle(isPositive ? AppTheme.Colors.success : AppTheme.Colors.danger)
+        .foregroundStyle(color)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(color.opacity(0.12)))
     }
 
     // MARK: - Skeleton
 
     @ViewBuilder private var accountDetailSkeleton: some View {
-        // Hero + chart
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+        // Hero + chart + chips (à plat, chips sous le chart)
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             SkeletonHero()
-            HStack(spacing: 6) {
-                ForEach(0..<6, id: \.self) { _ in
-                    SkeletonBlock(width: 38, height: 26, cornerRadius: 13)
-                }
-                Spacer()
-            }
-            SkeletonChart(height: 200)
-        }
-        // KPIs
-        AppCard {
-            HStack(spacing: AppTheme.Spacing.sm) {
-                SkeletonStatBadge()
-                SkeletonStatBadge()
-                SkeletonStatBadge()
-            }
-        }
-        // Allocation
-        AppCard {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                SkeletonLine(width: 110, height: 15)
-                SkeletonDonut(size: 170)
-            }
-        }
-        // Positions
-        AppCard {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                SkeletonLine(width: 130, height: 15)
-                ForEach(0..<4, id: \.self) { _ in
-                    SkeletonPositionRow()
+            SkeletonLine(width: 200, height: 13)
+            SkeletonChart(height: 190)
+            HStack(spacing: 4) {
+                ForEach(0..<7, id: \.self) { _ in
+                    SkeletonBlock(width: 40, height: 28, cornerRadius: 14)
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
+        .padding(.horizontal, AppTheme.Spacing.sm)
+        // Allocation à plat
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            SkeletonLine(width: 130, height: 15)
+            SkeletonDonut(size: 150)
+        }
+        .padding(.horizontal, AppTheme.Spacing.sm)
+        // Positions à plat
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            SkeletonLine(width: 130, height: 15)
+            ForEach(0..<4, id: \.self) { _ in
+                SkeletonPositionRow()
+            }
+        }
+        .padding(.horizontal, AppTheme.Spacing.sm)
     }
 
     // MARK: - Helpers
