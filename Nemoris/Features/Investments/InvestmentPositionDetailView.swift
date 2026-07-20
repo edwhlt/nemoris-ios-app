@@ -123,6 +123,35 @@ struct InvestmentPositionDetailView: View {
             }
     }
 
+    /// Points ASSAINIS pour le rendu du chart : triés par date, un seul point
+    /// par jour, `close` fini et strictement positif, ET valeurs aberrantes
+    /// rejetées (voir plus bas).
+    ///
+    /// Prévention "code-barres" : une série de cours peut être CONTAMINÉE par
+    /// deux échelles de prix incompatibles fusionnées sous le même identifiant
+    /// — ex. un ticker qui résout vers le mauvais instrument Yahoo, ou (en démo)
+    /// un cours seedé irréaliste mélangé aux vrais cours synchronisés. Le chart
+    /// alterne alors entre 35 € et 300 € d'un point à l'autre → un peigne.
+    /// On se défend en écartant tout point hors de l'intervalle
+    /// [médiane / 4, médiane × 4] : une seule échelle survit, le rendu reste lisse.
+    private var chartPoints: [InvestmentPricePoint] {
+        var seenDays = Set<Date>()
+        let cal = Calendar.current
+        let deduped = positionPricePoints
+            .filter { $0.close.isFinite && $0.close > 0 }
+            .filter { seenDays.insert(cal.startOfDay(for: $0.date)).inserted }
+        guard deduped.count >= 4 else { return deduped }
+
+        let sortedCloses = deduped.map(\.close).sorted()
+        let median = sortedCloses[sortedCloses.count / 2]
+        guard median > 0 else { return deduped }
+        let lower = median / 4, upper = median * 4
+        let cleaned = deduped.filter { $0.close >= lower && $0.close <= upper }
+        // Si le filtre écarte tout (médiane pathologique), on retombe sur la
+        // série dédupliquée plutôt que d'afficher un chart vide.
+        return cleaned.isEmpty ? deduped : cleaned
+    }
+
     /// Domaine Y du chart calculé à partir des valeurs MEANINGFUL pour le cours :
     /// les `close` des price points + les `unitPrice` des BUY/SELL visibles + le PRU.
     /// On EXCLUT volontairement les dividendes (qui valent quelques centimes à
@@ -489,7 +518,7 @@ struct InvestmentPositionDetailView: View {
     ///   - Markers BUY/SELL/DIV à (executedAt, unitPrice) du cercle
     @ViewBuilder
     private var positionChart: some View {
-        if positionPricePoints.isEmpty {
+        if chartPoints.isEmpty {
             VStack(spacing: 8) {
                 Image(systemName: "chart.xyaxis.line")
                     .font(.system(size: 28, weight: .light))
@@ -507,37 +536,29 @@ struct InvestmentPositionDetailView: View {
             .frame(maxWidth: .infinity, minHeight: 200)
         } else {
             let pru = currentWeightedPRU
-            let firstPrice = positionPricePoints.first?.close ?? 0
-            let lastPrice = positionPricePoints.last?.close ?? 0
+            let firstPrice = chartPoints.first?.close ?? 0
+            let lastPrice = chartPoints.last?.close ?? 0
             let trendColor: Color = lastPrice >= firstPrice
                 ? AppTheme.Colors.success
                 : AppTheme.Colors.danger
+            let baseline = chartYDomain.lowerBound
 
             Chart {
-                // Zone gain (vert) / perte (rouge) entre le PRU et le cours,
-                // SEULEMENT pour les périodes où on détient la position.
-                // Sans cette zone, l'user doit mentalement comparer la courbe
-                // au PRU — avec, c'est immédiat.
-                ForEach(positionPricePoints) { point in
-                    if quantityAt(date: point.date) > 0 {
-                        let pointPru = pruAt(date: point.date)
-                        let isGain = point.close >= pointPru
-                        AreaMark(
-                            x: .value("Date", point.date),
-                            yStart: .value("PRU", pointPru),
-                            yEnd: .value("Cours", point.close)
-                        )
-                        .foregroundStyle(
-                            (isGain ? AppTheme.Colors.success : AppTheme.Colors.danger)
-                                .opacity(0.18)
-                        )
-                        .interpolationMethod(.monotone)
-                    }
-                }
+                // Aire + courbe dans UN SEUL ForEach (pattern identique à
+                // EvolutionChart, qui rend correctement). Deux ForEach séparés
+                // ou un `if` à l'intérieur cassent la continuité de la série et
+                // font rendre chaque point comme une barre verticale isolée
+                // (bug "code-barres"). La position détenue (gain/perte vs PRU)
+                // se lit via la courbe au-dessus/en-dessous de la RuleMark PRU.
+                ForEach(chartPoints) { point in
+                    AreaMark(
+                        x: .value("Date", point.date),
+                        yStart: .value("Min", baseline),
+                        yEnd: .value("Cours", point.close)
+                    )
+                    .foregroundStyle(trendColor.opacity(0.14))
+                    .interpolationMethod(.monotone)
 
-                // Courbe du cours (line épaisse). Couleur = tendance globale
-                // sur la plage affichée.
-                ForEach(positionPricePoints) { point in
                     LineMark(
                         x: .value("Date", point.date),
                         y: .value("Cours", point.close)
@@ -683,7 +704,7 @@ struct InvestmentPositionDetailView: View {
     /// Trouve le point d'historique le plus proche temporellement de `date`.
     /// Utilisé pour snapper le scrub à un vrai data point (pas une interpolation).
     private func closestPoint(to date: Date) -> InvestmentPricePoint? {
-        positionPricePoints.min(by: { a, b in
+        chartPoints.min(by: { a, b in
             abs(a.date.timeIntervalSince(date)) < abs(b.date.timeIntervalSince(date))
         })
     }
