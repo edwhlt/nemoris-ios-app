@@ -193,6 +193,30 @@ struct PortfolioEvolutionPoint: Identifiable, Hashable {
     let value: Double
 }
 
+extension Array where Element == PortfolioEvolutionPoint {
+    /// Assainit une série avant de la donner à Swift Charts.
+    ///
+    /// ⚠️ Prévention du rendu en "code-barres" : DEUX POINTS LE MÊME JOUR
+    /// créent un segment vertical dans une aire/courbe, et une série qui en
+    /// contient beaucoup se rend comme un peigne de barres verticales. Le
+    /// symptôme est intermittent (« parfois oui, parfois non ») car les
+    /// doublons n'apparaissent qu'après une synchro ayant introduit un
+    /// horodatage différent pour un jour déjà connu.
+    ///
+    /// On garantit ici : valeurs finies, un seul point par jour calendaire
+    /// (le dernier connu gagne), série triée par date croissante.
+    /// Pas de rejet d'outliers ici : sur un portefeuille agrégé une forte
+    /// progression est légitime (contrairement au cours d'un titre isolé).
+    func sanitizedForChart() -> [PortfolioEvolutionPoint] {
+        let cal = Calendar.current
+        var byDay: [Date: PortfolioEvolutionPoint] = [:]
+        for p in self where p.value.isFinite {
+            byDay[cal.startOfDay(for: p.date)] = p
+        }
+        return byDay.values.sorted { $0.date < $1.date }
+    }
+}
+
 // MARK: - Investment Hero Card
 
 /// Carte "hero" en haut d'un écran investments (Niveau Global ou Compte).
@@ -296,9 +320,14 @@ struct EvolutionChart: View {
 
     @State private var selectedDate: Date? = nil
 
+    /// Série effectivement tracée : assainie (un seul point par jour, valeurs
+    /// finies, triée). Garde-fou anti "code-barres" — cf. `sanitizedForChart()`.
+    /// TOUT le rendu doit passer par ici, jamais par `points` brut.
+    private var cleanPoints: [PortfolioEvolutionPoint] { points.sanitizedForChart() }
+
     /// Span temporel réel couvert par les points (fallback quand timeRange == nil).
     private var pointsSpan: TimeInterval {
-        guard let first = points.first?.date, let last = points.last?.date else { return 0 }
+        guard let first = cleanPoints.first?.date, let last = cleanPoints.last?.date else { return 0 }
         return max(0, last.timeIntervalSince(first))
     }
 
@@ -309,7 +338,7 @@ struct EvolutionChart: View {
 
     /// Couleur dynamique : vert si tendance haussière sur la plage, rouge sinon.
     private var trendColor: Color {
-        guard let first = points.first?.value, let last = points.last?.value else {
+        guard let first = cleanPoints.first?.value, let last = cleanPoints.last?.value else {
             return AppTheme.Colors.accent
         }
         return last >= first ? AppTheme.Colors.success : AppTheme.Colors.danger
@@ -317,13 +346,13 @@ struct EvolutionChart: View {
 
     private var selectedPoint: PortfolioEvolutionPoint? {
         guard let selectedDate else { return nil }
-        return points.min { abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate)) }
+        return cleanPoints.min { abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate)) }
     }
 
     /// Domaine Y avec un padding visuel pour ne pas coller aux bords.
     private var yDomain: ClosedRange<Double> {
-        guard let lo = points.map(\.value).min(),
-              let hi = points.map(\.value).max() else { return 0...1 }
+        guard let lo = cleanPoints.map(\.value).min(),
+              let hi = cleanPoints.map(\.value).max() else { return 0...1 }
         let span = max(hi - lo, 0.0001)
         let pad = span * 0.12
         return (lo - pad)...(hi + pad)
@@ -333,11 +362,11 @@ struct EvolutionChart: View {
     /// Sert de yStart pour l'AreaMark afin que le remplissage s'arrête au plus bas point
     /// au lieu de descendre jusqu'aux abscisses.
     private var minValue: Double {
-        points.map(\.value).min() ?? 0
+        cleanPoints.map(\.value).min() ?? 0
     }
 
     var body: some View {
-        if points.isEmpty {
+        if cleanPoints.isEmpty {
             // Placeholder élégant — pas un EmptyStateView lourd
             VStack(spacing: 8) {
                 Image(systemName: "chart.xyaxis.line")
@@ -350,7 +379,7 @@ struct EvolutionChart: View {
             .frame(maxWidth: .infinity, minHeight: height)
         } else {
             Chart {
-                ForEach(points) { point in
+                ForEach(cleanPoints) { point in
                     LineMark(
                         x: .value("Date", point.date),
                         y: .value("Valeur", point.value)
@@ -575,22 +604,25 @@ struct InvestmentSparkline: View {
     var height: CGFloat = 32
     var width: CGFloat = 80
 
+    /// Même garde-fou que `EvolutionChart` : série assainie (un point par jour).
+    private var cleanPoints: [PortfolioEvolutionPoint] { points.sanitizedForChart() }
+
     private var trendColor: Color {
-        guard let first = points.first?.value, let last = points.last?.value else {
+        guard let first = cleanPoints.first?.value, let last = cleanPoints.last?.value else {
             return AppTheme.Colors.textSecondary
         }
         return last >= first ? AppTheme.Colors.success : AppTheme.Colors.danger
     }
 
     var body: some View {
-        if points.count < 2 {
+        if cleanPoints.count < 2 {
             // Pas assez de données → placeholder discret
             RoundedRectangle(cornerRadius: 2)
                 .fill(AppTheme.Colors.textSecondary.opacity(0.1))
                 .frame(width: width, height: height)
         } else {
             Chart {
-                ForEach(points) { point in
+                ForEach(cleanPoints) { point in
                     LineMark(
                         x: .value("Date", point.date),
                         y: .value("Valeur", point.value)

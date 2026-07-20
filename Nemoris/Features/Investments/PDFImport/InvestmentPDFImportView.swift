@@ -46,15 +46,23 @@ struct InvestmentPDFImportView: View {
     private let repository = InvestmentRepository()
     private let parser = InvestmentPDFParser.shared
 
+    /// Repli proposé quand Apple Intelligence n'est pas disponible : bascule
+    /// vers l'import CSV déterministe (mapping de colonnes, sans IA). nil =
+    /// aucun repli proposé.
+    private let onFallbackToCSV: (() -> Void)?
+
     /// Init standard (ouverture depuis le menu ⋯).
-    init() {}
+    init(onFallbackToCSV: (() -> Void)? = nil) {
+        self.onFallbackToCSV = onFallbackToCSV
+    }
 
     /// Chantier D — init pré-rempli avec un fichier déposé par un raccourci Siri.
     /// L'utilisateur choisit le compte cible puis lance l'analyse (aucun import
     /// automatique).
-    init(preloadedFileURL url: URL) {
+    init(preloadedFileURL url: URL, onFallbackToCSV: (() -> Void)? = nil) {
         _pdfURL = State(initialValue: url)
         _pdfFileName = State(initialValue: url.lastPathComponent)
+        self.onFallbackToCSV = onFallbackToCSV
     }
 
     enum ImportStep {
@@ -141,12 +149,28 @@ struct InvestmentPDFImportView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Apple Intelligence requise")
                                 .font(.subheadline).fontWeight(.semibold)
-                            Text("L'import PDF utilise l'IA on-device pour comprendre les relevés de n'importe quelle banque. iOS 26+ avec Apple Intelligence activée est requis.")
+                            Text("La lecture automatique (PDF, capture d'écran, image) utilise l'IA on-device : iOS 26+ avec Apple Intelligence activée est requis.")
                                 .font(.caption)
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
                         }
                     }
                     .padding(.vertical, 4)
+
+                    // Repli sans IA : l'import CSV déterministe (mapping de
+                    // colonnes) reste pleinement disponible — offline-first.
+                    if let onFallbackToCSV {
+                        Button {
+                            dismiss()
+                            // Laisse la sheet se fermer avant d'en présenter une autre.
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                onFallbackToCSV()
+                            }
+                        } label: {
+                            Label("Importer un CSV à la place", systemImage: "tablecells")
+                                .font(.subheadline)
+                        }
+                        .tint(AppTheme.Colors.accent)
+                    }
                 }
             }
 

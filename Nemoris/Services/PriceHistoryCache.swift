@@ -25,9 +25,30 @@ final class PriceHistoryCache {
         identifier.uppercased()
     }
 
+    /// Un cours quotidien = UN point par jour calendaire. On déduplique sur le
+    /// début de journée (et pas sur le timestamp exact) car les sources ne
+    /// datent pas leurs points à la même heure : un même jour peut arriver à
+    /// 09:05Z depuis une source et à 15:30Z depuis une autre.
+    ///
+    /// ⚠️ C'est LA cause du rendu en "code-barres" : deux points le même jour
+    /// créent un segment vertical dans le chart. Le symptôme est intermittent
+    /// (« parfois oui, parfois non ») car il n'apparaît qu'après une sync qui
+    /// a introduit un horodatage différent de celui déjà en cache.
+    /// En cas de doublon, le point le plus récemment écrit gagne.
+    private func dedupedByDay(_ points: [InvestmentPricePoint]) -> [InvestmentPricePoint] {
+        let cal = Calendar.current
+        var byDay: [Date: InvestmentPricePoint] = [:]
+        for p in points where p.close.isFinite && p.close > 0 {
+            byDay[cal.startOfDay(for: p.date)] = p
+        }
+        return byDay.values.sorted { $0.date < $1.date }
+    }
+
     /// Récupère les points sortés par date croissante, limité à `limit`.
+    /// Déduplique par jour à la lecture : soigne immédiatement les caches déjà
+    /// pollués par l'ancienne écriture (pas besoin d'attendre une resync).
     func fetch(identifier: String, limit: Int = 365) -> [InvestmentPricePoint] {
-        let points = store.get(normalize(identifier)) ?? []
+        let points = dedupedByDay(store.get(normalize(identifier)) ?? [])
         // L'ancien SELECT faisait ORDER BY price_date DESC LIMIT N puis retournait
         // sorted ASC. On reproduit : prend les N plus récents puis trie ASC.
         let sortedDesc = points.sorted { $0.date > $1.date }
@@ -49,23 +70,26 @@ final class PriceHistoryCache {
         return points.max(by: { $0.date < $1.date })?.date
     }
 
-    /// Merge des nouveaux points dans le cache. Sémantique = UPSERT par date :
-    /// si une date existe déjà, son close est remplacé par le nouveau.
+    /// Merge des nouveaux points dans le cache. Sémantique = UPSERT par JOUR
+    /// calendaire (cf. `dedupedByDay`) : un même jour déjà présent voit son
+    /// point remplacé par le nouveau, même si l'horodatage diffère.
     /// Renvoie le nombre de points effectivement écrits.
     @discardableResult
     func save(identifier: String, points: [InvestmentPricePoint]) -> Int {
         guard !points.isEmpty else { return 0 }
         let key = normalize(identifier)
-        var existing = store.get(key) ?? []
-        var byDate: [Date: InvestmentPricePoint] = [:]
-        for p in existing { byDate[p.date] = p }
+        let cal = Calendar.current
+        var byDay: [Date: InvestmentPricePoint] = [:]
+        // L'existant d'abord, les nouveaux ensuite → les nouveaux gagnent.
+        for p in (store.get(key) ?? []) where p.close.isFinite && p.close > 0 {
+            byDay[cal.startOfDay(for: p.date)] = p
+        }
         var written = 0
-        for p in points {
-            byDate[p.date] = p
+        for p in points where p.close.isFinite && p.close > 0 {
+            byDay[cal.startOfDay(for: p.date)] = p
             written += 1
         }
-        existing = byDate.values.sorted { $0.date < $1.date }
-        store.set(key, value: existing)
+        store.set(key, value: byDay.values.sorted { $0.date < $1.date })
         return written
     }
 

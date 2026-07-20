@@ -72,15 +72,15 @@ struct InvestmentsView: View {
                     } label: {
                         Label("Ajouter un compte", systemImage: "building.columns")
                     }
-                    Button {
-                        showImportSheet = true
-                    } label: {
-                        Label("Importer un CSV", systemImage: "doc.badge.plus")
-                    }
+                    // Entrée d'import UNIQUE : le parcours intelligent gère déjà
+                    // PDF / capture d'écran / image / CSV. Si Apple Intelligence
+                    // n'est pas dispo, il propose lui-même le repli vers l'import
+                    // CSV déterministe (mapping de colonnes) — l'offline-first
+                    // reste garanti sans IA.
                     Button {
                         showPDFImportSheet = true
                     } label: {
-                        Label("Import intelligent (IA)", systemImage: "sparkles")
+                        Label("Importer un relevé…", systemImage: "square.and.arrow.down")
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -143,13 +143,15 @@ struct InvestmentsView: View {
             }
         }
         .sheet(isPresented: $showPDFImportSheet) {
-            InvestmentPDFImportView()
+            // Repli sans Apple Intelligence → import CSV déterministe.
+            InvestmentPDFImportView(onFallbackToCSV: { showImportSheet = true })
         }
         // Chantier D — import intelligent ouvert par un raccourci Siri (document
         // pré-rempli). Consomme aussi l'URL en attente si la vue vient d'être
         // montée par navigateToTab(.investments) avant que .onChange ne s'attache.
         .sheet(item: $preloadedImport) { item in
-            InvestmentPDFImportView(preloadedFileURL: item.url)
+            InvestmentPDFImportView(preloadedFileURL: item.url,
+                                    onFallbackToCSV: { showImportSheet = true })
         }
         .onChange(of: appState.pendingInvestmentImportURL) { _, url in
             consumePendingInvestmentImport(url)
