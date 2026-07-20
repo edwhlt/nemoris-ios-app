@@ -55,14 +55,34 @@ final class InvestmentPDFParser: Sendable {
 
     /// Extrait le texte d'une image via Vision OCR.
     func extractTextFromImage(at url: URL) -> String? {
-        guard let data = try? Data(contentsOf: url),
-              let image = UIImage(data: data),
-              let cgImage = image.cgImage
-        else {
+        guard let data = try? Data(contentsOf: url) else {
             print("[PDFParser] Impossible de charger l'image: \(url.lastPathComponent)")
             return nil
         }
+        return extractTextFromImageData(data)
+    }
+
+    /// Chantier C — OCR direct depuis des `Data` en mémoire (PhotosPicker :
+    /// `loadTransferable(type: Data.self)`, aucune écriture disque).
+    func extractTextFromImageData(_ data: Data) -> String? {
+        guard let image = UIImage(data: data), let cgImage = image.cgImage else {
+            print("[PDFParser] Data image illisible")
+            return nil
+        }
         return recognizeText(in: cgImage)
+    }
+
+    /// Chantier C — pipeline complet pour une image en mémoire (PhotosPicker).
+    /// OCR → parsing IA bi-mode (ordres OU capture de portefeuille).
+    @MainActor func parseImageData(_ data: Data) async -> [PDFPageResult] {
+        guard let text = extractTextFromImageData(data) else { return [] }
+        let parsed = await parsePage(text: text, pageNumber: 1)
+        return [PDFPageResult(
+            pageNumber: 1, rawText: text,
+            orders: parsed.orders, positions: parsed.positions,
+            detectedMode: parsed.mode,
+            parsingNote: parsed.isEmpty ? "Aucun ordre ni position détecté dans l'image" : nil
+        )]
     }
 
     /// Reconnaissance de texte via Vision.
@@ -98,6 +118,15 @@ final class InvestmentPDFParser: Sendable {
 
     // MARK: - Parse universel (détecte le type de fichier)
 
+    /// Chantier C — résultat d'un parsing de page/bloc : ordres OU positions
+    /// (mode snapshot) + le mode détecté par l'IA.
+    struct PageParse {
+        var orders: [PDFExtractedOrder] = []
+        var positions: [PDFExtractedPosition] = []
+        var mode: PDFDocumentMode = .orders
+        var isEmpty: Bool { orders.isEmpty && positions.isEmpty }
+    }
+
     /// Point d'entrée universel — détecte le type de fichier et dispatch.
     @MainActor func parseFile(
         from url: URL,
@@ -115,11 +144,12 @@ final class InvestmentPDFParser: Sendable {
                 onPageParsed(1, 1)
                 return []
             }
-            let orders = await parsePage(text: text, pageNumber: 1)
+            let parsed = await parsePage(text: text, pageNumber: 1)
             onPageParsed(1, 1)
             return [PDFPageResult(
-                pageNumber: 1, rawText: text, orders: orders,
-                parsingNote: orders.isEmpty ? "Aucun ordre détecté dans l'image" : nil
+                pageNumber: 1, rawText: text,
+                orders: parsed.orders, positions: parsed.positions, detectedMode: parsed.mode,
+                parsingNote: parsed.isEmpty ? "Aucun ordre ni position détecté dans l'image" : nil
             )]
 
         case "csv", "txt", "tsv":
@@ -132,10 +162,11 @@ final class InvestmentPDFParser: Sendable {
             let chunks = Self.splitTextIntoChunks(text, maxChars: 4000)
             var results: [PDFPageResult] = []
             for (index, chunk) in chunks.enumerated() {
-                let orders = await parsePage(text: chunk, pageNumber: index + 1)
+                let parsed = await parsePage(text: chunk, pageNumber: index + 1)
                 results.append(PDFPageResult(
-                    pageNumber: index + 1, rawText: chunk, orders: orders,
-                    parsingNote: orders.isEmpty ? "Aucun ordre détecté dans ce bloc" : nil
+                    pageNumber: index + 1, rawText: chunk,
+                    orders: parsed.orders, positions: parsed.positions, detectedMode: parsed.mode,
+                    parsingNote: parsed.isEmpty ? "Aucun ordre détecté dans ce bloc" : nil
                 ))
                 onPageParsed(index + 1, chunks.count)
             }
@@ -147,11 +178,12 @@ final class InvestmentPDFParser: Sendable {
                 onPageParsed(1, 1)
                 return []
             }
-            let orders = await parsePage(text: text, pageNumber: 1)
+            let parsed = await parsePage(text: text, pageNumber: 1)
             onPageParsed(1, 1)
             return [PDFPageResult(
-                pageNumber: 1, rawText: text, orders: orders,
-                parsingNote: orders.isEmpty ? "Format non reconnu, aucun ordre détecté" : nil
+                pageNumber: 1, rawText: text,
+                orders: parsed.orders, positions: parsed.positions, detectedMode: parsed.mode,
+                parsingNote: parsed.isEmpty ? "Format non reconnu, aucun ordre détecté" : nil
             )]
         }
     }
@@ -185,12 +217,14 @@ final class InvestmentPDFParser: Sendable {
 
         var results: [PDFPageResult] = []
         for (index, (pageNumber, text)) in pages.enumerated() {
-            let orders = await parsePage(text: text, pageNumber: pageNumber)
-            let note = orders.isEmpty ? "Aucun ordre détecté sur cette page" : nil
+            let parsed = await parsePage(text: text, pageNumber: pageNumber)
+            let note = parsed.isEmpty ? "Aucun ordre détecté sur cette page" : nil
             results.append(PDFPageResult(
                 pageNumber: pageNumber,
                 rawText: text,
-                orders: orders,
+                orders: parsed.orders,
+                positions: parsed.positions,
+                detectedMode: parsed.mode,
                 parsingNote: note
             ))
             onPageParsed(index + 1, pages.count)
@@ -198,33 +232,34 @@ final class InvestmentPDFParser: Sendable {
         return results
     }
 
-    /// Parse une seule page via Foundation Models.
-    @MainActor private func parsePage(text: String, pageNumber: Int) async -> [PDFExtractedOrder] {
+    /// Parse une seule page via Foundation Models. Retourne ordres OU positions
+    /// (mode snapshot) selon la classification faite par l'IA.
+    @MainActor private func parsePage(text: String, pageNumber: Int) async -> PageParse {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
             return await parsePageWithAI(text: text, pageNumber: pageNumber)
         }
         #endif
         print("[PDFParser] Foundation Models non disponible — parsing impossible")
-        return []
+        return PageParse()
     }
 
     #if canImport(FoundationModels)
     @available(iOS 26.0, macOS 26.0, *)
-    private func parsePageWithAI(text: String, pageNumber: Int) async -> [PDFExtractedOrder] {
-        guard SystemLanguageModel.default.isAvailable else { return [] }
+    private func parsePageWithAI(text: String, pageNumber: Int) async -> PageParse {
+        guard SystemLanguageModel.default.isAvailable else { return PageParse() }
 
         let prompt = Self.buildPagePrompt(pageText: text, pageNumber: pageNumber)
         let session = LanguageModelSession(instructions: Self.systemInstructions)
 
         do {
             let response = try await session.respond(to: prompt)
-            let orders = Self.parseOrdersFromJSON(response.content, pageNumber: pageNumber)
-            print("[PDFParser] Page \(pageNumber): \(orders.count) ordres extraits")
-            return orders
+            let parsed = Self.parsePageResponse(response.content, pageNumber: pageNumber)
+            print("[PDFParser] Page \(pageNumber) [\(parsed.mode.rawValue)]: \(parsed.orders.count) ordres, \(parsed.positions.count) positions")
+            return parsed
         } catch {
             print("[PDFParser] Erreur IA page \(pageNumber): \(error.localizedDescription)")
-            return []
+            return PageParse()
         }
     }
     #endif
@@ -232,14 +267,30 @@ final class InvestmentPDFParser: Sendable {
     // MARK: - Prompt système
 
     static let systemInstructions = """
-    Tu es un assistant spécialisé dans l'extraction d'ordres d'investissement depuis des relevés bancaires.
+    Tu es un assistant spécialisé dans l'extraction de données d'investissement depuis des relevés bancaires ET des captures d'écran d'applications de courtage.
 
-    Tu reçois le texte brut d'UNE PAGE d'un relevé. Ta mission : identifier TOUS les ordres d'achat, vente ou dividende présents.
+    Tu reçois le texte brut d'UNE PAGE (relevé PDF) ou d'UNE CAPTURE D'ÉCRAN (OCR d'un screenshot d'app).
+
+    ÉTAPE 1 — CLASSIFIE D'ABORD LE DOCUMENT dans l'un de ces 2 modes :
+
+    • mode = "orders" → RELEVÉ D'ORDRES / AVIS D'OPÉRÉ : contient des OPÉRATIONS datées
+      (achat, vente, dividende) avec une DATE D'EXÉCUTION, un cours d'exécution, une quantité.
+      Indices : "Avis d'opéré", "Ordre exécuté le", "Date d'exécution", "Cours d'exécution".
+
+    • mode = "positions" → CAPTURE DE PORTEFEUILLE / ÉTAT DES POSITIONS : une LISTE de lignes
+      détenues (une par titre), avec quantité, PRU (prix de revient unitaire) et/ou valeur de
+      marché actuelle, SANS dates d'exécution. C'est typiquement un SCREENSHOT de l'écran
+      "Portefeuille"/"Positions" d'une app (PEA Boursorama, Trade Republic, Degiro, Fortuneo…).
+      Indices : colonnes "PRU", "Prix de revient", "+/- value", "Plus-value", "Valorisation",
+      "Quantité" affichées ensemble pour PLUSIEURS titres, sans date d'opération.
+
+    Si le document contient les deux, privilégie "orders" (plus précis pour l'historique).
+    Si tu ne peux pas trancher, choisis le mode qui a le plus de données exploitables.
 
     CONTEXTE :
     - Le document peut venir de N'IMPORTE QUELLE banque ou courtier (Boursorama, Trade Republic, Degiro, Fortuneo, Bourse Direct, Saxo, Interactive Brokers, Binck, etc.)
     - Chaque banque a son propre format, ses propres colonnes, ses propres abréviations
-    - Les tableaux sont souvent mal structurés en texte brut — tu dois reconstituer les lignes
+    - Les tableaux sont souvent mal structurés en texte brut (surtout en OCR de screenshot) — tu dois reconstituer les lignes
     - Les montants peuvent utiliser la virgule (FR) ou le point (US/UK) comme séparateur décimal
     - Les dates peuvent être dd/MM/yyyy, yyyy-MM-dd, dd.MM.yyyy, MM/dd/yyyy, etc.
 
@@ -286,9 +337,22 @@ final class InvestmentPDFParser: Sendable {
     - Cours : "Cours d'exécution : 485,30 EUR"
     - Frais : "Commission : 1,99 EUR" ou "Courtage : 0,00 EUR"
 
+    POUR LE MODE "positions" (capture de portefeuille), EXTRAIS CHAQUE LIGNE DÉTENUE :
+    - **asset_name** : nom réel du titre (jamais générique)
+    - **isin** : ISIN si visible (souvent absent des screenshots d'app — laisse "" sinon)
+    - **ticker** : symbole court si visible
+    - **quantity** : quantité détenue (nombre de parts/actions, décimal possible)
+    - **average_price** : PRU / prix de revient unitaire (colonne "PRU", "Prix de revient")
+    - **current_value** : valeur de marché ACTUELLE de la ligne (colonne "Valorisation",
+      "Valeur", "Montant") si affichée. Si seul le cours actuel est affiché, multiplie
+      par la quantité. Laisse null si vraiment introuvable.
+    - **currency** : devise (EUR par défaut)
+    - **confidence** : 0.0 à 1.0
+
     RÈGLE ABSOLUE : réponds UNIQUEMENT en JSON valide. Pas de texte autour, pas de markdown.
-    Format :
+    Format (le champ "mode" est OBLIGATOIRE) :
     {
+      "mode": "orders",
       "orders": [
         {
           "order_type": "BUY",
@@ -304,18 +368,39 @@ final class InvestmentPDFParser: Sendable {
           "confidence": 0.95
         }
       ],
+      "positions": [],
       "page_note": "Avis d'opéré achat Boursorama"
     }
 
-    Si VRAIMENT aucun ordre n'est détecté (page de couverture, CGV, récapitulatif sans détails) :
-    { "orders": [], "page_note": "Page de couverture / résumé sans ordres individuels" }
+    Exemple mode capture de portefeuille (screenshot d'app) :
+    {
+      "mode": "positions",
+      "orders": [],
+      "positions": [
+        {
+          "asset_name": "Amundi MSCI World UCITS ETF Acc",
+          "isin": "LU1681043599",
+          "ticker": "CW8",
+          "quantity": 12.0,
+          "average_price": 420.10,
+          "current_value": 5823.60,
+          "currency": "EUR",
+          "confidence": 0.9
+        }
+      ],
+      "page_note": "Capture portefeuille PEA Boursorama"
+    }
+
+    Si VRAIMENT rien n'est détecté (page de couverture, CGV, récapitulatif sans détails) :
+    { "mode": "unknown", "orders": [], "positions": [], "page_note": "Page sans données exploitables" }
 
     RAPPELS CRITIQUES :
+    - "mode" est TOUJOURS présent : "orders", "positions" ou "unknown"
     - Dates en sortie : TOUJOURS yyyy-MM-dd (jamais d'heure, jamais de T)
     - Montants en sortie : TOUJOURS le point comme séparateur décimal (1234.56 pas 1234,56)
     - asset_name : TOUJOURS le nom réel du titre, JAMAIS "Action" ou "ETF" tout seul
     - order_type : TOUJOURS "BUY", "SELL" ou "DIV" (en anglais)
-    - CHAQUE page d'avis d'opéré contient 1 ordre — ne le rate pas
+    - En mode "positions", NE PAS inventer de dates : il n'y en a pas
     """
 
     static func buildPagePrompt(pageText: String, pageNumber: Int) -> String {
@@ -333,7 +418,8 @@ final class InvestmentPDFParser: Sendable {
 
     // MARK: - JSON Parser
 
-    static func parseOrdersFromJSON(_ raw: String, pageNumber: Int) -> [PDFExtractedOrder] {
+    /// Chantier C — parse la réponse IA bi-mode (ordres OU positions) en `PageParse`.
+    static func parsePageResponse(_ raw: String, pageNumber: Int) -> PageParse {
         var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Strip markdown code fences
@@ -351,7 +437,7 @@ final class InvestmentPDFParser: Sendable {
               let end = cleaned.lastIndex(of: "}")
         else {
             print("[PDFParser] Pas de JSON trouvé dans la réponse IA page \(pageNumber)")
-            return []
+            return PageParse()
         }
         let jsonStr = String(cleaned[start...end])
 
@@ -359,26 +445,23 @@ final class InvestmentPDFParser: Sendable {
               let payload = try? JSONDecoder().decode(AIPageResponse.self, from: data)
         else {
             print("[PDFParser] Décodage JSON échoué page \(pageNumber)")
-            return []
+            return PageParse()
         }
 
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
 
-        return payload.orders.compactMap { raw in
-            // Parse la date avec plusieurs formats
+        // Ordres (tolérant : même sans "mode", on parse les ordres présents)
+        let orders: [PDFExtractedOrder] = (payload.orders ?? []).compactMap { raw in
             let date = Self.parseDate(raw.executed_at, formatter: dateFormatter)
             guard let executedAt = date else {
                 print("[PDFParser] Date invalide '\(raw.executed_at ?? "nil")' — ordre ignoré")
                 return nil
             }
-
-            let orderType = Self.normalizeOrderType(raw.order_type)
-            guard let orderType else {
+            guard let orderType = Self.normalizeOrderType(raw.order_type) else {
                 print("[PDFParser] Type d'ordre inconnu '\(raw.order_type)' — ordre ignoré")
                 return nil
             }
-
             return PDFExtractedOrder(
                 orderType: orderType,
                 assetName: raw.asset_name ?? "Inconnu",
@@ -394,6 +477,45 @@ final class InvestmentPDFParser: Sendable {
                 confidence: max(0, min(1, raw.confidence ?? 0.5))
             )
         }
+
+        // Positions (mode snapshot) — on ignore les lignes sans quantité exploitable.
+        let positions: [PDFExtractedPosition] = (payload.positions ?? []).compactMap { raw in
+            let qty = raw.quantity ?? 0
+            guard qty > 0 else { return nil }
+            let pru = raw.average_price ?? 0
+            return PDFExtractedPosition(
+                assetName: raw.asset_name ?? "Inconnu",
+                ticker: raw.ticker ?? "",
+                isin: raw.isin ?? "",
+                quantity: qty,
+                averageBuyPrice: pru,
+                currentValue: raw.current_value,
+                currency: raw.currency ?? "EUR",
+                pageNumber: pageNumber,
+                confidence: max(0, min(1, raw.confidence ?? 0.5))
+            )
+        }
+
+        // Mode : celui déclaré par l'IA (l'IA écrit "positions", pas
+        // "positionsSnapshot"), avec fallback déduit du contenu.
+        let mode: PDFDocumentMode = {
+            switch payload.mode?.lowercased() {
+            case "orders":               return .orders
+            case "positions":            return .positionsSnapshot
+            case "positionssnapshot":    return .positionsSnapshot
+            default:
+                if !orders.isEmpty { return .orders }
+                if !positions.isEmpty { return .positionsSnapshot }
+                return .unknown
+            }
+        }()
+
+        return PageParse(orders: orders, positions: positions, mode: mode)
+    }
+
+    /// Compat : ancienne signature (ordres seuls) — conservée si un appelant l'utilise.
+    static func parseOrdersFromJSON(_ raw: String, pageNumber: Int) -> [PDFExtractedOrder] {
+        parsePageResponse(raw, pageNumber: pageNumber).orders
     }
 
     /// Normalise les types d'ordre retournés par l'IA vers BUY/SELL/DIV.
@@ -474,10 +596,41 @@ final class InvestmentPDFParser: Sendable {
         return Array(groups.values).sorted { $0.assetName < $1.assetName }
     }
 
+    /// Chantier C — dédup des positions extraites d'une capture (mode snapshot)
+    /// par ISIN > ticker > nom. Additionne les quantités si la même ligne apparaît
+    /// sur plusieurs chunks/pages ; garde le PRU et la valeur de la 1re occurrence
+    /// (une capture n'affiche qu'une valeur par ligne).
+    static func aggregatePositions(_ positions: [PDFExtractedPosition]) -> [PDFExtractedPosition] {
+        let selected = positions.filter { $0.isSelected }
+        var groups: [String: PDFExtractedPosition] = [:]
+        var order: [String] = []
+
+        for position in selected {
+            let key: String
+            if !position.isin.isEmpty { key = position.isin.uppercased() }
+            else if !position.ticker.isEmpty { key = position.ticker.uppercased() }
+            else { key = position.assetName.uppercased() }
+
+            if var existing = groups[key] {
+                existing.quantity += position.quantity
+                if let extra = position.currentValue {
+                    existing.currentValue = (existing.currentValue ?? 0) + extra
+                }
+                groups[key] = existing
+            } else {
+                groups[key] = position
+                order.append(key)
+            }
+        }
+        return order.compactMap { groups[$0] }
+    }
+
     // MARK: - DTO décodage IA
 
     private struct AIPageResponse: Decodable {
-        let orders: [AIOrder]
+        let mode: String?
+        let orders: [AIOrder]?
+        let positions: [AIPosition]?
         let page_note: String?
     }
 
@@ -492,6 +645,17 @@ final class InvestmentPDFParser: Sendable {
         let executed_at: String?
         let currency: String?
         let notes: String?
+        let confidence: Double?
+    }
+
+    private struct AIPosition: Decodable {
+        let asset_name: String?
+        let ticker: String?
+        let isin: String?
+        let quantity: Double?
+        let average_price: Double?
+        let current_value: Double?
+        let currency: String?
         let confidence: Double?
     }
 }

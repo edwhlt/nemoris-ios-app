@@ -1,14 +1,15 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import PhotosUI
 
-/// Vue d'import PDF pour les ordres d'investissement.
+/// Vue d'import intelligent (PDF, image/screenshot, CSV) pour les investissements.
 ///
 /// **Flux :**
-/// 1. Sélection du fichier PDF + compte cible
-/// 2. Extraction texte + parsing IA page par page (progress bar)
-/// 3. Preview des ordres détectés — l'user peut cocher/décocher
-/// 4. Résumé par position (agrégation ISIN/ticker) + bouton Importer
-/// 5. Commit en base : création positions + ordres rattachés
+/// 1. Sélection du fichier OU d'une capture (photothèque) + compte cible
+/// 2. Extraction texte (PDFKit / Vision OCR) + parsing IA page par page (progress bar)
+/// 3. Preview des ordres OU positions détectés — l'user peut cocher/décocher
+/// 4. Résumé + bouton Importer
+/// 5. Commit en base : création positions + ordres (BUY synthétique en mode snapshot)
 struct InvestmentPDFImportView: View {
 
     @Environment(\.dismiss) private var dismiss
@@ -22,6 +23,8 @@ struct InvestmentPDFImportView: View {
     // Parsing
     @State private var pageResults: [PDFPageResult] = []
     @State private var allOrders: [PDFExtractedOrder] = []
+    /// Chantier C — positions extraites en mode capture de portefeuille.
+    @State private var allPositions: [PDFExtractedPosition] = []
     @State private var parsingProgress: Double = 0
     @State private var parsingTotal: Int = 0
     @State private var parsingCurrent: Int = 0
@@ -34,6 +37,11 @@ struct InvestmentPDFImportView: View {
     @State private var showFilePicker = false
     @State private var pdfURL: URL?
     @State private var pdfFileName: String = ""
+
+    // Chantier C — capture depuis la photothèque (screenshots de PEA/CTO).
+    @State private var photoItem: PhotosPickerItem?
+    @State private var pickedImageData: Data?
+    @State private var pickedImageName: String?
 
     private let repository = InvestmentRepository()
     private let parser = InvestmentPDFParser.shared
@@ -87,6 +95,24 @@ struct InvestmentPDFImportView: View {
             guard case .success(let urls) = result, let url = urls.first else { return }
             pdfURL = url
             pdfFileName = url.lastPathComponent
+            // Choisir un fichier annule une éventuelle capture photo (source unique).
+            pickedImageData = nil
+            pickedImageName = nil
+        }
+        // Chantier C — chargement de la capture choisie dans la photothèque.
+        .onChange(of: photoItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                if let data = try? await newItem.loadTransferable(type: Data.self) {
+                    await MainActor.run {
+                        pickedImageData = data
+                        pickedImageName = "Capture d'écran"
+                        // Une capture annule un fichier précédemment choisi.
+                        pdfURL = nil
+                        pdfFileName = ""
+                    }
+                }
+            }
         }
     }
 
@@ -139,10 +165,32 @@ struct InvestmentPDFImportView: View {
                     }
                 }
                 .buttonStyle(.plain)
+
+                // Chantier C — capture depuis la photothèque (screenshot d'app PEA/CTO).
+                PhotosPicker(selection: $photoItem, matching: .images) {
+                    HStack {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.title2)
+                            .foregroundStyle(AppTheme.Colors.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(pickedImageData != nil ? (pickedImageName ?? "Capture sélectionnée") : "Choisir une capture d'écran")
+                                .font(.subheadline)
+                                .foregroundStyle(AppTheme.Colors.textPrimary)
+                            Text(pickedImageData != nil ? "Toucher pour changer" : "Depuis la photothèque")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.textSecondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                }
+                .buttonStyle(.plain)
             } header: {
                 Text("Fichier source")
             } footer: {
-                Text("PDF, image (photo d'un relevé), CSV, texte… Le format est détecté automatiquement. L'IA analyse le contenu pour identifier les ordres.")
+                Text("PDF, image (photo d'un relevé), capture d'écran de ton PEA/CTO, CSV, texte… Le format est détecté automatiquement. L'IA analyse le contenu pour identifier les ordres OU les positions détenues.")
             }
 
             // Compte cible
@@ -185,7 +233,7 @@ struct InvestmentPDFImportView: View {
     }
 
     private var canStartParsing: Bool {
-        pdfURL != nil && selectedAccountId != nil && parser.isAIAvailable
+        (pdfURL != nil || pickedImageData != nil) && selectedAccountId != nil && parser.isAIAvailable
     }
 
     // MARK: - Step 2 : Parsing en cours
@@ -235,34 +283,41 @@ struct InvestmentPDFImportView: View {
         List {
             // Résumé
             Section {
-                HStack {
-                    Label("\(allOrders.count) ordres détectés", systemImage: "list.bullet.rectangle")
-                    Spacer()
-                    Text("\(allOrders.filter(\.isSelected).count) sélectionnés")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                if !allOrders.isEmpty {
+                    HStack {
+                        Label("\(allOrders.count) ordre(s) détecté(s)", systemImage: "list.bullet.rectangle")
+                        Spacer()
+                        Text("\(allOrders.filter(\.isSelected).count) sélectionné(s)")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                }
+                if !allPositions.isEmpty {
+                    HStack {
+                        Label("\(allPositions.count) position(s) détectée(s)", systemImage: "chart.pie")
+                        Spacer()
+                        Text("\(allPositions.filter(\.isSelected).count) sélectionnée(s)")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
                 }
                 HStack {
-                    Label("\(pageResults.count) pages analysées", systemImage: "doc.text")
+                    Label("\(pageResults.count) page(s) analysée(s)", systemImage: "doc.text")
                     Spacer()
-                    let withOrders = pageResults.filter { !$0.orders.isEmpty }.count
-                    Text("\(withOrders) avec ordres")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
             } header: {
                 Text("Résumé")
             }
 
-            if allOrders.isEmpty {
+            if allOrders.isEmpty && allPositions.isEmpty {
                 Section {
                     VStack(spacing: 12) {
                         Image(systemName: "magnifyingglass")
                             .font(.largeTitle)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
-                        Text("Aucun ordre détecté")
+                        Text("Rien à importer")
                             .font(.headline)
-                        Text("Le PDF ne semble pas contenir d'ordres d'investissement reconnaissables, ou le format n'a pas pu être interprété.")
+                        Text("Le document ne semble pas contenir d'ordres ni de positions reconnaissables, ou le format n'a pas pu être interprété.")
                             .font(.subheadline)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                             .multilineTextAlignment(.center)
@@ -271,47 +326,60 @@ struct InvestmentPDFImportView: View {
                     .padding(.vertical, 24)
                 }
             } else {
-                // Ordres groupés par position
-                let groups = InvestmentPDFParser.aggregateByPosition(allOrders)
-
-                Section {
-                    Text("\(groups.count) position(s) identifiée(s)")
-                        .font(.subheadline)
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                } header: {
-                    Text("Positions")
+                // Mode capture de portefeuille — positions détectées
+                if !allPositions.isEmpty {
+                    let posGroups = InvestmentPDFParser.aggregatePositions(allPositions)
+                    Section {
+                        Text("Capture de portefeuille — \(posGroups.count) ligne(s) détenue(s)")
+                            .font(.subheadline)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    } header: {
+                        Text("Positions détectées")
+                    }
+                    ForEach(posGroups) { position in
+                        Section { positionRow(position) }
+                    }
                 }
 
-                ForEach(groups) { group in
+                // Mode ordres — groupés par position
+                if !allOrders.isEmpty {
+                    let groups = InvestmentPDFParser.aggregateByPosition(allOrders)
                     Section {
-                        // En-tête position
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(group.assetName)
-                                .font(.headline)
-                            HStack(spacing: 12) {
-                                if !group.isin.isEmpty {
-                                    Text(group.isin)
-                                        .font(.caption).monospaced()
+                        Text("\(groups.count) position(s) identifiée(s)")
+                            .font(.subheadline)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    } header: {
+                        Text("Ordres détectés")
+                    }
+                    ForEach(groups) { group in
+                        Section {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(group.assetName)
+                                    .font(.headline)
+                                HStack(spacing: 12) {
+                                    if !group.isin.isEmpty {
+                                        Text(group.isin)
+                                            .font(.caption).monospaced()
+                                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                                    }
+                                    if !group.ticker.isEmpty {
+                                        Text(group.ticker)
+                                            .font(.caption).fontWeight(.semibold)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(AppTheme.Colors.accent.opacity(0.12), in: Capsule())
+                                            .foregroundStyle(AppTheme.Colors.accent)
+                                    }
+                                    Text(group.assetType)
+                                        .font(.caption2)
                                         .foregroundStyle(AppTheme.Colors.textSecondary)
                                 }
-                                if !group.ticker.isEmpty {
-                                    Text(group.ticker)
-                                        .font(.caption).fontWeight(.semibold)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(AppTheme.Colors.accent.opacity(0.12), in: Capsule())
-                                        .foregroundStyle(AppTheme.Colors.accent)
-                                }
-                                Text(group.assetType)
-                                    .font(.caption2)
-                                    .foregroundStyle(AppTheme.Colors.textSecondary)
                             }
-                        }
-                        .padding(.vertical, 4)
+                            .padding(.vertical, 4)
 
-                        // Ordres de cette position
-                        ForEach(group.orders) { order in
-                            orderRow(order)
+                            ForEach(group.orders) { order in
+                                orderRow(order)
+                            }
                         }
                     }
                 }
@@ -323,18 +391,76 @@ struct InvestmentPDFImportView: View {
                     } label: {
                         HStack {
                             Spacer()
-                            let selectedCount = allOrders.filter(\.isSelected).count
-                            Label("Importer \(selectedCount) ordre(s)", systemImage: "square.and.arrow.down.fill")
+                            Label(importButtonLabel, systemImage: "square.and.arrow.down.fill")
                                 .fontWeight(.semibold)
                             Spacer()
                         }
                     }
-                    .disabled(allOrders.filter(\.isSelected).isEmpty)
+                    .disabled(selectedImportCount == 0)
                     .tint(AppTheme.Colors.accent)
                 }
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    private var selectedImportCount: Int {
+        allOrders.filter(\.isSelected).count + allPositions.filter(\.isSelected).count
+    }
+
+    private var importButtonLabel: String {
+        let orders = allOrders.filter(\.isSelected).count
+        let positions = allPositions.filter(\.isSelected).count
+        if orders > 0 && positions > 0 { return "Importer \(orders) ordre(s) + \(positions) position(s)" }
+        if positions > 0 { return "Importer \(positions) position(s)" }
+        return "Importer \(orders) ordre(s)"
+    }
+
+    /// Row de preview d'une position détectée (mode snapshot) avec toggle sélection.
+    @ViewBuilder
+    private func positionRow(_ position: PDFExtractedPosition) -> some View {
+        let binding = Binding<Bool>(
+            get: { allPositions.first(where: { $0.id == position.id })?.isSelected ?? false },
+            set: { newValue in
+                if let idx = allPositions.firstIndex(where: { $0.id == position.id }) {
+                    allPositions[idx].isSelected = newValue
+                }
+            }
+        )
+        HStack(spacing: 10) {
+            Toggle(isOn: binding) { EmptyView() }
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .scaleEffect(0.7)
+                .frame(width: 36)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(position.assetName)
+                    .font(.subheadline).fontWeight(.medium)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    if !position.ticker.isEmpty {
+                        Text(position.ticker)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                    Text("×\(position.quantity.formatted()) @ \(position.averageBuyPrice.formatted(.currency(code: position.currency)))")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text((position.currentValue ?? position.investedCost), format: .currency(code: position.currency))
+                    .font(.subheadline).fontWeight(.semibold)
+                    .foregroundStyle(AppTheme.Colors.textPrimary)
+                confidenceBadge(position.confidence)
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     @ViewBuilder
@@ -537,10 +663,23 @@ struct InvestmentPDFImportView: View {
     }
 
     private func startParsing() {
-        guard let url = pdfURL else { return }
         step = .parsing
         parsingError = nil
 
+        // Chantier C — chemin capture (photothèque) : données en mémoire, OCR direct.
+        if let data = pickedImageData {
+            parsingTotal = 1
+            parsingCurrent = 0
+            parsingProgress = 0
+            Task {
+                let results = await parser.parseImageData(data)
+                await MainActor.run { finishParsing(results) }
+            }
+            return
+        }
+
+        // Chemin fichier (PDF, image, CSV, texte)
+        guard let url = pdfURL else { return }
         let hasAccess = url.startAccessingSecurityScopedResource()
         Task {
             defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
@@ -553,16 +692,21 @@ struct InvestmentPDFImportView: View {
                     parsingProgress = total > 0 ? Double(current) / Double(total) : 0
                 }
             }
-
-            if results.isEmpty {
-                parsingError = "Impossible de lire le fichier ou aucun texte exploitable."
-                return
-            }
-
-            pageResults = results
-            allOrders = results.flatMap(\.orders)
-            step = .preview
+            await MainActor.run { finishParsing(results) }
         }
+    }
+
+    @MainActor
+    private func finishParsing(_ results: [PDFPageResult]) {
+        if results.isEmpty {
+            parsingError = "Impossible de lire le fichier ou aucun contenu exploitable."
+            step = .selectFile
+            return
+        }
+        pageResults = results
+        allOrders = results.flatMap(\.orders)
+        allPositions = results.flatMap(\.positions)
+        step = .preview
     }
 
     private func performImport() {
@@ -571,7 +715,9 @@ struct InvestmentPDFImportView: View {
 
         Task.detached(priority: .userInitiated) {
             let selected = await MainActor.run { allOrders.filter(\.isSelected) }
+            let selectedPositions = await MainActor.run { allPositions.filter(\.isSelected) }
             let groups = InvestmentPDFParser.aggregateByPosition(selected)
+            let posSnapshots = InvestmentPDFParser.aggregatePositions(selectedPositions)
             let repo = InvestmentRepository()
 
             var positionsCreated = 0
@@ -580,7 +726,73 @@ struct InvestmentPDFImportView: View {
             var errors: [String] = []
 
             // Charger les positions existantes du compte pour détecter les doublons
-            let existingPositions = repo.fetchPositions(accountId: accountId)
+            var existingPositions = repo.fetchPositions(accountId: accountId)
+
+            // ── Mode capture de portefeuille : positions snapshot ────────────
+            // Nouvelle position → création + BUY synthétique (qty @ PRU) pour
+            // matérialiser qty/PRU (dérivés des ordres depuis v30) + current_value.
+            // Position existante → maj current_value (+ backfill ISIN), SANS
+            // toucher aux ordres saisis par l'user (pas d'écrasement silencieux).
+            for snap in posSnapshots {
+                let existing = existingPositions.first { pos in
+                    if !snap.isin.isEmpty && !pos.isin.isEmpty {
+                        return pos.isin.uppercased() == snap.isin.uppercased()
+                    }
+                    if !snap.ticker.isEmpty && !pos.ticker.isEmpty {
+                        return pos.ticker.uppercased() == snap.ticker.uppercased()
+                    }
+                    return false
+                }
+                let marketValue = snap.currentValue ?? snap.investedCost
+
+                if let existing {
+                    var updated = existing
+                    updated.currentValue = marketValue
+                    if updated.isin.isEmpty && !snap.isin.isEmpty { updated.isin = snap.isin }
+                    _ = repo.updatePosition(updated)
+                    positionsReused += 1
+                } else {
+                    guard let newId = repo.addPositionAndGetId(
+                        accountId: accountId,
+                        assetType: snap.assetType,
+                        assetName: snap.assetName,
+                        ticker: snap.ticker,
+                        isin: snap.isin,
+                        purchaseDate: Date()
+                    ) else {
+                        errors.append("Échec création position \(snap.assetName)")
+                        continue
+                    }
+                    // BUY synthétique : notes préfixées "Sync " pour rester
+                    // éligible à deleteSyntheticOrders (comme LiveSync).
+                    let key = snap.isin.isEmpty ? snap.ticker : snap.isin
+                    let synthetic = InvestmentOrder(
+                        id: 0,
+                        positionId: newId,
+                        orderType: .buy,
+                        quantity: snap.quantity,
+                        unitPrice: snap.averageBuyPrice,
+                        fees: 0,
+                        executedAt: Date(),
+                        notes: "Sync Import IA (capture portefeuille)",
+                        externalId: "aisnap_\(key)_\(Self.dateString(Date()))_\(snap.quantity)"
+                    )
+                    _ = repo.addOrder(synthetic)
+                    // current_value = valeur de marché de la capture.
+                    var created = InvestmentPosition(
+                        id: newId, accountId: accountId,
+                        assetType: snap.assetType, assetName: snap.assetName,
+                        ticker: snap.ticker, isin: snap.isin,
+                        quantity: snap.quantity, averageBuyPrice: snap.averageBuyPrice,
+                        currentValue: marketValue, purchaseDate: Date()
+                    )
+                    created.currentValue = marketValue
+                    _ = repo.updatePosition(created)
+                    positionsCreated += 1
+                    // Réinjecte dans la liste locale pour dédupe intra-batch.
+                    existingPositions.append(created)
+                }
+            }
 
             for group in groups {
                 // Chercher une position existante par ISIN ou ticker

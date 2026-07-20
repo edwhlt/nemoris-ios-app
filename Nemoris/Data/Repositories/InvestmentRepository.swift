@@ -566,20 +566,25 @@ struct InvestmentRepository {
         guard !rows.isEmpty else { return InvestmentImportResult(insertedCount: 0, failures: []) }
         var inserted = 0
         var failures: [InvestmentImportFailure] = []
+
+        // Chantier C — fix bug qty=0 : depuis v30, `addPosition` ignore
+        // quantity/averageBuyPrice (dérivés des ordres). Une position importée
+        // en CSV se retrouvait donc avec une quantité DÉRIVÉE de 0. On crée
+        // désormais la position PUIS un ordre BUY synthétique (qty @ PRU) pour
+        // matérialiser la quantité et le PRU, + on écrit current_value.
+        let extIdFormatter = DateFormatter()
+        extIdFormatter.locale = Locale(identifier: "en_US_POSIX")
+        extIdFormatter.dateFormat = "yyyyMMdd"
+
         for row in rows {
-            let ok = addPosition(
+            guard let newId = addPositionAndGetId(
                 accountId: accountId,
                 assetType: row.assetType,
                 assetName: row.assetName,
                 ticker: row.ticker,
-                quantity: row.quantity,
-                averageBuyPrice: row.averageBuyPrice,
-                currentValue: row.currentValue,
+                isin: "",
                 purchaseDate: row.purchaseDate
-            )
-            if ok {
-                inserted += 1
-            } else {
+            ) else {
                 failures.append(InvestmentImportFailure(
                     sourceRow: row.sourceRow,
                     identifier: row.ticker,
@@ -587,7 +592,38 @@ struct InvestmentRepository {
                     averageBuyPrice: row.averageBuyPrice,
                     reason: "Insertion SQL impossible"
                 ))
+                continue
             }
+
+            // Ordre BUY synthétique (dédup via external_id "csv_…" en cas de
+            // ré-import du même fichier). Ignoré si quantité nulle.
+            if row.quantity > 0 {
+                let key = row.ticker.isEmpty ? row.assetName : row.ticker
+                let synthetic = InvestmentOrder(
+                    id: 0,
+                    positionId: newId,
+                    orderType: .buy,
+                    quantity: row.quantity,
+                    unitPrice: row.averageBuyPrice,
+                    fees: 0,
+                    executedAt: row.purchaseDate,
+                    notes: "Import CSV",
+                    externalId: "csv_\(key)_\(extIdFormatter.string(from: row.purchaseDate))_\(row.quantity)"
+                )
+                _ = addOrder(synthetic)
+            }
+
+            // current_value : valeur de marché de la ligne CSV, fallback coût.
+            let marketValue = row.currentValue > 0 ? row.currentValue : row.quantity * row.averageBuyPrice
+            let created = InvestmentPosition(
+                id: newId, accountId: accountId,
+                assetType: row.assetType, assetName: row.assetName,
+                ticker: row.ticker, isin: "",
+                quantity: row.quantity, averageBuyPrice: row.averageBuyPrice,
+                currentValue: marketValue, purchaseDate: row.purchaseDate
+            )
+            _ = updatePosition(created)
+            inserted += 1
         }
         return InvestmentImportResult(insertedCount: inserted, failures: failures)
     }
