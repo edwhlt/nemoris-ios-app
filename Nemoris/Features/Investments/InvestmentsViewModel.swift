@@ -315,52 +315,82 @@ final class InvestmentsViewModel {
             return
         }
 
-        // 2. Historiques de prix par ticker, filtrés sur la plage
+        // 2. Historiques par POSITION (pas par ticker) via la résolution robuste
+        //    ISIN → ticker → symbole résolu par la dernière sync.
+        //
+        //    ⚠️ Avant, cette fonction ne cherchait QUE par `position.ticker` : dès
+        //    que l'historique était stocké sous l'ISIN ou sous un symbole résolu
+        //    (ex. ISIN → EWLD.PA via OpenFIGI), le chart GLOBAL restait vide
+        //    ("Aucun historique") alors que les écrans compte/position — qui
+        //    utilisaient déjà la résolution complète — affichaient bien la courbe.
         let cutoff = selectedTimeRange.startDate
-        var historyByTicker: [String: [InvestmentPricePoint]] = [:]
+        var historyByPositionId: [Int: [InvestmentPricePoint]] = [:]
         for position in allPositions {
-            let ticker = position.ticker
-            guard !ticker.isEmpty, historyByTicker[ticker] == nil else { continue }
-            let history = repository.fetchPriceHistory(identifier: ticker)
-                .sorted { $0.date < $1.date }
-                .filter { point in
-                    guard let cutoff else { return true }
-                    return point.date >= cutoff
-                }
+            let history = resolveHistory(for: position, cutoff: cutoff)
             if !history.isEmpty {
-                historyByTicker[ticker] = history
+                historyByPositionId[position.id] = history
             }
         }
 
-        guard !historyByTicker.isEmpty else {
+        guard !historyByPositionId.isEmpty else {
             portfolioEvolution = []
             return
         }
 
         // 3. Union des dates de tous les historiques (set pour déduplication)
-        let allDates = Set(historyByTicker.values.flatMap { $0.map(\.date) }).sorted()
+        let allDates = Set(historyByPositionId.values.flatMap { $0.map(\.date) }).sorted()
 
-        // 4. Pour chaque date, somme des valorisations (forward-fill par ticker)
-        var lastKnownPrice: [String: Double] = [:]
+        // 4. Pour chaque date, somme des valorisations (forward-fill par position)
+        var lastKnownPrice: [Int: Double] = [:]
         var points: [PortfolioEvolutionPoint] = []
 
         for date in allDates {
             var total: Double = 0
             for position in allPositions {
-                let ticker = position.ticker
-                // Cherche le prix le plus récent ≤ date pour ce ticker
-                if let history = historyByTicker[ticker],
+                // Cherche le prix le plus récent ≤ date pour cette position
+                if let history = historyByPositionId[position.id],
                    let latestBeforeDate = history.last(where: { $0.date <= date }) {
-                    lastKnownPrice[ticker] = latestBeforeDate.close
+                    lastKnownPrice[position.id] = latestBeforeDate.close
                 }
                 // Fallback : dernier prix connu OU PRU si jamais syncé
-                let price = lastKnownPrice[ticker] ?? position.averageBuyPrice
+                let price = lastKnownPrice[position.id] ?? position.averageBuyPrice
                 total += position.quantity * price
             }
             points.append(PortfolioEvolutionPoint(date: date, value: total))
         }
 
         portfolioEvolution = points
+    }
+
+    /// Résolution ROBUSTE de l'historique de cours d'une position.
+    /// Essaie dans l'ordre : ISIN → ticker → symboles retenus par la dernière
+    /// synchro réussie (ex. un ISIN résolu en "PUST.PA" via OpenFIGI est stocké
+    /// sous ce symbole). Source unique utilisée par TOUS les niveaux de chart
+    /// (global, compte, position) — sinon le parent peut rester vide alors que
+    /// l'enfant s'affiche.
+    private func resolveHistory(for position: InvestmentPosition, cutoff: Date?) -> [InvestmentPricePoint] {
+        func load(_ identifier: String) -> [InvestmentPricePoint] {
+            repository.fetchPriceHistory(identifier: identifier)
+                .sorted { $0.date < $1.date }
+                .filter { point in
+                    guard let cutoff else { return true }
+                    return point.date >= cutoff
+                }
+        }
+
+        let candidates = [position.isin, position.ticker].filter { !$0.isEmpty }
+        for candidate in candidates {
+            let history = load(candidate)
+            if !history.isEmpty { return history }
+        }
+        if let trace = InvestmentSyncTraceStore.fetchBest(identifiers: candidates),
+           trace.status == .success {
+            for symbol in trace.symbolsTried {
+                let history = load(symbol)
+                if !history.isEmpty { return history }
+            }
+        }
+        return []
     }
 
     /// Allocation par type d'actif (toutes positions confondues) — pour le donut chart.

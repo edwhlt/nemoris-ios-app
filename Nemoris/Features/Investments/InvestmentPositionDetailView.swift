@@ -651,10 +651,11 @@ struct InvestmentPositionDetailView: View {
                     return max(0, last.timeIntervalSince(first))
                 }()
                 let config = InvestmentChartXAxisConfig.config(for: localTimeRange, span: span)
-                AxisMarks(
-                    position: .bottom,
-                    values: .stride(by: config.strideUnit, count: config.strideCount)
-                ) { _ in
+                // ⚠️ `.stride(by:count:)` peut produire des DIZAINES de graduations
+                // sur les longues plages (5A/Max) : les labels se chevauchent ET
+                // gonflent la largeur intrinsèque du chart, ce qui rend toute la
+                // vue scrollable horizontalement. On plafonne à ~5 graduations.
+                AxisMarks(position: .bottom, values: .automatic(desiredCount: 5)) { _ in
                     AxisValueLabel(format: config.labelFormat)
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
                         .font(.system(size: 10))
@@ -697,6 +698,11 @@ struct InvestmentPositionDetailView: View {
                         )
                 }
             }
+            // maxWidth borne le chart à la largeur disponible : sans ça, un axe
+            // trop dense pouvait lui donner une largeur intrinsèque supérieure à
+            // l'écran et rendre toute la vue déplaçable latéralement.
+            // (Pas de .clipped() : ça couperait les labels d'axe X sous le plot.)
+            .frame(maxWidth: .infinity)
             .frame(height: 220)
         }
     }

@@ -440,10 +440,10 @@ struct EvolutionChart: View {
                 // `InvestmentChartXAxisConfig`. Sans ça, Swift Charts choisit
                 // un format auto sans année, ce qui rend illisible un "Max"
                 // qui couvre plusieurs années.
-                AxisMarks(
-                    position: .bottom,
-                    values: .stride(by: xAxisConfig.strideUnit, count: xAxisConfig.strideCount)
-                ) { _ in
+                // Plafond de ~5 graduations : `.stride` en produisait des dizaines
+                // sur les longues plages (labels superposés + largeur intrinsèque
+                // du chart qui explose → vue scrollable horizontalement).
+                AxisMarks(position: .bottom, values: .automatic(desiredCount: 5)) { _ in
                     AxisValueLabel(format: xAxisConfig.labelFormat)
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
                         .font(.system(size: 10))
