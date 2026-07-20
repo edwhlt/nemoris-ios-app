@@ -161,6 +161,12 @@ final class AppState {
     /// consommé par MoreView via `.navigationDestination`.
     var pendingMoreDestination: MainTabItem? = nil
 
+    /// Chantier D — document d'investissement déposé par un raccourci Siri
+    /// (`ImportInvestmentDocumentIntent`), à ouvrir dans l'import intelligent.
+    /// Setté par NemorisApp au passage au premier plan (consommation de
+    /// `PendingImportInbox`), consommé par `InvestmentsView` qui présente la sheet.
+    var pendingInvestmentImportURL: URL? = nil
+
     /// Liste des tabs effectivement actifs (filtrés selon les feature flags
     /// `showXxx`). Dérivé de `mainTabOrder` + flags. Le **4 premiers** sont
     /// directement adressables via TabView, les suivants vivent dans MoreView.

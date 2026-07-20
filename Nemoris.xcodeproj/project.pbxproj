@@ -12,16 +12,17 @@
 		1D2E302F146B2D3A1A1AFEAB /* InvestmentSyncTraceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBEB7A367FE8D2425D752C83 /* InvestmentSyncTraceStore.swift */; };
 		1E3513EA68B3043E94AF2421 /* FinanceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A3E85B67C259D5049AE2FA0 /* FinanceModels.swift */; };
 		2E16E5D6AA8F354E2C3E03F5 /* DatabaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C61F11CFB2CEAEBFB98D7B /* DatabaseManager.swift */; };
+		33D50D198FEA6517DAEFA961 /* TransactionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4502DC20D242598B6B52E65 /* TransactionRepository.swift */; };
 		5C4A11AA20260716005C4A02 /* SyncSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11AA20260716005C4A01 /* SyncSchema.swift */; };
 		5C4A11AB20260716005C4A02 /* SyncPayloadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11AB20260716005C4A01 /* SyncPayloadStore.swift */; };
 		5C4A11AB20260716005C4A04 /* CloudSyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11AB20260716005C4A03 /* CloudSyncEngine.swift */; };
 		5C4A11AB20260716005C4A06 /* CloudSyncSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11AB20260716005C4A05 /* CloudSyncSettingsView.swift */; };
 		5C4A11AB20260717005C4A08 /* SyncLive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11AB20260717005C4A07 /* SyncLive.swift */; };
-		33D50D198FEA6517DAEFA961 /* TransactionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4502DC20D242598B6B52E65 /* TransactionRepository.swift */; };
+		5C4A11AC20260718005C4A02 /* PlatformShims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11AC20260718005C4A01 /* PlatformShims.swift */; };
+		5C4A11AD20260718005C4A02 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 5C4A11AD20260718005C4A01 /* AppIcon.icon */; };
 		5F91672ADB63E3CB2B7B22E7 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A4737F83ED33275857E40A9 /* MainTabView.swift */; };
 		6EB61C12E2D668D2575CE109 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4DB50E1206BA1589716A420 /* AppState.swift */; };
 		6FFA1A93A7D2CC4474D749A5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 43E6D10DA96A34017839D4D0 /* Assets.xcassets */; };
-		5C4A11AD20260718005C4A02 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 5C4A11AD20260718005C4A01 /* AppIcon.icon */; };
 		9EA90697C30D963A0CDE3763 /* ReferenceDataView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC1F2BE9FB845B389A59C4B1 /* ReferenceDataView.swift */; };
 		CDCDCDCD10000000ABCDABCD /* EnvelopeSuggestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCDCDCD11000000ABCDABCD /* EnvelopeSuggestionService.swift */; };
 		CDCDCDCD12000000ABCDABCD /* EnvelopeSuggestionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCDCDCD13000000ABCDABCD /* EnvelopeSuggestionSheet.swift */; };
@@ -38,7 +39,7 @@
 		E826BBC12FBD5F4A0095EC62 /* NemorisShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E826BBC02FBD5F4A0095EC62 /* NemorisShortcuts.swift */; };
 		E826BBFD2FBDA3580095EC62 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E826BBA42FBD59710095EC62 /* WidgetKit.framework */; };
 		E826BBFE2FBDA3580095EC62 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E826BBA62FBD59710095EC62 /* SwiftUI.framework */; };
-		E826BC0D2FBDA3590095EC62 /* NemorisWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E826BBFC2FBDA3580095EC62 /* NemorisWidgetExtension.appex */; platformFilters = (ios, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		E826BC0D2FBDA3590095EC62 /* NemorisWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E826BBFC2FBDA3580095EC62 /* NemorisWidgetExtension.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		E826BC242FBE1F050095EC62 /* Nemoris.storekit in Resources */ = {isa = PBXBuildFile; fileRef = E826BC232FBE1F050095EC62 /* Nemoris.storekit */; };
 		E826BC252FBE1F050095EC62 /* Nemoris.storekit in Resources */ = {isa = PBXBuildFile; fileRef = E826BC232FBE1F050095EC62 /* Nemoris.storekit */; };
 		E881B20F2FABA66200B58D3C /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = E881B20E2FABA66200B58D3C /* AppConstants.swift */; };
@@ -102,7 +103,6 @@
 		E9E9E9E931000000ABCDABCD /* PayeePickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E9E9E930000000ABCDABCD /* PayeePickerSheet.swift */; };
 		E9E9E9E955000000ABCDABCD /* NAFCategoryMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E9E9E954000000ABCDABCD /* NAFCategoryMapper.swift */; };
 		E9E9E9EA01000000ABCDABCD /* MerchantLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E9E9EA00000000ABCDABCD /* MerchantLogo.swift */; };
-		5C4A11AC20260718005C4A02 /* PlatformShims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11AC20260718005C4A01 /* PlatformShims.swift */; };
 		E9E9E9EA21000000ABCDABCD /* PayeeDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E9E9EA20000000ABCDABCD /* PayeeDetailView.swift */; };
 		E9E9E9EA23000000ABCDABCD /* PayeeGroupPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E9E9EA22000000ABCDABCD /* PayeeGroupPickerView.swift */; };
 		E9E9E9EB01000000ABCDABCD /* ImportSessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E9E9EB00000000ABCDABCD /* ImportSessionModels.swift */; };
@@ -194,8 +194,14 @@
 		3273B3667969BBFA3AB36E94 /* TransactionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionsView.swift; sourceTree = "<group>"; };
 		39C50CDF8BA0C22D469D49AF /* NemorisApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NemorisApp.swift; sourceTree = "<group>"; };
 		43E6D10DA96A34017839D4D0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		5C4A11AD20260718005C4A01 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		4A4737F83ED33275857E40A9 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		5C4A11AA20260716005C4A01 /* SyncSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncSchema.swift; sourceTree = "<group>"; };
+		5C4A11AB20260716005C4A01 /* SyncPayloadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncPayloadStore.swift; sourceTree = "<group>"; };
+		5C4A11AB20260716005C4A03 /* CloudSyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncEngine.swift; sourceTree = "<group>"; };
+		5C4A11AB20260716005C4A05 /* CloudSyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncSettingsView.swift; sourceTree = "<group>"; };
+		5C4A11AB20260717005C4A07 /* SyncLive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLive.swift; sourceTree = "<group>"; };
+		5C4A11AC20260718005C4A01 /* PlatformShims.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformShims.swift; sourceTree = "<group>"; };
+		5C4A11AD20260718005C4A01 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		641B0565457A0F3EBC3A784E /* Nemoris.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Nemoris.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A8B9F03BE984E529A7D91659 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		BBEB7A367FE8D2425D752C83 /* InvestmentSyncTraceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentSyncTraceStore.swift; sourceTree = "<group>"; };
@@ -210,11 +216,6 @@
 		CDCDCDCD21000000ABCDABCD /* CurrencyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrencyService.swift; sourceTree = "<group>"; };
 		CDCDCDCD23000000ABCDABCD /* CurrencyConverterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrencyConverterSheet.swift; sourceTree = "<group>"; };
 		D5C61F11CFB2CEAEBFB98D7B /* DatabaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseManager.swift; sourceTree = "<group>"; };
-		5C4A11AA20260716005C4A01 /* SyncSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncSchema.swift; sourceTree = "<group>"; };
-		5C4A11AB20260716005C4A01 /* SyncPayloadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncPayloadStore.swift; sourceTree = "<group>"; };
-		5C4A11AB20260716005C4A03 /* CloudSyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncEngine.swift; sourceTree = "<group>"; };
-		5C4A11AB20260716005C4A05 /* CloudSyncSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncSettingsView.swift; sourceTree = "<group>"; };
-		5C4A11AB20260717005C4A07 /* SyncLive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLive.swift; sourceTree = "<group>"; };
 		DC1F2BE9FB845B389A59C4B1 /* ReferenceDataView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReferenceDataView.swift; sourceTree = "<group>"; };
 		E4502DC20D242598B6B52E65 /* TransactionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionRepository.swift; sourceTree = "<group>"; };
 		E8118E962FB6A46700563937 /* SimulatorSeeder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatorSeeder.swift; sourceTree = "<group>"; };
@@ -289,7 +290,6 @@
 		E9E9E9E930000000ABCDABCD /* PayeePickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayeePickerSheet.swift; sourceTree = "<group>"; };
 		E9E9E9E954000000ABCDABCD /* NAFCategoryMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NAFCategoryMapper.swift; sourceTree = "<group>"; };
 		E9E9E9EA00000000ABCDABCD /* MerchantLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MerchantLogo.swift; sourceTree = "<group>"; };
-		5C4A11AC20260718005C4A01 /* PlatformShims.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformShims.swift; sourceTree = "<group>"; };
 		E9E9E9EA20000000ABCDABCD /* PayeeDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayeeDetailView.swift; sourceTree = "<group>"; };
 		E9E9E9EA22000000ABCDABCD /* PayeeGroupPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayeeGroupPickerView.swift; sourceTree = "<group>"; };
 		E9E9E9EB00000000ABCDABCD /* ImportSessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportSessionModels.swift; sourceTree = "<group>"; };
@@ -448,6 +448,16 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		5C4A11AB20260716005C4A00 /* Sync */ = {
+			isa = PBXGroup;
+			children = (
+				5C4A11AB20260716005C4A01 /* SyncPayloadStore.swift */,
+				5C4A11AB20260716005C4A03 /* CloudSyncEngine.swift */,
+				5C4A11AB20260717005C4A07 /* SyncLive.swift */,
+			);
+			path = Sync;
+			sourceTree = "<group>";
+		};
 		600848A6DFB13D22A842F929 /* Nemoris */ = {
 			isa = PBXGroup;
 			children = (
@@ -585,16 +595,6 @@
 				E8118E962FB6A46700563937 /* SimulatorSeeder.swift */,
 			);
 			path = Data;
-			sourceTree = "<group>";
-		};
-		5C4A11AB20260716005C4A00 /* Sync */ = {
-			isa = PBXGroup;
-			children = (
-				5C4A11AB20260716005C4A01 /* SyncPayloadStore.swift */,
-				5C4A11AB20260716005C4A03 /* CloudSyncEngine.swift */,
-				5C4A11AB20260717005C4A07 /* SyncLive.swift */,
-			);
-			path = Sync;
 			sourceTree = "<group>";
 		};
 		DAD278D2F6B1A9931871B913 /* Transactions */ = {
@@ -1251,7 +1251,7 @@
 /* Begin PBXTargetDependency section */
 		E826BC0C2FBDA3590095EC62 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			platformFilters = (ios, );
+			platformFilter = ios;
 			target = E826BBFB2FBDA3580095EC62 /* NemorisWidgetExtension */;
 			targetProxy = E826BC0B2FBDA3590095EC62 /* PBXContainerItemProxy */;
 		};

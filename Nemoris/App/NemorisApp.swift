@@ -111,6 +111,13 @@ struct NemorisApp: App {
                             // seul : feature off, toggle off, déjà en cours,
                             // ou dernière passe < 4 h.
                             Task { await InvestmentAutoSyncService.shared.autoSyncIfNeeded(trigger: .appActive) }
+                            // Chantier D — document d'investissement déposé par un
+                            // raccourci Siri (ImportInvestmentDocumentIntent) : on le
+                            // consomme et on ouvre l'import intelligent pré-rempli.
+                            if let pending = PendingImportInbox.consumePendingInvestmentImport() {
+                                appState.pendingInvestmentImportURL = pending
+                                appState.navigateToTab(.investments)
+                            }
                             // NB: le shortcut iOS "Importer un CSV" écrivait dans pendingCSVKey,
                             // qui était relu par l'ancien ImportView. Le flux V3 prend un fichier
                             // par UIDocumentPicker, donc on ne consomme plus cette clé ici.

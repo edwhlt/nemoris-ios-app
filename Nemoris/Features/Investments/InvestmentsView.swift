@@ -3,6 +3,13 @@ import UniformTypeIdentifiers
 import Charts
 import TipKit
 
+/// Chantier D — wrapper Identifiable pour présenter l'import intelligent
+/// pré-rempli via `.sheet(item:)` (document déposé par un raccourci Siri).
+struct PreloadedInvestmentImport: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 struct InvestmentsView: View {
     @Environment(PurchaseManager.self) private var store
     @Environment(AppState.self) private var appState
@@ -24,6 +31,9 @@ struct InvestmentsView: View {
     @State private var showImportSheet = false
     @State private var showPDFImportSheet = false
     @State private var showFilePicker = false
+
+    /// Chantier D — import intelligent pré-rempli par un raccourci Siri.
+    @State private var preloadedImport: PreloadedInvestmentImport?
 
     @State private var csvRawContent = ""
     @State private var csvMapping = InvestmentCSVMapping(
@@ -134,6 +144,18 @@ struct InvestmentsView: View {
         }
         .sheet(isPresented: $showPDFImportSheet) {
             InvestmentPDFImportView()
+        }
+        // Chantier D — import intelligent ouvert par un raccourci Siri (document
+        // pré-rempli). Consomme aussi l'URL en attente si la vue vient d'être
+        // montée par navigateToTab(.investments) avant que .onChange ne s'attache.
+        .sheet(item: $preloadedImport) { item in
+            InvestmentPDFImportView(preloadedFileURL: item.url)
+        }
+        .onChange(of: appState.pendingInvestmentImportURL) { _, url in
+            consumePendingInvestmentImport(url)
+        }
+        .onAppear {
+            consumePendingInvestmentImport(appState.pendingInvestmentImportURL)
         }
         .fileImporter(
             isPresented: $showFilePicker,
@@ -327,6 +349,14 @@ struct InvestmentsView: View {
     private func reloadAll() {
         viewModel.load()
         viewModel.recomputePortfolioEvolution()
+    }
+
+    /// Chantier D — présente l'import intelligent pré-rempli et libère l'URL en
+    /// attente (one-shot). No-op si nil ou si une sheet est déjà en cours.
+    private func consumePendingInvestmentImport(_ url: URL?) {
+        guard let url, preloadedImport == nil else { return }
+        preloadedImport = PreloadedInvestmentImport(url: url)
+        appState.pendingInvestmentImportURL = nil
     }
 
     // MARK: - Skeleton

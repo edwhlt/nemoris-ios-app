@@ -46,6 +46,17 @@ struct InvestmentPDFImportView: View {
     private let repository = InvestmentRepository()
     private let parser = InvestmentPDFParser.shared
 
+    /// Init standard (ouverture depuis le menu ⋯).
+    init() {}
+
+    /// Chantier D — init pré-rempli avec un fichier déposé par un raccourci Siri.
+    /// L'utilisateur choisit le compte cible puis lance l'analyse (aucun import
+    /// automatique).
+    init(preloadedFileURL url: URL) {
+        _pdfURL = State(initialValue: url)
+        _pdfFileName = State(initialValue: url.lastPathComponent)
+    }
+
     enum ImportStep {
         case selectFile
         case parsing
