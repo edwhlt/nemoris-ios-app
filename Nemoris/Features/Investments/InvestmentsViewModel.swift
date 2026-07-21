@@ -323,56 +323,35 @@ final class InvestmentsViewModel {
         //    (ex. ISIN → EWLD.PA via OpenFIGI), le chart GLOBAL restait vide
         //    ("Aucun historique") alors que les écrans compte/position — qui
         //    utilisaient déjà la résolution complète — affichaient bien la courbe.
-        let cutoff = selectedTimeRange.startDate
-        // Granularité adaptée à la plage : la vue 1J utilise la série INTRADAY
-        // 30 min (la série quotidienne n'a qu'un seul point sur 24 h glissantes
-        // — rien à tracer). Les autres plages restent sur le quotidien.
-        let resolution: PriceResolution = selectedTimeRange == .oneDay ? .intraday30m : .daily
-        var historyByPositionId: [Int: [InvestmentPricePoint]] = [:]
-        // Prix de secours par position : en 1J, une position SANS intraday mais
-        // AVEC un quotidien reste valorisée à son dernier close réel (ligne
-        // plate) au lieu de retomber sur le PRU (qui fausserait le total).
-        var fallbackPrice: [Int: Double] = [:]
-        for position in allPositions {
-            let history = resolveHistory(for: position, cutoff: cutoff, resolution: resolution)
-            if !history.isEmpty {
-                historyByPositionId[position.id] = history
-            } else if resolution == .intraday30m,
-                      let lastDaily = resolveHistory(for: position, cutoff: nil, resolution: .daily).last?.close {
-                fallbackPrice[position.id] = lastDaily
-            }
+        // 2. Agrégation déléguée à PortfolioEvolutionBuilder : grille temporelle
+        //    RÉGULIÈRE, back/forward-fill avec les cours de la position, et
+        //    surtout AUCUN repli sur le PRU (qui injectait une valeur d'une
+        //    autre échelle et produisait les "dents de scie").
+        let inputs = allPositions.map { position in
+            PortfolioSeriesInput(
+                positionId: position.id,
+                quantity: position.quantity,
+                history: seriesHistory(for: position, range: selectedTimeRange)
+            )
         }
+        portfolioEvolution = PortfolioEvolutionBuilder
+            .build(inputs: inputs, range: selectedTimeRange)
+            .points
+    }
 
-        guard !historyByPositionId.isEmpty else {
-            portfolioEvolution = []
-            return
+    /// Historique à agréger pour une position sur une plage donnée.
+    /// Granularité adaptée : la vue 1J utilise la série INTRADAY 30 min (la série
+    /// quotidienne n'a qu'un point sur 24 h glissantes). Si l'intraday manque
+    /// pour cette position, on retombe sur son QUOTIDIEN (non filtré) : le
+    /// builder la maintiendra à plat sur son dernier cours réel — jamais sur le PRU.
+    private func seriesHistory(for position: InvestmentPosition,
+                               range: InvestmentTimeRange) -> [InvestmentPricePoint] {
+        if range == .oneDay {
+            let intraday = resolveHistory(for: position, cutoff: range.startDate, resolution: .intraday30m)
+            if !intraday.isEmpty { return intraday }
+            return resolveHistory(for: position, cutoff: nil, resolution: .daily)
         }
-
-        // 3. Union des dates de tous les historiques (set pour déduplication)
-        let allDates = Set(historyByPositionId.values.flatMap { $0.map(\.date) }).sorted()
-
-        // 4. Pour chaque date, somme des valorisations (forward-fill par position)
-        var lastKnownPrice: [Int: Double] = [:]
-        var points: [PortfolioEvolutionPoint] = []
-
-        for date in allDates {
-            var total: Double = 0
-            for position in allPositions {
-                // Cherche le prix le plus récent ≤ date pour cette position
-                if let history = historyByPositionId[position.id],
-                   let latestBeforeDate = history.last(where: { $0.date <= date }) {
-                    lastKnownPrice[position.id] = latestBeforeDate.close
-                }
-                // Fallback : dernier prix connu > dernier close quotidien > PRU
-                let price = lastKnownPrice[position.id]
-                    ?? fallbackPrice[position.id]
-                    ?? position.averageBuyPrice
-                total += position.quantity * price
-            }
-            points.append(PortfolioEvolutionPoint(date: date, value: total))
-        }
-
-        portfolioEvolution = points
+        return resolveHistory(for: position, cutoff: range.startDate, resolution: .daily)
     }
 
     /// Résolution ROBUSTE de l'historique de cours d'une position.
@@ -484,58 +463,19 @@ final class InvestmentsViewModel {
             return AccountEvolutionResult(points: [], positionsWithoutHistory: [])
         }
 
-        let cutoff = range.startDate
-        // Granularité adaptée à la plage (cf. recomputePortfolioEvolution) :
-        // 1J → série intraday 30 min, sinon quotidien.
-        let resolution: PriceResolution = range == .oneDay ? .intraday30m : .daily
-        // historyByPositionId : on indexe par position.id (pas par ticker) car
-        // 2 positions peuvent avoir le même ticker (rare mais possible).
-        var historyByPositionId: [Int: [InvestmentPricePoint]] = [:]
-        var positionsWithoutHistory: [InvestmentPosition] = []
-        var fallbackPrice: [Int: Double] = [:]
-
-        for position in positions {
-            // Résolution ISIN → ticker → symbole de la dernière sync réussie,
-            // PARTAGÉE avec le chart global (resolveHistory) — sinon le parent
-            // et l'enfant peuvent diverger sur ce qu'ils trouvent.
-            let found = resolveHistory(for: position, cutoff: cutoff, resolution: resolution)
-            if !found.isEmpty {
-                historyByPositionId[position.id] = found
-            } else if resolution == .intraday30m,
-                      let lastDaily = resolveHistory(for: position, cutoff: nil, resolution: .daily).last?.close {
-                // Pas d'intraday mais un quotidien existe : valorisée à son
-                // dernier close réel (ligne plate) — PAS dans le diagnostic
-                // "sans historique" qui parle de l'historique tout court.
-                fallbackPrice[position.id] = lastDaily
-            } else {
-                positionsWithoutHistory.append(position)
-            }
+        // Même moteur que le niveau global (grille régulière, jamais de PRU) —
+        // parent et enfant ne peuvent plus diverger, ni sur la résolution des
+        // identifiants, ni sur l'algorithme d'agrégation.
+        let inputs = positions.map { position in
+            PortfolioSeriesInput(
+                positionId: position.id,
+                quantity: position.quantity,
+                history: seriesHistory(for: position, range: range)
+            )
         }
-
-        guard !historyByPositionId.isEmpty else {
-            return AccountEvolutionResult(points: [], positionsWithoutHistory: positionsWithoutHistory)
-        }
-
-        let allDates = Set(historyByPositionId.values.flatMap { $0.map(\.date) }).sorted()
-        var lastKnownPrice: [Int: Double] = [:]
-        var points: [PortfolioEvolutionPoint] = []
-
-        for date in allDates {
-            var total: Double = 0
-            for position in positions {
-                if let history = historyByPositionId[position.id],
-                   let latestBeforeDate = history.last(where: { $0.date <= date }) {
-                    lastKnownPrice[position.id] = latestBeforeDate.close
-                }
-                let price = lastKnownPrice[position.id]
-                    ?? fallbackPrice[position.id]
-                    ?? position.averageBuyPrice
-                total += position.quantity * price
-            }
-            points.append(PortfolioEvolutionPoint(date: date, value: total))
-        }
-
-        return AccountEvolutionResult(points: points, positionsWithoutHistory: positionsWithoutHistory)
+        let result = PortfolioEvolutionBuilder.build(inputs: inputs, range: range)
+        let withoutHistory = positions.filter { result.unpricedPositionIds.contains($0.id) }
+        return AccountEvolutionResult(points: result.points, positionsWithoutHistory: withoutHistory)
     }
 
     /// Évolution du cours d'une position (multiplie par qty pour avoir la valeur de la position).
