@@ -207,7 +207,7 @@ struct ReferenceDataView: View {
                                         Image(systemName: "arrow.left.arrow.right")
                                             .font(.caption2).foregroundStyle(AppTheme.Colors.warning)
                                     }
-                                    countBadge(tierCounts[t.id] ?? 0)
+                                    EntityIdCountBadge(id: t.id, count: tierCounts[t.id] ?? 0)
                                 }
                                 .contentShape(Rectangle())
                                 .onTapGesture {
@@ -218,13 +218,13 @@ struct ReferenceDataView: View {
                                         editingPayee = t
                                     }
                                 }
-                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     if !isSelectingTiers {
                                         deleteSwipe(DeleteTarget(tab: .tiers, entityId: t.id, name: t.name,
                                                                  count: tierCounts[t.id] ?? 0, childIds: [], blocked: false))
                                     }
                                 }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
                                     if !isSelectingTiers {
                                         editButton { editingPayee = t }
                                     }
@@ -242,13 +242,13 @@ struct ReferenceDataView: View {
                                         }
                                     }
                                     Spacer()
-                                    countBadge(paymentTypeCounts[p.id] ?? 0)
+                                    EntityIdCountBadge(id: p.id, count: paymentTypeCounts[p.id] ?? 0)
                                 }
-                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     deleteSwipe(DeleteTarget(tab: .moyensPaiement, entityId: p.id, name: p.name,
                                                              count: paymentTypeCounts[p.id] ?? 0, childIds: [], blocked: false))
                                 }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
                                     editButton { startEdit(id: p.id, name: p.name, regex: p.regex ?? "") }
                                 }
                             }
@@ -262,9 +262,9 @@ struct ReferenceDataView: View {
                                         .frame(width: 10, height: 10)
                                     Text(tag.name)
                                     Spacer()
-                                    countBadge(tagCounts[tag.id] ?? 0)
+                                    EntityIdCountBadge(id: tag.id, count: tagCounts[tag.id] ?? 0)
                                 }
-                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     deleteSwipe(DeleteTarget(tab: .tags, entityId: tag.id, name: tag.name,
                                                              count: tagCounts[tag.id] ?? 0, childIds: [], blocked: false))
                                 }
@@ -545,7 +545,7 @@ struct ReferenceDataView: View {
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(accountTypeColor(a.accountType), in: Capsule())
                 }
-                countBadge(accountCounts[a.id] ?? 0)
+                EntityIdCountBadge(id: a.id, count: accountCounts[a.id] ?? 0)
                 if appState.selectedAccountId == a.id {
                     Image(systemName: "checkmark")
                         .font(.caption).foregroundStyle(AppTheme.Colors.accent)
@@ -554,12 +554,12 @@ struct ReferenceDataView: View {
                     .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
             }
         }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             deleteSwipe(DeleteTarget(tab: .comptes, entityId: a.id, name: a.name,
                                      count: accountCounts[a.id] ?? 0, childIds: [],
                                      blocked: (accountCounts[a.id] ?? 0) > 0))
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
             editButton { startEdit(id: a.id, name: a.name, regex: "", accountType: a.type) }
         }
     }
@@ -684,19 +684,6 @@ struct ReferenceDataView: View {
         .tint(AppTheme.Colors.danger)
     }
 
-    /// Badge affichant le nombre de transactions associées.
-    @ViewBuilder
-    private func countBadge(_ n: Int) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: "arrow.left.arrow.right")
-                .font(.system(size: 8, weight: .semibold))
-            Text("\(n)")
-                .font(.caption2).fontWeight(.medium)
-        }
-        .foregroundStyle(n == 0 ? AppTheme.Colors.textSecondary.opacity(0.4) : AppTheme.Colors.textSecondary)
-        .padding(.horizontal, 7).padding(.vertical, 2)
-        .background((n == 0 ? Color.clear : AppTheme.Colors.textSecondary.opacity(0.12)), in: Capsule())
-    }
 
     /// Icône à afficher dans la preview de la sheet d'édition : reflète l'icône RÉELLE
     /// utilisée à l'affichage (custom si définie, sinon fallback auto sur le nom).
@@ -752,12 +739,12 @@ struct ReferenceDataView: View {
             Text(c.name)
                 .fontWeight(c.parentId == nil ? .semibold : .regular)
             Spacer()
-            countBadge(categoryCounts[c.id] ?? 0)
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            deleteSwipe(deleteTargetForCategory(c))
+            EntityIdCountBadge(id: c.id, count: categoryCounts[c.id] ?? 0)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            deleteSwipe(deleteTargetForCategory(c))
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
             editButton { startEdit(id: c.id, name: c.name, regex: "", parentCategoryId: c.parentId, icon: c.icon) }
         }
     }
@@ -800,11 +787,11 @@ private struct CategoryTreeRow: View {
                 }
             } label: {
                 parentLabel(node)
-                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) { onDelete(node) } label: { Label("Supprimer", systemImage: "trash") }
                             .tint(AppTheme.Colors.danger)
                     }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
                         Button { onEdit(node.category) } label: { Label("Modifier", systemImage: "pencil") }
                             .tint(AppTheme.Colors.accent)
                     }
@@ -812,17 +799,6 @@ private struct CategoryTreeRow: View {
         }
     }
 
-    /// Badge du nombre de transactions associées.
-    @ViewBuilder
-    private func txBadge(_ n: Int) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: "arrow.left.arrow.right").font(.system(size: 8, weight: .semibold))
-            Text("\(n)").font(.caption2).fontWeight(.medium)
-        }
-        .foregroundStyle(n == 0 ? AppTheme.Colors.textSecondary.opacity(0.4) : AppTheme.Colors.textSecondary)
-        .padding(.horizontal, 7).padding(.vertical, 2)
-        .background((n == 0 ? Color.clear : AppTheme.Colors.textSecondary.opacity(0.12)), in: Capsule())
-    }
 
     @ViewBuilder
     private func parentLabel(_ node: CategoryNode) -> some View {
@@ -838,7 +814,7 @@ private struct CategoryTreeRow: View {
             Text(node.category.name)
                 .fontWeight(.semibold)
             Spacer()
-            txBadge(countFor(node.category))
+            EntityIdCountBadge(id: node.category.id, count: countFor(node.category))
             Text("\(node.children.count)")
                 .font(.caption2).fontWeight(.bold)
                 .foregroundStyle(.white)
@@ -876,13 +852,13 @@ private struct CategoryTreeRow: View {
             }
             Text(category.name).foregroundStyle(AppTheme.Colors.textPrimary)
             Spacer()
-            txBadge(countFor(category))
+            EntityIdCountBadge(id: category.id, count: countFor(category))
         }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) { onDelete(node) } label: { Label("Supprimer", systemImage: "trash") }
                 .tint(AppTheme.Colors.danger)
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
             Button { onEdit(category) } label: { Label("Modifier", systemImage: "pencil") }
                 .tint(AppTheme.Colors.accent)
         }
@@ -890,6 +866,42 @@ private struct CategoryTreeRow: View {
 }
 
 // MARK: - Icon picker for categories
+
+/// Badge combiné « identifiant technique + usage ».
+///
+/// Les deux informations sont volontairement DISTINCTES visuellement :
+///   - `#42` en monospace discret = l'ID en base (utile pour la console SQL,
+///     les rapprochements et le debug) ;
+///   - la capsule ⟷ N = le nombre de transactions associées.
+/// Avant, seul le compteur était affiché et l'ID n'était plus consultable
+/// depuis l'UI.
+private struct EntityIdCountBadge: View {
+    let id: Int
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("#\(id)")
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.55))
+                .accessibilityLabel("Identifiant \(id)")
+
+            HStack(spacing: 3) {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 8, weight: .semibold))
+                Text("\(count)")
+                    .font(.caption2).fontWeight(.medium)
+            }
+            .foregroundStyle(count == 0
+                             ? AppTheme.Colors.textSecondary.opacity(0.4)
+                             : AppTheme.Colors.textSecondary)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background((count == 0 ? Color.clear : AppTheme.Colors.textSecondary.opacity(0.12)),
+                        in: Capsule())
+            .accessibilityLabel("\(count) transaction(s)")
+        }
+    }
+}
 
 private struct CategoryIconPicker: View {
     @Binding var selectedIcon: String?
@@ -902,17 +914,111 @@ private struct CategoryIconPicker: View {
         Category(id: 0, name: categoryName, parentId: isParent ? nil : 1, icon: selectedIcon).displayIcon
     }
 
-    private static let groups: [(title: String, icons: [String])] = [
-        ("Alimentation", ["cart.fill", "fork.knife", "cup.and.saucer.fill", "wineglass.fill", "birthday.cake.fill", "fish.fill"]),
-        ("Transport",    ["car.fill", "tram.fill", "bus.fill", "fuelpump.fill", "airplane", "bicycle", "scooter"]),
-        ("Logement",     ["house.fill", "key.fill", "bolt.fill", "wifi", "lightbulb.fill", "wrench.and.screwdriver.fill", "bed.double.fill"]),
-        ("Santé",        ["heart.fill", "stethoscope", "pills.fill", "cross.fill", "figure.walk", "bandage.fill", "syringe.fill"]),
-        ("Loisirs",      ["gamecontroller.fill", "film.fill", "music.note", "book.fill", "photo.fill", "theatermasks.fill", "ticket.fill"]),
-        ("Sport",        ["figure.run", "figure.hiking", "figure.swimming", "figure.cycling", "sportscourt.fill", "trophy.fill", "dumbbell.fill"]),
-        ("Shopping",     ["bag.fill", "tag.fill", "gift.fill", "tshirt.fill", "watch.analog", "sparkles"]),
-        ("Finance",      ["banknote.fill", "building.columns.fill", "chart.line.uptrend.xyaxis", "arrow.uturn.left.circle.fill", "creditcard.fill", "dollarsign.circle.fill", "percent"]),
-        ("Divers",       ["star.fill", "bell.fill", "paperclip", "ellipsis.circle.fill", "questionmark.circle.fill", "folder.fill", "repeat", "calendar"]),
+    /// Filtre de recherche dans le catalogue (et saisie libre d'un nom SF Symbol).
+    @State private var searchText = ""
+
+    /// Existence d'un SF Symbol sur l'OS courant. Permet (a) d'accepter la
+    /// saisie libre de N'IMPORTE lequel des milliers de symboles Apple sans
+    /// embarquer la liste complète, et (b) de filtrer le catalogue pour ne
+    /// jamais afficher une case vide si un symbole n'existe pas sur cette version.
+    nonisolated private static func symbolExists(_ name: String) -> Bool {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return false }
+        #if os(macOS)
+        return NSImage(systemSymbolName: clean, accessibilityDescription: nil) != nil
+        #else
+        return UIKit.UIImage(systemName: clean) != nil
+        #endif
+    }
+
+    /// Catalogue brut, largement étendu (~230 symboles) et thématisé.
+    /// Il ne prétend PAS couvrir les 5000+ SF Symbols : la saisie libre en haut
+    /// de la sheet donne accès à tout le reste.
+    private static let rawGroups: [(title: String, icons: [String])] = [
+        ("Alimentation", ["cart.fill", "basket.fill", "fork.knife", "cup.and.saucer.fill", "mug.fill",
+                          "wineglass.fill", "birthday.cake.fill", "fish.fill", "carrot.fill",
+                          "takeoutbag.and.cup.and.straw.fill", "popcorn.fill", "leaf.fill", "flame.fill"]),
+        ("Transport",    ["car.fill", "car.2.fill", "bolt.car.fill", "tram.fill", "bus.fill", "ferry.fill",
+                          "fuelpump.fill", "airplane", "bicycle", "scooter", "figure.walk", "parkingsign",
+                          "road.lanes", "truck.box.fill", "train.side.front.car"]),
+        ("Logement",     ["house.fill", "house.lodge.fill", "building.2.fill", "key.fill", "bolt.fill",
+                          "wifi", "lightbulb.fill", "wrench.and.screwdriver.fill", "bed.double.fill",
+                          "sofa.fill", "shower.fill", "spigot.fill", "washer.fill", "chair.fill",
+                          "lamp.floor.fill", "hammer.fill", "paintbrush.fill"]),
+        ("Santé",        ["heart.fill", "stethoscope", "pills.fill", "cross.fill", "cross.case.fill",
+                          "bandage.fill", "syringe.fill", "eye.fill", "ear.fill", "brain.head.profile",
+                          "lungs.fill", "tooth.fill", "waveform.path.ecg", "facemask.fill"]),
+        ("Loisirs",      ["gamecontroller.fill", "film.fill", "music.note", "headphones", "book.fill",
+                          "photo.fill", "theatermasks.fill", "ticket.fill", "tv.fill", "guitars.fill",
+                          "paintpalette.fill", "puzzlepiece.fill", "die.face.5.fill", "camera.fill",
+                          "binoculars.fill", "party.popper.fill"]),
+        ("Sport",        ["figure.run", "figure.hiking", "figure.pool.swim", "figure.outdoor.cycle",
+                          "sportscourt.fill", "trophy.fill", "dumbbell.fill", "figure.yoga",
+                          "figure.strengthtraining.traditional", "soccerball", "basketball.fill",
+                          "tennis.racket", "figure.skiing.downhill", "medal.fill"]),
+        ("Shopping",     ["bag.fill", "tag.fill", "gift.fill", "tshirt.fill", "watch.analog", "sparkles",
+                          "shippingbox.fill", "cart.badge.plus", "handbag.fill", "eyeglasses",
+                          "shoeprints.fill", "scissors", "comb.fill"]),
+        ("Finance",      ["banknote.fill", "building.columns.fill", "chart.line.uptrend.xyaxis",
+                          "chart.pie.fill", "chart.bar.fill", "arrow.uturn.left.circle.fill",
+                          "creditcard.fill", "dollarsign.circle.fill", "eurosign.circle.fill", "percent",
+                          "wallet.pass.fill", "signature", "doc.text.fill", "scalemass.fill",
+                          "arrow.left.arrow.right", "bitcoinsign.circle.fill", "giftcard.fill"]),
+        ("Travail",      ["briefcase.fill", "laptopcomputer", "desktopcomputer", "printer.fill",
+                          "person.2.fill", "person.crop.circle.fill", "calendar", "clock.fill",
+                          "envelope.fill", "phone.fill", "folder.fill", "tray.full.fill",
+                          "pencil.and.ruler.fill", "chart.xyaxis.line", "network"]),
+        ("Éducation",    ["graduationcap.fill", "book.closed.fill", "books.vertical.fill", "pencil",
+                          "highlighter", "text.book.closed.fill", "globe.europe.africa.fill",
+                          "function", "atom", "testtube.2", "backpack.fill", "ruler.fill"]),
+        ("Famille",      ["figure.2.and.child.holdinghands", "figure.and.child.holdinghands",
+                          "person.3.fill", "heart.circle.fill", "pawprint.fill", "dog.fill", "cat.fill",
+                          "stroller.fill", "teddybear.fill", "balloon.2.fill", "hands.clap.fill"]),
+        ("Voyage",       ["suitcase.fill", "beach.umbrella.fill", "map.fill", "mappin.and.ellipse",
+                          "globe", "tent.fill", "mountain.2.fill", "sun.max.fill", "snowflake",
+                          "camera.viewfinder", "passport", "signpost.right.fill"]),
+        ("Technologie",  ["iphone", "ipad", "applewatch", "airpods.gen3", "display", "externaldrive.fill",
+                          "internaldrive.fill", "server.rack", "antenna.radiowaves.left.and.right",
+                          "cloud.fill", "lock.fill", "shield.fill", "cpu.fill", "battery.100percent",
+                          "cable.connector", "gearshape.fill"]),
+        ("Nature",       ["leaf.fill", "tree.fill", "drop.fill", "flame.fill", "wind", "cloud.rain.fill",
+                          "moon.stars.fill", "sunrise.fill", "water.waves", "bird.fill", "ant.fill",
+                          "camera.macro", "globe.americas.fill"]),
+        ("Divers",       ["star.fill", "bell.fill", "paperclip", "ellipsis.circle.fill",
+                          "questionmark.circle.fill", "folder.fill", "repeat", "flag.fill",
+                          "bookmark.fill", "checkmark.seal.fill", "exclamationmark.triangle.fill",
+                          "trash.fill", "archivebox.fill", "square.grid.2x2.fill", "circle.hexagongrid.fill",
+                          "infinity", "number"]),
     ]
+
+    /// Catalogue effectif : symboles réellement disponibles sur cet OS (calculé
+    /// une seule fois). Évite les cases vides si un symbole a été introduit dans
+    /// une version d'iOS/macOS plus récente que celle de l'appareil.
+    private static let groups: [(title: String, icons: [String])] = rawGroups
+        .map { (title: $0.title, icons: $0.icons.filter(symbolExists)) }
+        .filter { !$0.icons.isEmpty }
+
+    /// Catalogue filtré par la recherche (sur le nom du symbole ET le thème).
+    private var filteredGroups: [(title: String, icons: [String])] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return Self.groups }
+        return Self.groups
+            .map { group in
+                group.title.lowercased().contains(q)
+                    ? group
+                    : (title: group.title, icons: group.icons.filter { $0.lowercased().contains(q) })
+            }
+            .filter { !$0.icons.isEmpty }
+    }
+
+    /// Nom SF Symbol saisi à la main, valide et absent du catalogue → proposé
+    /// tel quel. C'est ce qui ouvre l'accès aux milliers de symboles Apple.
+    private var customSymbolCandidate: String? {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, Self.symbolExists(q) else { return nil }
+        let alreadyListed = filteredGroups.contains { $0.icons.contains(q) }
+        return alreadyListed ? nil : q
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -955,8 +1061,80 @@ private struct CategoryIconPicker: View {
 
             Divider()
 
+            // Recherche dans le catalogue + saisie libre d'un nom SF Symbol.
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                    TextField("Rechercher une icône (ex. « car », « heart »)", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .font(.callout)
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(AppTheme.Colors.textPrimary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+
+                Text("Tape le nom exact d'un SF Symbol pour utiliser n'importe quelle icône Apple.")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
+            }
+
+            // Symbole saisi à la main, valide et hors catalogue → utilisable directement.
+            if let custom = customSymbolCandidate {
+                Button {
+                    selectedIcon = custom
+                    dismiss()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: custom)
+                            .font(.system(size: 18))
+                            .foregroundStyle(AppTheme.Colors.accent)
+                            .frame(width: 32, height: 32)
+                            .background(AppTheme.Colors.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Utiliser « \(custom) »")
+                                .font(.callout.weight(.semibold))
+                                .foregroundStyle(AppTheme.Colors.textPrimary)
+                            Text("Symbole SF valide")
+                                .font(.caption2)
+                                .foregroundStyle(AppTheme.Colors.textSecondary)
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.right.circle.fill")
+                            .foregroundStyle(AppTheme.Colors.accent)
+                    }
+                    .padding(8)
+                    .background(AppTheme.Colors.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Aucun résultat ET saisie non reconnue → message explicite.
+            if filteredGroups.isEmpty && customSymbolCandidate == nil && !searchText.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "questionmark.circle")
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                    Text("Aucune icône trouvée. « \(searchText) » n'est pas un SF Symbol connu.")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 8)
+            }
+
             // Icon grid grouped by theme
-            ForEach(Self.groups, id: \.title) { group in
+            ForEach(filteredGroups, id: \.title) { group in
                 Text(group.title)
                     .font(.caption2)
                     .fontWeight(.semibold)
