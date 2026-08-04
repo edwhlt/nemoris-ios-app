@@ -54,6 +54,16 @@ struct SireneCompany: Decodable {
     let dateFermeture: String?
     let etatAdministratif: String?
     let siege: SireneSiege?
+    /// Établissements (agences, magasins) dont le nom ou l'enseigne matche la requête.
+    /// Renseigné uniquement si l'appel demande `include=matching_etablissements`.
+    ///
+    /// C'est la clé du drill-down : le siège d'une enseigne est souvent à l'autre bout du
+    /// pays, alors que le commerce cherché est une BRANCHE — qu'on reconnaît à son adresse.
+    /// Exemple mesuré (`q=boulangerie pralus`) : le siège est à Roanne, mais la boutique
+    /// facturée était « 18 quai Saint-Antoine, 69002 Lyon », qui n'apparaît que là.
+    let matchingEtablissements: [SireneEtablissement]?
+    let nombreEtablissements: Int?
+    let nombreEtablissementsOuverts: Int?
 
     enum CodingKeys: String, CodingKey {
         case siren
@@ -65,6 +75,41 @@ struct SireneCompany: Decodable {
         case dateFermeture = "date_fermeture"
         case etatAdministratif = "etat_administratif"
         case siege
+        case matchingEtablissements = "matching_etablissements"
+        case nombreEtablissements = "nombre_etablissements"
+        case nombreEtablissementsOuverts = "nombre_etablissements_ouverts"
+    }
+}
+
+/// Un établissement renvoyé dans `matching_etablissements`.
+/// ⚠️ `latitude`/`longitude` arrivent en CHAÎNES dans cette API, pas en nombres.
+struct SireneEtablissement: Decodable {
+    let siret: String?
+    let adresse: String?
+    let codePostal: String?
+    let commune: String?
+    let libelleCommune: String?
+    let latitude: String?
+    let longitude: String?
+    let listeEnseignes: [String]?
+    let nomCommercial: String?
+    let estSiege: Bool?
+    let ancienSiege: Bool?
+    let etatAdministratif: String?
+    let activitePrincipale: String?
+    let dateCreation: String?
+
+    enum CodingKeys: String, CodingKey {
+        case siret, adresse, commune, latitude, longitude
+        case codePostal = "code_postal"
+        case libelleCommune = "libelle_commune"
+        case listeEnseignes = "liste_enseignes"
+        case nomCommercial = "nom_commercial"
+        case estSiege = "est_siege"
+        case ancienSiege = "ancien_siege"
+        case etatAdministratif = "etat_administratif"
+        case activitePrincipale = "activite_principale"
+        case dateCreation = "date_creation"
     }
 }
 

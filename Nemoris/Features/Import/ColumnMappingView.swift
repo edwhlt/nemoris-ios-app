@@ -10,7 +10,14 @@ struct ColumnMappingView: View {
     let parsed: CSVParserV3.Parsed
     let accountId: Int
     let sourceFile: String?
-    let onSessionCreated: (ImportSessionSummary) -> Void
+    /// Chemin mono-fichier : cette vue crée la session elle-même.
+    var onSessionCreated: ((ImportSessionSummary) -> Void)? = nil
+    /// Chemin multi-fichiers : cette vue ne fait que RENDRE les lignes, c'est
+    /// l'écran d'entrée qui les agrège avec celles des autres fichiers avant de
+    /// créer UNE session unique.
+    var onRowsReady: (([ImportSessionRow]) -> Void)? = nil
+    /// Numéro de départ pour la numérotation globale des lignes (multi-fichiers).
+    var startingRowNumber: Int = 1
 
     @State private var dateColumn: Int? = nil
     @State private var amountColumn: Int? = nil
@@ -75,6 +82,7 @@ struct ColumnMappingView: View {
                 Section { Text(savingError).foregroundStyle(AppTheme.Colors.danger) }
             }
         }
+        .nemorisFormStyle()
         .navigationTitle("Mapping CSV")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -191,60 +199,31 @@ struct ColumnMappingView: View {
         )
         sessionRepo.saveMapping(mapping)
 
-        // 2. Construit les rows
-        var rows: [ImportSessionRow] = []
-        rows.reserveCapacity(parsed.rows.count)
-        var rejected = 0
-        for (idx, raw) in parsed.rows.enumerated() {
-            let dateRaw = (dCol < raw.count) ? raw[dCol] : ""
-            let amountRaw = (aCol < raw.count) ? raw[aCol] : ""
-            let labelRaw = (lCol < raw.count) ? raw[lCol] : ""
-            guard let date = CSVParserV3.parseDate(dateRaw, hintFormat: dateFormat),
-                  let amount = CSVParserV3.parseAmount(amountRaw, decimal: amountDecimal),
-                  !labelRaw.isEmpty
-            else { rejected += 1; continue }
-
-            rows.append(ImportSessionRow(
-                sourceRowNumber: idx + 1,
-                rawLabel: labelRaw,
-                date: date,
-                amount: amount
-            ))
-        }
-
+        // 2. Construit les rows (logique partagée avec le chemin « format déjà
+        //    connu », qui n'affiche jamais cet écran).
+        let (rows, _) = CSVParserV3.buildRows(parsed: parsed,
+                                              mapping: mapping,
+                                              startingAt: startingRowNumber,
+                                              sourceFile: sourceFile)
         guard !rows.isEmpty else {
             savingError = "Aucune ligne exploitable (vérifiez le format date/montant)."
             return
         }
 
-        let session = ImportSession(
-            id: UUID(),
-            createdAt: Date(),
-            updatedAt: Date(),
-            status: .active,
-            sourceFile: sourceFile,
-            accountId: accountId,
-            rows: rows
-        )
-
-        guard sessionRepo.insertSession(session) else {
-            savingError = "Échec de la sauvegarde de la session."
+        // 3a. Multi-fichiers : on rend la main, l'agrégation et la création de
+        //     session se font en amont.
+        if let onRowsReady {
+            onRowsReady(rows)
             return
         }
 
-        let summary = ImportSessionSummary(
-            id: session.id,
-            createdAt: session.createdAt,
-            updatedAt: session.updatedAt,
-            status: .active,
-            sourceFile: session.sourceFile,
-            accountId: session.accountId,
-            totalRows: session.rows.count,
-            pendingRows: session.rows.count
-        )
-
-        // 3. Notification rappel 12h + ouverture de la session
-        Task { await ImportNotificationService.scheduleReminder(forSessionId: session.id, pendingRows: rows.count) }
-        onSessionCreated(summary)
+        // 3b. Mono-fichier : création directe.
+        guard let summary = sessionRepo.createSession(rows: rows,
+                                                      accountId: accountId,
+                                                      sourceFile: sourceFile) else {
+            savingError = "Échec de la sauvegarde de la session."
+            return
+        }
+        onSessionCreated?(summary)
     }
 }

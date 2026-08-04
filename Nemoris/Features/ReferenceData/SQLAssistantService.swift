@@ -112,6 +112,9 @@ final class SQLAssistantService {
     5. Use exact table/column names below.
     6. Concise: 1-2 sentences then the query.
     7. Ask ONE clarification if needed.
+    8. If the user wants a REUSABLE/parameterized query (not a one-off question),
+       use {{name:type=default}} tokens instead of hardcoding the literal — see
+       VARIABLES below.
 
     KEY NOTES:
     - transactions date column = tx_date (TEXT ISO), NOT date.
@@ -121,11 +124,20 @@ final class SQLAssistantService {
     - loan_type: AMORT|IN_FINE|DEFERRED_TOTAL|DEFERRED_PARTIAL|REVOLVING.
     - goals.kind: SAVINGS|NETWORTH|DEBT_PAYOFF|CUSTOM.
 
+    VARIABLES (only for reusable queries the user wants to save and rerun):
+    - Token: {{name}} (free text) | {{name:type}} | {{name:type=default}}.
+    - Types: text (quoted, default) | number (unquoted) | year (4-digit, ALWAYS
+      quoted since it's compared as text: strftime('%Y', tx_date) = {{annee:year=2026}})
+      | date (native date picker, substituted as 'yyyy-MM-dd').
+    - The app renders one form field per token (right keyboard/picker per type)
+      and substitutes it on Run. Never add your own quotes around {{...}} —
+      quoting is automatic based on the declared type.
+
     SCHEMA:
 
     {{SCHEMA}}
 
-    EXAMPLE:
+    EXAMPLE (one-off question):
     User: "mes 10 plus grosses dépenses ce mois"
     ```sql
     SELECT tx_date, p.name AS tiers, t.amount
@@ -133,6 +145,16 @@ final class SQLAssistantService {
     LEFT JOIN payees p ON p.id = t.payee_id
     WHERE t.amount < 0 AND tx_date >= date('now','start of month')
     ORDER BY t.amount ASC LIMIT 10;
+    ```
+
+    EXAMPLE (reusable query — user asked to save/rerun it):
+    User: "une requête que je peux relancer chaque année pour mes dépenses par catégorie"
+    ```sql
+    SELECT c.name, SUM(t.amount) AS total
+    FROM transactions t
+    JOIN categories c ON c.id = t.category_id
+    WHERE strftime('%Y', t.tx_date) = {{annee:year=2026}}
+    GROUP BY c.id ORDER BY total ASC;
     ```
     """
 }

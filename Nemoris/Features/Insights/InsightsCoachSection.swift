@@ -12,6 +12,9 @@ import SwiftUI
 
 struct InsightsCoachSection: View {
     let insights: [Insight]
+    /// `false` quand la section est rendue dans une `DashboardTile`, qui porte déjà
+    /// le titre — sinon on empilerait deux en-têtes.
+    var showsHeader: Bool = true
     @State private var selectedInsight: Insight? = nil
 
     /// Top 3 insights non dismissés.
@@ -26,15 +29,17 @@ struct InsightsCoachSection: View {
     var body: some View {
         if !topInsights.isEmpty {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("COACH FINANCIER")
-                        .font(.system(size: 11, weight: .semibold))
-                        .tracking(0.8)
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                    Spacer()
-                    Text("Top \(topInsights.count)")
-                        .font(AppTheme.Typography.labelMedium)
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                if showsHeader {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("COACH FINANCIER")
+                            .font(.system(size: 11, weight: .semibold))
+                            .tracking(0.8)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                        Spacer()
+                        Text("Top \(topInsights.count)")
+                            .font(AppTheme.Typography.labelMedium)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
                 }
                 VStack(spacing: AppTheme.Spacing.sm) {
                     ForEach(topInsights) { insight in
@@ -46,7 +51,7 @@ struct InsightsCoachSection: View {
                     }
                 }
             }
-            .sheet(item: $selectedInsight) { insight in
+            .adaptivePane(item: $selectedInsight) { insight in
                 InsightDetailSheet(insight: insight)
             }
         }
@@ -102,12 +107,12 @@ struct InsightCard: View {
 // MARK: - Detail sheet
 
 struct InsightDetailSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     @Environment(AppState.self) private var appState
     let insight: Insight
 
     var body: some View {
-        NavigationStack {
             ZStack {
                 AppTheme.Colors.background.ignoresSafeArea()
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
@@ -179,14 +184,7 @@ struct InsightDetailSheet: View {
                 }
                 .padding(AppTheme.Spacing.xl)
             }
-            .navigationTitle("Détail")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
-                }
-            }
-        }
+            .paneChrome("Détail", cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 
     @ViewBuilder

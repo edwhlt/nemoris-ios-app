@@ -32,6 +32,7 @@ extension String {
 enum MerchantEnrichmentSource: String, Codable, CaseIterable {
     case sirene
     case llm        // Apple Foundation Models
+    case localLLM   // serveur HTTP compatible OpenAI configuré par l'utilisateur (LM Studio, Ollama…)
     case mapkit
     case merged     // vote pondéré entre plusieurs sources
     case manual     // saisi par l'utilisateur
@@ -57,6 +58,22 @@ struct MerchantEnrichment: Codable, Hashable {
     /// (ex. "Hung Restaurant Ha Giang" extrait depuis "VNPAY HUNG RES PSC VN P HA GIANG").
     /// Nil pour les sources non-LLM.
     var searchHint: String? = nil
+
+    // Champs additifs (AXE S). Tous `var x: T? = nil` → `decodeIfPresent` synthétisé,
+    // donc les fichiers de cache écrits par les versions précédentes se décodent inchangés.
+    // Ne jamais transformer l'un d'eux en non-optionnel sans versionner le cache.
+
+    /// SIREN de l'entreprise (9 chiffres). Le `siret` identifie l'établissement,
+    /// le `siren` identifie la personne morale qui le porte — c'est lui qui permet
+    /// de retrouver les autres établissements de la même enseigne.
+    var siren: String? = nil
+    /// Code postal de l'établissement, extrait séparément de `address` pour servir
+    /// de filtre de recherche (`code_postal`) et de signal de tri.
+    var postalCode: String? = nil
+    /// Nom de catégorie proposé par une source qui ne connaît pas les ids Nemoris
+    /// (le LLM renvoie "Alimentation", pas `category_id = 7`). Résolu en `categoryId`
+    /// par `EnrichmentOrchestrator.findCategoryId(byName:)`, qui a accès au référentiel.
+    var categoryHint: String? = nil
 
     static let empty = MerchantEnrichment(source: .merged, confidence: 0, enrichedAt: Date())
 

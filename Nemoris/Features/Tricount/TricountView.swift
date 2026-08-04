@@ -188,8 +188,16 @@ private struct TricountAPIClient {
 struct TricountListView: View {
     @State private var groups: [TricountGroup] = []
     @State private var showLoadSheet = false
+    /// Ouvre le détail dans le panneau (adaptivePane), plus un push — cohérent
+    /// avec le reste de l'app (transactions, tiers, comptes Investissements…) :
+    /// un seul mental model de drill-down partout, et ça évite le "bouton
+    /// retour" du push qui désynchronisait l'affichage lors d'un changement
+    /// de module (`NavigationSplitView` gardait l'ancien contenu poussé).
     @State private var selectedGroup: TricountGroup?
-    @State private var showDetail = false
+    #if os(macOS)
+    /// Pour fermer le panneau au retour vers la liste (cf. `onBack`).
+    @Environment(InspectorPaneCenter.self) private var paneCenter: InspectorPaneCenter?
+    #endif
     @State private var refreshingId: Int? = nil
     @State private var refreshError: String? = nil
     /// Skeleton tant que le 1er `loadGroups()` n'est pas terminé.
@@ -202,7 +210,27 @@ struct TricountListView: View {
 
     var body: some View {
         Group {
+            #if os(macOS)
+            // macOS : le détail d'un tricount remplace la liste DANS LA COLONNE
+            // (navigation interne par état, comme la fiche compte des
+            // Investissements). Un tricount est un CONTENEUR d'entrées — chaque
+            // entrée a son propre détail, qui lui s'ouvre dans l'inspecteur.
+            // Règle : conteneur → pleine page, feuille → inspecteur.
+            if let group = selectedGroup {
+                // Fermeture explicite du panneau au retour (cf. InvestmentsView) :
+                // il ne doit pas survivre au tricount qui l'a ouvert.
+                TricountDetailView(group: group, onBack: {
+                    paneCenter?.dismissCurrent()
+                    selectedGroup = nil
+                })
+            } else if isEmbedded {
+                listContent
+            } else {
+                NavigationStack { listContent }
+            }
+            #else
             if isEmbedded { listContent } else { NavigationStack { listContent } }
+            #endif
         }
         //.paywallOverlay(for: .tricount)
     }
@@ -227,22 +255,16 @@ struct TricountListView: View {
                     ForEach(groups) { group in
                         Button {
                             selectedGroup = group
-                            showDetail = true
                         } label: {
                             TricountGroupRow(group: group, isRefreshing: refreshingId == group.id)
                         }
                         .buttonStyle(.plain)
-                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            Button { refreshGroup(group) } label: {
-                                Label("Mettre à jour", systemImage: "arrow.clockwise")
-                            }
-                            .tint(AppTheme.Colors.accent)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) { deleteGroup(group) } label: {
-                                Label("Supprimer", systemImage: "trash")
-                            }
-                        }
+                        .rowActions(
+                            leading: [RowAction("Mettre à jour", systemImage: "arrow.clockwise", tint: AppTheme.Colors.accent) { refreshGroup(group) }],
+                            trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { deleteGroup(group) }],
+                            leadingFullSwipe: false,
+                            trailingFullSwipe: false
+                        )
                     }
                 }
             }
@@ -253,10 +275,19 @@ struct TricountListView: View {
                 Button { showLoadSheet = true } label: { Image(systemName: "plus") }
             }
         }
-        .navigationDestination(isPresented: $showDetail) {
-            if let g = selectedGroup { TricountDetailView(group: g) }
+        // macOS : `selectedGroup` bascule le CONTENU du module (cf. `body`) —
+        // pas de présentation ici. iOS : push piloté par item. Un `Binding(get:set:)`
+        // synthétique (nécessaire tant que `TricountGroup` n'était pas Hashable)
+        // provoquait un pop immédiat au tout premier push de la session — bug
+        // connu de `.navigationDestination(isPresented:)` avec un binding calculé
+        // au lieu d'un stockage `@State` direct. `item:` est piloté directement
+        // par `$selectedGroup`, sans binding intermédiaire.
+        #if !os(macOS)
+        .navigationDestination(item: $selectedGroup) { group in
+            TricountDetailView(group: group)
         }
-        .sheet(isPresented: $showLoadSheet) {
+        #endif
+        .adaptivePane(isPresented: $showLoadSheet) {
             TricountLoadSheet { repo.setupTables(); loadGroups() }
         }
         .task {
@@ -346,7 +377,8 @@ private struct TricountGroupRow: View {
 
 struct TricountLoadSheet: View {
     let onSaved: () -> Void
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
 
     private enum LoadState { case input, loading, selectMember(TricountFetchResult), error(String) }
 
@@ -357,7 +389,6 @@ struct TricountLoadSheet: View {
     private let client = TricountAPIClient()
 
     var body: some View {
-        NavigationStack {
             Group {
                 switch state {
                 case .input:
@@ -375,6 +406,7 @@ struct TricountLoadSheet: View {
                                 .disabled(urlInput.trimmingCharacters(in: .whitespaces).isEmpty)
                         }
                     }
+                    .nemorisFormStyle()
 
                 case .loading:
                     VStack(spacing: 16) {
@@ -416,6 +448,7 @@ struct TricountLoadSheet: View {
                                 .disabled(selectedMember.isEmpty)
                         }
                     }
+                    .nemorisFormStyle()
 
                 case .error(let msg):
                     VStack(spacing: 16) {
@@ -426,12 +459,7 @@ struct TricountLoadSheet: View {
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .navigationTitle("Charger un Tricount")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Annuler") { dismiss() } }
-            }
-        }
+            .paneChrome("Charger un Tricount", cancelLabel: "Annuler", onCancel: { dismiss() })
     }
 
     private func load() {
@@ -485,11 +513,19 @@ struct TricountLoadSheet: View {
 struct TricountDetailView: View {
     let group: TricountGroup
     var initialEntryId: Int? = nil
+    /// macOS : retour à la liste des tricounts. Le détail occupe la colonne du
+    /// module (navigation interne par état — cf. `TricountListView.body`), il
+    /// fournit donc lui-même son retour. nil quand la vue est poussée (iOS) ou
+    /// présentée en sheet depuis TransactionsView.
+    var onBack: (() -> Void)? = nil
+    // paneDismiss : ferme la présentation quand la vue est en sheet (niveau 2,
+    // depuis TransactionsView). No-op en pleine page, où c'est `onBack` qui sert.
+    @Environment(\.paneDismiss) private var paneDismiss
     @State private var entries: [TricountEntry] = []
     @State private var shares: [TricountShare] = []
-    @State private var reimbursementGroups: [TricountReimbursementGroup] = []
+    @State private var reimbursementGroups: [ReimbursementGroup] = []
     @State private var selectedTab = 0
-    @AppStorage("nemoris.reimbursementsEnabled") private var reimbursementsEnabled = false
+    @AppStorage("nemoris.reimbursementsEnabled") private var reimbursementsEnabled = true
     @State private var selectedEntry: TricountEntry? = nil
     @State private var quickLinkEntry: TricountEntry? = nil
     @State private var quickReimburseEntry: TricountEntry? = nil
@@ -505,6 +541,7 @@ struct TricountDetailView: View {
     @State private var hasLoaded = false
     private let repo = TricountRepository()
     private let txRepo = TransactionRepository()
+    private let reimbursementRepo = ReimbursementRepository()
     private let linkTip = TricountLinkTip()
     private let reimbTip = TricountReimbursementTip()
     private let balanceTip = TricountBalanceTip()
@@ -533,10 +570,64 @@ struct TricountDetailView: View {
             .reduce(0.0) { $0 + $1.total }
     }
 
+    /// Effet net des règlements déjà effectués (entrées TRANSFER/BALANCE — les
+    /// "Remboursement" Tricount entre membres). Exclues de `mySpentTotal`/
+    /// `myNetShare` (ce ne sont pas des dépenses partagées) mais elles DOIVENT
+    /// quand même ajuster le solde final : sans ça, un règlement déjà reçu ou
+    /// payé reste compté comme "encore dû", ce qui faisait diverger le solde
+    /// affiché de celui de Tricount dès qu'un membre se réglait.
+    private var mySettlementsNet: Double {
+        let byEntry = Dictionary(grouping: shares, by: { $0.entryId })
+        return entries.reduce(0.0) { sum, e in
+            let type = e.typeTransaction.uppercased()
+            guard type == "TRANSFER" || type == "BALANCE" else { return sum }
+            let entryShares = byEntry[e.id] ?? []
+            if e.whoPaid == group.myName {
+                // J'ai réglé une dette : crédité du montant reçu par l'autre partie.
+                let othersTotal = entryShares.filter { $0.memberName != group.myName }.reduce(0.0) { $0 + $1.amount }
+                return sum + othersTotal
+            } else if let myShare = entryShares.first(where: { $0.memberName == group.myName })?.amount, myShare > 0 {
+                // On m'a réglé une dette : débité, cette somme n'est plus due.
+                return sum - myShare
+            }
+            return sum
+        }
+    }
+
     // positif = on me doit / négatif = je dois
-    private var myBalance: Double { mySpentTotal - myNetShare }
+    private var myBalance: Double { mySpentTotal - myNetShare + mySettlementsNet }
 
     var body: some View {
+        #if os(macOS)
+        // Contenu de module en pleine page (drill-down depuis TricountListView) :
+        // toolbar NATIVE, avec le retour vers la liste. Présentée en sheet
+        // (niveau 2, depuis TransactionsView) : même toolbar native, sans retour
+        // — c'est « Fermer » qui sort.
+        if onBack != nil {
+            detailContent
+                .navigationTitle(group.title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { nativeToolbarContent }
+        } else {
+            NavigationStack {
+                detailContent
+                    .navigationTitle(group.title)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar { nativeToolbarContent }
+            }
+        }
+        #else
+        NavigationStack {
+            detailContent
+                .navigationTitle(group.title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { nativeToolbarContent }
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
         VStack(spacing: 0) {
             if !hasLoaded {
                 // Skeleton de la liste d'entrées en attendant le chargement local.
@@ -567,44 +658,7 @@ struct TricountDetailView: View {
                 }
             }
         }
-        .navigationTitle(group.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                if isSelectingEntries {
-                    Button("Annuler") {
-                        isSelectingEntries = false
-                        selectedEntryIds.removeAll()
-                    }
-                }
-            }
-            ToolbarItemGroup(placement: .navigationBarTrailing) {
-                if isSelectingEntries {
-                    if !selectedEntryIds.isEmpty {
-                        if reimbursementsEnabled {
-                            Button {
-                                showBulkEntryReimburse = true
-                            } label: {
-                                Label("Remboursement", systemImage: "arrow.uturn.left.circle")
-                            }
-                        }
-                        Button {
-                            bulkEntryTagInitialStates = computeBulkEntryTagStates()
-                            showBulkEntryTagPicker = true
-                        } label: {
-                            Label("Tags", systemImage: "tag")
-                        }
-                    }
-                } else {
-                    Button {
-                        isSelectingEntries = true
-                    } label: {
-                        Image(systemName: "checkmark.circle")
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showBulkEntryTagPicker) {
+        .adaptivePane(isPresented: $showBulkEntryTagPicker) {
             BulkTagSheet(
                 allTags: allTags,
                 initialStates: bulkEntryTagInitialStates,
@@ -633,17 +687,17 @@ struct TricountDetailView: View {
                 }
             )
         }
-        .sheet(isPresented: $showBulkEntryReimburse) {
+        .adaptivePane(isPresented: $showBulkEntryReimburse) {
             RemboursementQuickPickSheet(allTiers: allTiers) { tiersId, _ in
                 guard tiersId != nil, let tiersId else { return }
                 let byEntry = Dictionary(grouping: shares, by: { $0.entryId })
                 for entryId in selectedEntryIds {
                     let amount = byEntry[entryId]?.first(where: { $0.memberName == group.myName })?.amount ?? 0
                     if amount > 0 {
-                        repo.addReimbursement(entryId: entryId, tiersId: tiersId, amount: amount, currency: group.currency)
+                        reimbursementRepo.addOrUpdateReimbursement(tricountEntryId: entryId, payeeId: tiersId, amount: amount, currency: group.currency)
                     }
                 }
-                reimbursementGroups = repo.fetchReimbursementsForGroup(groupId: group.id)
+                reimbursementGroups = reimbursementRepo.fetchReimbursements(forTricountGroup: group.id)
                 isSelectingEntries = false
                 selectedEntryIds.removeAll()
             }
@@ -652,7 +706,7 @@ struct TricountDetailView: View {
             await Task.yield()
             entries = repo.fetchEntries(groupId: group.id)
             shares = repo.fetchShares(groupId: group.id)
-            reimbursementGroups = repo.fetchReimbursementsForGroup(groupId: group.id)
+            reimbursementGroups = reimbursementRepo.fetchReimbursements(forTricountGroup: group.id)
             allTags = txRepo.fetchAllTags()
             allTiers = txRepo.fetchTiers()
             loadEntryTags()
@@ -663,7 +717,7 @@ struct TricountDetailView: View {
                 selectedEntry = entry
             }
         }
-        .sheet(item: $selectedEntry) { entry in
+        .adaptivePane(item: $selectedEntry) { entry in
             let myShare = Dictionary(grouping: shares, by: { $0.entryId })[entry.id]?
                 .first(where: { $0.memberName == group.myName })?.amount
             TricountEntryDetailSheet(
@@ -673,22 +727,23 @@ struct TricountDetailView: View {
                 groupCurrency: group.currency,
                 repo: repo,
                 txRepo: txRepo,
+                reimbursementRepo: reimbursementRepo,
                 allTags: allTags
             ) {
                 entries = repo.fetchEntries(groupId: group.id)
-                reimbursementGroups = repo.fetchReimbursementsForGroup(groupId: group.id)
+                reimbursementGroups = reimbursementRepo.fetchReimbursements(forTricountGroup: group.id)
                 selectedEntry = nil
             }
         }
         // Swipe rapide : lier une transaction
-        .sheet(item: $quickLinkEntry) { entry in
+        .adaptivePane(item: $quickLinkEntry) { entry in
             TransactionPickerSheet(txRepo: txRepo, currentId: entry.linkedTransactionId) { tx in
                 repo.updateLinkedTransaction(entryId: entry.id, transactionId: tx.id)
                 entries = repo.fetchEntries(groupId: group.id)
             }
         }
         // Swipe rapide : gérer les tags d'une entrée
-        .sheet(item: $tagQuickEntry) { entry in
+        .adaptivePane(item: $tagQuickEntry) { entry in
             TagManagementSheet(
                 initialTagIds: Set(txRepo.fetchTags(forTricountEntry: entry.id).map(\.id)),
                 allTags: allTags,
@@ -706,16 +761,104 @@ struct TricountDetailView: View {
             )
         }
         // Swipe rapide : ajouter un remboursement
-        .sheet(item: $quickReimburseEntry) { entry in
+        .adaptivePane(item: $quickReimburseEntry) { entry in
             let rawShare = shares.first(where: { $0.entryId == entry.id && $0.memberName == group.myName })?.amount ?? 0
             AddTricountReimbursementSheet(
                 defaultAmount: abs(rawShare),
                 currency: group.currency
             ) { tiersId, amount, currency in
-                repo.addReimbursement(entryId: entry.id, tiersId: tiersId, amount: amount, currency: currency)
-                reimbursementGroups = repo.fetchReimbursementsForGroup(groupId: group.id)
+                reimbursementRepo.addOrUpdateReimbursement(tricountEntryId: entry.id, payeeId: tiersId, amount: amount, currency: currency)
+                reimbursementGroups = reimbursementRepo.fetchReimbursements(forTricountGroup: group.id)
             }
         }
+    }
+
+    // MARK: - Toolbar (retour/fermer + sélection ou actions groupées)
+
+    @ToolbarContentBuilder
+    private var nativeToolbarContent: some ToolbarContent {
+        #if os(macOS)
+        // Pleine page (drill-down) : retour vers la liste, au placement du back
+        // système. En sheet (niveau 2) : « Fermer ». Jamais les deux.
+        ToolbarItem(placement: .navigation) {
+            if isSelectingEntries {
+                Button("Annuler") {
+                    isSelectingEntries = false
+                    selectedEntryIds.removeAll()
+                }
+            } else if let onBack {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                }
+                .help("Tous les tricounts")
+                .accessibilityLabel("Tous les tricounts")
+            } else {
+                Button("Fermer") { paneDismiss() }
+            }
+        }
+        ToolbarItemGroup(placement: .primaryAction) {
+            if isSelectingEntries {
+                if !selectedEntryIds.isEmpty {
+                    if reimbursementsEnabled {
+                        Button {
+                            showBulkEntryReimburse = true
+                        } label: {
+                            Image(systemName: "arrow.uturn.left.circle")
+                        }
+                        .help("Remboursement")
+                    }
+                    Button {
+                        bulkEntryTagInitialStates = computeBulkEntryTagStates()
+                        showBulkEntryTagPicker = true
+                    } label: {
+                        Image(systemName: "tag")
+                    }
+                    .help("Tags")
+                }
+            } else {
+                Button {
+                    isSelectingEntries = true
+                } label: {
+                    Image(systemName: "checkmark.circle")
+                }
+                .help("Sélectionner")
+            }
+        }
+        #else
+        ToolbarItem(placement: .navigationBarLeading) {
+            if isSelectingEntries {
+                Button("Annuler") {
+                    isSelectingEntries = false
+                    selectedEntryIds.removeAll()
+                }
+            }
+        }
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            if isSelectingEntries {
+                if !selectedEntryIds.isEmpty {
+                    if reimbursementsEnabled {
+                        Button {
+                            showBulkEntryReimburse = true
+                        } label: {
+                            Label("Remboursement", systemImage: "arrow.uturn.left.circle")
+                        }
+                    }
+                    Button {
+                        bulkEntryTagInitialStates = computeBulkEntryTagStates()
+                        showBulkEntryTagPicker = true
+                    } label: {
+                        Label("Tags", systemImage: "tag")
+                    }
+                }
+            } else {
+                Button {
+                    isSelectingEntries = true
+                } label: {
+                    Image(systemName: "checkmark.circle")
+                }
+            }
+        }
+        #endif
     }
 
     private func loadEntryTags() {
@@ -765,11 +908,11 @@ struct TricountDetailView: View {
 
     private var entriesTab: some View {
         let byEntry = Dictionary(grouping: shares, by: { $0.entryId })
-        let reimbursementByEntry = Dictionary(grouping: reimbursementGroups.flatMap(\.items), by: { $0.entryId })
+        let reimbursementByEntry = Dictionary(grouping: reimbursementGroups.flatMap(\.items), by: { $0.tricountEntryId ?? -1 })
         return List {
             ForEach(entries) { entry in
                 let reimbursementNames = Array(
-                    Set((reimbursementByEntry[entry.id] ?? []).map(\.tiersName))
+                    Set((reimbursementByEntry[entry.id] ?? []).map(\.payeeName))
                 ).sorted()
                 let reimbursementLabel = reimbursementNames.isEmpty
                     ? nil
@@ -794,35 +937,18 @@ struct TricountDetailView: View {
                     if isSelectingEntries { toggleEntrySelection(entry.id) }
                     else { selectedEntry = entry }
                 }
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    if !isSelectingEntries {
-                        if reimbursementsEnabled {
-                            Button {
-                                quickReimburseEntry = entry
-                            } label: {
-                                Label("Rembourser", systemImage: "arrow.uturn.left.circle.fill")
-                            }
-                            .tint(AppTheme.Colors.warning)
-                        }
-
-                        Button {
-                            quickLinkEntry = entry
-                        } label: {
-                            Label("Lier", systemImage: "link")
-                        }
-                        .tint(AppTheme.Colors.accent)
-                    }
-                }
-                .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                    if !isSelectingEntries {
-                        Button {
-                            tagQuickEntry = entry
-                        } label: {
-                            Label("Tags", systemImage: "tag")
-                        }
-                        .tint(AppTheme.Colors.accentSecondary)
-                    }
-                }
+                .rowActions(
+                    leading: isSelectingEntries ? [] : [
+                        RowAction("Tags", systemImage: "tag", tint: AppTheme.Colors.accentSecondary) { tagQuickEntry = entry }
+                    ],
+                    trailing: isSelectingEntries ? [] :
+                        (reimbursementsEnabled
+                         ? [RowAction("Rembourser", systemImage: "arrow.uturn.left.circle.fill", tint: AppTheme.Colors.warning) { quickReimburseEntry = entry }]
+                         : [])
+                        + [RowAction("Lier", systemImage: "link", tint: AppTheme.Colors.accent) { quickLinkEntry = entry }],
+                    leadingFullSwipe: false,
+                    trailingFullSwipe: false
+                )
             }
         }.listStyle(.plain)
     }
@@ -838,7 +964,9 @@ struct TricountDetailView: View {
                 )
             }.listStyle(.plain)
         } else {
-            List {
+            // Form (pas List) : liste statique → boxes arrondies natives macOS
+            // via nemorisFormStyle(), insetGrouped natif sur iOS.
+            Form {
                 let groupTotal = reimbursementGroups.reduce(0) { $0 + $1.total }
                 Section {
                     HStack {
@@ -850,19 +978,19 @@ struct TricountDetailView: View {
                     }
                 }
                 ForEach(reimbursementGroups) { rGroup in
-                    Section(rGroup.tiersName) {
+                    Section(rGroup.payeeName) {
                         ForEach(rGroup.items) { item in
                             HStack(spacing: 10) {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(item.entryDescription.isEmpty ? "Dépense Tricount" : item.entryDescription)
+                                    Text(item.originDescription.isEmpty ? "Dépense Tricount" : item.originDescription)
                                         .font(.subheadline)
-                                    Text(item.entryDate.formatted(date: .abbreviated, time: .omitted))
+                                    Text(item.originDate.formatted(date: .abbreviated, time: .omitted))
                                         .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
                                 }
                                 Spacer()
-                                Text(item.signedAmount.formatted(.currency(code: item.currency)))
+                                Text(item.amount.formatted(.currency(code: item.currency)))
                                     .font(.subheadline)
-                                    .foregroundStyle(item.isExpenseEntry ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                                    .foregroundStyle(item.amount < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                             }
                         }
                         HStack {
@@ -874,7 +1002,7 @@ struct TricountDetailView: View {
                         }
                     }
                 }
-            }.listStyle(.insetGrouped)
+            }.nemorisFormStyle()
         }
     }
 }
@@ -973,17 +1101,29 @@ private struct TricountEntryRow: View {
                 }
                 // Tags chips
                 if !tags.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 4) {
-                            ForEach(tags) { tag in
-                                Text(tag.name)
-                                    .font(.caption2).fontWeight(.medium)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(tag.displayColor.opacity(0.12), in: Capsule())
-                                    .foregroundStyle(tag.displayColor)
-                            }
+                    let chips = HStack(spacing: 4) {
+                        ForEach(tags) { tag in
+                            Text(tag.name)
+                                .font(.caption2).fontWeight(.medium)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(tag.displayColor.opacity(0.12), in: Capsule())
+                                .foregroundStyle(tag.displayColor)
                         }
                     }
+                    // ⚠️ macOS : JAMAIS de ScrollView dans une row de List. Un scroll
+                    // (ici horizontal, pour les chips) mesuré dans une cellule
+                    // NSTableView provoque une « reentrant operation in NSTableView
+                    // delegate » → boucle de layout → la barre de fenêtre et le
+                    // bouton retour des vues poussées vibrent EN PERMANENCE. Sur Mac
+                    // on rend les chips dans un HStack clippé (largeur de row large
+                    // en desktop, la plupart tiennent). iOS garde le scroll tactile.
+                    #if os(macOS)
+                    chips
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .clipped()
+                    #else
+                    ScrollView(.horizontal, showsIndicators: false) { chips }
+                    #endif
                 }
             }
 
@@ -1029,7 +1169,8 @@ private struct TricountEntryRow: View {
 // MARK: - Entry Detail Sheet
 
 struct TricountEntryDetailSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
 
     let entry: TricountEntry
     let myShare: Double?
@@ -1037,27 +1178,33 @@ struct TricountEntryDetailSheet: View {
     let groupCurrency: String
     let repo: TricountRepository
     let txRepo: TransactionRepository
+    let reimbursementRepo: ReimbursementRepository
     let allTags: [Tag]
     let onChanged: () -> Void
 
-    @State private var reimbursements: [TricountReimbursement] = []
+    @State private var reimbursements: [Reimbursement] = []
+    /// Ligne en cours d'édition via "Modifier…" — nil pour un nouvel assignement.
+    /// Distingue une vraie mise à jour (par id) d'un nouvel upsert, pour ne
+    /// jamais dupliquer silencieusement si le payee change (fix bug v44 AXE R).
+    @State private var editingReimbursement: Reimbursement? = nil
     @State private var linkedTransaction: FinanceTransaction? = nil
     @State private var entryTags: [Tag] = []
     @State private var localAllTags: [Tag]
     @State private var showTransactionPicker = false
     @State private var showAddReimbursement = false
     @State private var showTagPicker = false
-    @AppStorage("nemoris.reimbursementsEnabled") private var reimbursementsEnabled = false
+    @AppStorage("nemoris.reimbursementsEnabled") private var reimbursementsEnabled = true
 
     init(entry: TricountEntry, myShare: Double?, myName: String, groupCurrency: String,
-         repo: TricountRepository, txRepo: TransactionRepository, allTags: [Tag],
-         onChanged: @escaping () -> Void) {
+         repo: TricountRepository, txRepo: TransactionRepository, reimbursementRepo: ReimbursementRepository,
+         allTags: [Tag], onChanged: @escaping () -> Void) {
         self.entry = entry
         self.myShare = myShare
         self.myName = myName
         self.groupCurrency = groupCurrency
         self.repo = repo
         self.txRepo = txRepo
+        self.reimbursementRepo = reimbursementRepo
         self.allTags = allTags
         self.onChanged = onChanged
         _localAllTags = State(initialValue: allTags)
@@ -1087,7 +1234,6 @@ struct TricountEntryDetailSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 // Infos de la dépense
                 Section("Dépense") {
@@ -1171,21 +1317,27 @@ struct TricountEntryDetailSheet: View {
                         if let r = reimbursements.first {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(r.tiersName).font(.subheadline)
+                                    Text(r.payeeName).font(.subheadline)
                                 }
                                 Spacer()
-                                Text(r.amount.formatted(.currency(code: r.currency)))
+                                Text(abs(r.amount).formatted(.currency(code: r.currency)))
                                     .font(.subheadline).foregroundStyle(AppTheme.Colors.success)
                             }
-                            Button("Modifier…") { showAddReimbursement = true }
+                            Button("Modifier…") {
+                                editingReimbursement = r
+                                showAddReimbursement = true
+                            }
                             Button("Supprimer", role: .destructive) {
-                                repo.deleteReimbursement(id: r.id)
+                                reimbursementRepo.deleteReimbursement(id: r.id)
                                 reimbursements = []
                                 onChanged()
                             }
                         } else {
                             Text("Aucun remboursement").foregroundStyle(AppTheme.Colors.textSecondary).font(.caption)
-                            Button("Assigner un remboursement…") { showAddReimbursement = true }
+                            Button("Assigner un remboursement…") {
+                                editingReimbursement = nil
+                                showAddReimbursement = true
+                            }
                         }
                     } header: {
                         Text("Remboursement")
@@ -1196,13 +1348,9 @@ struct TricountEntryDetailSheet: View {
                     }
                 }
             }
-            .navigationTitle("Détail dépense")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Fermer") { dismiss() } }
-            }
+            .nemorisFormStyle()
             .onAppear { loadData() }
-            .sheet(isPresented: $showTagPicker) {
+            .adaptivePane(isPresented: $showTagPicker) {
                 TagManagementSheet(
                     initialTagIds: Set(entryTags.map(\.id)),
                     allTags: localAllTags,
@@ -1219,30 +1367,37 @@ struct TricountEntryDetailSheet: View {
                     }
                 )
             }
-            .sheet(isPresented: $showTransactionPicker) {
+            .adaptivePane(isPresented: $showTransactionPicker) {
                 TransactionPickerSheet(txRepo: txRepo, currentId: entry.linkedTransactionId) { tx in
                     repo.updateLinkedTransaction(entryId: entry.id, transactionId: tx.id)
                     linkedTransaction = tx
                     onChanged()
                 }
             }
-            .sheet(isPresented: $showAddReimbursement) {
+            .adaptivePane(isPresented: $showAddReimbursement) {
                 AddTricountReimbursementSheet(
                     // On passe la valeur absolue : un remboursement est toujours un montant > 0
                     // (ce qu'on attend de recevoir, peu importe le signe de la part)
                     defaultAmount: abs(displayShare ?? 0),
-                    currency: groupCurrency
+                    currency: groupCurrency,
+                    existingReimbursement: editingReimbursement
                 ) { tiersId, amount, currency in
-                    repo.addReimbursement(entryId: entry.id, tiersId: tiersId, amount: amount, currency: currency)
-                    reimbursements = repo.fetchReimbursementsForEntry(entryId: entry.id)
+                    if let existing = editingReimbursement {
+                        // Édition par id : met à jour la ligne existante même si
+                        // le payee change, ne duplique jamais (fix bug v44 AXE R).
+                        reimbursementRepo.updateReimbursement(id: existing.id, payeeId: tiersId, amount: amount, currency: currency)
+                    } else {
+                        reimbursementRepo.addOrUpdateReimbursement(tricountEntryId: entry.id, payeeId: tiersId, amount: amount, currency: currency)
+                    }
+                    reimbursements = reimbursementRepo.fetchReimbursements(forTricountEntry: entry.id)
                     onChanged()
                 }
             }
-        }
+            .paneChrome("Détail dépense", cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 
     private func loadData() {
-        reimbursements = repo.fetchReimbursementsForEntry(entryId: entry.id)
+        reimbursements = reimbursementRepo.fetchReimbursements(forTricountEntry: entry.id)
         entryTags = txRepo.fetchTags(forTricountEntry: entry.id)
         if let txId = entry.linkedTransactionId {
             linkedTransaction = txRepo.fetchAllTransactions(limit: 2000).first(where: { $0.id == txId })
@@ -1253,7 +1408,8 @@ struct TricountEntryDetailSheet: View {
 // MARK: - Transaction Picker Sheet
 
 struct TransactionPickerSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     let txRepo: TransactionRepository
     let currentId: Int?
     let onSelect: (FinanceTransaction) -> Void
@@ -1270,7 +1426,6 @@ struct TransactionPickerSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             List(filtered) { tx in
                 Button {
                     onSelect(tx)
@@ -1299,22 +1454,22 @@ struct TransactionPickerSheet: View {
                 }
             }
             .searchable(text: $search, prompt: "Rechercher une transaction…")
-            .navigationTitle("Choisir une transaction")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Annuler") { dismiss() } }
-            }
             .onAppear { transactions = txRepo.fetchAllTransactions() }
-        }
+            .paneChrome("Choisir une transaction", cancelLabel: "Annuler", onCancel: { dismiss() })
     }
 }
 
 // MARK: - Add Tricount Reimbursement Sheet
 
 struct AddTricountReimbursementSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     let defaultAmount: Double
     let currency: String
+    /// Non-nil = édition d'une ligne existante — préchargée au lieu de repartir
+    /// du calcul théorique de part (fix bug v44 AXE R : "Modifier…" dupliquait
+    /// silencieusement si l'utilisateur changeait de payee).
+    var existingReimbursement: Reimbursement? = nil
     let onAdd: (Int, Double, String) -> Void
 
     private let txRepo = TransactionRepository()
@@ -1333,7 +1488,6 @@ struct AddTricountReimbursementSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section("Personne qui me doit") {
                     Button {
@@ -1359,26 +1513,26 @@ struct AddTricountReimbursementSheet: View {
                     }
                 }
             }
-            .navigationTitle("Nouveau remboursement")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Annuler") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Ajouter") {
-                        guard let amount = parsedAmount, selectedTiersId != -1 else { return }
-                        onAdd(selectedTiersId, amount, currency)
-                        dismiss()
-                    }
-                    .disabled(parsedAmount == nil || selectedTiersId == -1)
-                }
-            }
+            .nemorisFormStyle()
             .onAppear {
-                amountText = String(format: "%.2f", defaultAmount)
+                if let existing = existingReimbursement {
+                    amountText = String(format: "%.2f", abs(existing.amount))
+                    selectedTiersId = existing.payeeId
+                } else {
+                    amountText = String(format: "%.2f", defaultAmount)
+                }
                 allTiers = txRepo.fetchTiers()
             }
             .sheet(isPresented: $showTiersPicker) {
                 TiersSearchSheet(allTiers: allTiers, selectedId: $selectedTiersId)
             }
-        }
+            .paneChrome(existingReimbursement == nil ? "Nouveau remboursement" : "Modifier le remboursement",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: existingReimbursement == nil ? "Ajouter" : "Enregistrer",
+                        confirmDisabled: parsedAmount == nil || selectedTiersId == -1) {
+                guard let amount = parsedAmount, selectedTiersId != -1 else { return }
+                onAdd(selectedTiersId, amount, currency)
+                dismiss()
+            }
     }
 }

@@ -122,9 +122,17 @@ struct EnrichmentMapFullscreenSheet: View {
             HStack(alignment: .top, spacing: 10) {
                 sourceBadge(c.source)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(c.result.displayName ?? "—")
-                        .font(.headline)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(c.result.displayName ?? "—")
+                            .font(.headline)
+                            .lineLimit(1)
+                        if c.establishment?.isHeadquarters == true {
+                            detailBadge("Siège", color: AppTheme.Colors.accent)
+                        }
+                        if c.establishment?.isActive == false {
+                            detailBadge("Fermé", color: AppTheme.Colors.danger)
+                        }
+                    }
                     if let addr = c.result.address, !addr.isEmpty {
                         Text(addr).font(.caption).foregroundStyle(AppTheme.Colors.textSecondary).lineLimit(2)
                     }
@@ -157,6 +165,14 @@ struct EnrichmentMapFullscreenSheet: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: selectedCandidate?.id)
     }
 
+    private func detailBadge(_ label: String, color: Color) -> some View {
+        Text(label)
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(color.opacity(0.15), in: Capsule())
+            .foregroundStyle(color)
+    }
+
     private func sourceBadge(_ s: MerchantEnrichmentSource) -> some View {
         VStack(spacing: 2) {
             Image(systemName: markerIcon(for: s)).font(.caption.weight(.bold))
@@ -181,15 +197,22 @@ struct EnrichmentMapFullscreenSheet: View {
         // ici — l'utilisateur veut juste explorer la carte, on garde toutes les sources).
         var collected: [SearchCandidate] = []
 
-        // Dispatch via le registry — sources entreprises de tous les pays activés.
-        let companyResults = await CompanyDataSourcesRegistry.shared.search(
-            query: trimmed,
-            country: nil,
-            postalCode: nil
+        // AXE S — même chemin que les deux autres écrans : planificateur + cascade.
+        // Laisser ici l'ancienne construction de `q=` aurait recréé deux chemins de code
+        // divergents pour la même question, ce que la doctrine du projet proscrit.
+        //
+        // Un pin par ÉTABLISSEMENT géolocalisé (`establishmentPins`, chemin partagé) —
+        // l'ancien aplatissement 1 entreprise = 1 pin masquait toutes les branches
+        // alors que c'est précisément l'adresse qui distingue la bonne boutique.
+        let result = await MerchantQueryExecutor.shared.search(
+            input: MerchantQueryPlanner.Input(
+                rawLabel: trimmed,
+                userQueryOverride: trimmed
+            ),
+            budget: .interactive,
+            knownNafPrefixes: NAFCategoryMapper.shared.knownPrefixes
         )
-        for enrichment in companyResults {
-            collected.append(SearchCandidate(source: enrichment.source, result: enrichment))
-        }
+        collected.append(contentsOf: result.establishmentPins())
 
         let mapResults = await MapKitSearchService.searchAll(query: trimmed, near: nil, limit: 12)
         for map in mapResults {
@@ -208,29 +231,32 @@ struct EnrichmentMapFullscreenSheet: View {
 
     private func markerIcon(for s: MerchantEnrichmentSource) -> String {
         switch s {
-        case .sirene: return "building.2.fill"
-        case .mapkit: return "mappin.circle.fill"
-        case .llm:    return "sparkles"
-        default:      return "mappin"
+        case .sirene:   return "building.2.fill"
+        case .mapkit:   return "mappin.circle.fill"
+        case .llm:      return "sparkles"
+        case .localLLM: return "server.rack"
+        default:        return "mappin"
         }
     }
 
     private func markerColor(for s: MerchantEnrichmentSource) -> Color {
         switch s {
-        case .sirene: return .blue
-        case .mapkit: return .green
-        case .llm:    return .purple
-        default:      return .red
+        case .sirene:   return .blue
+        case .mapkit:   return .green
+        case .llm:      return .purple
+        case .localLLM: return .teal
+        default:        return .red
         }
     }
 
     private func badgeLabel(for s: MerchantEnrichmentSource) -> String {
         switch s {
-        case .sirene: return "SIRENE"
-        case .mapkit: return "MAPS"
-        case .llm:    return "IA"
-        case .merged: return "FUSION"
-        case .manual: return "MANUEL"
+        case .sirene:   return "SIRENE"
+        case .mapkit:   return "MAPS"
+        case .llm:      return "IA"
+        case .localLLM: return "LOCAL"
+        case .merged:   return "FUSION"
+        case .manual:   return "MANUEL"
         }
     }
 }

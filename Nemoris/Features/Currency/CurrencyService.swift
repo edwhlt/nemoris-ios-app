@@ -5,12 +5,16 @@ import os
 // MARK: - CurrencyService
 //
 // Service de conversion de devises — actor isolé pour gérer le cache thread-safe.
-// Provider gratuit : exchangerate.host (sans clé, données BCE quotidiennes).
+// Provider gratuit : fawazahmed0/currency-api via jsDelivr CDN (sans clé), avec
+// fallback pages.dev — même provider que `CurrencyRateService` (Tricount).
+// ⚠️ exchangerate.host (ancien provider) exige désormais une clé payante
+// (`missing_access_key`) : toute requête échouait silencieusement, d'où
+// "Impossible de récupérer le taux" pour 100% des conversions.
 //
 // **Stratégie de cache** : 3 niveaux pour minimiser le réseau :
 //   1. RAM (`Dictionary` en mémoire de l'actor) — recharge à chaque cold start
 //   2. SQLite `currency_rates` (table v6 existante) — survit aux relaunches
-//   3. Réseau (`exchangerate.host`) — fallback ultime
+//   3. Réseau (fawazahmed0/currency-api) — fallback ultime
 //
 // Lookup : on cherche un taux du JOUR. Si absent, on fallback sur les 30
 // derniers jours (le taux ne bouge pas trop sur 1 mois — acceptable pour
@@ -146,15 +150,26 @@ actor CurrencyService {
 
     // MARK: - Network layer
 
-    /// Fetch le taux via exchangerate.host (gratuit, sans clé, données BCE).
-    /// Endpoint : `https://api.exchangerate.host/latest?base=XXX&symbols=YYY`
-    /// pour les taux du jour ; pour les dates historiques : `/YYYY-MM-DD`.
+    /// Fetch le taux via fawazahmed0/currency-api (gratuit, sans clé, ~170 devises).
+    /// Essaie d'abord le CDN jsDelivr (dates historiques disponibles), puis le
+    /// fallback pages.dev (taux du jour uniquement) — même stratégie que
+    /// `CurrencyRateService.fetchRate` (Tricount).
+    /// Réponse : `{ "date": "…", "{fromKey}": { "{toKey}": 0.93 } }`.
     private func fetchFromNetwork(from: String, to: String, date: Date) async -> Double? {
-        let today = Calendar.current.isDateInToday(date)
-        let datePath = today ? "latest" : dayKey(date: date)
-        guard let url = URL(string: "https://api.exchangerate.host/\(datePath)?base=\(from)&symbols=\(to)") else {
-            return nil
+        let fromKey = from.lowercased()
+        let toKey = to.lowercased()
+        let datePath = Calendar.current.isDateInToday(date) ? "latest" : dayKey(date: date)
+        let primary = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@\(datePath)/v1/currencies/\(fromKey).json"
+        let fallback = "https://latest.currency-api.pages.dev/v1/currencies/\(fromKey).json"
+
+        if let rate = await decodeRate(urlString: primary, fromKey: fromKey, toKey: toKey) {
+            return rate
         }
+        return await decodeRate(urlString: fallback, fromKey: fromKey, toKey: toKey)
+    }
+
+    private func decodeRate(urlString: String, fromKey: String, toKey: String) async -> Double? {
+        guard let url = URL(string: urlString) else { return nil }
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -162,8 +177,8 @@ actor CurrencyService {
                 return nil
             }
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let rates = json["rates"] as? [String: Double],
-                  let rate = rates[to] else {
+                  let ratesDict = json[fromKey] as? [String: Any],
+                  let rate = ratesDict[toKey] as? Double else {
                 Self.log.warning("Currency fetch parse error : \(String(data: data, encoding: .utf8) ?? "?")")
                 return nil
             }

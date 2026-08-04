@@ -8,9 +8,46 @@ import TipKit
 // MARK: - Document picker cross-platform
 
 #if os(macOS)
+/// Ouvre un `NSOpenPanel` DIRECTEMENT depuis une action (bouton), sans passer
+/// par une sheet.
+///
+/// Sur Mac, choisir un fichier/dossier est une fenêtre système, pas une vue :
+/// la router via une `.sheet` qui lance `runModal()` dans son `onAppear`
+/// imbrique une boucle modale dans une présentation de sheet encore en cours —
+/// le panneau ne s'ouvrait pas (« Changer le dossier… » sans effet). Appelé
+/// depuis l'action, il n'y a plus de présentation concurrente.
+@MainActor
+func presentOpenPanel(contentTypes: [UTType], onPick: @escaping (URL) -> Void) {
+    let panel = NSOpenPanel()
+    panel.allowsMultipleSelection = false
+    // Un dossier ne se choisit PAS via `allowedContentTypes = [.folder]` (le
+    // bouton « Ouvrir » reste désactivé) : il faut `canChooseDirectories`.
+    if contentTypes.contains(.folder) {
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+    } else {
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = contentTypes
+    }
+    // Présentation ASYNCHRONE attachée à la fenêtre plutôt que `runModal()` :
+    // lancer une boucle modale imbriquée depuis une action SwiftUI ne rendait
+    // pas la main (le panneau ne s'affichait pas — aucun signet n'était jamais
+    // enregistré). `beginSheetModal` rend immédiatement et rappelle au choix.
+    let handler: (NSApplication.ModalResponse) -> Void = { response in
+        guard response == .OK, let url = panel.url else { return }
+        onPick(url)
+    }
+    if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+        panel.beginSheetModal(for: window, completionHandler: handler)
+    } else {
+        panel.begin(completionHandler: handler)
+    }
+}
+
 /// macOS : NSOpenPanel natif — même API que le wrapper UIKit ci-dessous.
-/// Présenté en sheet par les call sites : la vue ouvre le panel à l'apparition
-/// puis se dismiss (le panel Mac est une fenêtre système, pas une vue).
+/// ⚠️ Préférer `presentOpenPanel` (appel direct depuis l'action) : présenter ce
+/// wrapper en sheet imbrique une boucle modale dans une présentation en cours.
 struct DocumentPickerView: View {
     let contentTypes: [UTType]
     let onPick: (URL) -> Void
@@ -21,9 +58,19 @@ struct DocumentPickerView: View {
             .frame(width: 200, height: 120)
             .onAppear {
                 let panel = NSOpenPanel()
-                panel.allowedContentTypes = contentTypes
                 panel.allowsMultipleSelection = false
-                panel.canChooseDirectories = false
+                // Un dossier ne se sélectionne PAS via allowedContentTypes = [.folder]
+                // (le bouton "Ouvrir" reste alors désactivé, d'où le "Changer le
+                // dossier" inopérant) : il faut canChooseDirectories = true. On
+                // adapte selon la nature demandée (dossier vs fichier).
+                if contentTypes.contains(.folder) {
+                    panel.canChooseDirectories = true
+                    panel.canChooseFiles = false
+                } else {
+                    panel.canChooseDirectories = false
+                    panel.canChooseFiles = true
+                    panel.allowedContentTypes = contentTypes
+                }
                 if panel.runModal() == .OK, let url = panel.url {
                     onPick(url)
                 }
@@ -74,8 +121,79 @@ struct SettingsView: View {
 
     var isEmbedded: Bool = false
 
+    #if os(macOS)
+    /// Sous-section ouverte, en navigation PAR ÉTAT (pas un push).
+    ///
+    /// Un `NavigationLink` empile la destination dans la `NavigationStack` du
+    /// module ; sur macOS cet empilement n'est pas défait quand on change de
+    /// module depuis la sidebar : on se retrouvait dans « Réglages › Avancé »
+    /// alors que la sidebar surlignait déjà « Données ». Même remède que pour
+    /// Investissements et Tricount : la sous-section REMPLACE le contenu du
+    /// module, avec son propre retour.
+    @State private var pushedSection: SettingsSection?
+    /// Pour fermer le panneau en revenant à la liste des réglages.
+    @Environment(InspectorPaneCenter.self) private var paneCenter: InspectorPaneCenter?
+    #endif
+
     var body: some View {
+        #if os(macOS)
+        if let section = pushedSection {
+            settingsSectionPage(section)
+        } else if isEmbedded {
+            navBody
+        } else {
+            NavigationStack { navBody }
+        }
+        #else
         if isEmbedded { navBody } else { NavigationStack { navBody } }
+        #endif
+    }
+
+    #if os(macOS)
+    /// Une sous-section en pleine page + retour vers la liste des réglages.
+    @ViewBuilder
+    private func settingsSectionPage(_ section: SettingsSection) -> some View {
+        section.destination
+            .navigationTitle(section.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        paneCenter?.dismissCurrent()
+                        pushedSection = nil
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .help("Réglages")
+                    .accessibilityLabel("Réglages")
+                }
+            }
+    }
+
+    #endif
+
+    /// Row menant à une sous-section : navigation par ÉTAT sur macOS (le push
+    /// y désynchronise la sidebar), `NavigationLink` classique sur iOS. Le
+    /// chevron est ajouté à la main côté macOS pour un rendu identique.
+    @ViewBuilder
+    private func settingsLink(_ section: SettingsSection, @ViewBuilder label: () -> some View) -> some View {
+        #if os(macOS)
+        Button {
+            pushedSection = section
+        } label: {
+            HStack {
+                label()
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        #else
+        NavigationLink(destination: section.destination) { label() }
+        #endif
     }
 
     @ViewBuilder private var accountPickerOptions: some View {
@@ -253,10 +371,10 @@ struct SettingsView: View {
 
                 // ── Import & Données ──────────────────────────────────────
                 Section("Import & Données") {
-                    NavigationLink(destination: ImportV3EntryView()) {
+                    settingsLink(.importCSV) {
                         Label("Importer un CSV…", systemImage: "square.and.arrow.down")
                     }
-                    NavigationLink(destination: CompanyDataSourcesSettingsView()) {
+                    settingsLink(.companySources) {
                         Label("Sources entreprises", systemImage: "globe.europe.africa.fill")
                     }
                 }
@@ -269,11 +387,11 @@ struct SettingsView: View {
                 Section("Sauvegarde & synchronisation") {
                     // Filet de sécurité de base — gratuit, snapshots quotidiens iCloud
                     // (recommandé pour tous les users).
-                    NavigationLink(destination: BackupSettingsView()) {
+                    settingsLink(.backup) {
                         Label("Sauvegarde locale & iCloud", systemImage: "icloud.and.arrow.up.fill")
                     }
                     // Sync CloudKit chiffrée multi-appareils (AXE L).
-                    NavigationLink(destination: CloudSyncSettingsView()) {
+                    settingsLink(.cloudSync) {
                         HStack {
                             Label("Synchronisation iCloud", systemImage: "arrow.trianglehead.2.clockwise.rotate.90.icloud")
                             Spacer()
@@ -282,19 +400,12 @@ struct SettingsView: View {
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
                         }
                     }
-                    // Export continu du fichier vers un dossier choisi (Pro).
-                    // Volontairement PAS appelé "sync" : c'est un miroir one-way
-                    // (app → dossier) pour la portabilité/propriété du fichier —
-                    // la vraie sync multi-appareils est CloudSyncSettingsView.
-                    NavigationLink(destination: SyncSettingsView()) {
-                        HStack {
-                            Label("Export continu vers dossier", systemImage: "externaldrive.badge.icloud")
-                            Spacer()
-                            if !store.isUnlocked(.sync) { ProBadge() }
-                        }
-                    }
+                    // (Export continu vers dossier retiré 2026-07-26 — redondant
+                    //  avec les snapshots iCloud de BackupService, qui sont déjà
+                    //  des .sqlite bruts accessibles dans Fichiers et survivent à
+                    //  la désinstallation. Le multi-cloud viendra côté BackupService.)
                     if appState.showInvestments {
-                        NavigationLink(destination: LiveSyncSettingsView()) {
+                        settingsLink(.liveSync) {
                             Label("Exchanges & wallets", systemImage: "arrow.triangle.2.circlepath")
                         }
                     }
@@ -304,18 +415,18 @@ struct SettingsView: View {
                 // ── Avancé ────────────────────────────────────────────────
                 // Regroupe : IA, confidentialité, base de données.
                 Section("Avancé") {
-                    NavigationLink(destination: AISettingsView()) {
+                    settingsLink(.ai) {
                         Label("Intelligence artificielle", systemImage: "sparkles")
                     }
-                    NavigationLink(destination: PrivacyView()) {
+                    settingsLink(.privacy) {
                         Label("Données & vie privée", systemImage: "lock.shield")
                     }
                     // Rapport fiscal présenté en sheet (pas un push) — c'est
                     // un outil d'export ponctuel, pas un sous-réglage permanent.
-                    NavigationLink(destination: TaxReportView()) {
+                    settingsLink(.taxReport) {
                         Label("Rapport fiscal France", systemImage: "doc.text.fill")
                     }
-                    NavigationLink(destination: AdvancedSettingsView()) {
+                    settingsLink(.advanced) {
                         Label("Base de données & Console SQL", systemImage: "gearshape.2")
                     }
                 }
@@ -356,12 +467,7 @@ struct SettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .tint(AppTheme.Colors.accent)
-        #if os(macOS)
-        // Sur macOS le Form prend sa largeur intrinsèque (étroite) et se colle
-        // au bord : on force le remplissage du volet détail + style grouped natif.
-        .formStyle(.grouped)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        #endif
+        .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
         .navigationTitle("Paramètres")
         .onAppear {
@@ -370,7 +476,7 @@ struct SettingsView: View {
             }
             tabOrder = appState.mainTabOrder
         }
-        .sheet(isPresented: $showPaywall) {
+        .adaptivePane(isPresented: $showPaywall) {
             PaywallView().environment(store)
         }
     }
@@ -486,7 +592,7 @@ struct SettingsView: View {
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                 }
             }
-            .sheet(isPresented: $showCurrencyConverter) {
+            .adaptivePane(isPresented: $showCurrencyConverter) {
                 CurrencyConverterSheet().environment(appState)
             }
         } header: {
@@ -632,107 +738,10 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - SyncSettingsView
-
-struct SyncSettingsView: View {
-    @Environment(AppState.self) private var appState
-    @Environment(PurchaseManager.self) private var store
-    @State private var showSyncFolderPicker = false
-    @State private var syncFolderName: String? = SyncService.shared.destinationFolderName
-    @State private var syncErrorMessage: String?
-    @State private var lastSyncDate: Date? = SyncService.shared.lastSyncDate
-    @State private var lastSyncSuccess: Bool? = SyncService.shared.lastSyncSuccess
-
-    var body: some View {
-        Form {
-            Section {
-                if let name = syncFolderName {
-                    LabeledContent("Dossier") {
-                        Text(name)
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
-                            .multilineTextAlignment(.trailing)
-                    }
-
-                    if let date = lastSyncDate {
-                        LabeledContent("Dernière sync") {
-                            HStack(spacing: 4) {
-                                Image(systemName: lastSyncSuccess == true ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                    .foregroundStyle(lastSyncSuccess == true ? AppTheme.Colors.success : AppTheme.Colors.danger)
-                                    .font(.caption)
-                                Text(date, style: .relative)
-                                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                                    .font(.caption)
-                            }
-                        }
-                    }
-
-                    Button {
-                        let ok = SyncService.shared.sync()
-                        lastSyncDate = SyncService.shared.lastSyncDate
-                        lastSyncSuccess = ok
-                        appState.postToast(ok ? .success : .error,
-                                           ok ? "Sauvegarde envoyée" : "Échec de la sauvegarde")
-                    } label: {
-                        Label("Synchroniser maintenant", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    .tint(AppTheme.Colors.accent)
-
-                    Button("Changer de dossier…") {
-                        showSyncFolderPicker = true
-                    }
-                    .tint(AppTheme.Colors.accent)
-
-                    Button("Désactiver la synchronisation", role: .destructive) {
-                        SyncService.shared.removeDestination()
-                        syncFolderName = nil
-                        lastSyncDate = nil
-                        lastSyncSuccess = nil
-                        syncErrorMessage = nil
-                        appState.postToast(.info, "Synchronisation désactivée")
-                    }
-                } else {
-                    Text("Choisissez un dossier (iCloud Drive, OneDrive, local…) vers lequel la base sera automatiquement copiée.")
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                        .font(.caption)
-
-                    Button("Choisir un dossier de sync…") {
-                        showSyncFolderPicker = true
-                    }
-                    .tint(AppTheme.Colors.accent)
-                }
-
-                if let err = syncErrorMessage {
-                    Text(err).foregroundStyle(AppTheme.Colors.danger).font(.caption)
-                }
-            } header: {
-                Text("Dossier de destination")
-            } footer: {
-                if syncFolderName != nil {
-                    Text("La base est copiée automatiquement dans ce dossier à chaque modification et quand l'application passe en arrière-plan.")
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                }
-            }
-        }
-        .navigationTitle("Synchronisation")
-        .navigationBarTitleDisplayMode(.large)
-        .paywallOverlay(for: .sync)
-        .sheet(isPresented: $showSyncFolderPicker) {
-            DocumentPickerView(contentTypes: [.folder]) { url in
-                showSyncFolderPicker = false
-                do {
-                    try SyncService.shared.setDestination(from: url)
-                    syncFolderName = SyncService.shared.destinationFolderName
-                    lastSyncDate = SyncService.shared.lastSyncDate
-                    lastSyncSuccess = SyncService.shared.lastSyncSuccess
-                    syncErrorMessage = nil
-                } catch {
-                    syncErrorMessage = error.localizedDescription
-                }
-            }
-            .ignoresSafeArea()
-        }
-    }
-}
+// (SyncSettingsView + SyncService retirés 2026-07-26 — l'export continu one-way
+//  vers un dossier était redondant avec les snapshots iCloud de BackupService
+//  et avait un piège de fausse sécurité : le bookmark du dossier vivait dans
+//  UserDefaults, effacé à la désinstallation → l'export s'arrêtait en silence.)
 
 // MARK: - AdvancedSettingsView
 
@@ -797,7 +806,14 @@ struct AdvancedSettingsView: View {
                 }
 
                 Button("Changer le dossier…") {
+                    #if os(macOS)
+                    // Panneau système ouvert directement (cf. `presentOpenPanel`).
+                    presentOpenPanel(contentTypes: [.folder]) { url in
+                        applyPickedSQLFolder(url)
+                    }
+                    #else
                     showSQLFolderPicker = true
+                    #endif
                 }
                 .tint(AppTheme.Colors.accent)
 
@@ -833,20 +849,30 @@ struct AdvancedSettingsView: View {
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             }
         }
+        .nemorisFormStyle()
         .navigationTitle("Avancé")
         .navigationBarTitleDisplayMode(.large)
+        // iOS : picker en sheet (le contrôleur UIKit EST une vue). macOS : panneau
+        // système ouvert directement depuis l'action (cf. `presentOpenPanel`).
+        #if !os(macOS)
         .sheet(isPresented: $showSQLFolderPicker) {
             DocumentPickerView(contentTypes: [.folder]) { url in
                 showSQLFolderPicker = false
-                do {
-                    try SQLConsoleHelper.linkFolder(from: url)
-                    linkedSQLFolderName = SQLConsoleHelper.linkedFolderName
-                    sqlFolderErrorMessage = nil
-                } catch {
-                    sqlFolderErrorMessage = error.localizedDescription
-                }
+                applyPickedSQLFolder(url)
             }
             .ignoresSafeArea()
+        }
+        #endif
+    }
+
+    /// Enregistre le dossier choisi (commun aux deux plateformes).
+    private func applyPickedSQLFolder(_ url: URL) {
+        do {
+            try SQLConsoleHelper.linkFolder(from: url)
+            linkedSQLFolderName = SQLConsoleHelper.linkedFolderName
+            sqlFolderErrorMessage = nil
+        } catch {
+            sqlFolderErrorMessage = error.localizedDescription
         }
     }
 }
@@ -855,7 +881,9 @@ struct AdvancedSettingsView: View {
 
 struct PrivacyView: View {
     var body: some View {
-        List {
+        // Form (pas List) : contenu statique → boxes arrondies macOS via
+        // nemorisFormStyle(), rendu identique sur iOS.
+        Form {
             Section {
                 HStack(spacing: 16) {
                     ZStack {
@@ -917,8 +945,49 @@ struct PrivacyView: View {
             .listRowBackground(AppTheme.Colors.surface)
         }
         .scrollContentBackground(.hidden)
+        .nemorisFormStyle()
         .background(AppTheme.Colors.background)
         .navigationTitle("Confidentialité")
         .navigationBarTitleDisplayMode(.large)
+    }
+}
+
+// MARK: - Sous-sections des réglages
+
+/// Destinations des réglages. Sur macOS elles REMPLACENT le contenu du module
+/// (cf. `SettingsView.pushedSection`) — un push n'y est pas défait au changement
+/// de module et désynchronise la sidebar. Sur iOS, push classique.
+enum SettingsSection: String, Identifiable, CaseIterable {
+    case importCSV, companySources, backup, cloudSync, liveSync
+    case ai, privacy, taxReport, advanced
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .importCSV:      return "Importer un CSV"
+        case .companySources: return "Sources entreprises"
+        case .backup:         return "Sauvegarde locale & iCloud"
+        case .cloudSync:      return "Synchronisation iCloud"
+        case .liveSync:       return "Exchanges & wallets"
+        case .ai:             return "Intelligence artificielle"
+        case .privacy:        return "Données & vie privée"
+        case .taxReport:      return "Rapport fiscal France"
+        case .advanced:       return "Base de données & Console SQL"
+        }
+    }
+
+    @ViewBuilder var destination: some View {
+        switch self {
+        case .importCSV:      ImportV3EntryView(isEmbedded: true)
+        case .companySources: CompanyDataSourcesSettingsView()
+        case .backup:         BackupSettingsView()
+        case .cloudSync:      CloudSyncSettingsView()
+        case .liveSync:       LiveSyncSettingsView()
+        case .ai:             AISettingsView()
+        case .privacy:        PrivacyView()
+        case .taxReport:      TaxReportView()
+        case .advanced:       AdvancedSettingsView()
+        }
     }
 }

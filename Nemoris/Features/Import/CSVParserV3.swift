@@ -148,4 +148,46 @@ enum CSVParserV3 {
         guard let value = Double(s) else { return nil }
         return negative ? -value : value
     }
+
+    // MARK: - Construction des lignes de session
+
+    /// Applique un mapping de colonnes et produit les lignes de session.
+    ///
+    /// Extrait de `ColumnMappingView` parce qu'un import multi-fichiers réutilise
+    /// AUTOMATIQUEMENT le mapping mémorisé d'un format déjà connu, sans jamais
+    /// afficher l'écran de mapping : le même code doit servir les deux chemins.
+    ///
+    /// `startingAt` continue une numérotation GLOBALE : deux fichiers repartant
+    /// chacun à 1 produiraient des `sourceRowNumber` en collision dans une
+    /// session agrégée, et les rapports d'échec au commit désigneraient une
+    /// ligne ambiguë.
+    static func buildRows(parsed: Parsed,
+                          mapping: ColumnMapping,
+                          startingAt startNumber: Int = 1,
+                          sourceFile: String? = nil) -> (rows: [ImportSessionRow], rejected: Int) {
+        var rows: [ImportSessionRow] = []
+        rows.reserveCapacity(parsed.rows.count)
+        var rejected = 0
+        var number = startNumber
+
+        for raw in parsed.rows {
+            let dateRaw = (mapping.dateColumnIndex < raw.count) ? raw[mapping.dateColumnIndex] : ""
+            let amountRaw = (mapping.amountColumnIndex < raw.count) ? raw[mapping.amountColumnIndex] : ""
+            let labelRaw = (mapping.labelColumnIndex < raw.count) ? raw[mapping.labelColumnIndex] : ""
+            guard let date = parseDate(dateRaw, hintFormat: mapping.dateFormat),
+                  let amount = parseAmount(amountRaw, decimal: mapping.amountDecimal),
+                  !labelRaw.isEmpty
+            else { rejected += 1; continue }
+
+            rows.append(ImportSessionRow(
+                sourceRowNumber: number,
+                rawLabel: labelRaw,
+                date: date,
+                amount: amount,
+                sourceFile: sourceFile
+            ))
+            number += 1
+        }
+        return (rows, rejected)
+    }
 }

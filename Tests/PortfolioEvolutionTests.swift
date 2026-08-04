@@ -199,6 +199,38 @@ do {
            String(format: "amplitude = %.2f %%", amp))
 }
 
+// MARK: - t7 — 1J hors séance : la grille s'ancre sur la dernière cotation
+
+print("\nt7 · 1J consulté hors séance (week-end) : la dernière séance reste visible")
+do {
+    // Simule un samedi après-midi : la dernière cotation date de vendredi
+    // 17 h 30, soit ~46 h avant `now`. Une grille [now-24h, now] ne contient
+    // alors AUCUN point réel → la courbe s'aplatissait sur une seule valeur
+    // back-fillée (le symptôme « 1J n'affiche que 2 points »).
+    var session: [InvestmentPricePoint] = []
+    let lastQuote = now.addingTimeInterval(-46 * 3600)
+    for step in stride(from: 15, through: 0, by: -1) {
+        session.append(InvestmentPricePoint(
+            id: "S\(step)", identifier: "EWLD.PA",
+            date: lastQuote.addingTimeInterval(-Double(step) * 1800),
+            close: 40.0 + Double(15 - step) * 0.02))
+    }
+    let result = PortfolioEvolutionBuilder.build(
+        inputs: [PortfolioSeriesInput(positionId: 1, quantity: 100, history: session)],
+        range: .oneDay, now: now)
+
+    expect(result.points.count >= 15, "la séance cotée est bien tracée",
+           "\(result.points.count) points")
+    // La courbe doit refléter la variation réelle de la séance (+0.30 € sur
+    // 40 €, ×100 titres) et pas une ligne parfaitement plate.
+    let amp = amplitude(result.points)
+    expect(amp > 0.1, "la variation de la séance est visible",
+           String(format: "amplitude = %.2f %%", amp))
+    expect(result.points.last.map { $0.date <= now } ?? false,
+           "la grille ne dépasse pas l'instant présent")
+    expect(result.unpricedPositionIds.isEmpty, "position valorisée normalement")
+}
+
 // MARK: - Verdict
 
 print("\n\(checks - failures)/\(checks) assertions OK")

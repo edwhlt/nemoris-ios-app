@@ -26,6 +26,13 @@ final class NAFCategoryMapper: Sendable {
 
     /// Retourne la catégorie associée à un code NAF, en essayant plusieurs formats.
     /// Ex: "1071C", "10.71C", "10.71 C" → toutes matchent la même entrée.
+    /// Tous les codes NAF connus du référentiel.
+    ///
+    /// Exposé pour que `CandidateRanker` reste PUR : il a besoin de savoir si un code NAF
+    /// est reconnu (petit bonus de score), mais il ne doit pas lire le bundle. On lui passe
+    /// donc l'ensemble en donnée plutôt que ce mapper en dépendance.
+    var knownPrefixes: Set<String> { Set(mapping.keys) }
+
     func lookup(_ nafCode: String?) -> NAFCategory? {
         guard let raw = nafCode?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
             return nil

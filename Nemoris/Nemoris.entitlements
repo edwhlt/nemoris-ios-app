@@ -20,6 +20,12 @@
 		<string>iCloud.fr.hedwin.nemoris</string>
 	</array>
 	<key>aps-environment</key>
-	<string>development</string>
+	<string>production</string>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
 </dict>
 </plist>

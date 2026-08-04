@@ -63,6 +63,7 @@ struct TierUpdateSheet: View {
                 localizationSection
                 advancedSection
             }
+            .nemorisFormStyle()
             .navigationTitle("Vérifier le tier")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

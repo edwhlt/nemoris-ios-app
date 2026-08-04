@@ -44,6 +44,10 @@ echo "[patch-onnx] Info.plist MinimumOSVersion set to $TARGET"
 # builds (Archive, device builds). For simulator/unsigned builds it may be
 # empty, in which case we leave the framework unsigned (it's not uploaded).
 if [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
+    # Strip extended attributes (e.g. com.apple.provenance) that make codesign
+    # abort with "resource fork, Finder information, or similar detritus not
+    # allowed" — seen when signing with an older Xcode than the host macOS.
+    xattr -cr "$FRAMEWORK"
     codesign --force \
              --sign "$EXPANDED_CODE_SIGN_IDENTITY" \
              --preserve-metadata=identifier,entitlements \

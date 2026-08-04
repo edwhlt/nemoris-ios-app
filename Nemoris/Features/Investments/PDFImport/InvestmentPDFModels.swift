@@ -73,7 +73,63 @@ struct PDFExtractedPosition: Identifiable, Hashable {
     }
 }
 
-/// Résultat du parsing d'une page PDF/image.
+/// Nature réelle du document analysé, déterminée par SNIFFING du contenu et non
+/// par l'extension du fichier (cf. `InvestmentPDFParser.detectKind`).
+///
+/// Sert aussi au vocabulaire de l'UI : parler de « page » pour une capture
+/// d'écran ou un CSV n'a pas de sens depuis que l'import est multi-format.
+enum InvestmentDocumentKind: String {
+    case pdf
+    case image
+    case text
+    case unknown
+
+    /// Nom de l'unité analysée, au singulier. L'UI compose « 3 captures analysées ».
+    func unitLabel(count: Int) -> String {
+        let plural = count > 1
+        switch self {
+        case .pdf:     return plural ? "pages analysées" : "page analysée"
+        case .image:   return plural ? "captures analysées" : "capture analysée"
+        case .text:    return plural ? "blocs analysés" : "bloc analysé"
+        case .unknown: return plural ? "éléments analysés" : "élément analysé"
+        }
+    }
+}
+
+/// Pourquoi une page n'a rien donné. Sans ça, l'UI ne peut afficher qu'un
+/// « Rien à importer » indifférencié : impossible pour l'utilisateur (ou pour
+/// nous en support) de distinguer un OCR muet, une IA indisponible, une IA qui
+/// a échoué, et un document réellement sans opérations.
+enum PDFPageDiagnostic: Equatable {
+    /// Extraction OK, opérations trouvées.
+    case extracted
+    /// Aucun texte n'a pu être extrait (image illisible, PDF scanné vide…).
+    case noTextExtracted
+    /// Le contenu n'est pas du texte exploitable (binaire pris pour du texte).
+    case notTextContent
+    /// Le moteur IA n'est pas disponible sur cet appareil.
+    case aiUnavailable
+    /// Le moteur IA a échoué (contexte dépassé, garde-fou, erreur interne…).
+    case aiFailed(String)
+    /// Texte lu et IA OK, mais aucune opération reconnaissable dedans.
+    case nothingRecognized
+
+    var isFailure: Bool { self != .extracted }
+
+    /// Message court affiché à l'utilisateur.
+    var userMessage: String {
+        switch self {
+        case .extracted:        return "Opérations extraites."
+        case .noTextExtracted:  return "Aucun texte n'a pu être lu dans ce document. Si c'est une photo, vérifie qu'elle est nette et bien cadrée."
+        case .notTextContent:   return "Le format du fichier n'a pas été reconnu (contenu binaire). Réessaie en exportant un PDF, une capture d'écran ou un CSV."
+        case .aiUnavailable:    return "L'analyse intelligente n'est pas disponible sur cet appareil (Apple Intelligence requis). L'extraction automatique a été utilisée à la place."
+        case .aiFailed(let r):  return "L'analyse intelligente a échoué : \(r)"
+        case .nothingRecognized: return "Le texte a bien été lu, mais aucune opération (achat, vente, dividende) n'y a été reconnue."
+        }
+    }
+}
+
+/// Résultat du parsing d'une page PDF / capture / bloc de texte.
 struct PDFPageResult: Identifiable {
     let id = UUID()
     let pageNumber: Int
@@ -84,6 +140,12 @@ struct PDFPageResult: Identifiable {
     /// Mode détecté par l'IA pour cette page.
     var detectedMode: PDFDocumentMode = .orders
     var parsingNote: String?    // Commentaire IA (ex: "page de résumé, pas d'ordres")
+    /// Pourquoi cette page n'a rien donné (diagnostic affiché dans l'UI).
+    var diagnostic: PDFPageDiagnostic = .extracted
+    /// Nature réelle du document (sniffée), pour le vocabulaire de l'UI.
+    var kind: InvestmentDocumentKind = .unknown
+    /// Vrai si les opérations viennent de l'extracteur déterministe (sans IA).
+    var usedDeterministicFallback: Bool = false
 }
 
 /// Résumé de l'import final.

@@ -34,6 +34,9 @@ struct CompanyDataSourcesSettingsView: View {
                 }
             } header: { Text("Information supplémentaire") }
         }
+        .scrollContentBackground(.hidden)
+        .nemorisFormStyle()
+        .background(AppTheme.Colors.background.ignoresSafeArea())
         .navigationTitle("Sources entreprises")
         .navigationBarTitleDisplayMode(.inline)
     }

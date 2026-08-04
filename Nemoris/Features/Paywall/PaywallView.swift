@@ -4,13 +4,13 @@ import StoreKit
 // MARK: - PaywallView
 
 struct PaywallView: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     @Environment(PurchaseManager.self) private var store
 
     @State private var selectedProductID: String? = nil
 
     var body: some View {
-        NavigationStack {
             ScrollView {
                 VStack(spacing: 28) {
                     headerSection
@@ -22,15 +22,7 @@ struct PaywallView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 32)
             }
-            .navigationTitle("Finance Pro")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                }
-            }
-        }
+            .paneChrome("Finance Pro", cancelLabel: "Fermer", onCancel: { dismiss() })
         .onAppear {
             // Sélection par défaut : annuel (meilleur rapport qualité/prix)
             selectedProductID = store.yearlyProduct?.id ?? store.products.first?.id
@@ -278,7 +270,7 @@ struct PaywallOverlay: ViewModifier {
                     lockedOverlay
                 }
             }
-            .sheet(isPresented: $showPaywall) {
+            .adaptivePane(isPresented: $showPaywall) {
                 PaywallView()
                     .environment(store)
             }
@@ -343,5 +335,40 @@ struct ProBadge: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
         .background(AppTheme.Colors.accent, in: Capsule())
+    }
+}
+
+// MARK: - ToolbarPaywallGate
+
+/// Verrouille une action de `.toolbar` derrière le paywall.
+///
+/// `.paywallOverlay` ne suffit pas pour une action de toolbar : c'est un
+/// `.overlay {}` posé sur le CONTENU, et les items de `.toolbar` (barre de
+/// navigation) vivent dans une couche à part que cet overlay ne recouvre
+/// jamais — ils restent tapables même quand l'écran affiche le cadenas.
+/// Incident réel (2026-08-01) : le menu "⋯" d'Investissements et le "+" de
+/// la Console SQL restaient pleinement fonctionnels derrière l'écran
+/// verrouillé. Toujours passer une action de toolbar par ce wrapper plutôt
+/// que de l'exposer nue à côté d'un `paywallOverlay` sur le contenu.
+struct ToolbarPaywallGate<Content: View>: View {
+    let feature: AppFeature
+    @Environment(PurchaseManager.self) private var store
+    @State private var showPaywall = false
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        if store.isUnlocked(feature) {
+            content()
+        } else {
+            Button {
+                showPaywall = true
+            } label: {
+                Image(systemName: "lock.fill")
+            }
+            .adaptivePane(isPresented: $showPaywall) {
+                PaywallView()
+                    .environment(store)
+            }
+        }
     }
 }

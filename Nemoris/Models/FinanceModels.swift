@@ -305,12 +305,92 @@ struct TransactionEditDraft: Identifiable {
     }
 }
 
+/// Statut d'un remboursement — v44 (AXE R).
+enum ReimbursementStatus: String, Codable, CaseIterable, Identifiable {
+    case pending  = "PENDING"
+    case received = "RECEIVED"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .pending:  return "En attente"
+        case .received: return "Reçu"
+        }
+    }
+
+    var systemIcon: String {
+        switch self {
+        case .pending:  return "clock.fill"
+        case .received: return "checkmark.circle.fill"
+        }
+    }
+}
+
+/// Un remboursement attendu — rattaché à une transaction simple OU une entrée
+/// Tricount (jamais les deux, CHECK XOR en base, v44 AXE R). Remplace
+/// `transactions.reimbursement_payee_id` (0..1 payee) et `tricount_reimbursements`
+/// (0..N payees).
+struct Reimbursement: Identifiable {
+    let id: Int
+    let transactionId: Int?
+    let tricountEntryId: Int?
+    let payeeId: Int
+    let payeeName: String
+    var status: ReimbursementStatus
+    let updatedAt: Date
+
+    /// Montant signé dans la devise d'origine (négatif = dépense, le cas
+    /// courant) — déjà signé par la requête : montant tel quel pour une
+    /// transaction, part personnelle signée selon le type de l'entrée liée
+    /// pour un remboursement Tricount.
+    let amount: Double
+    let currency: String
+    /// Équivalent EUR signé (nil si conversion indisponible ou déjà en EUR).
+    let eurAmount: Double?
+
+    let originDescription: String
+    let originDate: Date
+
+    /// Catégorie de la transaction/entrée d'origine — nil si non catégorisée.
+    /// Ajoutés en fin de liste avec valeurs par défaut pour ne pas casser les
+    /// sites de construction existants qui n'ont pas cette info (remboursements
+    /// Tricount seuls, par ex.).
+    var categoryId: Int? = nil
+    var categoryName: String = ""
+    /// Payee PRINCIPAL de la transaction d'origine (ex. "Netflix") — distinct
+    /// de `payeeName` qui est celui qui REMBOURSE. Vide côté Tricount (pas
+    /// d'équivalent). Sert de repli d'affichage quand `originDescription` est
+    /// vide (fréquent : c'est un champ de note libre, souvent jamais rempli).
+    var originPayeeName: String = ""
+
+    var isTricountOrigin: Bool { tricountEntryId != nil }
+    var effectiveEurAmount: Double { eurAmount ?? amount }
+    var isConverted: Bool { eurAmount != nil && currency != "EUR" && currency != "" }
+    var needsConversion: Bool { currency != "EUR" && currency != "" && eurAmount == nil }
+}
+
+/// Remboursements groupés par catégorie de dépense d'origine — vue
+/// complémentaire au groupement par payee dans `ReimbursementsSheet`.
+struct CategoryReimbursementGroup: Identifiable {
+    let categoryId: Int?
+    let categoryName: String   // "Non catégorisé" si categoryId == nil
+    let items: [Reimbursement]
+    var id: Int { categoryId ?? -1 }
+    var total: Double { items.reduce(0) { $0 + $1.effectiveEurAmount } }
+    var transactionCount: Int { items.filter { !$0.isTricountOrigin }.count }
+    var tricountCount: Int { items.filter { $0.isTricountOrigin }.count }
+}
+
+/// Remboursements groupés par payee — transactions simples et Tricount confondus.
 struct ReimbursementGroup: Identifiable {
-    let tiersId: Int
-    let tiersName: String
-    let transactions: [FinanceTransaction]
-    var total: Double { transactions.reduce(0) { $0 + $1.amount } }
-    var id: Int { tiersId }
+    let payeeId: Int
+    let payeeName: String
+    let items: [Reimbursement]
+    var id: Int { payeeId }
+    var total: Double { items.reduce(0) { $0 + $1.effectiveEurAmount } }
+    var transactionCount: Int { items.filter { !$0.isTricountOrigin }.count }
+    var tricountCount: Int { items.filter { $0.isTricountOrigin }.count }
 }
 
 struct MonthlyTotals {
@@ -400,7 +480,7 @@ struct TiersBulkImportResult {
 
 // MARK: - Tricount Models
 
-struct TricountGroup: Identifiable, Equatable {
+struct TricountGroup: Identifiable, Equatable, Hashable {
     let id: Int
     let tricountKey: String
     let title: String
@@ -427,37 +507,6 @@ struct TricountEntry: Identifiable {
     let userCategoryId: Int?
     let userCategoryName: String
     let linkedTransactionId: Int?
-}
-
-struct TricountReimbursement: Identifiable {
-    let id: Int
-    let entryId: Int
-    let tiersId: Int
-    let tiersName: String
-    let amount: Double              // montant dans la devise du groupe (toujours positif)
-    let currency: String            // devise du groupe (ex. "VND")
-    let eurAmount: Double?          // équivalent EUR (nil si taux inconnu)
-    let entryDescription: String
-    let entryDate: Date
-    let entryTypeTransaction: String // type de l'entrée liée ("NORMAL", "INCOME", etc.)
-
-    var effectiveEurAmount: Double { eurAmount ?? amount }
-    var isConverted: Bool { eurAmount != nil && currency != "EUR" && currency != "" }
-    var needsConversion: Bool { currency != "EUR" && currency != "" && eurAmount == nil }
-    /// Vrai si l'entrée liée est une dépense (NORMAL).
-    var isExpenseEntry: Bool { entryTypeTransaction.uppercased() == "NORMAL" }
-    /// Montant EUR signé : négatif pour une dépense, positif pour un revenu/remboursement.
-    var signedEffectiveEurAmount: Double { isExpenseEntry ? -effectiveEurAmount : effectiveEurAmount }
-    /// Montant original signé (devise d'origine).
-    var signedAmount: Double { isExpenseEntry ? -amount : amount }
-}
-
-struct TricountReimbursementGroup: Identifiable {
-    let tiersId: Int
-    let tiersName: String
-    let items: [TricountReimbursement]
-    var total: Double { items.reduce(0) { $0 + $1.signedEffectiveEurAmount } }
-    var id: Int { tiersId }
 }
 
 /// Résumé des dépenses pour un tag (transactions + entrées Tricount)
@@ -662,4 +711,25 @@ struct InvestmentPricePoint: Identifiable, Hashable, Codable {
     let identifier: String
     let date: Date
     let close: Double
+    /// Cours d'OUVERTURE du pas de temps (la bougie : jour en `.daily`, tranche
+    /// de 30 min en `.intraday30m`). C'est le « prix d'entrée » du point, que
+    /// Yahoo et Stooq fournissent déjà à côté du close.
+    ///
+    /// Optionnel pour deux raisons :
+    ///   - les séries déjà en cache disque n'ont pas la clé (le décodage Codable
+    ///     synthétisé utilise `decodeIfPresent` pour un Optional → les caches
+    ///     existants restent lisibles, sinon TOUT l'historique serait jeté au
+    ///     premier décodage) ;
+    ///   - CoinGecko `market_chart` ne renvoie que des prix ponctuels, pas d'OHLC.
+    let open: Double?
+
+    /// Init explicite : avec `open` en `let` sans valeur par défaut, l'init
+    /// mémberwise synthétisé l'exigerait sur les ~6 sites de construction.
+    init(id: String, identifier: String, date: Date, close: Double, open: Double? = nil) {
+        self.id = id
+        self.identifier = identifier
+        self.date = date
+        self.close = close
+        self.open = open
+    }
 }

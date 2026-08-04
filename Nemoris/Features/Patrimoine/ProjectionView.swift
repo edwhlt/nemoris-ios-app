@@ -17,7 +17,8 @@ import Charts
 //   - Date estimée où le patrimoine net dépasse un palier (100k, 250k, 500k…)
 
 struct ProjectionView: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     @Environment(AppState.self) private var appState
     let viewModel: PatrimoineViewModel
 
@@ -54,7 +55,6 @@ struct ProjectionView: View {
     }
 
     var body: some View {
-        NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
                     // Picker scenarios — segmented compact
@@ -81,14 +81,7 @@ struct ProjectionView: View {
                 }
             }
             .background(AppTheme.Colors.background)
-            .navigationTitle("Projection 5 ans")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
-                }
-            }
-        }
+            .paneChrome("Projection 5 ans", cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 
     // MARK: - Picker scenarios

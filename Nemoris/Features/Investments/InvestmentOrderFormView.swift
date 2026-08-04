@@ -11,7 +11,8 @@ import SwiftUI
 //   3. refresh de la vue parente
 
 struct InvestmentOrderFormView: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
 
     let positionId: Int
     let currency: String
@@ -49,7 +50,6 @@ struct InvestmentOrderFormView: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section("Type d'opération") {
                     Picker("Type", selection: $orderType) {
@@ -111,21 +111,13 @@ struct InvestmentOrderFormView: View {
                     footerText
                 }
             }
-            .navigationTitle(isEditing ? "Modifier l'ordre" : "Nouvel ordre")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(isEditing ? "Mettre à jour" : "Ajouter") {
-                        save()
-                    }
-                    .disabled(!canSave)
-                }
-            }
+            .nemorisFormStyle()
             // Pas de .onAppear — init() set tout au build time.
-        }
+            .paneChrome(isEditing ? "Modifier l'ordre" : "Nouvel ordre",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: isEditing ? "Mettre à jour" : "Ajouter",
+                        confirmDisabled: !canSave,
+                        onConfirm: { save() })
     }
 
     // MARK: - Helpers

@@ -170,6 +170,13 @@ struct PatrimoineSnapshot {
 
     var netWorth: Double { totalAssets - totalLiabilities }
 
+    /// Nombre total d'éléments suivis, toutes catégories confondues.
+    var itemsCount: Int { assetsCount + realEstateCount + loansCount }
+
+    /// Faux quand l'utilisateur n'a rien saisi dans le module — le Dashboard masque
+    /// alors son bloc Patrimoine plutôt que d'afficher un net worth à 0 €.
+    var hasData: Bool { itemsCount > 0 }
+
     static let empty = PatrimoineSnapshot(
         totalAssets: 0,
         totalLiabilities: 0,

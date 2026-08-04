@@ -2,17 +2,17 @@ import SwiftUI
 
 // MARK: - BackupSettingsView
 //
-// Vue Settings dédiée aux snapshots locaux + iCloud. Complémentaire à
-// `SyncSettingsView` (qui fait du live-sync vers un dossier choisi par l'user).
-// Ici on parle de **points de restauration** : snapshots discrets (auto quotidien
-// + manuels), rotation 30 derniers, restore explicite avec sauvegarde de
-// sécurité avant écrasement.
+// Vue Settings dédiée aux snapshots locaux + iCloud. On parle ici de **points de
+// restauration** : snapshots discrets (auto quotidien + manuels), rotation 30
+// derniers, restore explicite avec sauvegarde de sécurité avant écrasement.
 //
-// **Pourquoi 2 vues distinctes ?**
-//   - SyncSettings = sync continu (risqué multi-device, Pro). Pour les power-users
-//     qui veulent que leur fichier suive partout.
-//   - BackupSettings = filet de sécurité de base (gratuit). Pour tout le monde —
-//     si l'iPhone est perdu/cassé/restauré, on récupère la dernière sauvegarde.
+// C'est le filet de sécurité de base (gratuit, pour tout le monde) : si l'iPhone
+// est perdu/cassé/restauré/réinstallé, on récupère la dernière sauvegarde iCloud
+// (elle survit à la désinstallation, contrairement au sandbox local).
+//
+// Complémentaire de `CloudSyncSettingsView` (sync CloudKit multi-appareils temps
+// réel). L'ancien `SyncSettingsView` (export continu one-way vers un dossier) a
+// été retiré 2026-07-26 (redondant + bookmark perdu à la désinstallation).
 
 struct BackupSettingsView: View {
     @Environment(AppState.self) private var appState
@@ -104,19 +104,10 @@ struct BackupSettingsView: View {
                 } else {
                     ForEach(snapshots) { snap in
                         snapshotRow(snap)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    snapshotToDelete = snap
-                                } label: {
-                                    Label("Supprimer", systemImage: "trash")
-                                }
-                                Button {
-                                    snapshotToRestore = snap
-                                } label: {
-                                    Label("Restaurer", systemImage: "arrow.counterclockwise")
-                                }
-                                .tint(AppTheme.Colors.warning)
-                            }
+                            .rowActions(trailing: [
+                                RowAction("Supprimer", systemImage: "trash", role: .destructive) { snapshotToDelete = snap },
+                                RowAction("Restaurer", systemImage: "arrow.counterclockwise", tint: AppTheme.Colors.warning) { snapshotToRestore = snap }
+                            ], trailingFullSwipe: false)
                     }
                 }
             } header: {
@@ -126,6 +117,7 @@ struct BackupSettingsView: View {
                     .font(AppTheme.Typography.bodySmall)
             }
         }
+        .nemorisFormStyle()
         .navigationTitle("Sauvegarde locale & iCloud")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { reload() }
@@ -173,18 +165,24 @@ struct BackupSettingsView: View {
     @ViewBuilder
     private func snapshotRow(_ snap: BackupService.Snapshot) -> some View {
         HStack(spacing: AppTheme.Spacing.md) {
-            Image(systemName: snap.isICloud ? "icloud" : "iphone")
-                .foregroundStyle(snap.isICloud ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary)
+            Image(systemName: snap.isPreRestore ? "arrow.counterclockwise.circle" : (snap.isICloud ? "icloud" : "iphone"))
+                .foregroundStyle(snap.isPreRestore ? AppTheme.Colors.warning : (snap.isICloud ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary))
             VStack(alignment: .leading, spacing: 2) {
                 Text(snap.displayName)
                     .font(AppTheme.Typography.bodyMedium)
                     .foregroundStyle(AppTheme.Colors.textPrimary)
-                Text("\(snap.sizeLabel) · \(snap.isICloud ? "iCloud" : "Local")")
+                Text(snapshotSubtitle(snap))
                     .font(AppTheme.Typography.bodySmall)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             }
             Spacer()
         }
+    }
+
+    private func snapshotSubtitle(_ snap: BackupService.Snapshot) -> String {
+        let location = snap.isICloud ? "iCloud" : "Local"
+        guard snap.isPreRestore else { return "\(snap.sizeLabel) · \(location)" }
+        return "\(snap.sizeLabel) · \(location) · Sécurité avant restauration"
     }
 
     // MARK: - Actions

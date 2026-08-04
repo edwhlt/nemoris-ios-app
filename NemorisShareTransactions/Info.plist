@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- AXE P — share extension « Transactions ».
+	     Activation par DICTIONNAIRE (fiable, recommandé Apple) : jusqu'à 10 FICHIERS.
+	     Le prédicat UTI string précédent était rejeté par iOS (extension invisible
+	     partout) et ne matchait pas les relevés bancaires sans extension `.csv`
+	     (typés en donnée générique). `SupportsFile` couvre TOUT fichier — un
+	     relevé CSV avec ou sans extension. Pas de clé image → n'apparaît PAS pour
+	     une photo (réservée à « Portefeuille »). Le parser CSV valide au runtime. -->
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.share-services</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<key>NSExtensionActivationRule</key>
+			<dict>
+				<key>NSExtensionActivationSupportsFileWithMaxCount</key>
+				<integer>10</integer>
+			</dict>
+		</dict>
+	</dict>
+</dict>
+</plist>

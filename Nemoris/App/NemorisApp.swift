@@ -6,6 +6,10 @@ import TipKit
 struct NemorisApp: App {
     @State private var appState = AppState()
     @State private var purchaseManager = PurchaseManager.shared
+    /// Cache des agrégats du Dashboard. Injecté ici et pas en `@State` dans la vue :
+    /// `DashboardView` est instanciée deux fois (TabView iOS + volet détail de la
+    /// sidebar macOS), et deux caches voudraient dire tout calculer deux fois.
+    @State private var dashboardStore = DashboardSnapshotStore()
     @State private var hasDatabase: Bool
     /// État de déverrouillage. Démarre à `false` si le lock est activé ET qu'on
     /// a une demande d'auth pending (cas typique : reprise depuis background).
@@ -55,6 +59,7 @@ struct NemorisApp: App {
                     MainTabView()
                         .environment(appState)
                         .environment(purchaseManager)
+                        .environment(dashboardStore)
                         .environment(\.locale, appState.locale)
                         .preferredColorScheme(appState.preferredColorScheme)
                         .tipViewStyle(NemorisTipViewStyle())
@@ -71,7 +76,6 @@ struct NemorisApp: App {
                 }
                     .onChange(of: scenePhase) { _, newPhase in
                         if newPhase == .background {
-                            SyncService.shared.syncIfNeeded()
                             // Sync CloudKit (AXE L) : pousse les écritures locales
                             // accumulées pendant la session vers le moteur, qui les
                             // enverra en arrière-plan. No-op si sync désactivée.
@@ -114,14 +118,18 @@ struct NemorisApp: App {
                             // Chantier D — document d'investissement déposé par un
                             // raccourci Siri (ImportInvestmentDocumentIntent) : on le
                             // consomme et on ouvre l'import intelligent pré-rempli.
-                            if let pending = PendingImportInbox.consumePendingInvestmentImport() {
-                                appState.pendingInvestmentImportURL = pending
+                            let pendingInvest = PendingImportInbox.consumePendingInvestmentImports()
+                            if !pendingInvest.isEmpty {
+                                appState.pendingInvestmentImportURLs = pendingInvest
                                 appState.navigateToTab(.investments)
                             }
-                            // NB: le shortcut iOS "Importer un CSV" écrivait dans pendingCSVKey,
-                            // qui était relu par l'ancien ImportView. Le flux V3 prend un fichier
-                            // par UIDocumentPicker, donc on ne consomme plus cette clé ici.
-                            // À rebrancher sur ImportV3EntryView si on remet ce shortcut en service.
+                            // AXE P — relevés déposés par le raccourci "Importer des
+                            // transactions" ou la share extension Transactions :
+                            // MainTabView présente ImportV3EntryView pré-rempli.
+                            let pendingTx = PendingImportInbox.consumePendingTransactionImports()
+                            if !pendingTx.isEmpty {
+                                appState.pendingTransactionImportURLs = pendingTx
+                            }
                         }
                     }
                     .task { await purchaseManager.initialize() }

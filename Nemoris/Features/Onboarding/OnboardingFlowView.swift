@@ -36,6 +36,14 @@ struct OnboardingFlowView: View {
     @State private var showFilePicker = false
     @State private var errorMessage: String?
 
+    // Détection restauration (2026-07-26) : au 1er lancement on scanne les
+    // snapshots iCloud de BackupService (ils survivent à la désinstallation). Si
+    // une sauvegarde existe, on la propose EN PREMIER, avec un badge de fraîcheur
+    // — pour ne plus jamais laisser un user repartir de zéro alors qu'une
+    // sauvegarde l'attendait.
+    @State private var restoreSnapshots: [BackupService.Snapshot] = []
+    @State private var isRestoring = false
+
     // Premier compte (step .createAccount)
     @State private var accountName: String = ""
     @State private var accountType: String = "COURANT"
@@ -166,6 +174,17 @@ struct OnboardingFlowView: View {
                     .padding(.horizontal, AppTheme.Spacing.xl)
             }
 
+            // Sauvegarde iCloud détectée → proposée EN PREMIER (badge fraîcheur).
+            if let latest = restoreSnapshots.first {
+                VStack(spacing: AppTheme.Spacing.sm) {
+                    restoreCard(latest)
+                    Text("ou repartir autrement")
+                        .font(AppTheme.Typography.bodySmall)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                }
+                .padding(.horizontal, AppTheme.Spacing.xxxl)
+            }
+
             VStack(spacing: AppTheme.Spacing.md) {
                 primaryButton("Créer une nouvelle base", action: createNew)
                 secondaryButton("Rejoindre via iCloud", action: createForICloud)
@@ -208,6 +227,7 @@ struct OnboardingFlowView: View {
                 errorMessage = error.localizedDescription
             }
         }
+        .task { await loadSnapshotsForRestore() }
     }
 
     // MARK: - Step 3 : Premier compte (suite d'une création neuve)
@@ -229,6 +249,7 @@ struct OnboardingFlowView: View {
                     Text("Vous pourrez ajouter d'autres comptes plus tard dans Données.")
                 }
             }
+            .nemorisFormStyle()
             .scrollContentBackground(.hidden)
 
             primaryButton("Continuer") {
@@ -424,6 +445,108 @@ struct OnboardingFlowView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Restauration depuis une sauvegarde iCloud
+
+    /// Charge les snapshots BackupService. iCloud peut mettre quelques secondes à
+    /// exposer son conteneur après un cold start / une réinstallation → on
+    /// réessaie jusqu'à 5 fois (1 s d'intervalle) avant d'abandonner en silence.
+    @MainActor
+    private func loadSnapshotsForRestore() async {
+        for attempt in 0..<5 {
+            let found = BackupService.shared.listSnapshots()
+            if !found.isEmpty {
+                restoreSnapshots = found
+                return
+            }
+            if attempt < 4 { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        }
+    }
+
+    /// Restaure la sauvegarde la plus récente puis file aux modules (la base
+    /// restaurée a déjà ses comptes). Le download iCloud peut bloquer quelques
+    /// secondes → on affiche un état "Restauration…".
+    private func restoreLatest() {
+        guard let snap = restoreSnapshots.first, !isRestoring else { return }
+        isRestoring = true
+        errorMessage = nil
+        Task { @MainActor in
+            do {
+                try BackupService.shared.restore(snapshot: snap)
+                isRestoring = false
+                step = .modules
+            } catch {
+                isRestoring = false
+                errorMessage = "Restauration impossible : \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Niveau d'alerte selon l'âge de la sauvegarde : plus elle est vieille, plus
+    /// on prévient qu'en restaurant on perd les données saisies depuis.
+    private func restoreFreshness(_ snap: BackupService.Snapshot) -> (tint: Color, icon: String, message: String) {
+        let days = Calendar.current.dateComponents([.day], from: snap.createdAt, to: Date()).day ?? 0
+        switch days {
+        case ...1:
+            return (AppTheme.Colors.success, "checkmark.seal.fill",
+                    "Sauvegarde récente — sûre à restaurer.")
+        case 2...7:
+            return (AppTheme.Colors.warning, "exclamationmark.triangle.fill",
+                    "Il y a \(days) jours — vos données des derniers jours pourraient manquer.")
+        default:
+            return (AppTheme.Colors.danger, "exclamationmark.triangle.fill",
+                    "Attention : \(days) jours. Des données récentes manqueront probablement.")
+        }
+    }
+
+    @ViewBuilder
+    private func restoreCard(_ snap: BackupService.Snapshot) -> some View {
+        let fresh = restoreFreshness(snap)
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Image(systemName: "icloud.and.arrow.down.fill")
+                    .font(.title2)
+                    .foregroundStyle(AppTheme.Colors.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sauvegarde iCloud trouvée")
+                        .font(AppTheme.Typography.titleSmall)
+                        .foregroundStyle(AppTheme.Colors.textPrimary)
+                    Text("\(snap.displayName) · \(snap.sizeLabel)")
+                        .font(AppTheme.Typography.bodySmall)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                }
+                Spacer()
+            }
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: fresh.icon).font(.caption)
+                Text(fresh.message)
+                    .font(AppTheme.Typography.bodySmall)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(fresh.tint)
+
+            Button(action: restoreLatest) {
+                HStack(spacing: AppTheme.Spacing.sm) {
+                    if isRestoring { ProgressView().controlSize(.small).tint(.white) }
+                    Text(isRestoring ? "Restauration…" : "Restaurer cette sauvegarde")
+                        .font(AppTheme.Typography.titleSmall)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, AppTheme.Spacing.md)
+            }
+            .foregroundStyle(.white)
+            .background(AppTheme.Colors.accent)
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md))
+            .disabled(isRestoring)
+        }
+        .padding(AppTheme.Spacing.xl)
+        .background(AppTheme.Colors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppTheme.Radius.md)
+                .stroke(AppTheme.Colors.accent.opacity(0.35), lineWidth: 1)
+        )
     }
 
     // MARK: - Reusable buttons

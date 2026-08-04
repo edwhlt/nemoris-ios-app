@@ -44,7 +44,10 @@ struct PatrimoineView: View {
         if isEmbedded { navBody } else { NavigationStack { navBody } }
     }
 
-    @ViewBuilder private var navBody: some View {
+    /// Corps scindé en couches (coreContent → panesLayer → navBody) :
+    /// l'expression unique dépassait le budget du type-checker Swift après
+    /// l'ajout des panneaux détail macOS (adaptiveEntityPane ×4).
+    private var coreContent: some View {
         Group {
             if vm.assets.isEmpty && vm.realEstates.isEmpty && vm.loans.isEmpty {
                 // Empty state pleine page — on garde un ScrollView simple pour ne
@@ -113,6 +116,36 @@ struct PatrimoineView: View {
         .navigationTitle("Patrimoine")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
+            #if os(macOS)
+            // macOS : le menu "+" est étalé en boutons icône seule + tooltip
+            // natif, groupés dans UNE pilule (ControlGroup).
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                Button {
+                    showCreateAsset = true
+                } label: {
+                    Image(systemName: "banknote.fill")
+                }
+                .help("Nouvel actif")
+                Button {
+                    showCreateRealEstate = true
+                } label: {
+                    Image(systemName: "house.fill")
+                }
+                .help("Nouveau bien")
+                Button {
+                    showCreateLoan = true
+                } label: {
+                    Image(systemName: "creditcard.fill")
+                }
+                .help("Nouveau prêt")
+                Button {
+                    showCreateGoal = true
+                } label: {
+                    Image(systemName: "target")
+                }
+                .help("Nouvel objectif")
+            }
+            #else
             ToolbarItem(placement: .navigationBarTrailing) {
                 // Le toolbar `+` devient un Menu maintenant qu'on a 2 types d'entrées
                 // (actif liquide vs bien immobilier). Étape 4 ajoutera "Prêt" ici.
@@ -143,43 +176,81 @@ struct PatrimoineView: View {
                         .foregroundStyle(AppTheme.Colors.accent)
                 }
             }
+            #endif
         }
-        .sheet(isPresented: $showCreateAsset) {
+    }
+
+    /// Grappe des présentations (panes création + détail/édition).
+    private var panesLayer: some View {
+        coreContent
+        .adaptivePane(isPresented: $showCreateAsset) {
             AssetFormView(viewModel: vm, existingAsset: nil)
                 .environment(appState)
         }
-        .sheet(item: $editingAsset) { asset in
+        .adaptiveEntityPane(
+            item: $editingAsset,
+            title: "Actif",
+            refresh: { a in vm.assets.first { $0.id == a.id } },
+            onDelete: { assetToDelete = $0 }
+        ) { asset in
+            AssetDetailPane(asset: asset, vm: vm)
+        } edit: { asset in
             AssetFormView(viewModel: vm, existingAsset: asset)
                 .environment(appState)
         }
-        .sheet(isPresented: $showCreateRealEstate) {
+        .adaptivePane(isPresented: $showCreateRealEstate) {
             RealEstateFormView(viewModel: vm, existingItem: nil)
                 .environment(appState)
         }
-        .sheet(item: $editingRealEstate) { item in
+        .adaptiveEntityPane(
+            item: $editingRealEstate,
+            title: "Bien immobilier",
+            refresh: { r in vm.realEstates.first { $0.id == r.id } },
+            onDelete: { realEstateToDelete = $0 }
+        ) { item in
+            RealEstateDetailPane(item: item)
+        } edit: { item in
             RealEstateFormView(viewModel: vm, existingItem: item)
                 .environment(appState)
         }
-        .sheet(isPresented: $showCreateLoan) {
+        .adaptivePane(isPresented: $showCreateLoan) {
             LoanFormView(viewModel: vm, existingLoan: nil)
                 .environment(appState)
         }
-        .sheet(item: $editingLoan) { loan in
+        .adaptiveEntityPane(
+            item: $editingLoan,
+            title: "Prêt",
+            refresh: { l in vm.loans.first { $0.id == l.id } },
+            onDelete: { loanToDelete = $0 }
+        ) { loan in
+            LoanDetailPane(loan: loan, realEstates: vm.realEstates)
+        } edit: { loan in
             LoanFormView(viewModel: vm, existingLoan: loan)
                 .environment(appState)
         }
-        .sheet(isPresented: $showCreateGoal) {
+        .adaptivePane(isPresented: $showCreateGoal) {
             GoalFormView(viewModel: vm, existingGoal: nil)
                 .environment(appState)
         }
-        .sheet(item: $editingGoal) { goal in
+        .adaptiveEntityPane(
+            item: $editingGoal,
+            title: "Objectif",
+            refresh: { g in vm.goals.first { $0.id == g.id } },
+            onDelete: { goalToDelete = $0 }
+        ) { goal in
+            GoalDetailPane(goal: goal)
+        } edit: { goal in
             GoalFormView(viewModel: vm, existingGoal: goal)
                 .environment(appState)
         }
-        .sheet(isPresented: $showProjection) {
+        .adaptivePane(isPresented: $showProjection) {
             ProjectionView(viewModel: vm)
                 .environment(appState)
         }
+    }
+
+    @ViewBuilder private var navBody: some View {
+        panesLayer
         .confirmationDialog(
             assetToDelete.map { "Supprimer « \($0.name) » ?" } ?? "",
             isPresented: Binding(
@@ -622,24 +693,23 @@ struct PatrimoineView: View {
             Section {
                 ForEach(vm.goals) { goal in
                     goalRow(goal)
+                        // ⚠️ Identité PRÉFIXÉE par le type (cf. `mobilierListSection`) :
+                        // objectif/actif/bien/prêt partagent des `id: Int` qui se
+                        // recouvrent, et la `List` macOS (NSTableView) recycle ses
+                        // lignes PAR IDENTITÉ à travers TOUTES les sections — sans
+                        // préfixe, une ligne d'objectif s'affichait dans la section
+                        // des actifs ou des prêts. iOS scope par section, d'où un
+                        // bug invisible sur mobile.
+                        .id("goal-\(goal.id)")
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(plainRowInsets)
-                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            Button {
-                                editingGoal = goal
-                            } label: {
-                                Label("Modifier", systemImage: "pencil")
-                            }
-                            .tint(AppTheme.Colors.accent)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                goalToDelete = goal
-                            } label: {
-                                Label("Supprimer", systemImage: "trash")
-                            }
-                        }
+                        .rowActions(
+                            leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingGoal = goal }],
+                            trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { goalToDelete = goal }],
+                            leadingFullSwipe: false,
+                            trailingFullSwipe: false
+                        )
                 }
             } header: {
                 sectionHeader(
@@ -785,26 +855,19 @@ struct PatrimoineView: View {
             Section {
                 ForEach(vm.assets) { asset in
                     assetRow(asset)
+                        // Identité préfixée — cf. `goalsListSection` (collision d'id
+                        // entre collections + recyclage NSTableView sur macOS).
+                        .id("asset-\(asset.id)")
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(plainRowInsets)
-                        // Swipe LEFT (leading) → Modifier ; swipe RIGHT (trailing) → Supprimer.
-                        // Geste natif iOS, supérieur au contextMenu pour les actions courantes.
-                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            Button {
-                                editingAsset = asset
-                            } label: {
-                                Label("Modifier", systemImage: "pencil")
-                            }
-                            .tint(AppTheme.Colors.accent)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                assetToDelete = asset
-                            } label: {
-                                Label("Supprimer", systemImage: "trash")
-                            }
-                        }
+                        // Actions adaptatives : swipe iOS / clic droit macOS (cf. RowActions).
+                        .rowActions(
+                            leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingAsset = asset }],
+                            trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { assetToDelete = asset }],
+                            leadingFullSwipe: false,
+                            trailingFullSwipe: false
+                        )
                 }
             } header: {
                 sectionHeader(
@@ -824,24 +887,17 @@ struct PatrimoineView: View {
             Section {
                 ForEach(vm.realEstates) { item in
                     realEstateRow(item)
+                        // Identité préfixée — cf. `goalsListSection`.
+                        .id("realestate-\(item.id)")
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(plainRowInsets)
-                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            Button {
-                                editingRealEstate = item
-                            } label: {
-                                Label("Modifier", systemImage: "pencil")
-                            }
-                            .tint(AppTheme.Colors.accent)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                realEstateToDelete = item
-                            } label: {
-                                Label("Supprimer", systemImage: "trash")
-                            }
-                        }
+                        .rowActions(
+                            leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingRealEstate = item }],
+                            trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { realEstateToDelete = item }],
+                            leadingFullSwipe: false,
+                            trailingFullSwipe: false
+                        )
                 }
             } header: {
                 sectionHeader(
@@ -933,24 +989,17 @@ struct PatrimoineView: View {
             Section {
                 ForEach(vm.loans) { loan in
                     loanRow(loan)
+                        // Identité préfixée — cf. `goalsListSection`.
+                        .id("loan-\(loan.id)")
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(plainRowInsets)
-                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            Button {
-                                editingLoan = loan
-                            } label: {
-                                Label("Modifier", systemImage: "pencil")
-                            }
-                            .tint(AppTheme.Colors.accent)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                loanToDelete = loan
-                            } label: {
-                                Label("Supprimer", systemImage: "trash")
-                            }
-                        }
+                        .rowActions(
+                            leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingLoan = loan }],
+                            trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { loanToDelete = loan }],
+                            leadingFullSwipe: false,
+                            trailingFullSwipe: false
+                        )
                 }
             } header: {
                 // Header dette : montant en danger (terracotta) + coût mensuel total
@@ -1169,4 +1218,224 @@ struct PatrimoineView: View {
 #Preview {
     PatrimoineView()
         .environment(AppState())
+}
+
+// MARK: - Panneaux détail macOS (patrimoine)
+
+/// Détail lecture seule d'un actif — mode « voir » du panneau macOS.
+/// Jamais instancié sur iOS (le tap y ouvre directement l'édition en sheet).
+private struct AssetDetailPane: View {
+    let asset: PatrimoineAsset
+    let vm: PatrimoineViewModel
+
+    private var resolvedValue: Double {
+        asset.isLinked ? asset.lastKnownValue : asset.manualValue
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    Image(systemName: asset.assetKind.systemIcon)
+                        .font(.title3)
+                        .foregroundStyle(AppTheme.Colors.accent)
+                        .frame(width: 36, height: 36)
+                        .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(asset.name).font(AppTheme.Typography.bodyMedium)
+                        Text(asset.assetKind.label)
+                            .font(AppTheme.Typography.labelSmall)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                    Spacer()
+                    Text(resolvedValue, format: .currency(code: "EUR"))
+                        .font(AppTheme.Typography.moneySmall)
+                        .foregroundStyle(AppTheme.Colors.accent)
+                }
+                .padding(.vertical, 2)
+            }
+
+            Section("Détails") {
+                LabeledContent("Famille", value: asset.assetKind.label)
+                LabeledContent("Valeur", value: resolvedValue.formatted(.currency(code: "EUR")))
+                LabeledContent("Source", value: asset.isLinked ? "Compte lié (auto)" : "Saisie manuelle")
+                LabeledContent("Créé le", value: asset.createdAt.formatted(date: .abbreviated, time: .omitted))
+            }
+
+            if let notes = asset.notes, !notes.isEmpty {
+                Section("Notes") {
+                    Text(notes).font(AppTheme.Typography.bodySmall)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Détail lecture seule d'un bien immobilier — mode « voir » du panneau macOS.
+private struct RealEstateDetailPane: View {
+    let item: PatrimoineRealEstate
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    Image(systemName: "house.fill")
+                        .font(.title3)
+                        .foregroundStyle(AppTheme.Colors.accent)
+                        .frame(width: 36, height: 36)
+                        .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name).font(AppTheme.Typography.bodyMedium)
+                        if let address = item.address, !address.isEmpty {
+                            Text(address)
+                                .font(AppTheme.Typography.labelSmall)
+                                .foregroundStyle(AppTheme.Colors.textSecondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    Text(item.currentValue, format: .currency(code: "EUR"))
+                        .font(AppTheme.Typography.moneySmall)
+                        .foregroundStyle(AppTheme.Colors.accent)
+                }
+                .padding(.vertical, 2)
+            }
+
+            Section("Valorisation") {
+                LabeledContent("Prix d'achat", value: item.purchasePrice.formatted(.currency(code: "EUR")))
+                LabeledContent("Valeur actuelle", value: item.currentValue.formatted(.currency(code: "EUR")))
+                LabeledContent("Plus-value") {
+                    Text("\(item.capitalGain >= 0 ? "+" : "")\(item.capitalGain.formatted(.currency(code: "EUR"))) (\(String(format: "%.1f", item.capitalGainPercent)) %)")
+                        .foregroundStyle(item.capitalGain >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
+                }
+            }
+
+            Section("Dates") {
+                LabeledContent("Achat", value: item.purchaseDate.formatted(date: .abbreviated, time: .omitted))
+                if let estimated = item.estimatedAt {
+                    LabeledContent("Dernière estimation", value: estimated.formatted(date: .abbreviated, time: .omitted))
+                }
+            }
+
+            if let notes = item.notes, !notes.isEmpty {
+                Section("Notes") {
+                    Text(notes).font(AppTheme.Typography.bodySmall)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Détail lecture seule d'un prêt — mode « voir » du panneau macOS.
+private struct LoanDetailPane: View {
+    let loan: PatrimoineLoan
+    let realEstates: [PatrimoineRealEstate]
+
+    private var linkedRealEstateName: String? {
+        guard let id = loan.linkedRealEstateId else { return nil }
+        return realEstates.first { $0.id == id }?.name
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    Image(systemName: "creditcard.fill")
+                        .font(.title3)
+                        .foregroundStyle(AppTheme.Colors.warning)
+                        .frame(width: 36, height: 36)
+                        .background(AppTheme.Colors.warning.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(loan.name).font(AppTheme.Typography.bodyMedium)
+                        Text(loan.loanType.label)
+                            .font(AppTheme.Typography.labelSmall)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                    Spacer()
+                    Text(loan.principal, format: .currency(code: "EUR"))
+                        .font(AppTheme.Typography.moneySmall)
+                        .foregroundStyle(AppTheme.Colors.warning)
+                }
+                .padding(.vertical, 2)
+            }
+
+            Section("Conditions") {
+                LabeledContent("Type", value: loan.loanType.label)
+                LabeledContent("Capital emprunté", value: loan.principal.formatted(.currency(code: "EUR")))
+                LabeledContent("Taux annuel", value: String(format: "%.2f %%", loan.annualRate * 100))
+                LabeledContent("Durée", value: "\(loan.durationMonths) mois")
+                if loan.deferralMonths > 0 {
+                    LabeledContent("Différé", value: "\(loan.deferralMonths) mois")
+                }
+                if loan.insuranceMonthly > 0 {
+                    LabeledContent("Assurance", value: "\(loan.insuranceMonthly.formatted(.currency(code: "EUR"))) / mois")
+                }
+            }
+
+            Section("Détails") {
+                LabeledContent("Début", value: loan.startDate.formatted(date: .abbreviated, time: .omitted))
+                if let linkedRealEstateName {
+                    LabeledContent("Bien financé", value: linkedRealEstateName)
+                }
+            }
+
+            if let notes = loan.notes, !notes.isEmpty {
+                Section("Notes") {
+                    Text(notes).font(AppTheme.Typography.bodySmall)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Détail lecture seule d'un objectif — mode « voir » du panneau macOS.
+private struct GoalDetailPane: View {
+    let goal: Goal
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    Image(systemName: goal.kind.systemIcon)
+                        .font(.title3)
+                        .foregroundStyle(AppTheme.Colors.accent)
+                        .frame(width: 36, height: 36)
+                        .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(goal.name).font(AppTheme.Typography.bodyMedium)
+                        Text(goal.kind.label)
+                            .font(AppTheme.Typography.labelSmall)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                    Spacer()
+                    Text(goal.targetAmount, format: .currency(code: "EUR"))
+                        .font(AppTheme.Typography.moneySmall)
+                        .foregroundStyle(AppTheme.Colors.accent)
+                }
+                .padding(.vertical, 2)
+            }
+
+            Section("Détails") {
+                LabeledContent("Type", value: goal.kind.label)
+                LabeledContent("Objectif", value: goal.targetAmount.formatted(.currency(code: "EUR")))
+                if goal.kind == .custom {
+                    LabeledContent("Montant atteint", value: goal.customCurrentAmount.formatted(.currency(code: "EUR")))
+                }
+                if let deadline = goal.deadlineDate {
+                    LabeledContent("Échéance", value: deadline.formatted(date: .abbreviated, time: .omitted))
+                }
+                LabeledContent("Créé le", value: goal.createdAt.formatted(date: .abbreviated, time: .omitted))
+            }
+
+            if let notes = goal.notes, !notes.isEmpty {
+                Section("Notes") {
+                    Text(notes).font(AppTheme.Typography.bodySmall)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
 }

@@ -14,7 +14,7 @@ import SwiftUI
 // même de l'enregistrer.
 
 struct LoanFormView: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.paneDismiss) private var dismiss
     @Environment(AppState.self) private var appState
     let viewModel: PatrimoineViewModel
     let existingLoan: PatrimoineLoan?
@@ -102,7 +102,6 @@ struct LoanFormView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
             Form {
                 // ── Identité ────────────────────────────────────────
                 Section("Identité") {
@@ -301,17 +300,7 @@ struct LoanFormView: View {
                     }
                 }
             }
-            .navigationTitle(existingLoan == nil ? "Nouveau prêt" : "Modifier")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") { save() }
-                        .disabled(!canSave)
-                }
-            }
+            .nemorisFormStyle()
             .confirmationDialog(
                 "Supprimer ce prêt ?",
                 isPresented: $showDeleteConfirm,
@@ -326,7 +315,10 @@ struct LoanFormView: View {
             } message: {
                 Text("Cette action ne peut pas être annulée.")
             }
-        }
+            .paneChrome(existingLoan == nil ? "Nouveau prêt" : "Modifier",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Enregistrer", confirmDisabled: !canSave,
+                        onConfirm: { save() })
     }
 
     // MARK: - Helpers UI

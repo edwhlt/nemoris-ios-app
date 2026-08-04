@@ -69,7 +69,7 @@ final class PatrimoineViewModel {
 
     /// Somme de tous les assets résolus (mobilier & liquidités).
     var totalAssetsValue: Double {
-        assets.reduce(0) { $0 + (resolvedAssetValues[$1.id] ?? $1.lastKnownValue) }
+        PatrimoineSnapshotBuilder.totalAssetsValue(assets: assets, resolvedValues: resolvedAssetValues)
     }
 
     /// Somme de la valeur actuelle estimée de tous les biens immobiliers.
@@ -92,12 +92,12 @@ final class PatrimoineViewModel {
     /// (toutes les opérations sont des sommations O(n) sur des collections en RAM,
     /// donc négligeable même pour des centaines d'items).
     var snapshot: PatrimoineSnapshot {
-        PatrimoineSnapshot(
-            totalAssets: totalAssetsValue + totalRealEstateValue,
-            totalLiabilities: totalLoansRemainingCapital,
-            assetsCount: assets.count,
-            realEstateCount: realEstates.count,
-            loansCount: loans.count
+        PatrimoineSnapshotBuilder.snapshot(
+            assets: assets,
+            realEstates: realEstates,
+            loans: loans,
+            resolvedValues: resolvedAssetValues,
+            loanStates: loanStates
         )
     }
 
@@ -115,7 +115,7 @@ final class PatrimoineViewModel {
 
     /// Somme des capitaux restants dus sur tous les prêts (côté passif du patrimoine).
     var totalLoansRemainingCapital: Double {
-        loans.reduce(0) { $0 + (loanStates[$1.id]?.remainingCapital ?? $1.principal) }
+        PatrimoineSnapshotBuilder.totalLiabilities(loans: loans, loanStates: loanStates)
     }
 
     // MARK: - Goals state
@@ -167,23 +167,25 @@ final class PatrimoineViewModel {
         realEstates = patrimoineRepo.fetchRealEstate()
         loans = patrimoineRepo.fetchLoans()
 
-        // Résolution des valeurs assets + persistance opportuniste de last_known_value.
-        var values: [Int: Double] = [:]
-        var sources: [Int: AssetValueSource] = [:]
-        for asset in assets {
-            let (value, source) = resolveValue(for: asset)
-            values[asset.id] = value
-            sources[asset.id] = source
-            // Persiste le snapshot uniquement si le lien a été résolu vivant — évite
-            // d'écraser une valeur historique avec 0 si le lien est cassé.
-            if source == .linkedAccount || source == .linkedInvestment {
-                if abs(value - asset.lastKnownValue) > 0.005 {
-                    patrimoineRepo.updateLastKnownValue(assetId: asset.id, value: value)
-                }
-            }
-        }
+        // Résolution des valeurs assets via le moteur pur, partagé avec le Dashboard.
+        // Les soldes bancaires sont fetchés UNE fois, et seulement pour les comptes
+        // réellement liés (un `fetchAccountBalance` = un SUM sur toute la table).
+        let (values, sources) = PatrimoineSnapshotBuilder.resolveValues(
+            assets: assets,
+            existingBankAccountIds: Set(availableBankAccounts.map(\.id)),
+            bankBalances: bankBalances(for: assets),
+            investmentAccounts: availableInvestmentAccounts
+        )
         resolvedAssetValues = values
         resolvedAssetSources = sources
+
+        // Persistance opportuniste de last_known_value — uniquement si le lien a été
+        // résolu vivant, pour ne pas écraser une valeur historique avec 0 quand le
+        // lien est cassé. Reste ici : un moteur pur n'écrit pas en base.
+        for asset in assets where sources[asset.id] == .linkedAccount || sources[asset.id] == .linkedInvestment {
+            guard let value = values[asset.id], abs(value - asset.lastKnownValue) > 0.005 else { continue }
+            patrimoineRepo.updateLastKnownValue(assetId: asset.id, value: value)
+        }
 
         // Recense les liens rompus pour mettre en avant les rows concernées et
         // permettre une bannière d'alerte au sommet de la List.
@@ -263,22 +265,26 @@ final class PatrimoineViewModel {
 
     /// Résout la valeur d'un asset selon son mode (linked ou standalone).
     /// Exposée pour le form et le picker (pour afficher la valeur lue en preview).
+    /// Délègue au moteur pur — la règle de résolution n'existe qu'à un seul endroit.
     func resolveValue(for asset: PatrimoineAsset) -> (value: Double, source: AssetValueSource) {
-        if let bankId = asset.linkedAccountId {
-            if availableBankAccounts.contains(where: { $0.id == bankId }) {
-                let bal = transactionRepo.fetchAccountBalance(accountId: bankId, upToDate: nil)
-                return (bal, .linkedAccount)
-            }
-            // Compte supprimé entre le fetch précédent et maintenant — fallback offline.
-            return (asset.lastKnownValue, .brokenLink)
+        PatrimoineSnapshotBuilder.resolveValue(
+            for: asset,
+            existingBankAccountIds: Set(availableBankAccounts.map(\.id)),
+            bankBalances: bankBalances(for: [asset]),
+            investmentAccounts: availableInvestmentAccounts
+        )
+    }
+
+    /// Soldes des comptes bancaires liés aux assets fournis. Un seul
+    /// `fetchAccountBalance` par compte, et uniquement pour les comptes existants —
+    /// un compte supprimé doit rester détecté comme lien rompu, pas lu à 0 €.
+    private func bankBalances(for assets: [PatrimoineAsset]) -> [Int: Double] {
+        let existing = Set(availableBankAccounts.map(\.id))
+        var balances: [Int: Double] = [:]
+        for id in PatrimoineSnapshotBuilder.linkedBankAccountIds(in: assets) where existing.contains(id) {
+            balances[id] = transactionRepo.fetchAccountBalance(accountId: id, upToDate: nil)
         }
-        if let invId = asset.linkedInvestmentAccountId {
-            if let acc = availableInvestmentAccounts.first(where: { $0.id == invId }) {
-                return (acc.currentValue + acc.cashBalance, .linkedInvestment)
-            }
-            return (asset.lastKnownValue, .brokenLink)
-        }
-        return (asset.manualValue, .manual)
+        return balances
     }
 
     /// Wrapper côté VM qui calcule la valeur fraîche d'un compte source sans toucher

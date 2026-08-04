@@ -33,11 +33,40 @@ enum PriceResolution: String, Sendable {
 
     /// Fenêtre de rétention. nil = pas de purge (le quotidien est déjà borné
     /// par la source à 10 ans).
+    ///
+    /// ⚠️ 96 h et non 48 h : une rétention de 2 jours vide le cache intraday
+    /// dès le week-end (dernière cotation vendredi 17 h 30 → dimanche matin il
+    /// ne reste RIEN), et la vue 1J devenait alors entièrement dépendante d'un
+    /// appel réseau réussi. 96 h fait tenir la dernière séance jusqu'au lundi.
+    /// Coût : ~200 points par actif au lieu de ~100, négligeable.
     var retention: TimeInterval? {
         switch self {
         case .daily:       return nil
-        case .intraday30m: return 48 * 3600   // 2 jours : couvre la plage 1J glissante
+        case .intraday30m: return 96 * 3600
         }
+    }
+}
+
+extension Array where Element == InvestmentPricePoint {
+    /// Fenêtre de la vue 1J, ancrée sur le DERNIER POINT DISPONIBLE — jamais
+    /// sur `Date()`.
+    ///
+    /// ⚠️ C'est LA cause du « 1J n'affiche que 2 points ». Une fenêtre glissante
+    /// calée sur l'instant présent est vide dès qu'on regarde hors séance : un
+    /// ETF de Paris cote jusqu'à 17 h 30, donc consulté le soir à 19 h il reste
+    /// des points, mais samedi, dimanche, ou lundi avant 9 h, TOUTE la dernière
+    /// séance est à plus de 24 h → 0 point intraday → repli silencieux sur la
+    /// série quotidienne, qui n'a elle-même qu'un ou deux points sur 24 h.
+    /// D'où une courbe à 2 points, systématiquement, hors heures de marché.
+    ///
+    /// En ancrant sur le dernier point connu on obtient les dernières 24 h
+    /// COTÉES : la séance complète pour un titre traditionnel, un vrai 24 h
+    /// glissant pour une crypto (qui cote en continu, donc son dernier point
+    /// est de toute façon récent).
+    func lastQuotedWindow(hours: Double = 24) -> [InvestmentPricePoint] {
+        guard let anchor = self.map(\.date).max() else { return [] }
+        let cutoff = anchor.addingTimeInterval(-hours * 3600)
+        return self.filter { $0.date >= cutoff }.sorted { $0.date < $1.date }
     }
 }
 

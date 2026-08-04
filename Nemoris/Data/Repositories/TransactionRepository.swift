@@ -52,14 +52,15 @@ struct TransactionRepository {
                 t.payee_id,
                 t.category_id,
                 t.payment_type_id,
-                t.reimbursement_payee_id,
+                rb.payee_id,
                 COALESCE(tr.name, ''),
                 t.libelle_brut
             FROM transactions t
             LEFT JOIN payees ti ON ti.id = t.payee_id
             LEFT JOIN categories c ON c.id = t.category_id
             LEFT JOIN payment_types m ON m.id = t.payment_type_id
-            LEFT JOIN payees tr ON tr.id = t.reimbursement_payee_id
+            LEFT JOIN reimbursements rb ON rb.transaction_id = t.id
+            LEFT JOIN payees tr ON tr.id = rb.payee_id
             WHERE \(accountClause) t.tx_date >= ?
               AND t.tx_date <= ?
             ORDER BY t.tx_date DESC, t.id DESC
@@ -109,6 +110,70 @@ struct TransactionRepository {
 
             return results
         }) ?? []
+    }
+
+    /// Fetch d'une transaction unique par id (utilisé par le pane détail macOS
+    /// pour rafraîchir après une édition). Mêmes JOINs que `fetchTransactions`.
+    func fetchTransaction(id: Int) -> FinanceTransaction? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        return query(read: { db in
+            let sql = """
+            SELECT
+                t.id,
+                t.account_id,
+                COALESCE(ti.name, ''),
+                COALESCE(c.name, ''),
+                COALESCE(m.name, ''),
+                COALESCE(t.information, ''),
+                t.amount,
+                COALESCE(t.tx_date, ''),
+                t.payee_id,
+                t.category_id,
+                t.payment_type_id,
+                rb.payee_id,
+                COALESCE(tr.name, ''),
+                t.libelle_brut
+            FROM transactions t
+            LEFT JOIN payees ti ON ti.id = t.payee_id
+            LEFT JOIN categories c ON c.id = t.category_id
+            LEFT JOIN payment_types m ON m.id = t.payment_type_id
+            LEFT JOIN reimbursements rb ON rb.transaction_id = t.id
+            LEFT JOIN payees tr ON tr.id = rb.payee_id
+            WHERE t.id = ?;
+            """
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+                return nil
+            }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int(stmt, 1, Int32(id))
+
+            func optInt(_ col: Int32) -> Int? {
+                sqlite3_column_type(stmt, col) == SQLITE_NULL ? nil : Int(sqlite3_column_int(stmt, col))
+            }
+
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+            return FinanceTransaction(
+                id: Int(sqlite3_column_int(stmt, 0)),
+                accountId: Int(sqlite3_column_int(stmt, 1)),
+                tiersId: optInt(8),
+                categoryId: optInt(9),
+                paymentTypeId: optInt(10),
+                remboursementTiersId: optInt(11),
+                tiersName: string(from: stmt, index: 2),
+                categoryName: string(from: stmt, index: 3),
+                paymentTypeName: string(from: stmt, index: 4),
+                remboursementTiersName: string(from: stmt, index: 12),
+                information: string(from: stmt, index: 5),
+                libelleBrut: sqlite3_column_type(stmt, 13) == SQLITE_NULL ? nil : string(from: stmt, index: 13),
+                amount: sqlite3_column_double(stmt, 6),
+                date: formatter.date(from: string(from: stmt, index: 7)) ?? Date()
+            )
+        }) ?? nil
     }
 
     func fetchCategories() -> [Category] {
@@ -459,25 +524,38 @@ struct TransactionRepository {
 
     // MARK: - Transaction CRUD
 
+    /// Retourne l'id de la transaction créée (nil si échec). Le remboursement
+    /// éventuel (`remboursementTiersId`) n'est plus une colonne de cette table
+    /// depuis v44 (AXE R) — l'appelant doit enchaîner avec
+    /// `ReimbursementRepository.setReimbursement(transactionId:payeeId:)` une
+    /// fois l'id obtenu.
     @discardableResult
     func addTransaction(accountId: Int, tiersId: Int?, categoryId: Int?, paymentTypeId: Int?,
-                        remboursementTiersId: Int?, information: String, amount: Double, date: Date) -> Bool {
+                        information: String, amount: Double, date: Date) -> Int? {
+        guard DatabaseManager.shared.hasDatabase() else { return nil }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+            sqlite3_close(db); return nil
+        }
+        defer { sqlite3_close(db) }
         let fmt = DateFormatter()
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.dateFormat = "yyyy-MM-dd"
-        return writeSingle(sql: """
-            INSERT INTO transactions (account_id, payee_id, category_id, payment_type_id, reimbursement_payee_id, information, amount, tx_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """) { stmt in
-            sqlite3_bind_int(stmt, 1, Int32(accountId))
-            if let v = tiersId { sqlite3_bind_int(stmt, 2, Int32(v)) } else { sqlite3_bind_null(stmt, 2) }
-            if let v = categoryId { sqlite3_bind_int(stmt, 3, Int32(v)) } else { sqlite3_bind_null(stmt, 3) }
-            if let v = paymentTypeId { sqlite3_bind_int(stmt, 4, Int32(v)) } else { sqlite3_bind_null(stmt, 4) }
-            if let v = remboursementTiersId { sqlite3_bind_int(stmt, 5, Int32(v)) } else { sqlite3_bind_null(stmt, 5) }
-            sqlite3_bind_text(stmt, 6, information, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_double(stmt, 7, amount)
-            sqlite3_bind_text(stmt, 8, fmt.string(from: date), -1, SQLITE_TRANSIENT)
-        }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, """
+            INSERT INTO transactions (account_id, payee_id, category_id, payment_type_id, information, amount, tx_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, Int32(accountId))
+        if let v = tiersId { sqlite3_bind_int(stmt, 2, Int32(v)) } else { sqlite3_bind_null(stmt, 2) }
+        if let v = categoryId { sqlite3_bind_int(stmt, 3, Int32(v)) } else { sqlite3_bind_null(stmt, 3) }
+        if let v = paymentTypeId { sqlite3_bind_int(stmt, 4, Int32(v)) } else { sqlite3_bind_null(stmt, 4) }
+        sqlite3_bind_text(stmt, 5, information, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(stmt, 6, amount)
+        sqlite3_bind_text(stmt, 7, fmt.string(from: date), -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { return nil }
+        return Int(sqlite3_last_insert_rowid(db))
     }
 
     @discardableResult
@@ -491,6 +569,8 @@ struct TransactionRepository {
         ids.reduce(0) { deleteTransaction(id: $1) ? $0 + 1 : $0 }
     }
 
+    /// Remboursement géré séparément par ReimbursementRepository.setReimbursement
+    /// depuis v44 (AXE R) — l'appelant enchaîne après ce updateTransaction.
     @discardableResult
     func updateTransaction(_ draft: TransactionEditDraft) -> Bool {
         let formatter = DateFormatter()
@@ -499,7 +579,7 @@ struct TransactionRepository {
         let dateStr = formatter.string(from: draft.date)
         return writeSingle(sql: """
             UPDATE transactions
-            SET payee_id = ?, category_id = ?, payment_type_id = ?, information = ?, amount = ?, tx_date = ?, reimbursement_payee_id = ?
+            SET payee_id = ?, category_id = ?, payment_type_id = ?, information = ?, amount = ?, tx_date = ?
             WHERE id = ?
             """) { stmt in
             if let v = draft.tiersId { sqlite3_bind_int(stmt, 1, Int32(v)) } else { sqlite3_bind_null(stmt, 1) }
@@ -508,8 +588,7 @@ struct TransactionRepository {
             sqlite3_bind_text(stmt, 4, draft.information, -1, SQLITE_TRANSIENT)
             sqlite3_bind_double(stmt, 5, draft.amount)
             sqlite3_bind_text(stmt, 6, dateStr, -1, SQLITE_TRANSIENT)
-            if let v = draft.remboursementTiersId { sqlite3_bind_int(stmt, 7, Int32(v)) } else { sqlite3_bind_null(stmt, 7) }
-            sqlite3_bind_int(stmt, 8, Int32(draft.id))
+            sqlite3_bind_int(stmt, 7, Int32(draft.id))
         }
     }
 
@@ -962,14 +1041,15 @@ struct TransactionRepository {
                 SELECT t.id, t.account_id,
                     COALESCE(ti.name,''), COALESCE(c.name,''), COALESCE(m.name,''),
                     COALESCE(t.information,''), t.amount, COALESCE(t.tx_date,''),
-                    t.payee_id, t.category_id, t.payment_type_id, t.reimbursement_payee_id,
+                    t.payee_id, t.category_id, t.payment_type_id, rb.payee_id,
                     COALESCE(tr.name,'')
                 FROM transactions t
                 JOIN transaction_tags tt ON tt.transaction_id = t.id
                 LEFT JOIN payees ti ON ti.id = t.payee_id
                 LEFT JOIN categories c ON c.id = t.category_id
                 LEFT JOIN payment_types m ON m.id = t.payment_type_id
-                LEFT JOIN payees tr ON tr.id = t.reimbursement_payee_id
+                LEFT JOIN reimbursements rb ON rb.transaction_id = t.id
+                LEFT JOIN payees tr ON tr.id = rb.payee_id
                 WHERE tt.tag_id = ?
                 ORDER BY t.tx_date DESC, t.id DESC;
                 """
@@ -1179,17 +1259,15 @@ struct TransactionRepository {
         sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
 
         var nullTiersStmt: OpaquePointer?
-        var nullRembStmt:  OpaquePointer?
         var delRembStmt:   OpaquePointer?
         var delTiersStmt:  OpaquePointer?
 
         sqlite3_prepare_v2(db, "UPDATE transactions SET payee_id = NULL WHERE payee_id = ?;",      -1, &nullTiersStmt, nil)
-        sqlite3_prepare_v2(db, "UPDATE transactions SET reimbursement_payee_id = NULL WHERE reimbursement_payee_id = ?;", -1, &nullRembStmt, nil)
-        sqlite3_prepare_v2(db, "DELETE FROM tricount_reimbursements WHERE payee_id = ?;",          -1, &delRembStmt,  nil)
+        // Couvre les 2 origines (transaction simple + Tricount) en un seul DELETE — v44 AXE R.
+        sqlite3_prepare_v2(db, "DELETE FROM reimbursements WHERE payee_id = ?;",                    -1, &delRembStmt,  nil)
         sqlite3_prepare_v2(db, "DELETE FROM payees WHERE id = ?;",                                  -1, &delTiersStmt, nil)
         defer {
             sqlite3_finalize(nullTiersStmt)
-            sqlite3_finalize(nullRembStmt)
             sqlite3_finalize(delRembStmt)
             sqlite3_finalize(delTiersStmt)
         }
@@ -1199,7 +1277,6 @@ struct TransactionRepository {
             let i32 = Int32(id)
             func run(_ s: OpaquePointer?) { if let s { sqlite3_reset(s); sqlite3_bind_int(s, 1, i32); sqlite3_step(s) } }
             run(nullTiersStmt)
-            run(nullRembStmt)
             run(delRembStmt)
             if let s = delTiersStmt { sqlite3_reset(s); sqlite3_bind_int(s, 1, i32); if sqlite3_step(s) == SQLITE_DONE { deleted += 1 } }
         }
@@ -1266,93 +1343,6 @@ struct TransactionRepository {
             return TiersBulkImportResult(insertedCount: 0, skippedCount: rows.count)
         }
         return TiersBulkImportResult(insertedCount: inserted, skippedCount: skipped)
-    }
-
-    // MARK: - Remboursements (toutes comptes confondus)
-
-    func fetchReimbursementGroups(from: Date, to: Date) -> [ReimbursementGroup] {
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-        fmt.dateFormat = "yyyy-MM-dd"
-        let fromRaw = fmt.string(from: min(from, to))
-        let toRaw   = fmt.string(from: max(from, to))
-
-        return query(read: { db in
-            let sql = """
-            SELECT
-                t.id, t.account_id,
-                t.payee_id, t.category_id, t.payment_type_id, t.reimbursement_payee_id,
-                COALESCE(ti.name, ''), COALESCE(c.name, ''), COALESCE(m.name, ''),
-                COALESCE(tr.name, ''), COALESCE(t.information, ''),
-                t.amount, COALESCE(t.tx_date, '')
-            FROM transactions t
-            LEFT JOIN payees ti ON ti.id = t.payee_id
-            LEFT JOIN categories c ON c.id = t.category_id
-            LEFT JOIN payment_types m ON m.id = t.payment_type_id
-            LEFT JOIN payees tr ON tr.id = t.reimbursement_payee_id
-            WHERE t.reimbursement_payee_id IS NOT NULL
-              AND t.tx_date >= ? AND t.tx_date <= ?
-            ORDER BY tr.name COLLATE NOCASE, t.tx_date DESC;
-            """
-            var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return [] }
-            defer { sqlite3_finalize(stmt) }
-            sqlite3_bind_text(stmt, 1, fromRaw, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(stmt, 2, toRaw, -1, SQLITE_TRANSIENT)
-
-            func optInt(_ col: Int32) -> Int? {
-                sqlite3_column_type(stmt, col) == SQLITE_NULL ? nil : Int(sqlite3_column_int(stmt, col))
-            }
-
-            var rows: [(tiersId: Int, tiersName: String, tx: FinanceTransaction)] = []
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                guard let remboursementId = optInt(5) else { continue }
-                let remboursementName = string(from: stmt, index: 9)
-                rows.append((
-                    tiersId: remboursementId,
-                    tiersName: remboursementName,
-                    tx: FinanceTransaction(
-                        id: Int(sqlite3_column_int(stmt, 0)),
-                        accountId: Int(sqlite3_column_int(stmt, 1)),
-                        tiersId: optInt(2), categoryId: optInt(3), paymentTypeId: optInt(4),
-                        remboursementTiersId: remboursementId,
-                        tiersName: string(from: stmt, index: 6),
-                        categoryName: string(from: stmt, index: 7),
-                        paymentTypeName: string(from: stmt, index: 8),
-                        remboursementTiersName: remboursementName,
-                        information: string(from: stmt, index: 10),
-                        libelleBrut: nil,
-                        amount: sqlite3_column_double(stmt, 11),
-                        date: fmt.date(from: string(from: stmt, index: 12)) ?? Date()
-                    )
-                ))
-            }
-
-            // Group by reimbursement tiers
-            var grouped: [Int: (name: String, txs: [FinanceTransaction])] = [:]
-            for row in rows {
-                grouped[row.tiersId, default: (row.tiersName, [])].txs.append(row.tx)
-            }
-            return grouped.map { id, pair in
-                ReimbursementGroup(tiersId: id, tiersName: pair.name, transactions: pair.txs)
-            }.sorted { $0.tiersName < $1.tiersName }
-        }) ?? []
-    }
-
-    // MARK: - Mise à jour reimbursement_payee_id
-
-    @discardableResult
-    func updateTransactionRemboursement(id: Int, tiersId: Int?) -> Bool {
-        writeSingle(sql: "UPDATE transactions SET reimbursement_payee_id = ? WHERE id = ?") { stmt in
-            if let tid = tiersId { sqlite3_bind_int(stmt, 1, Int32(tid)) } else { sqlite3_bind_null(stmt, 1) }
-            sqlite3_bind_int(stmt, 2, Int32(id))
-        }
-    }
-
-    func updateTransactionsRemboursement(ids: Set<Int>, tiersId: Int?) -> Int {
-        ids.reduce(0) { count, id in
-            updateTransactionRemboursement(id: id, tiersId: tiersId) ? count + 1 : count
-        }
     }
 
     // MARK: - Mise à jour rapide catégorie
@@ -1462,13 +1452,14 @@ struct TransactionRepository {
                 t.id, t.account_id,
                 COALESCE(ti.name, ''), COALESCE(c.name, ''), COALESCE(m.name, ''),
                 COALESCE(t.information, ''), t.amount, COALESCE(t.tx_date, ''),
-                t.payee_id, t.category_id, t.payment_type_id, t.reimbursement_payee_id,
+                t.payee_id, t.category_id, t.payment_type_id, rb.payee_id,
                 COALESCE(tr.name, '')
             FROM transactions t
             LEFT JOIN payees ti ON ti.id = t.payee_id
             LEFT JOIN categories c ON c.id = t.category_id
             LEFT JOIN payment_types m ON m.id = t.payment_type_id
-            LEFT JOIN payees tr ON tr.id = t.reimbursement_payee_id
+            LEFT JOIN reimbursements rb ON rb.transaction_id = t.id
+            LEFT JOIN payees tr ON tr.id = rb.payee_id
             ORDER BY t.tx_date DESC, t.id DESC
             LIMIT ?;
             """
@@ -1697,13 +1688,14 @@ struct TransactionRepository {
             SELECT t.id, t.account_id,
                 COALESCE(ti.name,''), COALESCE(c.name,''), COALESCE(m.name,''),
                 COALESCE(t.information,''), t.amount, COALESCE(t.tx_date,''),
-                t.payee_id, t.category_id, t.payment_type_id, t.reimbursement_payee_id,
+                t.payee_id, t.category_id, t.payment_type_id, rb.payee_id,
                 COALESCE(tr.name,'')
             FROM transactions t
             LEFT JOIN payees ti ON ti.id = t.payee_id
             LEFT JOIN categories c ON c.id = t.category_id
             LEFT JOIN payment_types m ON m.id = t.payment_type_id
-            LEFT JOIN payees tr ON tr.id = t.reimbursement_payee_id
+            LEFT JOIN reimbursements rb ON rb.transaction_id = t.id
+            LEFT JOIN payees tr ON tr.id = rb.payee_id
             WHERE \(whereClause)
             ORDER BY t.tx_date ASC, t.id ASC;
             """
@@ -1826,14 +1818,15 @@ struct TransactionRepository {
                 t.payee_id,
                 t.category_id,
                 t.payment_type_id,
-                t.reimbursement_payee_id,
+                rb.payee_id,
                 COALESCE(tr.name, ''),
                 t.libelle_brut
             FROM transactions t
             LEFT JOIN payees ti ON ti.id = t.payee_id
             LEFT JOIN categories c ON c.id = t.category_id
             LEFT JOIN payment_types m ON m.id = t.payment_type_id
-            LEFT JOIN payees tr ON tr.id = t.reimbursement_payee_id
+            LEFT JOIN reimbursements rb ON rb.transaction_id = t.id
+            LEFT JOIN payees tr ON tr.id = rb.payee_id
             WHERE t.tx_date >= ?
               AND t.tx_date <= ?
               AND (t.payee_id IS NULL OR ti.linked_account_id IS NULL)

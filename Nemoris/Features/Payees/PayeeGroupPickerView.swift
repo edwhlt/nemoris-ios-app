@@ -122,6 +122,7 @@ private struct CreatePayeeGroupSheet: View {
                     Text("Rassemble plusieurs tiers de la même enseigne (ex. tous les Carrefour Market).")
                 }
             }
+            .nemorisFormStyle()
             .navigationTitle("Nouveau groupe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

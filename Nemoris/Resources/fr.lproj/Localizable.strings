@@ -403,6 +403,7 @@
 "Importer" = "Importer";
 "Importer un CSV" = "Importer un CSV";
 "Importer un fichier CSV" = "Importer un fichier CSV";
+"Importer des transactions (CSV)" = "Importer des transactions (CSV)";
 "Exportez le relevé de votre compte bancaire au format CSV depuis votre banque en ligne, puis importez-le ici pour commencer à suivre vos finances." = "Exportez le relevé de votre compte bancaire au format CSV depuis votre banque en ligne, puis importez-le ici pour commencer à suivre vos finances.";
 "Une fois le fichier choisi, vous mapperez les colonnes (date / montant / libellé). Le mapping est mémorisé pour les prochains imports du même format." = "Une fois le fichier choisi, vous mapperez les colonnes (date / montant / libellé). Le mapping est mémorisé pour les prochains imports du même format.";
 "Choisir un CSV" = "Choisir un CSV";
@@ -616,6 +617,19 @@
 "Comment ça marche" = "Comment ça marche";
 "État actuel" = "État actuel";
 "À savoir" = "À savoir";
+"Source" = "Source";
+"Automatique" = "Automatique";
+"Serveur local" = "Serveur local";
+"Désactivée" = "Désactivée";
+"Adresse du serveur" = "Adresse du serveur";
+"Nom du modèle" = "Nom du modèle";
+"Clé API (optionnel)" = "Clé API (optionnel)";
+"Test en cours…" = "Test en cours…";
+"Tester la connexion" = "Tester la connexion";
+"Utilise Apple Foundation Models si disponible sur cet appareil, sinon aucune IA. Ce réglage est propre à cet appareil — les autres appareils Nemoris peuvent utiliser une source différente." = "Utilise Apple Foundation Models si disponible sur cet appareil, sinon aucune IA. Ce réglage est propre à cet appareil — les autres appareils Nemoris peuvent utiliser une source différente.";
+"Nemoris envoie le libellé de la transaction à l'adresse configurée (LM Studio, Ollama, ou tout serveur compatible OpenAI). L'adresse et la clé restent sur cet appareil, rien n'est envoyé à un serveur Nemoris. Ce réglage est propre à cet appareil — les autres appareils Nemoris peuvent utiliser une source différente." = "Nemoris envoie le libellé de la transaction à l'adresse configurée (LM Studio, Ollama, ou tout serveur compatible OpenAI). L'adresse et la clé restent sur cet appareil, rien n'est envoyé à un serveur Nemoris. Ce réglage est propre à cet appareil — les autres appareils Nemoris peuvent utiliser une source différente.";
+"Aucune source IA n'est appelée. L'enrichissement reste fonctionnel via Sirene, MapKit et le moteur embarqué. Ce réglage est propre à cet appareil — les autres appareils Nemoris peuvent utiliser une source différente." = "Aucune source IA n'est appelée. L'enrichissement reste fonctionnel via Sirene, MapKit et le moteur embarqué. Ce réglage est propre à cet appareil — les autres appareils Nemoris peuvent utiliser une source différente.";
+"Avec un serveur local, le libellé de la transaction part vers l'adresse configurée ci-dessus — pas vers un serveur Nemoris." = "Avec un serveur local, le libellé de la transaction part vers l'adresse configurée ci-dessus — pas vers un serveur Nemoris.";
 
 /* MARK: - Common UI */
 "Sélectionner…" = "Sélectionner…";

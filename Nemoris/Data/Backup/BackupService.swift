@@ -85,6 +85,10 @@ final class BackupService {
         let createdAt: Date
         let sizeBytes: Int64
         let isICloud: Bool
+        /// `true` pour une sauvegarde de sécurité auto-créée juste avant une
+        /// restauration (préfixe `nemoris-pre-restore-`) — pas déclenchée par
+        /// l'user, mais restaurable/supprimable comme n'importe quel snapshot.
+        let isPreRestore: Bool
 
         var displayName: String {
             let fmt = DateFormatter()
@@ -112,10 +116,7 @@ final class BackupService {
 
         // Nom timestampé — yyyy-MM-dd-HHmmss en POSIX pour un tri lexicographique
         // qui suit l'ordre chronologique.
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-        fmt.dateFormat = "yyyy-MM-dd-HHmmss"
-        let filename = "nemoris-backup-\(fmt.string(from: Date())).sqlite"
+        let filename = "nemoris-backup-\(Self.filenameTimestampFormatter.string(from: Date())).sqlite"
 
         var createdURLs: [URL] = []
 
@@ -183,10 +184,7 @@ final class BackupService {
         // 1) Sauvegarde de sécurité de la DB courante AVANT toute opération.
         if FileManager.default.fileExists(atPath: dbURL.path) {
             let safetyDir = try ensureLocalBackupDir()
-            let fmt = DateFormatter()
-            fmt.locale = Locale(identifier: "en_US_POSIX")
-            fmt.dateFormat = "yyyy-MM-dd-HHmmss"
-            let safetyName = "nemoris-pre-restore-\(fmt.string(from: Date())).sqlite"
+            let safetyName = "nemoris-pre-restore-\(Self.filenameTimestampFormatter.string(from: Date())).sqlite"
             let safetyURL = safetyDir.appendingPathComponent(safetyName)
             try copyDatabase(from: dbURL, to: safetyURL)
             Self.log.info("Sauvegarde de sécurité créée : \(safetyName)")
@@ -222,6 +220,16 @@ final class BackupService {
     /// Appelé au launch — silencieux, ne throw jamais (logué uniquement).
     func runAutoBackupIfDue() {
         guard autoBackupEnabled else { return }
+        // Garde-fou base vide : ne jamais snapshoter une base sans transaction
+        // (base fraîchement créée / en cours d'onboarding / rejoint iCloud pas
+        // encore descendu). Sinon ce backup quasi-vide occupe un slot des 30 et
+        // finit par pousser un vrai snapshot hors rotation. Dès la 1re
+        // transaction (import, saisie, ou descente CloudKit), les backups
+        // reprennent normalement.
+        guard DatabaseManager.shared.transactionCount() > 0 else {
+            Self.log.info("Auto-backup sauté : base sans transaction.")
+            return
+        }
         if let last = lastBackupDate, Date().timeIntervalSince(last) < 24 * 3600 {
             return
         }
@@ -267,6 +275,28 @@ final class BackupService {
         try FileManager.default.copyItem(at: src, to: dest)
     }
 
+    /// Format des noms de fichiers (`nemoris-backup-yyyy-MM-dd-HHmmss.sqlite`,
+    /// `nemoris-pre-restore-yyyy-MM-dd-HHmmss.sqlite`) — partagé par la génération
+    /// du nom ET le parsing pour l'affichage (cf. `dateFromFilename`).
+    private static let filenameTimestampFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd-HHmmss"
+        return fmt
+    }()
+
+    /// Date réelle du snapshot, extraite du nom de fichier plutôt que de
+    /// l'attribut `.creationDate` : `FileManager.copyItem` préserve le birthtime
+    /// du fichier SOURCE (la base live, quasi jamais recréée en usage normal —
+    /// écritures SQLite en place) au lieu de dater la copie. Sans ce fix, tous
+    /// les snapshots héritent de la même date figée, ce qui fausse l'affichage,
+    /// le tri chronologique ET la rotation des `maxSnapshots` plus récents.
+    private static func dateFromFilename(_ filename: String) -> Date? {
+        let name = (filename as NSString).deletingPathExtension
+        guard name.count >= 17 else { return nil }
+        return filenameTimestampFormatter.date(from: String(name.suffix(17)))
+    }
+
     /// Énumère les fichiers `.sqlite` dans un dossier et les transforme en Snapshots.
     private func snapshotsIn(directory: URL, isICloud: Bool) -> [Snapshot] {
         let urls = (try? FileManager.default.contentsOfDirectory(
@@ -276,20 +306,23 @@ final class BackupService {
         )) ?? []
 
         return urls.compactMap { url -> Snapshot? in
+            let name = url.lastPathComponent
+            let isPreRestore = name.hasPrefix("nemoris-pre-restore-")
             guard url.pathExtension == "sqlite",
-                  url.lastPathComponent.hasPrefix("nemoris-backup-") else { return nil }
+                  isPreRestore || name.hasPrefix("nemoris-backup-") else { return nil }
             let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
             // iCloud fichiers pas encore téléchargés : `.fileSize` peut être 0 ou nil
             // mais la métadata système contient la vraie taille. On accepte 0 si rien
             // d'autre — l'user voit "0 octets" et comprend que c'est en attente.
             let size = (attrs?[.size] as? Int64) ?? 0
-            let date = (attrs?[.creationDate] as? Date) ?? Date()
+            let date = Self.dateFromFilename(name) ?? (attrs?[.creationDate] as? Date) ?? Date()
             return Snapshot(
-                id: url.lastPathComponent,
+                id: name,
                 url: url,
                 createdAt: date,
                 sizeBytes: size,
-                isICloud: isICloud
+                isICloud: isICloud,
+                isPreRestore: isPreRestore
             )
         }
     }

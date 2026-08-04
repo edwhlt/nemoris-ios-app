@@ -1,0 +1,263 @@
+{
+  "fill" : "system-light",
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.11373,0.22745,0.19608,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.32157,0.72157,0.58824,1.00000"
+              }
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "top.svg",
+          "name" : "top",
+          "position" : {
+            "scale" : 0.7,
+            "translation-in-points" : [
+              -83.29999999999995,
+              -63.35000000000002
+            ]
+          }
+        },
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.11373,0.22745,0.19608,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.32157,0.72157,0.58824,1.00000"
+              }
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "bottom.svg",
+          "name" : "bottom",
+          "position" : {
+            "scale" : 0.7,
+            "translation-in-points" : [
+              92.84030559999997,
+              61.95326973289002
+            ]
+          }
+        },
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.32157,0.72157,0.58824,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "bar3.svg",
+          "name" : "bar3",
+          "position" : {
+            "scale" : 0.8,
+            "translation-in-points" : [
+              120.6,
+              14.3
+            ]
+          }
+        },
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.69020,0.47843,0.30980,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.69020,0.47843,0.30980,1.00000"
+              }
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "bar2.svg",
+          "name" : "bar2",
+          "position" : {
+            "scale" : 0.7,
+            "translation-in-points" : [
+              -2,
+              108.5
+            ]
+          }
+        },
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.32157,0.72157,0.58824,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "bar1.svg",
+          "name" : "bar1",
+          "position" : {
+            "scale" : 0.6,
+            "translation-in-points" : [
+              -122.2,
+              208.60193755695138
+            ]
+          }
+        },
+        {
+          "hidden" : true,
+          "image-name" : "Background.svg",
+          "name" : "Background",
+          "position" : {
+            "scale" : 0.7,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.6
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.2
+      }
+    },
+    {
+      "hidden" : true,
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.32157,0.72157,0.58824,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "Curve3.svg",
+          "name" : "Curve3",
+          "position" : {
+            "scale" : 1.8,
+            "translation-in-points" : [
+              0.29674144243301726,
+              58.993916418823346
+            ]
+          }
+        },
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.69020,0.47843,0.30980,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.69020,0.47843,0.30980,1.00000"
+              }
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "Curve2.svg",
+          "name" : "Curve2",
+          "position" : {
+            "scale" : 1.8,
+            "translation-in-points" : [
+              0.27159636478415905,
+              116.2413135087977
+            ]
+          }
+        },
+        {
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "srgb:0.11373,0.22745,0.19608,1.00000"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "display-p3:0.32157,0.72157,0.58824,1.00000"
+              }
+            }
+          ],
+          "hidden" : false,
+          "image-name" : "Curve.svg",
+          "name" : "Curve",
+          "position" : {
+            "scale" : 1.8,
+            "translation-in-points" : [
+              0.07991404922472611,
+              0.5617195419984
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "solid" : "srgb:0.32157,0.72157,0.58824,1.00000"
+          },
+          "hidden" : true,
+          "image-name" : "logo.svg",
+          "name" : "logo",
+          "position" : {
+            "scale" : 1.8,
+            "translation-in-points" : [
+              0.8817197670680343,
+              9.951929762176519
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.6
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.2
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

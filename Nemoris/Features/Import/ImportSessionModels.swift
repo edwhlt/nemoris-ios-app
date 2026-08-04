@@ -52,13 +52,22 @@ struct ImportSessionRow: Identifiable, Codable, Hashable {
     /// Permet de proposer sa suppression si la session est annulée (nettoyage des tiers fantômes).
     /// nil = aucun tier créé par cette ligne (lien vers un tier existant, ou pas encore décidé).
     var createdPayeeId: Int? = nil
+    /// Fichier d'origine, quand une session agrège PLUSIEURS fichiers.
+    /// `nil` pour une session mono-fichier (l'info est alors dans
+    /// `ImportSession.sourceFile`).
+    ///
+    /// Propriété optionnelle avec valeur par défaut : le `Codable` synthétisé la
+    /// décode en `decodeIfPresent`, donc les `rows_json` déjà persistés (sessions
+    /// actives d'une version précédente) se relisent sans migration.
+    var sourceFile: String? = nil
 
     init(id: UUID = UUID(),
          sourceRowNumber: Int,
          rawLabel: String,
          date: Date,
          amount: Double,
-         paymentTypeHint: String? = nil)
+         paymentTypeHint: String? = nil,
+         sourceFile: String? = nil)
     {
         self.id = id
         self.sourceRowNumber = sourceRowNumber
@@ -66,6 +75,7 @@ struct ImportSessionRow: Identifiable, Codable, Hashable {
         self.date = date
         self.amount = amount
         self.paymentTypeHint = paymentTypeHint
+        self.sourceFile = sourceFile
         self.resolution = .pending
         self.userAction = .pending
     }

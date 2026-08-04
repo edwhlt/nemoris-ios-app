@@ -113,7 +113,8 @@ enum WidgetDataStore {
     static let snapshotKey    = "nemoris.widgetSnapshot"
     static let allAccountsKey = "nemoris.allAccountsData"
     static let budgetKey      = "nemoris.budgetWidgetData"
-    static let pendingCSVKey  = "nemoris.pendingCSV"
+    // (pendingCSVKey supprimée 2026-07-22 — flux mort depuis l'import V3.
+    //  Le dépôt de CSV passe par PendingImportInbox kind .transactions.)
 
     private static let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -240,15 +241,18 @@ enum WidgetDataStore {
 
         let actual = allTxns.filter { $0.amount < 0 }.reduce(0) { $0 + abs($1.amount) }
 
-        let envelopes = BudgetRepository.shared.fetchEnvelopes().filter { $0.isActive }
-        var envelopeItems: [EnvelopeWidgetItem] = []
-        for env in envelopes.prefix(4) {
-            guard let catId = env.categoryId else { continue }
-            let monthlyAmount = env.period == .yearly ? env.amount / 12 : env.amount
-            let spent = allTxns
-                .filter { $0.amount < 0 && $0.categoryId == catId }
-                .reduce(0) { $0 + abs($1.amount) }
-            envelopeItems.append(EnvelopeWidgetItem(name: env.name, spent: spent, allocated: monthlyAmount))
+        // Moteur partagé avec l'app — le widget affichait jusqu'ici des montants
+        // différents de ceux du Dashboard (il ignorait les sous-catégories).
+        // ⚠️ La forme encodée `BudgetWidgetData` ne bouge pas : c'est le contrat
+        // décodé par l'extension widget via l'App Group.
+        let envelopes = BudgetRepository.shared.fetchEnvelopes()
+            .filter { $0.isActive && $0.categoryId != nil }
+        let envelopeItems = EnvelopeSpendingCalculator.progresses(
+            envelopes: Array(envelopes.prefix(4)),
+            transactions: allTxns,
+            categories: TransactionRepository().fetchCategories()
+        ).map {
+            EnvelopeWidgetItem(name: $0.envelope.name, spent: $0.spent, allocated: $0.allocated)
         }
 
         let budgetData = BudgetWidgetData(

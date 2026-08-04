@@ -17,7 +17,8 @@ import SwiftUI
 //   - `to`   = EUR (sauf si preferredCurrency == EUR, alors USD)
 
 struct CurrencyConverterSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     @Environment(AppState.self) private var appState
 
     @State private var amountText: String = "100"
@@ -39,7 +40,6 @@ struct CurrencyConverterSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section("Montant") {
                     HStack {
@@ -131,7 +131,7 @@ struct CurrencyConverterSheet: View {
                     .disabled(amount <= 0 || isConverting || fromCurrency == toCurrency)
                     .tint(AppTheme.Colors.accent)
                 } footer: {
-                    Text("Taux fournis par exchangerate.host (données BCE). Mis en cache localement après le 1er fetch.")
+                    Text("Taux de change mis à jour quotidiennement. Mis en cache localement après le 1er fetch.")
                         .font(AppTheme.Typography.bodySmall)
                 }
 
@@ -152,14 +152,8 @@ struct CurrencyConverterSheet: View {
                     Text("Préférence")
                 }
             }
-            .navigationTitle("Convertisseur")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
-                }
-            }
-        }
+            .nemorisFormStyle()
+            .paneChrome("Convertisseur", cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 
     private func convert() async {

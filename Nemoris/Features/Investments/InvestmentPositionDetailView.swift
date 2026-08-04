@@ -50,6 +50,10 @@ struct InvestmentPositionDetailView: View {
     /// Skeleton tant que `.task` n'a pas terminé loadCachedHistory + loadOrders.
     @State private var hasLoaded = false
     @Environment(\.dismiss) private var dismissDetail
+    /// macOS : la fiche vit dans le panneau latéral (AdaptivePane) — `\.dismiss`
+    /// y est un no-op, la fermeture passe par `\.paneDismiss` (no-op partout
+    /// ailleurs : les deux appels coexistent sans garde de plateforme).
+    @Environment(\.paneDismiss) private var paneDismiss
     @Environment(AppState.self) private var appState
 
     private let repository = InvestmentRepository()
@@ -136,12 +140,14 @@ struct InvestmentPositionDetailView: View {
     /// par jour calendaire (prévention "code-barres").
     private var chartPoints: [InvestmentPricePoint] {
         if localTimeRange == .oneDay && !intradayHistory.isEmpty {
-            // Intraday : un point par HORODATAGE (pas par jour !), fenêtre 24 h.
-            let cutoff = Date().addingTimeInterval(-24 * 3600)
+            // Intraday : un point par HORODATAGE (pas par jour !), fenêtre des
+            // dernières 24 h COTÉES — ancrée sur le dernier point disponible et
+            // non sur `Date()`, sinon la vue est vide hors séance (cf.
+            // `lastQuotedWindow`).
             var seen = Set<Date>()
             let deduped = intradayHistory
-                .filter { $0.close.isFinite && $0.close > 0 && $0.date >= cutoff }
-                .sorted { $0.date < $1.date }
+                .filter { $0.close.isFinite && $0.close > 0 }
+                .lastQuotedWindow()
                 .filter { seen.insert($0.date).inserted }
             return rejectOutliers(deduped)
         }
@@ -341,10 +347,21 @@ struct InvestmentPositionDetailView: View {
                 await syncHistory()
             }
         }
+        // Sync déclenchée par pull-to-refresh sur la ScrollView — pas de bouton dédié.
+        // macOS : hébergée dans le PANNEAU (depuis la fiche compte) → chrome
+        // déclaré via paneChrome (Fermer / Supprimer / Modifier dans la barre
+        // système, une seule pilule). iOS : poussée → NavigationStack + toolbar.
+        #if os(macOS)
+        .paneChrome(position.assetName.isEmpty ? position.ticker : position.assetName,
+                    cancelLabel: "Fermer", onCancel: { paneDismiss() },
+                    destructiveLabel: "Supprimer la position",
+                    onDestructive: { showDeletePositionConfirm = true },
+                    confirmLabel: "Modifier la position",
+                    onConfirm: { showEditForm = true })
+        #else
         .navigationTitle(position.assetName.isEmpty ? position.ticker : position.assetName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // Sync déclenchée par pull-to-refresh sur la ScrollView — pas de bouton dédié.
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button {
@@ -364,13 +381,14 @@ struct InvestmentPositionDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showEditForm) {
+        #endif
+        .adaptivePane(isPresented: $showEditForm) {
             InvestmentPositionFormView(accountId: account.id, position: position) { p, isNew in
                 viewModel.savePosition(p, isNew: isNew)
                 appState.dataRefreshToken = UUID()
             }
         }
-        .sheet(isPresented: $showOrderAddForm) {
+        .adaptivePane(isPresented: $showOrderAddForm) {
             InvestmentOrderFormView(
                 positionId: position.id,
                 currency: account.currency,
@@ -383,7 +401,7 @@ struct InvestmentPositionDetailView: View {
                 appState.dataRefreshToken = UUID()
             }
         }
-        .sheet(item: $editingOrder) { orderToEdit in
+        .adaptivePane(item: $editingOrder) { orderToEdit in
             InvestmentOrderFormView(
                 positionId: position.id,
                 currency: account.currency,
@@ -404,7 +422,8 @@ struct InvestmentPositionDetailView: View {
             Button("Supprimer", role: .destructive) {
                 viewModel.deletePosition(id: position.id)
                 appState.dataRefreshToken = UUID()
-                dismissDetail()
+                dismissDetail()   // push iOS : pop de la stack
+                paneDismiss()     // panneau macOS : fermeture (no-op ailleurs)
             }
             Button("Annuler", role: .cancel) {}
         } message: {
@@ -536,6 +555,26 @@ struct InvestmentPositionDetailView: View {
                 }
             }
 
+            // Bandeau de lecture : prix d'entrée (ouverture) → prix de sortie
+            // (clôture) DU POINT POINTÉ, avec l'écart en valeur et en %. Ces
+            // deux prix viennent de la source (OHLC Yahoo/Stooq) et changent
+            // donc à chaque point parcouru. Toujours visible dès qu'il y a une
+            // courbe : une annotation collée au point serait tronquée près des
+            // bords du chart.
+            if !chartPoints.isEmpty {
+                ChartScrubReadout(
+                    reference: chartReadoutReference,
+                    current: chartReadoutCurrent,
+                    currency: account.currency,
+                    referenceLabel: (readoutOpen?.isRealOpen ?? true) ? "Ouverture" : "Point précédent",
+                    currentLabel: chartSelectedDate != nil ? "Cours pointé" : "Dernier cours",
+                    deltaCaption: "sur ce point",
+                    isScrubbing: chartSelectedDate != nil,
+                    showsTime: localTimeRange == .oneDay
+                )
+                .padding(.top, AppTheme.Spacing.xs)
+            }
+
             positionChart
                 .padding(.top, AppTheme.Spacing.xs)
 
@@ -552,6 +591,40 @@ struct InvestmentPositionDetailView: View {
             }
         }
         .padding(.horizontal, AppTheme.Spacing.sm)
+    }
+
+    /// Bougie lue par le bandeau : celle sous le doigt pendant le scrub, la
+    /// dernière de la plage au repos.
+    private var readoutCandle: InvestmentPricePoint? {
+        if let selected = chartSelectedDate, let snapped = closestPoint(to: selected) {
+            return snapped
+        }
+        return chartPoints.last
+    }
+
+    /// Prix d'ENTRÉE du point pointé = ouverture de la bougie, telle que la
+    /// source la fournit (`open` de Yahoo / Stooq). C'est une donnée PROPRE À
+    /// CHAQUE POINT : elle change quand on parcourt la courbe, contrairement au
+    /// PRU qui est une constante de la position.
+    ///
+    /// Repli quand la source n'a pas d'OHLC (CoinGecko, ou série mise en cache
+    /// avant l'ajout du champ `open`) : la clôture du point précédent, qui est
+    /// le prix auquel le pas de temps a commencé. Même sémantique, autre nom —
+    /// d'où le label distinct côté UI, pour ne pas laisser croire à une vraie
+    /// ouverture de séance.
+    private var readoutOpen: (value: Double, isRealOpen: Bool)? {
+        guard let candle = readoutCandle else { return nil }
+        if let open = candle.open, open > 0 { return (open, true) }
+        guard let idx = chartPoints.firstIndex(where: { $0.id == candle.id }), idx > 0 else { return nil }
+        return (chartPoints[idx - 1].close, false)
+    }
+
+    private var chartReadoutReference: ChartReadoutPoint? {
+        readoutOpen.map { ChartReadoutPoint(value: $0.value) }
+    }
+
+    private var chartReadoutCurrent: ChartReadoutPoint? {
+        readoutCandle.map { ChartReadoutPoint(date: $0.date, value: $0.close) }
     }
 
     /// Date du plus ancien point de cours stocké pour cette position. Utilisé
@@ -713,7 +786,9 @@ struct InvestmentPositionDetailView: View {
                 }
             }
             .chartYAxis {
-                AxisMarks(position: .trailing) { _ in
+                // desiredCount borné (comme EvolutionChart) : un axe Y non borné
+                // pouvait générer trop de graduations/gridlines et alourdir le layout.
+                AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { _ in
                     AxisValueLabel()
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
                         .font(.system(size: 10))
@@ -742,18 +817,26 @@ struct InvestmentPositionDetailView: View {
                                     let origin = geo[plotFrame].origin
                                     let locationX = value.location.x - origin.x
                                     if let date: Date = proxy.value(atX: locationX) {
+                                        let previous = chartSelectedDate.flatMap { closestPoint(to: $0)?.date }
                                         chartSelectedDate = date
+                                        // Tick discret au changement de point (pas
+                                        // à chaque pixel parcouru).
+                                        if closestPoint(to: date)?.date != previous {
+                                            HapticService.shared.selection()
+                                        }
                                     }
                                 }
                                 .onEnded { _ in chartSelectedDate = nil }
                         )
                 }
             }
-            // maxWidth borne le chart à la largeur disponible : sans ça, un axe
-            // trop dense pouvait lui donner une largeur intrinsèque supérieure à
-            // l'écran et rendre toute la vue déplaçable latéralement.
-            // (Pas de .clipped() : ça couperait les labels d'axe X sous le plot.)
-            .frame(maxWidth: .infinity)
+            // ⚠️ PAS de `.frame(maxWidth: .infinity)` ici. Combiné au
+            // `.chartOverlay { GeometryReader }` ci-dessus, il crée sur macOS une
+            // BOUCLE de layout AutoLayout (NSISEngine / _updateConstraintsForSubtree
+            // récursif) → beachball puis crash NSException à l'ouverture d'une
+            // position. EvolutionChart (qui marche) n'a qu'un `.frame(height:)`.
+            // La densité de l'axe X est déjà bornée (desiredCount: 5), donc maxWidth
+            // n'est plus nécessaire pour éviter le scroll horizontal.
             .frame(height: 220)
         }
     }
@@ -1020,33 +1103,46 @@ struct InvestmentPositionDetailView: View {
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .padding(.vertical, 8)
                 } else {
-                    // AXE M : List scrollDisabled pour `.swipeActions` natif.
-                    // AXE M : pas de Button → tap inactif. L'édition d'un ordre passe
-                    // exclusivement par swipe leading "Modifier" (ou trailing "Supprimer").
-                    // Choix UX : un ordre affecte le PnL, on évite les modifs accidentelles
-                    // par tap involontaire.
+                    // Édition/suppression via swipe iOS ET clic droit macOS (RowActions) :
+                    // sur Mac le swipe n'existait pas → un ordre y était inéditable.
+                    // Pas de tap volontaire : un ordre affecte le PnL, on évite les
+                    // modifications par tap accidentel.
                     let reversed = orders.reversed().map { $0 }
+                    #if os(macOS)
+                    // ⚠️ macOS : pas de List imbriquée — une List (= NSTableView)
+                    // scrollDisabled à hauteur figée dans le ScrollView de la fiche
+                    // provoque une boucle de contraintes AutoLayout → beachball puis
+                    // crash NSException _postWindowNeedsUpdateConstraints. Même mine
+                    // que positionsCard (cf. InvestmentAccountDetailView, fix 22/07).
+                    // → VStack simple + RowActions (clic droit).
+                    VStack(spacing: 0) {
+                        ForEach(reversed) { order in
+                            orderRowContent(order)
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                                .rowActions(
+                                    leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingOrder = order }],
+                                    trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { deleteOrder(order) }]
+                                )
+                            if order.id != reversed.last?.id {
+                                Divider()
+                                    .overlay(AppTheme.Colors.textSecondary.opacity(0.1))
+                            }
+                        }
+                    }
+                    #else
                     List {
                         ForEach(reversed) { order in
                             orderRowContent(order)
                                 .listRowBackground(AppTheme.Colors.surface)
                                 .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                                 .listRowSeparatorTint(AppTheme.Colors.textSecondary.opacity(0.1))
-                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                    Button {
-                                        editingOrder = order
-                                    } label: {
-                                        Label("Modifier", systemImage: "pencil")
-                                    }
-                                    .tint(AppTheme.Colors.accent)
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button(role: .destructive) {
-                                        deleteOrder(order)
-                                    } label: {
-                                        Label("Supprimer", systemImage: "trash")
-                                    }
-                                }
+                                .rowActions(
+                                    leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingOrder = order }],
+                                    trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { deleteOrder(order) }],
+                                    leadingFullSwipe: false,
+                                    trailingFullSwipe: false
+                                )
                         }
                     }
                     .listStyle(.plain)
@@ -1054,13 +1150,14 @@ struct InvestmentPositionDetailView: View {
                     .scrollDisabled(true)
                     // ~62pt par ligne d'ordre (icône + label + sous-titre + montant)
                     .frame(height: CGFloat(reversed.count) * 62)
+                    #endif
                 }
             }
         }
     }
 
-    /// Contenu visuel d'un ordre — extrait pour pouvoir être inséré comme label
-    /// d'un Button dans une List (au lieu de SwipeableRow custom).
+    /// Contenu visuel d'un ordre — extrait pour être inséré dans une row de List
+    /// (actions via RowActions : swipe iOS / clic droit macOS).
     @ViewBuilder
     private func orderRowContent(_ order: InvestmentOrder) -> some View {
         HStack(spacing: AppTheme.Spacing.md) {

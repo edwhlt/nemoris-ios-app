@@ -9,7 +9,6 @@ struct BudgetView: View {
     @State private var calendarDays: [CalendarDay] = []
     @State private var selectedDay: CalendarDay?
     @State private var summary: MonthlyBudgetSummary?
-    @State private var showEnvelopes = false
     @State private var apercuPresentation: ApercuPresentation? = nil
     @State private var txCache: [String: [FinanceTransaction]] = [:]
     @State private var allTiers: [Tiers] = []
@@ -26,21 +25,81 @@ struct BudgetView: View {
 
     var isEmbedded: Bool = false
 
+    #if os(macOS)
+    /// Sous-écran du module ouvert en navigation PAR ÉTAT (jamais un push).
+    enum BudgetSection: Identifiable {
+        case envelopes, recurring
+        var id: Self { self }
+        var title: String {
+            switch self {
+            case .envelopes: return "Enveloppes"
+            case .recurring: return "Récurrents"
+            }
+        }
+    }
+    @State private var pushedSection: BudgetSection?
+    /// Pour fermer le panneau en revenant au calendrier.
+    @Environment(InspectorPaneCenter.self) private var paneCenter: InspectorPaneCenter?
+
+    /// Sous-écran en pleine page + retour vers le calendrier.
+    @ViewBuilder
+    private func budgetSectionPage(_ section: BudgetSection) -> some View {
+        Group {
+            switch section {
+            case .envelopes: EnvelopeListView(vm: vm)
+            case .recurring: RecurringManagementView(vm: vm)
+            }
+        }
+        .navigationTitle(section.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    paneCenter?.dismissCurrent()
+                    pushedSection = nil
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .help("Budget")
+                .accessibilityLabel("Budget")
+            }
+        }
+    }
+    #endif
+
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 1), count: 7)
     private let weekdaySymbols = ["L", "M", "M", "J", "V", "S", "D"]
 
     var body: some View {
         Group {
+            #if os(macOS)
+            // Sous-écran ouvert → il REMPLACE le contenu du module (navigation
+            // par état, avec son propre retour). Cf. commentaire de la toolbar.
+            if let section = pushedSection {
+                budgetSectionPage(section)
+            } else if isEmbedded {
+                navContent
+            } else {
+                NavigationStack { navContent }
+            }
+            #else
             if isEmbedded { navContent } else { NavigationStack { navContent } }
+            #endif
         }
-        .onAppear {
+        // `.task` et NON `.onAppear` : dans la colonne détail d'un
+        // `NavigationSplitView` macOS, `.onAppear` n'est pas fiable — il ne se
+        // déclenchait pas ici, et le module s'affichait donc vide (« Aucun
+        // récurrent », budget à 0 €) alors que la base contenait les données.
+        // Le calendrier, lui, se chargeait : il passe par un `.task(id:)`.
+        .task {
             vm.onAppear()
             if allTiers.isEmpty { allTiers = referenceRepo.fetchTiers() }
             if allCategories.isEmpty { allCategories = referenceRepo.fetchCategories() }
         }
-        .sheet(isPresented: $vm.showDetectionSheet) {
+        .adaptivePane(isPresented: $vm.showDetectionSheet) {
             DetectionResultsSheet(vm: vm)
         }
+        .paywallOverlay(for: .budget)
     }
 
     // MARK: - Main Content
@@ -81,7 +140,16 @@ struct BudgetView: View {
                             EmptyStateView(
                                 icon: "arrow.clockwise.circle",
                                 title: "Aucun récurrent",
-                                message: "Utilisez le menu ··· pour détecter vos dépenses récurrentes."
+                                // macOS : le menu "⋯" a été aplati en boutons dans la
+                                // barre d'outils — le message doit suivre, sinon il
+                                // renvoie vers un menu qui n'existe plus.
+                                message: {
+                                    #if os(macOS)
+                                    "Utilisez la baguette magique dans la barre d'outils pour détecter vos dépenses récurrentes."
+                                    #else
+                                    "Utilisez le menu ··· pour détecter vos dépenses récurrentes."
+                                    #endif
+                                }()
                             )
                             .padding(.horizontal, AppTheme.Spacing.md)
                         }
@@ -92,9 +160,15 @@ struct BudgetView: View {
             }
             .animation(AppTheme.Animations.springSnappy, value: selectedDay?.id)
             .task(id: vm.displayedMonth) { await loadData() }
-            .onChange(of: vm.previsions) { _, _ in Task { summary = await vm.monthlySummary() } }
-            .navigationDestination(isPresented: $showEnvelopes) {
-                EnvelopeListView(vm: vm)
+            .onChange(of: vm.previsions) { _, _ in
+                // Transactions du mois déjà en cache dans l'immense majorité des cas
+                // (posées par `loadData()`) → recalcul synchrone, pas de aller-retour
+                // SQL pour un simple skip/match/edit de récurrent.
+                if let txs = txCache[monthKey(vm.displayedMonth)] {
+                    summary = vm.monthlySummary(transactions: txs)
+                } else {
+                    Task { summary = await vm.monthlySummary() }
+                }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // Transparent spacer keeps scroll content from hiding behind bubble
@@ -132,10 +206,21 @@ struct BudgetView: View {
                             exitingSlideOffset = dragOffset
                             showExiting = true
 
-                            // Load new month data immediately from cache
+                            // `vm.nextMonth()`/`previousMonth()` basculent `vm.previsions`
+                            // de façon SYNCHRONE quand le mois cible est déjà en cache
+                            // (cf. BudgetViewModel.applyCachedOrReloadPrevisions) — donc
+                            // `vm.calendarDays`/`vm.monthlySummary` ci-dessous lisent déjà
+                            // les prévisions du mois cible, jamais celles de l'ancien mois.
                             if goingLeft { vm.nextMonth() } else { vm.previousMonth() }
-                            calendarDays = txCache[targetKey].map { vm.calendarDays(transactions: $0) } ?? []
-                            summary = nil
+                            if let cachedTxs = txCache[targetKey] {
+                                calendarDays = vm.calendarDays(transactions: cachedTxs)
+                                summary = vm.monthlySummary(transactions: cachedTxs)
+                            } else {
+                                // Mois pas encore pré-chargé (ex: plusieurs swipes très
+                                // rapprochés) — `.task(id:)` prend le relais sous peu.
+                                calendarDays = []
+                                summary = nil
+                            }
                             selectedDay = nil
 
                             // Position entering content off the opposite edge (no animation)
@@ -177,33 +262,59 @@ struct BudgetView: View {
             }
             .allowsHitTesting(summary != nil)
         }
-        .sheet(item: $apercuPresentation) { p in
+        .adaptivePane(item: $apercuPresentation) { p in
             BudgetApercuSheet(summary: p.summary, days: p.days, month: p.month, categories: vm.categories, allTiers: allTiers, allCategories: allCategories)
         }
         .navigationTitle("Budget")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
+            #if os(macOS)
+            // macOS : actions en boutons icône (pas de menu "⋯"), et surtout
+            // AUCUN `NavigationLink` — un push depuis un module désynchronise la
+            // sidebar et, dans une toolbar, déclenchait un crash. Les deux
+            // destinations passent par un état (cf. `pushedSection`), comme dans
+            // Investissements, Tricount et Réglages.
+            ToolbarItemGroup(placement: .primaryAction) {
+                ToolbarPaywallGate(feature: .budget) {
                     Button { vm.runAutoDetection() } label: {
-                        Label("Détecter les récurrents", systemImage: "wand.and.stars")
+                        Image(systemName: "wand.and.stars")
                     }
-                    NavigationLink {
-                        EnvelopeListView(vm: vm)
-                    } label: {
-                        Label("Enveloppes budgétaires", systemImage: "envelope.fill")
+                    .help("Détecter les récurrents")
+                    Button { pushedSection = .envelopes } label: {
+                        Image(systemName: "envelope.fill")
                     }
-                    Divider()
-                    NavigationLink {
-                        RecurringManagementView(vm: vm)
-                    } label: {
-                        Label("Gérer les récurrents", systemImage: "arrow.clockwise.circle.fill")
+                    .help("Enveloppes")
+                    Button { pushedSection = .recurring } label: {
+                        Image(systemName: "arrow.clockwise.circle.fill")
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+                    .help("Gérer les récurrents")
                 }
-                .tint(AppTheme.Colors.accent)
             }
+            #else
+            ToolbarItem(placement: .primaryAction) {
+                ToolbarPaywallGate(feature: .budget) {
+                    Menu {
+                        Button { vm.runAutoDetection() } label: {
+                            Label("Détecter les récurrents", systemImage: "wand.and.stars")
+                        }
+                        NavigationLink {
+                            EnvelopeListView(vm: vm)
+                        } label: {
+                            Label("Enveloppes budgétaires", systemImage: "envelope.fill")
+                        }
+                        Divider()
+                        NavigationLink {
+                            RecurringManagementView(vm: vm)
+                        } label: {
+                            Label("Gérer les récurrents", systemImage: "arrow.clockwise.circle.fill")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .tint(AppTheme.Colors.accent)
+                }
+            }
+            #endif
         }
     }
 
@@ -275,34 +386,6 @@ struct BudgetView: View {
         }
     }
 
-    // MARK: - Budget Overview Section
-
-    @ViewBuilder private func budgetOverviewSection(_ s: MonthlyBudgetSummary) -> some View {
-        AppCard {
-            VStack(spacing: AppTheme.Spacing.sm) {
-                SectionHeader(title: "Aperçu budgétaire")
-                MonthOverviewCard(summary: s)
-            }
-        }
-        .padding(.horizontal, AppTheme.Spacing.md)
-
-        if !s.envelopes.isEmpty {
-            AppCard {
-                VStack(spacing: AppTheme.Spacing.sm) {
-                    SectionHeader(
-                        title: "Enveloppes",
-                        action: { showEnvelopes = true },
-                        actionLabel: "Gérer"
-                    )
-                    ForEach(s.envelopes) { env in
-                        EnvelopeProgressRow(progress: env)
-                    }
-                }
-            }
-            .padding(.horizontal, AppTheme.Spacing.md)
-        }
-    }
-
     // MARK: - Prevision Sections
 
     @ViewBuilder private var upcomingSection: some View {
@@ -327,9 +410,12 @@ struct BudgetView: View {
     }
 
     @ViewBuilder private var thisMonthSection: some View {
-        let pending = vm.pendingPrevisions.filter { ep in
-            !vm.upcomingPrevisions.contains { $0.id == ep.id }
-        }
+        // ⚠️ `upcomingPrevisions` est lu UNE fois et converti en `Set` d'ids.
+        // La version d'origine le relisait DANS le filtre — donc une fois par
+        // prévision testée — et chaque lecture reconstruisait toute la liste
+        // enrichie : coût quadratique à chaque rendu de la vue.
+        let upcomingIds = Set(vm.upcomingPrevisions.map(\.id))
+        let pending = vm.pendingPrevisions.filter { !upcomingIds.contains($0.id) }
         if !pending.isEmpty {
             AppCard {
                 VStack(spacing: AppTheme.Spacing.sm) {
@@ -390,19 +476,22 @@ struct BudgetView: View {
     private func loadData() async {
         let month = vm.displayedMonth
         let (start, end) = monthBounds(month)
-        async let txsFetch = Task.detached(priority: .userInitiated) {
+        let txs = await Task.detached(priority: .userInitiated) {
             TransactionRepository().fetchAllAccountsTransactions(from: start, to: end)
         }.value
-        async let summaryFetch = vm.monthlySummary()
-        let (txs, sum) = await (txsFetch, summaryFetch)
         calendarDays = vm.calendarDays(transactions: txs)
         txCache[monthKey(month)] = txs
-        summary = sum
+        // Calculé en mémoire à partir de `txs` — évite le 2e fetch SQLite quasi
+        // identique que `vm.monthlySummary()` faisait en interne pour le même mois.
+        summary = vm.monthlySummary(transactions: txs)
         selectedDay = nil
         // Premier chargement terminé → on cache le skeleton.
         if isInitialLoading { isInitialLoading = false }
 
-        // Pré-charger les mois adjacents en arrière-plan
+        // Pré-charger les mois adjacents en arrière-plan. Priorité `.utility` (pas
+        // `.background`) : un swipe peu après l'ouverture de l'écran doit trouver le
+        // cache déjà rempli, sinon la grille apparaît vide le temps du fetch — c'est
+        // précisément la sensation de "chargement" au changement de mois à corriger.
         let cal = Calendar.current
         for delta in [-1, 1] {
             let adjMonth = cal.date(byAdding: .month, value: delta, to: month) ?? month
@@ -410,7 +499,7 @@ struct BudgetView: View {
             guard txCache[key] == nil else { continue }
             let (s, e) = monthBounds(adjMonth)
             Task {
-                let adjTxs = await Task.detached(priority: .background) {
+                let adjTxs = await Task.detached(priority: .utility) {
                     TransactionRepository().fetchAllAccountsTransactions(from: s, to: e)
                 }.value
                 txCache[key] = adjTxs
@@ -541,7 +630,7 @@ private struct BudgetApercuSheet: View {
     let categories: [Category]
     let allTiers: [Tiers]
     let allCategories: [Category]
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.paneDismiss) private var paneDismiss
 
     @State private var selectedCategoryName: String? = nil
     @State private var showCategoryTxSheet: Bool = false
@@ -623,40 +712,40 @@ private struct BudgetApercuSheet: View {
                 .padding(.top, AppTheme.Spacing.md)
             }
             .background(AppTheme.Colors.background)
-            .navigationTitle(month.formatted(.dateTime.month(.wide).year()).capitalized)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Fermer") { dismiss() }
-                }
-            }
-            .sheet(isPresented: $showCategoryTxSheet) {
-                NavigationStack {
-                    List(filteredTransactionsForSelectedCategory()) { tx in
-                        HStack(spacing: 10) {
-                            MerchantLogo(transaction: tx, allTiers: allTiers, allCategories: allCategories, size: 36)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(tx.tiersName.isEmpty ? tx.information : tx.tiersName)
-                                    .font(.subheadline)
-                                if !tx.information.isEmpty && !tx.tiersName.isEmpty {
-                                    Text(tx.information).font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary).lineLimit(1)
-                                }
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text(tx.amount, format: .currency(code: "EUR"))
-                                    .font(.subheadline).bold()
-                                    .foregroundStyle(tx.amount < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
-                                Text(tx.date, format: .dateTime.day().month(.abbreviated))
-                                    .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
-                            }
+            .paneChromeInline(month.formatted(.dateTime.month(.wide).year()).capitalized,
+                               cancelLabel: "Fermer", onCancel: { paneDismiss() })
+            // #8 macOS : une .sheet imbriquée dans une vue elle-même présentée
+            // en .sheet s'affiche VIDE sur Mac. On pousse la liste dans la
+            // NavigationStack existante via navigationDestination (comportement
+        }
+        // Niveau 2 (adaptivePane depuis un contenu déjà dans le panneau macOS
+        // → sheet, cf. paneHostContext). Un push (navigationDestination) ferait
+        // remonter son titre/back-button dans la barre du MODULE (le panneau
+        // n'a pas de fenêtre séparée pour l'absorber) — la sheet, elle, est sa
+        // propre fenêtre sur macOS et reste scopée correctement.
+        .adaptivePane(isPresented: $showCategoryTxSheet) {
+            List(filteredTransactionsForSelectedCategory()) { tx in
+                HStack(spacing: 10) {
+                    MerchantLogo(transaction: tx, allTiers: allTiers, allCategories: allCategories, size: 36)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(tx.tiersName.isEmpty ? tx.information : tx.tiersName)
+                            .font(.subheadline)
+                        if !tx.information.isEmpty && !tx.tiersName.isEmpty {
+                            Text(tx.information).font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary).lineLimit(1)
                         }
                     }
-                    .navigationTitle(selectedCategoryName ?? "Transactions")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fermer") { showCategoryTxSheet = false } } }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(tx.amount, format: .currency(code: "EUR"))
+                            .font(.subheadline).bold()
+                            .foregroundStyle(tx.amount < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                        Text(tx.date, format: .dateTime.day().month(.abbreviated))
+                            .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
                 }
             }
+            .paneChrome(selectedCategoryName ?? "Transactions",
+                        cancelLabel: "Fermer", onCancel: { showCategoryTxSheet = false })
         }
     }
 
@@ -764,15 +853,10 @@ struct RecurringManagementView: View {
                                 RecurringPatternRow(pattern: p, categories: vm.categories)
                                     .contentShape(Rectangle())
                                     .onTapGesture { editingPattern = p }
-                                    .swipeActions(edge: .trailing) {
-                                        Button(role: .destructive) { vm.deletePattern(id: p.id) } label: {
-                                            Label("Supprimer", systemImage: "trash")
-                                        }
-                                        Button { vm.togglePattern(p) } label: {
-                                            Label("Désactiver", systemImage: "pause.circle")
-                                        }
-                                        .tint(AppTheme.Colors.warning)
-                                    }
+                                    .rowActions(trailing: [
+                                        RowAction("Supprimer", systemImage: "trash", role: .destructive) { vm.deletePattern(id: p.id) },
+                                        RowAction("Désactiver", systemImage: "pause.circle", tint: AppTheme.Colors.warning) { vm.togglePattern(p) }
+                                    ])
                             }
                         }
                         .listRowBackground(AppTheme.Colors.surface)
@@ -783,15 +867,10 @@ struct RecurringManagementView: View {
                                 RecurringPatternRow(pattern: p, categories: vm.categories)
                                     .contentShape(Rectangle())
                                     .onTapGesture { editingPattern = p }
-                                    .swipeActions(edge: .trailing) {
-                                        Button(role: .destructive) { vm.deletePattern(id: p.id) } label: {
-                                            Label("Supprimer", systemImage: "trash")
-                                        }
-                                        Button { vm.togglePattern(p) } label: {
-                                            Label("Réactiver", systemImage: "play.circle")
-                                        }
-                                        .tint(AppTheme.Colors.success)
-                                    }
+                                    .rowActions(trailing: [
+                                        RowAction("Supprimer", systemImage: "trash", role: .destructive) { vm.deletePattern(id: p.id) },
+                                        RowAction("Réactiver", systemImage: "play.circle", tint: AppTheme.Colors.success) { vm.togglePattern(p) }
+                                    ])
                             }
                         }
                         .listRowBackground(AppTheme.Colors.surface)
@@ -808,8 +887,17 @@ struct RecurringManagementView: View {
                     .tint(AppTheme.Colors.accent)
             }
         }
-        .sheet(isPresented: $showAddSheet) { PatternEditSheet(vm: vm, pattern: nil) }
-        .sheet(item: $editingPattern) { p in PatternEditSheet(vm: vm, pattern: p) }
+        .adaptivePane(isPresented: $showAddSheet) { PatternEditSheet(vm: vm, pattern: nil) }
+        .adaptiveEntityPane(
+            item: $editingPattern,
+            title: "Récurrent",
+            refresh: { p in vm.patterns.first { $0.id == p.id } },
+            onDelete: { vm.deletePattern(id: $0.id) }
+        ) { p in
+            PatternDetailPane(pattern: p, categories: vm.categories)
+        } edit: { p in
+            PatternEditSheet(vm: vm, pattern: p)
+        }
     }
 }
 
@@ -817,10 +905,10 @@ struct RecurringManagementView: View {
 
 private struct DetectionResultsSheet: View {
     @Bindable var vm: BudgetViewModel
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
             List {
                 Section {
                     Text("Ces dépenses semblent récurrentes dans votre historique. Confirmez celles que vous souhaitez suivre.")
@@ -854,31 +942,24 @@ private struct DetectionResultsSheet: View {
                             .font(AppTheme.Typography.labelSmall)
                             .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.6))
                     }
-                    .swipeActions(edge: .leading) {
-                        Button {
+                    .rowActions(leading: [
+                        RowAction("Confirmer", systemImage: "checkmark", tint: AppTheme.Colors.success) {
                             vm.acceptCandidate(candidate)
                             vm.detectionResults.removeAll { $0.name == candidate.name }
                             if vm.detectionResults.isEmpty { dismiss() }
-                        } label: { Label("Confirmer", systemImage: "checkmark") }
-                        .tint(AppTheme.Colors.success)
-                    }
+                        }
+                    ])
                     .listRowBackground(AppTheme.Colors.surface)
                 }
             }
             .scrollContentBackground(.hidden)
             .background(AppTheme.Colors.background)
-            .navigationTitle("Récurrents détectés")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Fermer") { dismiss() } }
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Tout accepter") {
-                        for c in vm.detectionResults { vm.acceptCandidate(c) }
-                        dismiss()
-                    }
-                }
+            .paneChrome("Récurrents détectés",
+                        cancelLabel: "Fermer", onCancel: { dismiss() },
+                        confirmLabel: "Tout accepter") {
+                for c in vm.detectionResults { vm.acceptCandidate(c) }
+                dismiss()
             }
-        }
     }
 }
 
@@ -1236,7 +1317,9 @@ private struct RecurringPatternRow: View {
 private struct PatternEditSheet: View {
     @Bindable var vm: BudgetViewModel
     let pattern: RecurringPattern?
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss (pas \.dismiss) : la vue est présentée via adaptivePane —
+    // sheet iOS OU panneau macOS, la fermeture est uniforme.
+    @Environment(\.paneDismiss) private var dismiss
 
     @State private var name = ""
     @State private var amount = ""
@@ -1253,7 +1336,6 @@ private struct PatternEditSheet: View {
     @State private var allTiers: [Tiers] = []
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section("Informations") {
                     TextField("Nom (ex: Netflix, Loyer)", text: $name)
@@ -1309,22 +1391,19 @@ private struct PatternEditSheet: View {
                         .font(.caption)
                 }
             }
-            .navigationTitle(pattern == nil ? "Nouveau récurrent" : "Modifier")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Annuler") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") { save(); dismiss() }
-                        .disabled(name.isEmpty || amount.isEmpty)
+            .nemorisFormStyle()
+            .onAppear {
+                populateFields()
+                if allTiers.isEmpty {
+                    allTiers = TransactionRepository().fetchTiers()
                 }
             }
-        }
-        .onAppear {
-            populateFields()
-            if allTiers.isEmpty {
-                allTiers = TransactionRepository().fetchTiers()
+            .paneChrome(pattern == nil ? "Nouveau récurrent" : "Modifier",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Enregistrer",
+                        confirmDisabled: name.isEmpty || amount.isEmpty) {
+                save(); dismiss()
             }
-        }
     }
 
     private func populateFields() {
@@ -1407,11 +1486,9 @@ struct EnvelopeListView: View {
                         }
                         .contentShape(Rectangle())
                         .onTapGesture { editingEnvelope = env }
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) { vm.deleteEnvelope(id: env.id) } label: {
-                                Label("Supprimer", systemImage: "trash")
-                            }
-                        }
+                        .rowActions(trailing: [
+                            RowAction("Supprimer", systemImage: "trash", role: .destructive) { vm.deleteEnvelope(id: env.id) }
+                        ])
                         .listRowBackground(AppTheme.Colors.surface)
                     }
                 }
@@ -1438,9 +1515,18 @@ struct EnvelopeListView: View {
                 }
             }
         }
-        .sheet(isPresented: $showAdd) { EnvelopeEditSheet(vm: vm, envelope: nil) }
-        .sheet(item: $editingEnvelope) { env in EnvelopeEditSheet(vm: vm, envelope: env) }
-        .sheet(isPresented: $showSuggestions) {
+        .adaptivePane(isPresented: $showAdd) { EnvelopeEditSheet(vm: vm, envelope: nil) }
+        .adaptiveEntityPane(
+            item: $editingEnvelope,
+            title: "Enveloppe",
+            refresh: { e in vm.envelopes.first { $0.id == e.id } },
+            onDelete: { vm.deleteEnvelope(id: $0.id) }
+        ) { env in
+            EnvelopeDetailPane(envelope: env, categories: vm.categories)
+        } edit: { env in
+            EnvelopeEditSheet(vm: vm, envelope: env)
+        }
+        .adaptivePane(isPresented: $showSuggestions) {
             EnvelopeSuggestionSheet(
                 viewModel: vm,
                 existingEnvelopes: vm.envelopes,
@@ -1453,7 +1539,8 @@ struct EnvelopeListView: View {
 private struct EnvelopeEditSheet: View {
     @Bindable var vm: BudgetViewModel
     let envelope: BudgetEnvelope?
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
 
     @State private var name = ""
     @State private var amount = ""
@@ -1461,7 +1548,6 @@ private struct EnvelopeEditSheet: View {
     @State private var categoryId: Int? = nil
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section {
                     TextField("Nom (ex: Alimentation)", text: $name)
@@ -1482,24 +1568,21 @@ private struct EnvelopeEditSheet: View {
                     }
                 }
             }
-            .navigationTitle(envelope == nil ? "Nouvelle enveloppe" : "Modifier")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Annuler") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") { save(); dismiss() }
-                        .disabled(name.isEmpty || amount.isEmpty)
+            .nemorisFormStyle()
+            .onAppear {
+                if let e = envelope {
+                    name = e.name
+                    amount = String(format: "%.2f", e.amount)
+                    period = e.period
+                    categoryId = e.categoryId
                 }
             }
-        }
-        .onAppear {
-            if let e = envelope {
-                name = e.name
-                amount = String(format: "%.2f", e.amount)
-                period = e.period
-                categoryId = e.categoryId
+            .paneChrome(envelope == nil ? "Nouvelle enveloppe" : "Modifier",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Enregistrer",
+                        confirmDisabled: name.isEmpty || amount.isEmpty) {
+                save(); dismiss()
             }
-        }
     }
 
     private func save() {
@@ -1869,5 +1952,129 @@ struct BudgetRatioBar: View {
                     .foregroundStyle(isOver ? AppTheme.Colors.danger : AppTheme.Colors.textSecondary)
             }
         }
+    }
+}
+
+// MARK: - Panneaux détail macOS (récurrents + enveloppes)
+
+/// Détail lecture seule d'un motif récurrent — mode « voir » du panneau macOS.
+/// Jamais instancié sur iOS (le tap y ouvre directement l'édition en sheet).
+private struct PatternDetailPane: View {
+    let pattern: RecurringPattern
+    let categories: [Category]
+
+    /// Tiers chargés localement pour résoudre le nom du tier associé
+    /// (RecurringManagementView ne les possède pas).
+    @State private var allTiers: [Tiers] = []
+
+    private var categoryName: String? {
+        categories.first { $0.id == pattern.categoryId }?.name
+    }
+
+    private var tierName: String? {
+        guard let pid = pattern.payeeId else { return nil }
+        return allTiers.first { $0.id == pid }?.name
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(pattern.isExpense ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                        .frame(width: 36, height: 36)
+                        .background((pattern.isExpense ? AppTheme.Colors.danger : AppTheme.Colors.success).opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(pattern.name).font(AppTheme.Typography.bodyMedium)
+                        Text(pattern.frequency.label)
+                            .font(AppTheme.Typography.labelSmall)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                    Spacer()
+                    Text(pattern.amountAvg, format: .currency(code: "EUR"))
+                        .font(AppTheme.Typography.moneySmall)
+                        .foregroundStyle(pattern.isExpense ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                }
+                .padding(.vertical, 2)
+            }
+
+            Section("Détails") {
+                LabeledContent("Fréquence", value: pattern.frequency.label)
+                if pattern.frequency == .monthly, let day = pattern.anchorDay {
+                    LabeledContent("Jour du mois", value: "\(day)")
+                }
+                if let categoryName {
+                    LabeledContent("Catégorie", value: categoryName)
+                }
+                if let tierName {
+                    LabeledContent("Tier associé", value: tierName)
+                }
+                LabeledContent("Statut", value: pattern.isActive ? "Actif" : "Inactif")
+                LabeledContent("Origine", value: pattern.isManual ? "Saisi manuellement" : "Détecté automatiquement")
+            }
+
+            Section("Période") {
+                LabeledContent("Début", value: pattern.startDate.formatted(date: .abbreviated, time: .omitted))
+                if let end = pattern.endDate {
+                    LabeledContent("Fin", value: end.formatted(date: .abbreviated, time: .omitted))
+                }
+                if let detected = pattern.lastDetectedAt {
+                    LabeledContent("Dernière détection", value: detected.formatted(date: .abbreviated, time: .omitted))
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear {
+            if pattern.payeeId != nil, allTiers.isEmpty {
+                allTiers = TransactionRepository().fetchTiers()
+            }
+        }
+    }
+}
+
+/// Détail lecture seule d'une enveloppe budgétaire — mode « voir » du panneau macOS.
+private struct EnvelopeDetailPane: View {
+    let envelope: BudgetEnvelope
+    let categories: [Category]
+
+    private var categoryName: String? {
+        categories.first { $0.id == envelope.categoryId }?.name
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    Image(systemName: "envelope.fill")
+                        .font(.title3)
+                        .foregroundStyle(AppTheme.Colors.accent)
+                        .frame(width: 36, height: 36)
+                        .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(envelope.name).font(AppTheme.Typography.bodyMedium)
+                        Text(envelope.period.label)
+                            .font(AppTheme.Typography.labelSmall)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                    Spacer()
+                    Text(envelope.amount, format: .currency(code: "EUR"))
+                        .font(AppTheme.Typography.moneySmall)
+                        .foregroundStyle(AppTheme.Colors.accent)
+                }
+                .padding(.vertical, 2)
+            }
+
+            Section("Détails") {
+                LabeledContent("Plafond", value: envelope.amount.formatted(.currency(code: "EUR")))
+                LabeledContent("Période", value: envelope.period.label)
+                if let categoryName {
+                    LabeledContent("Catégorie", value: categoryName)
+                }
+                LabeledContent("Début", value: envelope.startDate.formatted(date: .abbreviated, time: .omitted))
+                LabeledContent("Statut", value: envelope.isActive ? "Active" : "Inactive")
+            }
+        }
+        .formStyle(.grouped)
     }
 }

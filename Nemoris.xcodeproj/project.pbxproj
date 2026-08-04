@@ -7,12 +7,34 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0BA57A21EE7D037AFF35C9F8 /* SwipeableRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1EFF186F52527F7E43FE44 /* SwipeableRow.swift */; };
+		0BA57A21EE7D037AFF35C9F8 /* RowActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA1EFF186F52527F7E43FE44 /* RowActions.swift */; };
 		13CB0CE6FC80B2CC5D103C37 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8B9F03BE984E529A7D91659 /* DashboardView.swift */; };
 		1D2E302F146B2D3A1A1AFEAB /* InvestmentSyncTraceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBEB7A367FE8D2425D752C83 /* InvestmentSyncTraceStore.swift */; };
 		1E3513EA68B3043E94AF2421 /* FinanceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A3E85B67C259D5049AE2FA0 /* FinanceModels.swift */; };
 		2E16E5D6AA8F354E2C3E03F5 /* DatabaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5C61F11CFB2CEAEBFB98D7B /* DatabaseManager.swift */; };
 		33D50D198FEA6517DAEFA961 /* TransactionRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4502DC20D242598B6B52E65 /* TransactionRepository.swift */; };
+		5A5E0000000000000000200 /* MerchantQueryPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E0000000000000000100 /* MerchantQueryPlan.swift */; };
+		5A5E0000000000000000201 /* SearchBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E0000000000000000101 /* SearchBudget.swift */; };
+		5A5E0000000000000000202 /* LocalityResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E0000000000000000102 /* LocalityResolver.swift */; };
+		5A5E0000000000000000203 /* MerchantTokenSimilarity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E0000000000000000103 /* MerchantTokenSimilarity.swift */; };
+		5A5E0000000000000000204 /* AbbreviationTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E0000000000000000104 /* AbbreviationTable.swift */; };
+		5A5E0000000000000000205 /* ForeignLocalityTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E0000000000000000105 /* ForeignLocalityTable.swift */; };
+		5A5E0000000000000000206 /* BankLabelTemplate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E0000000000000000106 /* BankLabelTemplate.swift */; };
+		5A5E0000000000000000207 /* LLMQueryRefinement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E0000000000000000107 /* LLMQueryRefinement.swift */; };
+		5A5E0000000000000000208 /* DeterministicQueryRefiner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E0000000000000000108 /* DeterministicQueryRefiner.swift */; };
+		5A5E0000000000000000209 /* MerchantQueryPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E0000000000000000109 /* MerchantQueryPlanner.swift */; };
+		5A5E000000000000000020A /* CandidateRanker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E000000000000000010A /* CandidateRanker.swift */; };
+		5A5E000000000000000020B /* GeoCommuneResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E000000000000000010B /* GeoCommuneResolver.swift */; };
+		5A5E000000000000000020C /* MerchantQueryExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E000000000000000010C /* MerchantQueryExecutor.swift */; };
+		5A5E0000000000000000232 /* CompanyMatchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E0000000000000000132 /* CompanyMatchModels.swift */; };
+		5A5E00000000000000006002 /* CompanyMatchRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E00000000000000006001 /* CompanyMatchRow.swift */; };
+		5AF10000000000000000A002 /* BankStatementExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AF10000000000000000A001 /* BankStatementExtractor.swift */; };
+		5AF10000000000000000A012 /* TransactionDocumentParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AF10000000000000000A011 /* TransactionDocumentParser.swift */; };
+		5AF10000000000000000A022 /* TransactionDocumentParseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AF10000000000000000A021 /* TransactionDocumentParseView.swift */; };
+		5A5E00000000000000006012 /* SearchPlanInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5E00000000000000006011 /* SearchPlanInspector.swift */; };
+		5AE0000000000000000000AD /* NemorisShareTransactions.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5AE0000000000000000000A2 /* NemorisShareTransactions.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5AE0000000000000000000BD /* NemorisShareInvest.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5AE0000000000000000000B2 /* NemorisShareInvest.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5BB6D8D5172603D74557C94F /* AIEnrichmentBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8C31FF06D7C9ECE1EBFB04A /* AIEnrichmentBackend.swift */; };
 		5C4A11AA20260716005C4A02 /* SyncSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11AA20260716005C4A01 /* SyncSchema.swift */; };
 		5C4A11AB20260716005C4A02 /* SyncPayloadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11AB20260716005C4A01 /* SyncPayloadStore.swift */; };
 		5C4A11AB20260716005C4A04 /* CloudSyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11AB20260716005C4A03 /* CloudSyncEngine.swift */; };
@@ -20,10 +42,14 @@
 		5C4A11AB20260717005C4A08 /* SyncLive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11AB20260717005C4A07 /* SyncLive.swift */; };
 		5C4A11AC20260718005C4A02 /* PlatformShims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11AC20260718005C4A01 /* PlatformShims.swift */; };
 		5C4A11AD20260718005C4A02 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 5C4A11AD20260718005C4A01 /* AppIcon.icon */; };
+		5C4A11B7A03D0001005C4A99 /* GroupedStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4A11B7A03D0002005C4A99 /* GroupedStyle.swift */; };
 		5F91672ADB63E3CB2B7B22E7 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A4737F83ED33275857E40A9 /* MainTabView.swift */; };
 		6EB61C12E2D668D2575CE109 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4DB50E1206BA1589716A420 /* AppState.swift */; };
 		6FFA1A93A7D2CC4474D749A5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 43E6D10DA96A34017839D4D0 /* Assets.xcassets */; };
+		747F4986807BA61FE52EB176 /* LocalLLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80ADCCB8AFB91A6DC0331756 /* LocalLLMService.swift */; };
 		9EA90697C30D963A0CDE3763 /* ReferenceDataView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC1F2BE9FB845B389A59C4B1 /* ReferenceDataView.swift */; };
+		A1B2C3D4E5F600000000AA01 /* AdaptivePane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600000000AA02 /* AdaptivePane.swift */; };
+		ACAC8D908DD43F492C4DCFBF /* ReimbursementRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9A8175A6AA8A01F70856786 /* ReimbursementRepository.swift */; };
 		CDCDCDCD10000000ABCDABCD /* EnvelopeSuggestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCDCDCD11000000ABCDABCD /* EnvelopeSuggestionService.swift */; };
 		CDCDCDCD12000000ABCDABCD /* EnvelopeSuggestionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCDCDCD13000000ABCDABCD /* EnvelopeSuggestionSheet.swift */; };
 		CDCDCDCD14000000ABCDABCD /* InsightModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCDCDCD15000000ABCDABCD /* InsightModels.swift */; };
@@ -34,6 +60,21 @@
 		CDCDCDCD1E000000ABCDABCD /* TaxReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCDCDCD1F000000ABCDABCD /* TaxReportView.swift */; };
 		CDCDCDCD20000000ABCDABCD /* CurrencyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCDCDCD21000000ABCDABCD /* CurrencyService.swift */; };
 		CDCDCDCD22000000ABCDABCD /* CurrencyConverterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDCDCDCD23000000ABCDABCD /* CurrencyConverterSheet.swift */; };
+		DA5B0001000000000000AAA1 /* EnvelopeSpendingCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000AAA1 /* EnvelopeSpendingCalculator.swift */; };
+		DA5B0001000000000000AAA2 /* InvestmentsRecap.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000AAA2 /* InvestmentsRecap.swift */; };
+		DA5B0001000000000000AAA3 /* PatrimoineSnapshotBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000AAA3 /* PatrimoineSnapshotBuilder.swift */; };
+		DA5B0001000000000000BBB1 /* DashboardSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000BBB1 /* DashboardSnapshot.swift */; };
+		DA5B0001000000000000BBB2 /* DashboardSnapshotBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000BBB2 /* DashboardSnapshotBuilder.swift */; };
+		DA5B0001000000000000BBB3 /* DashboardSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000BBB3 /* DashboardSnapshotStore.swift */; };
+		DA5B0001000000000000CCC1 /* DashboardOverviewBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000CCC1 /* DashboardOverviewBanner.swift */; };
+		DA5B0001000000000000CCC2 /* DashboardCustomizeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000CCC2 /* DashboardCustomizeView.swift */; };
+		DA5B0001000000000000DDA1 /* DashboardCardID.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000DDA1 /* DashboardCardID.swift */; };
+		DA5B0001000000000000DDA2 /* DashboardLayoutStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000DDA2 /* DashboardLayoutStore.swift */; };
+		DA5B0001000000000000DEA1 /* DashboardGridPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000DEA1 /* DashboardGridPlanner.swift */; };
+		DA5B0001000000000000DFA1 /* DashboardTile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000DFA1 /* DashboardTile.swift */; };
+		DA5B0001000000000000DFA2 /* DashboardCardHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000DFA2 /* DashboardCardHost.swift */; };
+		DA5B0001000000000000DFA3 /* DashboardCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000DFA3 /* DashboardCards.swift */; };
+		DA5B0001000000000000EEA1 /* YearFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA5B0000000000000000EEA1 /* YearFormatting.swift */; };
 		E74F78245AA347A0C2C9FB1D /* TransactionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3273B3667969BBFA3AB36E94 /* TransactionsView.swift */; };
 		E8118E972FB6A46700563937 /* SimulatorSeeder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8118E962FB6A46700563937 /* SimulatorSeeder.swift */; };
 		E826BBC12FBD5F4A0095EC62 /* NemorisShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E826BBC02FBD5F4A0095EC62 /* NemorisShortcuts.swift */; };
@@ -67,7 +108,6 @@
 		E8BB7CF02FD18FFF009D67C0 /* TransactionDensity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8BB7CEE2FD18FFF009D67C0 /* TransactionDensity.swift */; };
 		E8DFE8D52F97C46900C33343 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8DFE8D42F97C46900C33343 /* SettingsView.swift */; };
 		E8E71A782FA21E0B00232023 /* DashboardCharts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E71A772FA21E0B00232023 /* DashboardCharts.swift */; };
-		E8E71A7A2FA21E2000232023 /* AnnualDashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E71A792FA21E2000232023 /* AnnualDashboardViewModel.swift */; };
 		E8E71A7C2FA21E3400232023 /* FilteredDashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E71A7B2FA21E3400232023 /* FilteredDashboardViewModel.swift */; };
 		E8E71A7E2FA220AB00232023 /* FilteredDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E71A7D2FA220AB00232023 /* FilteredDashboardView.swift */; };
 		E8E71A822FA986A600232023 /* AppTips.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E71A812FA986A600232023 /* AppTips.swift */; };
@@ -162,9 +202,24 @@
 		PDFI000101000000ABCDABCD /* InvestmentPDFModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = PDFI000100000000ABCDABCD /* InvestmentPDFModels.swift */; };
 		PDFI000201000000ABCDABCD /* InvestmentPDFParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = PDFI000200000000ABCDABCD /* InvestmentPDFParser.swift */; };
 		PDFI000301000000ABCDABCD /* InvestmentPDFImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = PDFI000300000000ABCDABCD /* InvestmentPDFImportView.swift */; };
+		PDFI000401000000ABCDABCD /* InvestmentStatementExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = PDFI000400000000ABCDABCD /* InvestmentStatementExtractor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		5AE0000000000000000000AB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F857318EB357D311B6E85F4F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5AE0000000000000000000A1;
+			remoteInfo = NemorisShareTransactions;
+		};
+		5AE0000000000000000000BB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F857318EB357D311B6E85F4F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5AE0000000000000000000B1;
+			remoteInfo = NemorisShareInvest;
+		};
 		E826BC0B2FBDA3590095EC62 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = F857318EB357D311B6E85F4F /* Project object */;
@@ -182,6 +237,8 @@
 			dstSubfolderSpec = 13;
 			files = (
 				E826BC0D2FBDA3590095EC62 /* NemorisWidgetExtension.appex in Embed Foundation Extensions */,
+				5AE0000000000000000000AD /* NemorisShareTransactions.appex in Embed Foundation Extensions */,
+				5AE0000000000000000000BD /* NemorisShareInvest.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -195,6 +252,28 @@
 		39C50CDF8BA0C22D469D49AF /* NemorisApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NemorisApp.swift; sourceTree = "<group>"; };
 		43E6D10DA96A34017839D4D0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		4A4737F83ED33275857E40A9 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		5A5E0000000000000000100 /* MerchantQueryPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MerchantQueryPlan.swift; sourceTree = "<group>"; };
+		5A5E0000000000000000101 /* SearchBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchBudget.swift; sourceTree = "<group>"; };
+		5A5E0000000000000000102 /* LocalityResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalityResolver.swift; sourceTree = "<group>"; };
+		5A5E0000000000000000103 /* MerchantTokenSimilarity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MerchantTokenSimilarity.swift; sourceTree = "<group>"; };
+		5A5E0000000000000000104 /* AbbreviationTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AbbreviationTable.swift; sourceTree = "<group>"; };
+		5A5E0000000000000000105 /* ForeignLocalityTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForeignLocalityTable.swift; sourceTree = "<group>"; };
+		5A5E0000000000000000106 /* BankLabelTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BankLabelTemplate.swift; sourceTree = "<group>"; };
+		5A5E0000000000000000107 /* LLMQueryRefinement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMQueryRefinement.swift; sourceTree = "<group>"; };
+		5A5E0000000000000000108 /* DeterministicQueryRefiner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeterministicQueryRefiner.swift; sourceTree = "<group>"; };
+		5A5E0000000000000000109 /* MerchantQueryPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MerchantQueryPlanner.swift; sourceTree = "<group>"; };
+		5A5E000000000000000010A /* CandidateRanker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateRanker.swift; sourceTree = "<group>"; };
+		5A5E000000000000000010B /* GeoCommuneResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoCommuneResolver.swift; sourceTree = "<group>"; };
+		5A5E000000000000000010C /* MerchantQueryExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MerchantQueryExecutor.swift; sourceTree = "<group>"; };
+		5A5E0000000000000000132 /* CompanyMatchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyMatchModels.swift; sourceTree = "<group>"; };
+		5A5E00000000000000006001 /* CompanyMatchRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanyMatchRow.swift; sourceTree = "<group>"; };
+		5AF10000000000000000A001 /* BankStatementExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BankStatementExtractor.swift; sourceTree = "<group>"; };
+		5AF10000000000000000A011 /* TransactionDocumentParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionDocumentParser.swift; sourceTree = "<group>"; };
+		5AF10000000000000000A021 /* TransactionDocumentParseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionDocumentParseView.swift; sourceTree = "<group>"; };
+		5A5E00000000000000006011 /* SearchPlanInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchPlanInspector.swift; sourceTree = "<group>"; };
+		5AE0000000000000000000A2 /* NemorisShareTransactions.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NemorisShareTransactions.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		5AE0000000000000000000B2 /* NemorisShareInvest.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NemorisShareInvest.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		5AE0000000000000000000C1 /* NemorisShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NemorisShareExtension.entitlements; sourceTree = "<group>"; };
 		5C4A11AA20260716005C4A01 /* SyncSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncSchema.swift; sourceTree = "<group>"; };
 		5C4A11AB20260716005C4A01 /* SyncPayloadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncPayloadStore.swift; sourceTree = "<group>"; };
 		5C4A11AB20260716005C4A03 /* CloudSyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncEngine.swift; sourceTree = "<group>"; };
@@ -202,9 +281,14 @@
 		5C4A11AB20260717005C4A07 /* SyncLive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLive.swift; sourceTree = "<group>"; };
 		5C4A11AC20260718005C4A01 /* PlatformShims.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformShims.swift; sourceTree = "<group>"; };
 		5C4A11AD20260718005C4A01 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		5C4A11B7A03D0002005C4A99 /* GroupedStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupedStyle.swift; sourceTree = "<group>"; };
 		641B0565457A0F3EBC3A784E /* Nemoris.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Nemoris.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		80ADCCB8AFB91A6DC0331756 /* LocalLLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMService.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F600000000AA02 /* AdaptivePane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptivePane.swift; sourceTree = "<group>"; };
 		A8B9F03BE984E529A7D91659 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		BBEB7A367FE8D2425D752C83 /* InvestmentSyncTraceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentSyncTraceStore.swift; sourceTree = "<group>"; };
+		C8C31FF06D7C9ECE1EBFB04A /* AIEnrichmentBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIEnrichmentBackend.swift; sourceTree = "<group>"; };
+		C9A8175A6AA8A01F70856786 /* ReimbursementRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReimbursementRepository.swift; sourceTree = "<group>"; };
 		CDCDCDCD11000000ABCDABCD /* EnvelopeSuggestionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvelopeSuggestionService.swift; sourceTree = "<group>"; };
 		CDCDCDCD13000000ABCDABCD /* EnvelopeSuggestionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvelopeSuggestionSheet.swift; sourceTree = "<group>"; };
 		CDCDCDCD15000000ABCDABCD /* InsightModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightModels.swift; sourceTree = "<group>"; };
@@ -216,6 +300,21 @@
 		CDCDCDCD21000000ABCDABCD /* CurrencyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrencyService.swift; sourceTree = "<group>"; };
 		CDCDCDCD23000000ABCDABCD /* CurrencyConverterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrencyConverterSheet.swift; sourceTree = "<group>"; };
 		D5C61F11CFB2CEAEBFB98D7B /* DatabaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseManager.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000AAA1 /* EnvelopeSpendingCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvelopeSpendingCalculator.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000AAA2 /* InvestmentsRecap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentsRecap.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000AAA3 /* PatrimoineSnapshotBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatrimoineSnapshotBuilder.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000BBB1 /* DashboardSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardSnapshot.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000BBB2 /* DashboardSnapshotBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardSnapshotBuilder.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000BBB3 /* DashboardSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardSnapshotStore.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000CCC1 /* DashboardOverviewBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardOverviewBanner.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000CCC2 /* DashboardCustomizeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardCustomizeView.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000DDA1 /* DashboardCardID.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardCardID.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000DDA2 /* DashboardLayoutStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardLayoutStore.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000DEA1 /* DashboardGridPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardGridPlanner.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000DFA1 /* DashboardTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardTile.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000DFA2 /* DashboardCardHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardCardHost.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000DFA3 /* DashboardCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardCards.swift; sourceTree = "<group>"; };
+		DA5B0000000000000000EEA1 /* YearFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YearFormatting.swift; sourceTree = "<group>"; };
 		DC1F2BE9FB845B389A59C4B1 /* ReferenceDataView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReferenceDataView.swift; sourceTree = "<group>"; };
 		E4502DC20D242598B6B52E65 /* TransactionRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionRepository.swift; sourceTree = "<group>"; };
 		E8118E962FB6A46700563937 /* SimulatorSeeder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatorSeeder.swift; sourceTree = "<group>"; };
@@ -254,7 +353,6 @@
 		E8BB7CEE2FD18FFF009D67C0 /* TransactionDensity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransactionDensity.swift; sourceTree = "<group>"; };
 		E8DFE8D42F97C46900C33343 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E8E71A772FA21E0B00232023 /* DashboardCharts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardCharts.swift; sourceTree = "<group>"; };
-		E8E71A792FA21E2000232023 /* AnnualDashboardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnualDashboardViewModel.swift; sourceTree = "<group>"; };
 		E8E71A7B2FA21E3400232023 /* FilteredDashboardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilteredDashboardViewModel.swift; sourceTree = "<group>"; };
 		E8E71A7D2FA220AB00232023 /* FilteredDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilteredDashboardView.swift; sourceTree = "<group>"; };
 		E8E71A812FA986A600232023 /* AppTips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTips.swift; sourceTree = "<group>"; };
@@ -341,7 +439,7 @@
 		E9F0F0F000000003ABCDABCD /* SkeletonComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonComponents.swift; sourceTree = "<group>"; };
 		E9F0F0F100000001ABCDABCD /* SQLAssistantService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLAssistantService.swift; sourceTree = "<group>"; };
 		E9F0F0F100000003ABCDABCD /* SQLAssistantSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLAssistantSheet.swift; sourceTree = "<group>"; };
-		EA1EFF186F52527F7E43FE44 /* SwipeableRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeableRow.swift; sourceTree = "<group>"; };
+		EA1EFF186F52527F7E43FE44 /* RowActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RowActions.swift; sourceTree = "<group>"; };
 		EAEAEAEA01000000ABCDABCD /* InvestmentChartComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentChartComponents.swift; sourceTree = "<group>"; };
 		EAEAEAEA02000000ABCDABCD /* InvestmentAccountDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentAccountDetailView.swift; sourceTree = "<group>"; };
 		EAEAEAEA03000000ABCDABCD /* InvestmentOrderFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentOrderFormView.swift; sourceTree = "<group>"; };
@@ -350,9 +448,24 @@
 		PDFI000100000000ABCDABCD /* InvestmentPDFModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentPDFModels.swift; sourceTree = "<group>"; };
 		PDFI000200000000ABCDABCD /* InvestmentPDFParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentPDFParser.swift; sourceTree = "<group>"; };
 		PDFI000300000000ABCDABCD /* InvestmentPDFImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentPDFImportView.swift; sourceTree = "<group>"; };
+		PDFI000400000000ABCDABCD /* InvestmentStatementExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvestmentStatementExtractor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		5AE0000000000000000000A4 /* Exceptions for "NemorisShareTransactions" folder in "NemorisShareTransactions" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 5AE0000000000000000000A1 /* NemorisShareTransactions */;
+		};
+		5AE0000000000000000000B4 /* Exceptions for "NemorisShareInvest" folder in "NemorisShareInvest" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 5AE0000000000000000000B1 /* NemorisShareInvest */;
+		};
 		E826BC112FBDA3590095EC62 /* Exceptions for "NemorisWidget" folder in "NemorisWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -363,6 +476,22 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		5AE0000000000000000000A3 /* NemorisShareTransactions */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				5AE0000000000000000000A4 /* Exceptions for "NemorisShareTransactions" folder in "NemorisShareTransactions" target */,
+			);
+			path = NemorisShareTransactions;
+			sourceTree = "<group>";
+		};
+		5AE0000000000000000000B3 /* NemorisShareInvest */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				5AE0000000000000000000B4 /* Exceptions for "NemorisShareInvest" folder in "NemorisShareInvest" target */,
+			);
+			path = NemorisShareInvest;
+			sourceTree = "<group>";
+		};
 		E826BBFF2FBDA3580095EC62 /* NemorisWidget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -384,6 +513,20 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		5AE0000000000000000000A6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5AE0000000000000000000B6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E826BBF92FBDA3580095EC62 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -428,9 +571,14 @@
 		4C7D93FB38A1EE652E3C0C09 /* Dashboard */ = {
 			isa = PBXGroup;
 			children = (
+				DA5B0000000000000000BB00 /* Service */,
+				DA5B0000000000000000DF00 /* Cards */,
+				DA5B0000000000000000DE00 /* Layout */,
+				DA5B0000000000000000DD00 /* Model */,
+				DA5B0000000000000000CCC1 /* DashboardOverviewBanner.swift */,
+				DA5B0000000000000000CCC2 /* DashboardCustomizeView.swift */,
 				A8B9F03BE984E529A7D91659 /* DashboardView.swift */,
 				E8E71A772FA21E0B00232023 /* DashboardCharts.swift */,
-				E8E71A792FA21E2000232023 /* AnnualDashboardViewModel.swift */,
 				E8E71A7B2FA21E3400232023 /* FilteredDashboardViewModel.swift */,
 				E8E71A7D2FA220AB00232023 /* FilteredDashboardView.swift */,
 				E9E9E9E500000000ABCDABCD /* AlertEngine.swift */,
@@ -444,8 +592,30 @@
 			children = (
 				641B0565457A0F3EBC3A784E /* Nemoris.app */,
 				E826BBFC2FBDA3580095EC62 /* NemorisWidgetExtension.appex */,
+				5AE0000000000000000000A2 /* NemorisShareTransactions.appex */,
+				5AE0000000000000000000B2 /* NemorisShareInvest.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		5A5E00000000000000000010 /* QueryPlanning */ = {
+			isa = PBXGroup;
+			children = (
+				5A5E0000000000000000100 /* MerchantQueryPlan.swift */,
+				5A5E0000000000000000101 /* SearchBudget.swift */,
+				5A5E0000000000000000102 /* LocalityResolver.swift */,
+				5A5E0000000000000000103 /* MerchantTokenSimilarity.swift */,
+				5A5E0000000000000000104 /* AbbreviationTable.swift */,
+				5A5E0000000000000000105 /* ForeignLocalityTable.swift */,
+				5A5E0000000000000000106 /* BankLabelTemplate.swift */,
+				5A5E0000000000000000107 /* LLMQueryRefinement.swift */,
+				5A5E0000000000000000108 /* DeterministicQueryRefiner.swift */,
+				5A5E0000000000000000109 /* MerchantQueryPlanner.swift */,
+				5A5E000000000000000010A /* CandidateRanker.swift */,
+				5A5E000000000000000010B /* GeoCommuneResolver.swift */,
+				5A5E000000000000000010C /* MerchantQueryExecutor.swift */,
+			);
+			path = QueryPlanning;
 			sourceTree = "<group>";
 		};
 		5C4A11AB20260716005C4A00 /* Sync */ = {
@@ -482,6 +652,7 @@
 			children = (
 				E4502DC20D242598B6B52E65 /* TransactionRepository.swift */,
 				E8B6883D2F989FBD0041CDD8 /* TricountRepository.swift */,
+				C9A8175A6AA8A01F70856786 /* ReimbursementRepository.swift */,
 				E881B2182FAC485700B58D3C /* InvestmentRepository.swift */,
 				E9E9E9A300000000ABCDABCD /* PatrimoineRepository.swift */,
 				E9E9E9D300000000ABCDABCD /* GoalRepository.swift */,
@@ -505,8 +676,11 @@
 			isa = PBXGroup;
 			children = (
 				E826BC122FBDA3630095EC62 /* NemorisWidgetExtension.entitlements */,
+				5AE0000000000000000000C1 /* NemorisShareExtension.entitlements */,
 				600848A6DFB13D22A842F929 /* Nemoris */,
 				E826BBFF2FBDA3580095EC62 /* NemorisWidget */,
+				5AE0000000000000000000A3 /* NemorisShareTransactions */,
+				5AE0000000000000000000B3 /* NemorisShareInvest */,
 				E881B2442FB62AE600B58D3C /* Frameworks */,
 				57B630E0BB8EEA70A0C66C02 /* Products */,
 				E8E71A832FA9D31F00232023 /* Docs */,
@@ -542,11 +716,16 @@
 				E9E9E9EB04000000ABCDABCD /* ImportNotificationService.swift */,
 				E9E9E9EB06000000ABCDABCD /* ImportSessionBanner.swift */,
 				E9E9E9EB08000000ABCDABCD /* CSVParserV3.swift */,
+				5AF10000000000000000A001 /* BankStatementExtractor.swift */,
+				5AF10000000000000000A011 /* TransactionDocumentParser.swift */,
+				5AF10000000000000000A021 /* TransactionDocumentParseView.swift */,
 				E9E9E9EB0A000000ABCDABCD /* ImportV3EntryView.swift */,
 				E9E9E9EB0C000000ABCDABCD /* ColumnMappingView.swift */,
 				E9E9E9EB0E000000ABCDABCD /* ImportSessionView.swift */,
 				E9E9E9EB10000000ABCDABCD /* ImportSessionViewModel.swift */,
 				E9E9E9EB12000000ABCDABCD /* EnrichmentSheetView.swift */,
+				5A5E00000000000000006001 /* CompanyMatchRow.swift */,
+				5A5E00000000000000006011 /* SearchPlanInspector.swift */,
 				E9E9E9EB14000000ABCDABCD /* TierUpdateSheet.swift */,
 				E9E9E9EB16000000ABCDABCD /* PayeeCreationFormSheet.swift */,
 				E9E9E9EB18000000ABCDABCD /* EnrichmentMapFullscreenSheet.swift */,
@@ -597,6 +776,43 @@
 			path = Data;
 			sourceTree = "<group>";
 		};
+		DA5B0000000000000000BB00 /* Service */ = {
+			isa = PBXGroup;
+			children = (
+				DA5B0000000000000000BBB1 /* DashboardSnapshot.swift */,
+				DA5B0000000000000000BBB2 /* DashboardSnapshotBuilder.swift */,
+				DA5B0000000000000000BBB3 /* DashboardSnapshotStore.swift */,
+			);
+			path = Service;
+			sourceTree = "<group>";
+		};
+		DA5B0000000000000000DD00 /* Model */ = {
+			isa = PBXGroup;
+			children = (
+				DA5B0000000000000000DDA1 /* DashboardCardID.swift */,
+				DA5B0000000000000000DDA2 /* DashboardLayoutStore.swift */,
+			);
+			path = Model;
+			sourceTree = "<group>";
+		};
+		DA5B0000000000000000DE00 /* Layout */ = {
+			isa = PBXGroup;
+			children = (
+				DA5B0000000000000000DEA1 /* DashboardGridPlanner.swift */,
+			);
+			path = Layout;
+			sourceTree = "<group>";
+		};
+		DA5B0000000000000000DF00 /* Cards */ = {
+			isa = PBXGroup;
+			children = (
+				DA5B0000000000000000DFA1 /* DashboardTile.swift */,
+				DA5B0000000000000000DFA2 /* DashboardCardHost.swift */,
+				DA5B0000000000000000DFA3 /* DashboardCards.swift */,
+			);
+			path = Cards;
+			sourceTree = "<group>";
+		};
 		DAD278D2F6B1A9931871B913 /* Transactions */ = {
 			isa = PBXGroup;
 			children = (
@@ -631,6 +847,7 @@
 				E9E9E9F302000000ABCDABCD /* InvestmentPositionDetailView.swift */,
 				EAEAEAEA03000000ABCDABCD /* InvestmentOrderFormView.swift */,
 				BBEB7A367FE8D2425D752C83 /* InvestmentSyncTraceStore.swift */,
+				DA5B0000000000000000AAA2 /* InvestmentsRecap.swift */,
 				PDFI000000000000ABCDABCD /* PDFImport */,
 				E9E9E9F510000000ABCDABCD /* LiveSync */,
 			);
@@ -665,6 +882,7 @@
 				E881B2342FAD9C9F00B58D3C /* BudgetCalendarView.swift */,
 				E881B2382FADE29100B58D3C /* TransactionMatcher.swift */,
 				E9E9E9F000000000ABCDABCD /* BudgetNotificationService.swift */,
+				DA5B0000000000000000AAA1 /* EnvelopeSpendingCalculator.swift */,
 				CDCDCDCD11000000ABCDABCD /* EnvelopeSuggestionService.swift */,
 				CDCDCDCD13000000ABCDABCD /* EnvelopeSuggestionSheet.swift */,
 			);
@@ -680,10 +898,13 @@
 				E9F0F0F000000005ABCDABCD /* Skeletons */,
 				E881B23B2FAE605400B58D3C /* AppTheme.swift */,
 				E881B23D2FAE606F00B58D3C /* DesignComponents.swift */,
+				5C4A11B7A03D0002005C4A99 /* GroupedStyle.swift */,
 				E9E9E9EA00000000ABCDABCD /* MerchantLogo.swift */,
 				5C4A11AC20260718005C4A01 /* PlatformShims.swift */,
-				EA1EFF186F52527F7E43FE44 /* SwipeableRow.swift */,
+				EA1EFF186F52527F7E43FE44 /* RowActions.swift */,
+				A1B2C3D4E5F600000000AA02 /* AdaptivePane.swift */,
 				E9E9E9AF00000000ABCDABCD /* MoneyText.swift */,
+				DA5B0000000000000000EEA1 /* YearFormatting.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -737,6 +958,7 @@
 				E9E9E9A600000000ABCDABCD /* AssetFormView.swift */,
 				E9E9E9A700000000ABCDABCD /* RealEstateFormView.swift */,
 				E9E9E9A800000000ABCDABCD /* LoanCalculator.swift */,
+				DA5B0000000000000000AAA3 /* PatrimoineSnapshotBuilder.swift */,
 				E9E9E9A900000000ABCDABCD /* LoanFormView.swift */,
 				E9E9E9DB00000000ABCDABCD /* ProjectionEngine.swift */,
 				E9E9E9DD00000000ABCDABCD /* ProjectionView.swift */,
@@ -804,6 +1026,7 @@
 				E8DC34492FC9EF25003EF244 /* Sirene */,
 				E9E9E9E954000000ABCDABCD /* NAFCategoryMapper.swift */,
 				E9E9E9EE00000000ABCDABCD /* CompanyDataSource.swift */,
+				5A5E0000000000000000132 /* CompanyMatchModels.swift */,
 				E9E9E9EE04000000ABCDABCD /* CompaniesHouseDataSource.swift */,
 				E9E9E9EE06000000ABCDABCD /* ZefixDataSource.swift */,
 				E9E9E9EE0A000000ABCDABCD /* CompanyDataSourcesRegistry.swift */,
@@ -826,9 +1049,12 @@
 			isa = PBXGroup;
 			children = (
 				E9E9E9E990000000ABCDABCD /* CompanyDataSources */,
+				5A5E00000000000000000010 /* QueryPlanning */,
 				E9E9E9EC00000000ABCDABCD /* EnrichmentModels.swift */,
 				E9E9E9EC02000000ABCDABCD /* EnrichmentRepository.swift */,
 				E9E9E9EC04000000ABCDABCD /* EnrichmentLLMService.swift */,
+				C8C31FF06D7C9ECE1EBFB04A /* AIEnrichmentBackend.swift */,
+				80ADCCB8AFB91A6DC0331756 /* LocalLLMService.swift */,
 				E9E9E9EC06000000ABCDABCD /* MapKitSearchService.swift */,
 				E9E9E9EC08000000ABCDABCD /* EnrichmentOrchestrator.swift */,
 				E9E9E9EC0A000000ABCDABCD /* LocationExtractor.swift */,
@@ -945,6 +1171,7 @@
 			children = (
 				PDFI000100000000ABCDABCD /* InvestmentPDFModels.swift */,
 				PDFI000200000000ABCDABCD /* InvestmentPDFParser.swift */,
+				PDFI000400000000ABCDABCD /* InvestmentStatementExtractor.swift */,
 				PDFI000300000000ABCDABCD /* InvestmentPDFImportView.swift */,
 			);
 			path = PDFImport;
@@ -967,6 +1194,8 @@
 			);
 			dependencies = (
 				E826BC0C2FBDA3590095EC62 /* PBXTargetDependency */,
+				5AE0000000000000000000AC /* PBXTargetDependency */,
+				5AE0000000000000000000BC /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				E8DC34472FC9ED69003EF244 /* Services */,
@@ -979,6 +1208,50 @@
 			productName = FinanceMobileIOS;
 			productReference = 641B0565457A0F3EBC3A784E /* Nemoris.app */;
 			productType = "com.apple.product-type.application";
+		};
+		5AE0000000000000000000A1 /* NemorisShareTransactions */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5AE0000000000000000000AA /* Build configuration list for PBXNativeTarget "NemorisShareTransactions" */;
+			buildPhases = (
+				5AE0000000000000000000A5 /* Sources */,
+				5AE0000000000000000000A6 /* Frameworks */,
+				5AE0000000000000000000A7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5AE0000000000000000000A3 /* NemorisShareTransactions */,
+			);
+			name = NemorisShareTransactions;
+			packageProductDependencies = (
+			);
+			productName = NemorisShareTransactions;
+			productReference = 5AE0000000000000000000A2 /* NemorisShareTransactions.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		5AE0000000000000000000B1 /* NemorisShareInvest */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5AE0000000000000000000BA /* Build configuration list for PBXNativeTarget "NemorisShareInvest" */;
+			buildPhases = (
+				5AE0000000000000000000B5 /* Sources */,
+				5AE0000000000000000000B6 /* Frameworks */,
+				5AE0000000000000000000B7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5AE0000000000000000000B3 /* NemorisShareInvest */,
+			);
+			name = NemorisShareInvest;
+			packageProductDependencies = (
+			);
+			productName = NemorisShareInvest;
+			productReference = 5AE0000000000000000000B2 /* NemorisShareInvest.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		E826BBFB2FBDA3580095EC62 /* NemorisWidgetExtension */ = {
 			isa = PBXNativeTarget;
@@ -1012,6 +1285,12 @@
 				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
+					5AE0000000000000000000A1 = {
+						CreatedOnToolsVersion = 26.4;
+					};
+					5AE0000000000000000000B1 = {
+						CreatedOnToolsVersion = 26.4;
+					};
 					E826BBFB2FBDA3580095EC62 = {
 						CreatedOnToolsVersion = 26.4;
 					};
@@ -1037,6 +1316,8 @@
 			targets = (
 				486CE5196ED6E967037DE733 /* Nemoris */,
 				E826BBFB2FBDA3580095EC62 /* NemorisWidgetExtension */,
+				5AE0000000000000000000A1 /* NemorisShareTransactions */,
+				5AE0000000000000000000B1 /* NemorisShareInvest */,
 			);
 		};
 /* End PBXProject section */
@@ -1051,6 +1332,20 @@
 				5C4A11AD20260718005C4A02 /* AppIcon.icon in Resources */,
 				E881B2172FAC2E1800B58D3C /* Localizable.strings in Resources */,
 				E881B2142FAC2E0200B58D3C /* Localizable.strings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5AE0000000000000000000A7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5AE0000000000000000000B7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1087,6 +1382,20 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		5AE0000000000000000000A5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5AE0000000000000000000B5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		C06B19D341934450BE8FACDB /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1094,10 +1403,13 @@
 				E8118E972FB6A46700563937 /* SimulatorSeeder.swift in Sources */,
 				E8E71A7E2FA220AB00232023 /* FilteredDashboardView.swift in Sources */,
 				E881B23E2FAE606F00B58D3C /* DesignComponents.swift in Sources */,
-				0BA57A21EE7D037AFF35C9F8 /* SwipeableRow.swift in Sources */,
+				5C4A11B7A03D0001005C4A99 /* GroupedStyle.swift in Sources */,
+				0BA57A21EE7D037AFF35C9F8 /* RowActions.swift in Sources */,
+				A1B2C3D4E5F600000000AA01 /* AdaptivePane.swift in Sources */,
 				E881B2252FAC7E0400B58D3C /* PaywallView.swift in Sources */,
 				6EB61C12E2D668D2575CE109 /* AppState.swift in Sources */,
 				E8B6883E2F989FBD0041CDD8 /* TricountRepository.swift in Sources */,
+				ACAC8D908DD43F492C4DCFBF /* ReimbursementRepository.swift in Sources */,
 				E881B22F2FAD9BFA00B58D3C /* BudgetRepository.swift in Sources */,
 				E881B2392FADE29100B58D3C /* TransactionMatcher.swift in Sources */,
 				13CB0CE6FC80B2CC5D103C37 /* DashboardView.swift in Sources */,
@@ -1160,7 +1472,6 @@
 				E881B22B2FAD9B9800B58D3C /* BudgetModels.swift in Sources */,
 				E881B2312FAD9C3100B58D3C /* BudgetViewModel.swift in Sources */,
 				E881B22D2FAD9BC600B58D3C /* RecurringDetector.swift in Sources */,
-				E8E71A7A2FA21E2000232023 /* AnnualDashboardViewModel.swift in Sources */,
 				E881B2332FAD9C7900B58D3C /* BudgetView.swift in Sources */,
 				E8B688412F98A0480041CDD8 /* TricountView.swift in Sources */,
 				E8E71A822FA986A600232023 /* AppTips.swift in Sources */,
@@ -1187,11 +1498,16 @@
 				E9E9E9EB05000000ABCDABCD /* ImportNotificationService.swift in Sources */,
 				E9E9E9EB07000000ABCDABCD /* ImportSessionBanner.swift in Sources */,
 				E9E9E9EB09000000ABCDABCD /* CSVParserV3.swift in Sources */,
+				5AF10000000000000000A002 /* BankStatementExtractor.swift in Sources */,
+				5AF10000000000000000A012 /* TransactionDocumentParser.swift in Sources */,
+				5AF10000000000000000A022 /* TransactionDocumentParseView.swift in Sources */,
 				E9E9E9EB0B000000ABCDABCD /* ImportV3EntryView.swift in Sources */,
 				E9E9E9EB0D000000ABCDABCD /* ColumnMappingView.swift in Sources */,
 				E9E9E9EB0F000000ABCDABCD /* ImportSessionView.swift in Sources */,
 				E9E9E9EB11000000ABCDABCD /* ImportSessionViewModel.swift in Sources */,
 				E9E9E9EB13000000ABCDABCD /* EnrichmentSheetView.swift in Sources */,
+				5A5E00000000000000006002 /* CompanyMatchRow.swift in Sources */,
+				5A5E00000000000000006012 /* SearchPlanInspector.swift in Sources */,
 				E9E9E9EB15000000ABCDABCD /* TierUpdateSheet.swift in Sources */,
 				E9E9E9EB17000000ABCDABCD /* PayeeCreationFormSheet.swift in Sources */,
 				E9E9E9EB19000000ABCDABCD /* EnrichmentMapFullscreenSheet.swift in Sources */,
@@ -1199,8 +1515,24 @@
 				E9E9E9EC01000000ABCDABCD /* EnrichmentModels.swift in Sources */,
 				E9E9E9EC03000000ABCDABCD /* EnrichmentRepository.swift in Sources */,
 				E9E9E9EC05000000ABCDABCD /* EnrichmentLLMService.swift in Sources */,
+				5BB6D8D5172603D74557C94F /* AIEnrichmentBackend.swift in Sources */,
+				747F4986807BA61FE52EB176 /* LocalLLMService.swift in Sources */,
 				E9E9E9EC07000000ABCDABCD /* MapKitSearchService.swift in Sources */,
 				E9E9E9EC09000000ABCDABCD /* EnrichmentOrchestrator.swift in Sources */,
+				5A5E0000000000000000200 /* MerchantQueryPlan.swift in Sources */,
+				5A5E0000000000000000201 /* SearchBudget.swift in Sources */,
+				5A5E0000000000000000202 /* LocalityResolver.swift in Sources */,
+				5A5E0000000000000000203 /* MerchantTokenSimilarity.swift in Sources */,
+				5A5E0000000000000000204 /* AbbreviationTable.swift in Sources */,
+				5A5E0000000000000000205 /* ForeignLocalityTable.swift in Sources */,
+				5A5E0000000000000000206 /* BankLabelTemplate.swift in Sources */,
+				5A5E0000000000000000207 /* LLMQueryRefinement.swift in Sources */,
+				5A5E0000000000000000208 /* DeterministicQueryRefiner.swift in Sources */,
+				5A5E0000000000000000209 /* MerchantQueryPlanner.swift in Sources */,
+				5A5E000000000000000020A /* CandidateRanker.swift in Sources */,
+				5A5E000000000000000020B /* GeoCommuneResolver.swift in Sources */,
+				5A5E000000000000000020C /* MerchantQueryExecutor.swift in Sources */,
+				5A5E0000000000000000232 /* CompanyMatchModels.swift in Sources */,
 				E9E9E9EC0B000000ABCDABCD /* LocationExtractor.swift in Sources */,
 				E9E9E9EE01000000ABCDABCD /* CompanyDataSource.swift in Sources */,
 				E9E9E9EE05000000ABCDABCD /* CompaniesHouseDataSource.swift in Sources */,
@@ -1210,6 +1542,21 @@
 				E9E9E9EF01000000ABCDABCD /* ContactsService.swift in Sources */,
 				E9E9E9EF03000000ABCDABCD /* ContactPickerSheet.swift in Sources */,
 				E9E9E9F001000000ABCDABCD /* BudgetNotificationService.swift in Sources */,
+				DA5B0001000000000000EEA1 /* YearFormatting.swift in Sources */,
+				DA5B0001000000000000CCC2 /* DashboardCustomizeView.swift in Sources */,
+				DA5B0001000000000000DFA3 /* DashboardCards.swift in Sources */,
+				DA5B0001000000000000DFA2 /* DashboardCardHost.swift in Sources */,
+				DA5B0001000000000000DFA1 /* DashboardTile.swift in Sources */,
+				DA5B0001000000000000DEA1 /* DashboardGridPlanner.swift in Sources */,
+				DA5B0001000000000000DDA2 /* DashboardLayoutStore.swift in Sources */,
+				DA5B0001000000000000DDA1 /* DashboardCardID.swift in Sources */,
+				DA5B0001000000000000CCC1 /* DashboardOverviewBanner.swift in Sources */,
+				DA5B0001000000000000BBB3 /* DashboardSnapshotStore.swift in Sources */,
+				DA5B0001000000000000BBB2 /* DashboardSnapshotBuilder.swift in Sources */,
+				DA5B0001000000000000BBB1 /* DashboardSnapshot.swift in Sources */,
+				DA5B0001000000000000AAA3 /* PatrimoineSnapshotBuilder.swift in Sources */,
+				DA5B0001000000000000AAA2 /* InvestmentsRecap.swift in Sources */,
+				DA5B0001000000000000AAA1 /* EnvelopeSpendingCalculator.swift in Sources */,
 				E9E9E9F101000000ABCDABCD /* AISettingsView.swift in Sources */,
 				E9E9E9F201000000ABCDABCD /* InvestmentChartComponents.swift in Sources */,
 				E9E9E9F301000000ABCDABCD /* InvestmentAccountDetailView.swift in Sources */,
@@ -1217,6 +1564,7 @@
 				E9E9E9F401000000ABCDABCD /* InvestmentOrderFormView.swift in Sources */,
 				PDFI000101000000ABCDABCD /* InvestmentPDFModels.swift in Sources */,
 				PDFI000201000000ABCDABCD /* InvestmentPDFParser.swift in Sources */,
+				PDFI000401000000ABCDABCD /* InvestmentStatementExtractor.swift in Sources */,
 				PDFI000301000000ABCDABCD /* InvestmentPDFImportView.swift in Sources */,
 				1D2E302F146B2D3A1A1AFEAB /* InvestmentSyncTraceStore.swift in Sources */,
 				E9E9E9F501000000ABCDABCD /* InvestmentLiveSyncProvider.swift in Sources */,
@@ -1249,6 +1597,18 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		5AE0000000000000000000AC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilter = ios;
+			target = 5AE0000000000000000000A1 /* NemorisShareTransactions */;
+			targetProxy = 5AE0000000000000000000AB /* PBXContainerItemProxy */;
+		};
+		5AE0000000000000000000BC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilter = ios;
+			target = 5AE0000000000000000000B1 /* NemorisShareInvest */;
+			targetProxy = 5AE0000000000000000000BB /* PBXContainerItemProxy */;
+		};
 		E826BC0C2FBDA3590095EC62 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			platformFilter = ios;
@@ -1347,7 +1707,7 @@
 				CODE_SIGN_ENTITLEMENTS = Nemoris/NemorisDebug.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = P5US3ZM4M3;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Nemoris/Resources/Info.plist;
@@ -1362,7 +1722,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = fr.hedwin.nemoris;
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
@@ -1379,7 +1739,7 @@
 				CODE_SIGN_ENTITLEMENTS = Nemoris/Nemoris.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = P5US3ZM4M3;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Nemoris/Resources/Info.plist;
@@ -1394,11 +1754,155 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = fr.hedwin.nemoris;
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		5AE0000000000000000000A8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_ENTITLEMENTS = NemorisShareExtension.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = P5US3ZM4M3;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NemorisShareTransactions/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Transactions;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = fr.hedwin.nemoris.ShareTransactions;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5AE0000000000000000000A9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_ENTITLEMENTS = NemorisShareExtension.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = P5US3ZM4M3;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NemorisShareTransactions/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Transactions;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = fr.hedwin.nemoris.ShareTransactions;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		5AE0000000000000000000B8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_ENTITLEMENTS = NemorisShareExtension.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = P5US3ZM4M3;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NemorisShareInvest/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Portefeuille;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = fr.hedwin.nemoris.ShareInvest;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5AE0000000000000000000B9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_ENTITLEMENTS = NemorisShareExtension.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = P5US3ZM4M3;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NemorisShareInvest/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Portefeuille;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = fr.hedwin.nemoris.ShareInvest;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
 		};
@@ -1553,6 +2057,24 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		5AE0000000000000000000AA /* Build configuration list for PBXNativeTarget "NemorisShareTransactions" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5AE0000000000000000000A8 /* Debug */,
+				5AE0000000000000000000A9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5AE0000000000000000000BA /* Build configuration list for PBXNativeTarget "NemorisShareInvest" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5AE0000000000000000000B8 /* Debug */,
+				5AE0000000000000000000B9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		A9640AFB03150114D256B962 /* Build configuration list for PBXProject "Nemoris" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

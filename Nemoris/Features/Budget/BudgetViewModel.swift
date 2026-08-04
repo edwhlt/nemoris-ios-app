@@ -7,10 +7,13 @@ final class BudgetViewModel {
 
     // MARK: - State
 
-    var patterns: [RecurringPattern] = []
+    // `didSet` : les trois sources de `enrichedPrevisions` la reconstruisent
+    // quand elles changent — le cache ne peut donc pas devenir obsolète, quel
+    // que soit le chemin de mutation (chargement, refresh, skip, match…).
+    var patterns: [RecurringPattern] = [] { didSet { rebuildEnrichedPrevisions() } }
     var envelopes: [BudgetEnvelope] = []
-    var previsions: [BudgetPrevision] = []
-    var categories: [Category] = []
+    var previsions: [BudgetPrevision] = [] { didSet { rebuildEnrichedPrevisions() } }
+    var categories: [Category] = [] { didSet { rebuildEnrichedPrevisions() } }
     var isLoading = false
     var detectionResults: [DetectionCandidate] = []
     var showDetectionSheet = false
@@ -26,6 +29,13 @@ final class BudgetViewModel {
 
     private let repo = BudgetRepository.shared
     private let txRepo = TransactionRepository()
+
+    /// Cache des prévisions par mois (clé "yyyy-MM"). Permet à `navigateMonth(by:)`
+    /// de basculer `previsions` de façon SYNCHRONE quand le mois cible a déjà été
+    /// pré-chargé — miroir du `txCache` que `BudgetView` tient pour les transactions.
+    /// Sans ce cache, chaque swipe attendait un aller-retour SQL avant que les points
+    /// "Prévu" du calendrier et la bulle de résumé n'affichent les bonnes valeurs.
+    private var previsionsCache: [String: [BudgetPrevision]] = [:]
 
     // MARK: - Lifecycle
 
@@ -61,25 +71,47 @@ final class BudgetViewModel {
         self.envelopes = envelopesResult
         self.previsions = prevResult
         self.categories = catResult
+        previsionsCache[monthKey(displayedMonth)] = prevResult
+
+        await prefetchAdjacentPrevisions()
     }
 
     // MARK: - Month Navigation
 
     func previousMonth() {
-        displayedMonth = Calendar.current.date(byAdding: .month, value: -1, to: displayedMonth) ?? displayedMonth
-        Task { await reloadPrevisions() }
+        navigateMonth(by: -1)
     }
 
     func nextMonth() {
-        displayedMonth = Calendar.current.date(byAdding: .month, value: 1, to: displayedMonth) ?? displayedMonth
-        Task { await reloadPrevisions() }
+        navigateMonth(by: 1)
     }
 
     func goToCurrentMonth() {
         let cal = Calendar.current
         let now = Date()
         displayedMonth = cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? now
-        Task { await reloadPrevisions() }
+        applyCachedOrReloadPrevisions()
+    }
+
+    /// Change le mois affiché de `delta` mois. Si les prévisions du mois cible sont
+    /// déjà en cache (pré-chargées pendant qu'on regardait le mois précédent),
+    /// `previsions` est réaffecté de façon SYNCHRONE — aucun aller-retour SQL entre
+    /// le swipe et l'affichage des points "Prévu"/de la bulle de résumé.
+    private func navigateMonth(by delta: Int) {
+        displayedMonth = Calendar.current.date(byAdding: .month, value: delta, to: displayedMonth) ?? displayedMonth
+        applyCachedOrReloadPrevisions()
+    }
+
+    private func applyCachedOrReloadPrevisions() {
+        let key = monthKey(displayedMonth)
+        if let cached = previsionsCache[key] {
+            previsions = cached
+        } else {
+            // Mois jamais visité ni pré-chargé (ex: swipes rapides enchaînés) —
+            // fallback sur l'ancien comportement (fetch async).
+            Task { await reloadPrevisions() }
+        }
+        Task { await prefetchAdjacentPrevisions() }
     }
 
     private func reloadPrevisions() async {
@@ -87,7 +119,26 @@ final class BudgetViewModel {
         let result = await Task.detached(priority: .userInitiated) {
             BudgetRepository.shared.fetchPrevisions(from: start, to: end)
         }.value
+        previsionsCache[monthKey(displayedMonth)] = result
         self.previsions = result
+    }
+
+    /// Pré-charge les prévisions de M-1/M+1 pendant que l'utilisateur regarde le
+    /// mois affiché, pour que le PROCHAIN swipe (dans un sens ou l'autre) trouve
+    /// déjà tout en cache. Priorité `.utility` (pas `.background`) : un swipe
+    /// rapproché doit avoir de bonnes chances de trouver le fetch déjà résolu.
+    private func prefetchAdjacentPrevisions() async {
+        let cal = Calendar.current
+        for delta in [-1, 1] {
+            let adjMonth = cal.date(byAdding: .month, value: delta, to: displayedMonth) ?? displayedMonth
+            let key = monthKey(adjMonth)
+            guard previsionsCache[key] == nil else { continue }
+            let (s, e) = monthRange(adjMonth)
+            let result = await Task.detached(priority: .utility) {
+                BudgetRepository.shared.fetchPrevisions(from: s, to: e)
+            }.value
+            previsionsCache[key] = result
+        }
     }
 
     // MARK: - Auto-Detection
@@ -253,10 +304,23 @@ final class BudgetViewModel {
     // MARK: - Computed Views
 
     /// Previsions enrichies pour le mois affiche
-    var enrichedPrevisions: [EnrichedPrevision] {
-        previsions.compactMap { prev in
-            let pattern = patterns.first { $0.id == prev.recurringPatternId }
-            let catName = categoryName(for: pattern?.categoryId)
+    /// Liste enrichie MISE EN CACHE (et non recalculée à chaque lecture).
+    ///
+    /// ⚠️ C'était une propriété calculée : chaque lecture reconstruisait les
+    /// ~1300 prévisions puis les triait. Les vues la lisent plusieurs fois par
+    /// rendu — et parfois à l'intérieur d'une boucle — ce qui rendait le module
+    /// inutilisable. Elle est désormais recalculée UNIQUEMENT quand ses sources
+    /// changent (cf. les `didSet` de `previsions`/`patterns`/`categories`), et
+    /// l'association prévision → récurrent passe par un dictionnaire au lieu
+    /// d'une recherche linéaire.
+    private(set) var enrichedPrevisions: [EnrichedPrevision] = []
+
+    private func rebuildEnrichedPrevisions() {
+        let patternsById = Dictionary(patterns.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let categoryNameById = Dictionary(categories.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        enrichedPrevisions = previsions.compactMap { prev in
+            let pattern = prev.recurringPatternId.flatMap { patternsById[$0] }
+            let catName = pattern?.categoryId.flatMap { categoryNameById[$0] }
             return EnrichedPrevision(
                 prevision: prev,
                 patternName: pattern?.name ?? "Manuel",
@@ -282,7 +346,14 @@ final class BudgetViewModel {
         let txs = await Task.detached(priority: .userInitiated) {
             TransactionRepository().fetchAllAccountsTransactions(from: start, to: end)
         }.value
+        return monthlySummary(transactions: txs)
+    }
 
+    /// Variante synchrone : calcule le résumé à partir de transactions déjà en
+    /// mémoire (cache tenu par `BudgetView`), sans repasser par SQLite. Utilisée au
+    /// swipe de mois pour un affichage instantané de la bulle de résumé — le fetch
+    /// réseau/DB est le principal facteur du délai qu'on cherche à éliminer.
+    func monthlySummary(transactions txs: [FinanceTransaction]) -> MonthlyBudgetSummary {
         let monthPrevisions = previsions.filter { $0.status != .skipped }
         // Part FIXE du prévu = somme des prévisions négatives (récurrents identifiés).
         let recurringForecast = monthPrevisions.filter { $0.amount < 0 }.reduce(0) { $0 + abs($1.amount) }
@@ -290,6 +361,14 @@ final class BudgetViewModel {
         // ce qui est déjà couvert par les récurrents de la même catégorie (pour
         // éviter le double comptage : si "Loyer & Charges" a un récurrent de
         // 950 € ET une enveloppe de 1100 €, on n'ajoute que le delta 150 €).
+        // Catégorie de chaque récurrent, indexée UNE fois : la version d'origine
+        // refaisait un `patterns.first(where:)` pour chaque prévision de chaque
+        // enveloppe (≈ 2,4 M comparaisons sur une base réelle) — l'un des deux
+        // points chauds qui gelaient le module.
+        let patternCategoryById = Dictionary(
+            patterns.compactMap { p in p.categoryId.map { (p.id, $0) } },
+            uniquingKeysWith: { a, _ in a }
+        )
         let envelopeForecast = envelopes
             .filter { $0.isActive }
             .reduce(0.0) { acc, env in
@@ -301,7 +380,7 @@ final class BudgetViewModel {
                     .filter { p in
                         guard p.amount < 0 else { return false }
                         guard let patternId = p.recurringPatternId,
-                              let patternCat = patterns.first(where: { $0.id == patternId })?.categoryId
+                              let patternCat = patternCategoryById[patternId]
                         else { return false }
                         return allIds.contains(patternCat)
                     }
@@ -321,32 +400,15 @@ final class BudgetViewModel {
             .filter { matchedTxIds.contains($0.id) && $0.amount < 0 }
             .reduce(0) { $0 + abs($1.amount) }
 
-        let envelopeProgress = envelopes.filter { $0.isActive }.map { env -> EnvelopeProgress in
-            let catName = categoryName(for: env.categoryId)
-            let catIcon = categoryIcon(for: env.categoryId)
-            let allIds = allCategoryIds(for: env.categoryId)
-            let envTxs = txs.filter { $0.amount < 0 && allIds.contains($0.categoryId ?? -1) }
-            let spent = envTxs.reduce(0) { $0 + abs($1.amount) }
-            let recurringSpent = envTxs
-                .filter { matchedTxIds.contains($0.id) }
-                .reduce(0) { $0 + abs($1.amount) }
-            // Prévisions actives du mois pour les patterns liés à cette catégorie
-            let envPatternIds = Set(patterns
-                .filter { p in p.categoryId.map { allIds.contains($0) } ?? false }
-                .map { $0.id })
-            let forecasted = previsions
-                .filter { p in
-                    p.status != .skipped &&
-                    p.amount < 0 &&
-                    (p.recurringPatternId.map { envPatternIds.contains($0) } ?? false)
-                }
-                .reduce(0) { $0 + abs($1.amount) }
-            let allocated = env.period == .yearly ? env.amount / 12 : env.amount
-            return EnvelopeProgress(envelope: env, categoryName: catName ?? env.name,
-                                    categoryIcon: catIcon, spent: spent,
-                                    allocated: allocated, recurringSpent: recurringSpent,
-                                    forecasted: forecasted)
-        }
+        // Moteur partagé — même calcul que le Dashboard, les alertes et le widget.
+        // Voir `EnvelopeSpendingCalculator` pour l'historique des 4 versions divergentes.
+        let envelopeProgress = EnvelopeSpendingCalculator.progresses(
+            envelopes: envelopes.filter { $0.isActive },
+            transactions: txs,
+            categories: categories,
+            previsions: previsions,
+            patterns: patterns
+        )
 
         let monthStr = monthKey(displayedMonth)
         return MonthlyBudgetSummary(
@@ -362,22 +424,31 @@ final class BudgetViewModel {
     }
 
     /// Jours du mois affiche pour le calendrier — tous les comptes
+    /// ⚠️ Trois corrections de perf par rapport à la version d'origine, qui
+    /// gelait la fenêtre plusieurs secondes :
+    /// 1. `enrichedPrevisions` est lu UNE fois (il était relu à chaque jour du
+    ///    mois, soit ~31 recalculs complets de la liste enrichie) ;
+    /// 2. indexation par jour via `Dictionary(grouping:)` — O(n) — au lieu d'un
+    ///    `filter` complet par jour, O(n × 31) ;
+    /// 3. clé = `startOfDay` (une `Date`) au lieu d'une chaîne formatée : chaque
+    ///    appel à `isoDate` construisait un `DateFormatter` neuf, ce qui est
+    ///    coûteux, et il y en avait des dizaines de milliers.
     func calendarDays(transactions: [FinanceTransaction]) -> [CalendarDay] {
         let cal = Calendar.current
         let (start, _) = monthRange(displayedMonth)
         guard let range = cal.dateInterval(of: .month, for: displayedMonth) else { return [] }
 
         let totalDays = cal.dateComponents([.day], from: range.start, to: range.end).day ?? 30
-        var days: [CalendarDay] = []
+        let prevByDay = Dictionary(grouping: enrichedPrevisions) { cal.startOfDay(for: $0.expectedDate) }
+        let txByDay = Dictionary(grouping: transactions) { cal.startOfDay(for: $0.date) }
 
-        for offset in 0..<totalDays {
-            guard let day = cal.date(byAdding: .day, value: offset, to: start) else { continue }
-            let dayKey = isoDate(day)
-            let dayPrevisions = enrichedPrevisions.filter { isoDate($0.expectedDate) == dayKey }
-            let dayTxs = transactions.filter { isoDate($0.date) == dayKey }
-            days.append(CalendarDay(date: day, previsions: dayPrevisions, transactions: dayTxs))
+        return (0..<totalDays).compactMap { offset in
+            guard let day = cal.date(byAdding: .day, value: offset, to: start) else { return nil }
+            let key = cal.startOfDay(for: day)
+            return CalendarDay(date: day,
+                               previsions: prevByDay[key] ?? [],
+                               transactions: txByDay[key] ?? [])
         }
-        return days
     }
 
     // MARK: - Duplicate Matching
@@ -413,21 +484,17 @@ final class BudgetViewModel {
         return f.string(from: date)
     }
 
-    private func isoDate(_ date: Date) -> String {
+    /// Formateur RÉUTILISÉ : en construire un à chaque appel coûte cher, et cette
+    /// fonction est appelée en boucle. Locale POSIX pour un format stable.
+    private static let isoFormatter: DateFormatter = {
         let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: date)
-    }
+        return f
+    }()
 
-    private func categoryName(for categoryId: Int?) -> String? {
-        guard let id = categoryId else { return nil }
-        return categories.first { $0.id == id }?.name
-    }
-
-    private func categoryIcon(for categoryId: Int?) -> String {
-        guard let id = categoryId,
-              let cat = categories.first(where: { $0.id == id }) else { return "tag.fill" }
-        return cat.displayIcon
+    private func isoDate(_ date: Date) -> String {
+        Self.isoFormatter.string(from: date)
     }
 
     /// Retourne l'id de la categorie + tous ses enfants (pour les enveloppes hierarchiques)
@@ -437,4 +504,5 @@ final class BudgetViewModel {
         return [id] + children
     }
 }
+
 

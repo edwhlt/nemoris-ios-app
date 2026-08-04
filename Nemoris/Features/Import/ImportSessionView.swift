@@ -13,7 +13,8 @@ import NemorisEngine
 struct ImportSessionView: View {
     let sessionId: UUID
 
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     @Environment(AppState.self) private var appState
     @State private var viewModel: ImportSessionViewModel?
     @State private var loadError: String?
@@ -362,23 +363,18 @@ struct ImportSessionView: View {
                         onReset: { vm.resetAction(rowId: row.id) },
                         onHelp: { showActionsHelp = true }
                     )
-                    // Swipe = raccourci vers les 2 verbes principaux (mêmes que la barre inline).
-                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        if canValidate(row),
-                           row.userAction != .confirmed, row.userAction != .manuallySet {
-                            Button { vm.confirm(rowId: row.id) } label: {
-                                Label("Valider", systemImage: "checkmark")
-                            }
-                            .tint(AppTheme.Colors.success)
-                        }
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if row.userAction != .skipped {
-                            Button(role: .destructive) { vm.skip(rowId: row.id) } label: {
-                                Label("Ignorer", systemImage: "minus.circle")
-                            }
-                        }
-                    }
+                    // Raccourci vers les 2 verbes principaux (mêmes que la barre inline) :
+                    // swipe iOS / clic droit macOS via RowActions.
+                    .rowActions(
+                        leading: (canValidate(row) && row.userAction != .confirmed && row.userAction != .manuallySet)
+                            ? [RowAction("Valider", systemImage: "checkmark", tint: AppTheme.Colors.success) { vm.confirm(rowId: row.id) }]
+                            : [],
+                        trailing: row.userAction != .skipped
+                            ? [RowAction("Ignorer", systemImage: "minus.circle", role: .destructive) { vm.skip(rowId: row.id) }]
+                            : [],
+                        leadingFullSwipe: true,
+                        trailingFullSwipe: false
+                    )
                 }
             }
             .listStyle(.plain)

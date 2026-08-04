@@ -6,9 +6,10 @@ import FoundationModels
 /// AXE B — Wrapper Apple Foundation Models (`LanguageModelSession`) pour l'enrichissement
 /// de libellés bancaires. 100% on-device, gratuit, pas de clé API. iOS 26.0+.
 ///
-/// Si le framework n'est pas disponible (iOS < 18.1) ou si le modèle n'est pas dispo
-/// sur l'appareil, `identify(...)` renvoie nil — l'orchestrateur ignore simplement la
-/// branche LLM et continue avec Sirene + MapKit.
+/// Si le framework n'est pas disponible (iOS < 26.0) ou si le modèle n'est pas dispo
+/// sur l'appareil, `identify(...)` renvoie nil — `AIEnrichmentBackend` (le point de
+/// dispatch partagé) bascule alors vers `LocalLLMService` si l'utilisateur en a
+/// configuré un, ou continue simplement avec Sirene + MapKit.
 ///
 /// Privacy : aucun appel réseau, aucune télémétrie. Cohérent avec le projet privacy-first.
 @MainActor
@@ -52,6 +53,27 @@ final class EnrichmentLLMService {
         }
     }
     #endif
+
+    /// Complétion texte générique via Foundation Models. `nil` si le framework
+    /// est indisponible ou si la génération échoue — même contrat de silence
+    /// qu'`identify`. Utilisée par `AIEnrichmentBackend.completeText` pour les
+    /// tâches qui ne sont pas de l'identification de marchand (extraction de
+    /// relevés, notamment).
+    func complete(system: String, user: String) async -> String? {
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, macOS 26.0, *) {
+            guard SystemLanguageModel.default.isAvailable else { return nil }
+            let session = LanguageModelSession(instructions: system)
+            do {
+                return try await session.respond(to: user).content
+            } catch {
+                print("[EnrichmentLLMService] complete error: \(error.localizedDescription)")
+                return nil
+            }
+        }
+        #endif
+        return nil
+    }
 
     // MARK: - Prompts
 
@@ -229,8 +251,10 @@ final class EnrichmentLLMService {
         else { return nil }
 
         // On laisse l'orchestrateur faire le mapping category text → category_id Nemoris
-        // (il a accès au repo). Ici on stocke juste les champs bruts.
-        return MerchantEnrichment(
+        // (il a accès au repo). Ici on stocke juste les champs bruts : le nom de catégorie
+        // part dans `categoryHint`, que `EnrichmentOrchestrator.resolvingCategoryHint`
+        // convertit en `categoryId`. Avant, il était décodé puis jeté.
+        var result = MerchantEnrichment(
             displayName: payload.name,
             domain: payload.domain,
             categoryId: nil,
@@ -244,6 +268,8 @@ final class EnrichmentLLMService {
             enrichedAt: Date(),
             searchHint: payload.search_query?.trimmingCharacters(in: .whitespaces).nilIfEmpty
         )
+        result.categoryHint = payload.category?.trimmingCharacters(in: .whitespaces).nilIfEmpty
+        return result
     }
 
     private struct LLMPayload: Decodable {

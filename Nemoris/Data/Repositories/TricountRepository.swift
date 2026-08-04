@@ -233,7 +233,7 @@ struct TricountRepository {
         // Child records (shares, reimbursements) must be deleted first to avoid FK violations
         // that would otherwise cause the entire transaction to rollback silently.
         if seenEntryIds.isEmpty {
-            exec(db, "DELETE FROM tricount_reimbursements WHERE entry_id IN (SELECT id FROM tricount_entries WHERE group_id = ?)") {
+            exec(db, "DELETE FROM reimbursements WHERE tricount_entry_id IN (SELECT id FROM tricount_entries WHERE group_id = ?)") {
                 sqlite3_bind_int($0, 1, Int32(gid))
             }
             exec(db, "DELETE FROM tricount_shares WHERE entry_id IN (SELECT id FROM tricount_entries WHERE group_id = ?)") {
@@ -245,7 +245,7 @@ struct TricountRepository {
             let staleSubquery = "SELECT id FROM tricount_entries WHERE group_id = ? AND id NOT IN (\(placeholders))"
 
             // 1. Delete reimbursements for stale entries
-            let reimbSQL = "DELETE FROM tricount_reimbursements WHERE entry_id IN (\(staleSubquery))"
+            let reimbSQL = "DELETE FROM reimbursements WHERE tricount_entry_id IN (\(staleSubquery))"
             var reimbStmt: OpaquePointer?
             if sqlite3_prepare_v2(db, reimbSQL, -1, &reimbStmt, nil) == SQLITE_OK, let reimbStmt {
                 defer { sqlite3_finalize(reimbStmt) }
@@ -448,172 +448,6 @@ struct TricountRepository {
         if let tid = transactionId { sqlite3_bind_int(stmt, 1, Int32(tid)) } else { sqlite3_bind_null(stmt, 1) }
         sqlite3_bind_int(stmt, 2, Int32(entryId))
         return sqlite3_step(stmt) == SQLITE_DONE
-    }
-
-    // MARK: - Tricount Reimbursements
-
-    @discardableResult
-    func addReimbursement(entryId: Int, tiersId: Int, amount: Double, currency: String) -> Bool {
-        guard DatabaseManager.shared.hasDatabase() else { return false }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db); return false
-        }
-        defer { sqlite3_close(db) }
-        sqlite3_exec(db, "PRAGMA foreign_keys = ON;", nil, nil, nil)
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO tricount_reimbursements (entry_id, payee_id, amount, currency) VALUES (?, ?, ?, ?)", -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int(stmt, 1, Int32(entryId))
-        sqlite3_bind_int(stmt, 2, Int32(tiersId))
-        sqlite3_bind_double(stmt, 3, amount)
-        sqlite3_bind_text(stmt, 4, currency, -1, SQLITE_TRANSIENT_TC)
-        return sqlite3_step(stmt) == SQLITE_DONE
-    }
-
-    @discardableResult
-    func deleteReimbursement(id: Int) -> Bool {
-        guard DatabaseManager.shared.hasDatabase() else { return false }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db); return false
-        }
-        defer { sqlite3_close(db) }
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "DELETE FROM tricount_reimbursements WHERE id = ?", -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int(stmt, 1, Int32(id))
-        return sqlite3_step(stmt) == SQLITE_DONE
-    }
-
-    func fetchReimbursementsForEntry(entryId: Int) -> [TricountReimbursement] {
-        guard DatabaseManager.shared.hasDatabase() else { return [] }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db); return []
-        }
-        defer { sqlite3_close(db) }
-        let sql = """
-        SELECT r.id, r.entry_id, r.payee_id, COALESCE(t.name, ''), r.amount, r.currency,
-               COALESCE(e.description, ''), COALESCE(e.date, ''),
-               CASE
-                   WHEN r.currency = 'EUR' OR r.currency = '' THEN r.amount
-                   WHEN e.local_currency = 'EUR' AND e.local_total IS NOT NULL AND e.total != 0
-                       THEN r.amount * (ABS(e.local_total) / ABS(e.total))
-                   WHEN cr.rate IS NOT NULL THEN r.amount * cr.rate
-                   ELSE NULL
-               END AS eur_amount,
-               COALESCE(e.type_transaction, 'NORMAL')
-        FROM tricount_reimbursements r
-        JOIN payees t ON t.id = r.payee_id
-        JOIN tricount_entries e ON e.id = r.entry_id
-        LEFT JOIN currency_rates cr ON cr.from_currency = r.currency AND cr.to_currency = 'EUR' AND cr.date = e.date
-        WHERE r.entry_id = ?
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return [] }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int(stmt, 1, Int32(entryId))
-        let fmt = DateFormatter(); fmt.locale = Locale(identifier: "en_US_POSIX"); fmt.dateFormat = "yyyy-MM-dd"
-        var results: [TricountReimbursement] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let eurAmount: Double? = sqlite3_column_type(stmt, 8) == SQLITE_NULL ? nil : sqlite3_column_double(stmt, 8)
-            results.append(TricountReimbursement(
-                id: Int(sqlite3_column_int(stmt, 0)),
-                entryId: Int(sqlite3_column_int(stmt, 1)),
-                tiersId: Int(sqlite3_column_int(stmt, 2)),
-                tiersName: str(stmt, 3),
-                amount: sqlite3_column_double(stmt, 4),
-                currency: str(stmt, 5),
-                eurAmount: eurAmount,
-                entryDescription: str(stmt, 6),
-                entryDate: fmt.date(from: str(stmt, 7)) ?? Date(),
-                entryTypeTransaction: str(stmt, 9)
-            ))
-        }
-        return results
-    }
-
-    /// Remboursements d'un groupe Tricount spécifique, groupés par tiers.
-    func fetchReimbursementsForGroup(groupId: Int) -> [TricountReimbursementGroup] {
-        guard DatabaseManager.shared.hasDatabase() else { return [] }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db); return []
-        }
-        defer { sqlite3_close(db) }
-        let sql = eurReimbursementSQL(where: "e.group_id = ?", orderBy: "ti.name COLLATE NOCASE, e.date DESC")
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return [] }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int(stmt, 1, Int32(groupId))
-        return groupReimbursementRows(stmt: stmt)
-    }
-
-    func fetchReimbursementGroups(from: Date? = nil, to: Date? = nil) -> [TricountReimbursementGroup] {
-        guard DatabaseManager.shared.hasDatabase() else { return [] }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db); return []
-        }
-        defer { sqlite3_close(db) }
-        let fmt = DateFormatter(); fmt.locale = Locale(identifier: "en_US_POSIX"); fmt.dateFormat = "yyyy-MM-dd"
-        var conditions: [String] = []
-        if let from { conditions.append("e.date >= '\(fmt.string(from: from))'") }
-        if let to   { conditions.append("e.date <= '\(fmt.string(from: to))'") }
-        let whereClause = conditions.isEmpty ? nil : conditions.joined(separator: " AND ")
-        let sql = eurReimbursementSQL(where: whereClause, orderBy: "ti.name COLLATE NOCASE, e.date DESC")
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return [] }
-        defer { sqlite3_finalize(stmt) }
-        return groupReimbursementRows(stmt: stmt)
-    }
-
-    // Construit la requête de remboursement avec conversion EUR via currency_rates.
-    private func eurReimbursementSQL(where condition: String?, orderBy: String) -> String {
-        let whereClause = condition.map { "WHERE \($0)" } ?? ""
-        return """
-        SELECT r.id, r.entry_id, r.payee_id, COALESCE(ti.name, ''), r.amount, r.currency,
-               COALESCE(e.description, ''), COALESCE(e.date, ''),
-               CASE
-                   WHEN r.currency = 'EUR' OR r.currency = '' THEN r.amount
-                   WHEN e.local_currency = 'EUR' AND e.local_total IS NOT NULL AND e.total != 0
-                       THEN r.amount * (ABS(e.local_total) / ABS(e.total))
-                   WHEN cr.rate IS NOT NULL THEN r.amount * cr.rate
-                   ELSE NULL
-               END AS eur_amount,
-               COALESCE(e.type_transaction, 'NORMAL')
-        FROM tricount_reimbursements r
-        JOIN payees ti ON ti.id = r.payee_id
-        JOIN tricount_entries e ON e.id = r.entry_id
-        LEFT JOIN currency_rates cr ON cr.from_currency = r.currency AND cr.to_currency = 'EUR' AND cr.date = e.date
-        \(whereClause)
-        ORDER BY \(orderBy)
-        """
-    }
-
-    private func groupReimbursementRows(stmt: OpaquePointer) -> [TricountReimbursementGroup] {
-        let fmt = DateFormatter(); fmt.locale = Locale(identifier: "en_US_POSIX"); fmt.dateFormat = "yyyy-MM-dd"
-        var grouped: [Int: (name: String, items: [TricountReimbursement])] = [:]
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let eurAmount: Double? = sqlite3_column_type(stmt, 8) == SQLITE_NULL ? nil : sqlite3_column_double(stmt, 8)
-            let item = TricountReimbursement(
-                id: Int(sqlite3_column_int(stmt, 0)),
-                entryId: Int(sqlite3_column_int(stmt, 1)),
-                tiersId: Int(sqlite3_column_int(stmt, 2)),
-                tiersName: str(stmt, 3),
-                amount: sqlite3_column_double(stmt, 4),
-                currency: str(stmt, 5),
-                eurAmount: eurAmount,
-                entryDescription: str(stmt, 6),
-                entryDate: fmt.date(from: str(stmt, 7)) ?? Date(),
-                entryTypeTransaction: str(stmt, 9)
-            )
-            grouped[item.tiersId, default: (item.tiersName, [])].items.append(item)
-        }
-        return grouped.map { id, pair in
-            TricountReimbursementGroup(tiersId: id, tiersName: pair.name, items: pair.items)
-        }.sorted { $0.tiersName < $1.tiersName }
     }
 
     // MARK: - Balance Computation

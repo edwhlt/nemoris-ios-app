@@ -9,7 +9,8 @@ struct SQLAssistantSheet: View {
     /// Callback appelé quand l'user choisit "Utiliser cette requête".
     let onApply: (String) -> Void
 
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     @State private var service = SQLAssistantService()
     @State private var messages: [ChatMessage] = []
     @State private var inputText: String = ""
@@ -33,7 +34,6 @@ struct SQLAssistantSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             Group {
                 switch service.availability {
                 case .ready:
@@ -60,23 +60,13 @@ struct SQLAssistantSheet: View {
                     )
                 }
             }
-            .navigationTitle("Assistant SQL")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
-                }
-                if service.availability == .ready && !messages.isEmpty {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button("Nouvelle conversation") {
+            .paneChrome("Assistant SQL",
+                        cancelLabel: "Fermer", onCancel: { dismiss() },
+                        confirmLabel: (service.availability == .ready && !messages.isEmpty) ? "Nouvelle conversation" : nil,
+                        onConfirm: (service.availability == .ready && !messages.isEmpty) ? {
                             service.resetConversation()
                             messages = []
-                        }
-                        .font(.caption)
-                    }
-                }
-            }
-        }
+                        } : nil)
     }
 
     // MARK: - Chat body

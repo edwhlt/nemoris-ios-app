@@ -18,10 +18,19 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.finance</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSContactsUsageDescription</key>
 	<string>Nemoris a besoin d'accéder à vos contacts uniquement quand vous liez explicitement un tier à un contact, pour afficher sa photo et son nom. 100% local — aucune donnée n'est envoyée sur internet.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Nemoris utilise Face ID pour vous identifier en local lorsque vous ouvrez l'application, si vous activez le verrouillage dans Réglages. Aucune donnée biométrique n'est jamais transmise — tout est géré par iOS.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Si vous configurez un serveur IA local (LM Studio, Ollama…) dans Réglages → Intelligence artificielle, Nemoris s'y connecte sur votre réseau pour identifier des marchands. Rien n'est envoyé à un serveur Nemoris.</string>
 	<key>NSUbiquitousContainers</key>
 	<dict>
 		<key>iCloud.fr.hedwin.nemoris</key>

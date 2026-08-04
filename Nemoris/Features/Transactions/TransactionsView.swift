@@ -73,7 +73,9 @@ struct TransactionsView: View {
     @State private var bulkTagInitialStates: [Int: TagSelectionState] = [:]
 
     // Édition
-    @State private var editingTransaction: TransactionEditDraft? = nil
+    /// Transaction sélectionnée : iOS → sheet d'édition directe ; macOS →
+    /// panneau détail (Modifier/Supprimer) puis édition (adaptiveEntityPane).
+    @State private var selectedTransaction: FinanceTransaction? = nil
     @State private var quickCategoryTx: FinanceTransaction? = nil
     @State private var tagQuickTx: FinanceTransaction? = nil
     @State private var txToDelete: FinanceTransaction? = nil
@@ -267,7 +269,7 @@ struct TransactionsView: View {
                                 .padding(.vertical, 4)
                             }
                         }
-                        .listRowBackground(AppTheme.Colors.surface)
+                        .macGroupedRow()
 
                         // ── Avertissement non catégorisé ────────────────
                         if uncategorizedCount > 0 && selectedCategoryId != -2 {
@@ -295,7 +297,7 @@ struct TransactionsView: View {
                                 }
                                 .buttonStyle(.plain)
                             }
-                            .listRowBackground(AppTheme.Colors.surface)
+                            .macGroupedRow()
                         }
 
                         ForEach(groupedTransactions, id: \.date) { group in
@@ -305,34 +307,29 @@ struct TransactionsView: View {
                                         .contentShape(Rectangle())
                                         .onTapGesture {
                                             if isSelecting { toggleSelection(item.id) }
-                                            else { editingTransaction = TransactionEditDraft(from: item) }
+                                            else { selectedTransaction = item }
                                         }
-                                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                            if !isSelecting {
-                                                Button {
-                                                    editingTransaction = TransactionEditDraft(from: item)
-                                                } label: {
-                                                    Label("Modifier", systemImage: "pencil")
+                                        .rowActions(
+                                            leading: isSelecting ? [] : [
+                                                RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) {
+                                                    selectedTransaction = item
                                                 }
-                                                .tint(AppTheme.Colors.accent)
-                                            }
-                                        }
-                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                            if !isSelecting {
-                                                Button(role: .destructive) {
+                                            ],
+                                            trailing: isSelecting ? [] : [
+                                                RowAction("Supprimer", systemImage: "trash", role: .destructive) {
                                                     txToDelete = item
-                                                } label: {
-                                                    Label("Supprimer", systemImage: "trash")
-                                                }
-                                                Button {
+                                                },
+                                                RowAction("Tags", systemImage: "tag", tint: AppTheme.Colors.accentSecondary) {
                                                     tagQuickTx = item
-                                                } label: {
-                                                    Label("Tags", systemImage: "tag")
                                                 }
-                                                .tint(AppTheme.Colors.accentSecondary)
-                                            }
-                                        }
-                                        .listRowBackground(
+                                            ],
+                                            leadingFullSwipe: false,
+                                            trailingFullSwipe: false
+                                        )
+                                        .macGroupedRow(
+                                            first: item.id == group.transactions.first?.id,
+                                            last: item.id == group.transactions.last?.id
+                                        ) {
                                             ZStack(alignment: .leading) {
                                                 AppTheme.Colors.surface
                                                 if linkedTricountTxIds.contains(item.id) {
@@ -342,10 +339,11 @@ struct TransactionsView: View {
                                                         .frame(width: 3)
                                                 }
                                             }
-                                        )
+                                        }
                                 }
                             } header: {
                                 Text(group.label)
+                                    .macGroupedSectionHeader()
                             }
                         }
 
@@ -363,19 +361,39 @@ struct TransactionsView: View {
                                 .listRowBackground(Color.clear)
                         }
                     }
+                    #if os(macOS)
+                    // macOS : .plain = base neutre pour les cartes custom
+                    // dessinées par macGroupedRow (coins arrondis first/last,
+                    // inset, séparateurs internes). iOS garde son insetGrouped
+                    // natif — macGroupedRow n'y pose que le listRowBackground.
+                    .listStyle(.plain)
+                    // Décolle la 1ʳᵉ carte de la toolbar (iOS insetGrouped ajoute
+                    // cet espace automatiquement, pas `.plain`).
+                    .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+                    #endif
                     .scrollContentBackground(.hidden)
                     .background(AppTheme.Colors.background)
                 }
             }
             .navigationTitle("Transactions")
             .toolbar {
+                // #9 macOS : ne pas émettre d'item .navigation (mapping de
+                // navigationBarLeading) — même vide il entre en collision avec le
+                // back système + toggle sidebar du NavigationSplitView, d'où la
+                // flèche de retour qui "voyage". Sur Mac, "Annuler" rejoint le
+                // groupe trailing.
+                #if !os(macOS)
                 ToolbarItem(placement: .navigationBarLeading) {
                     if isSelecting {
                         Button("Annuler") { cancelSelection() }
                     }
                 }
+                #endif
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     if isSelecting {
+                        #if os(macOS)
+                        Button("Annuler") { cancelSelection() }
+                        #endif
                         if !selectedIds.isEmpty {
                             Button {
                                 showBulkCategoryPicker = true
@@ -413,6 +431,29 @@ struct TransactionsView: View {
                                   ? "line.3.horizontal.decrease.circle.fill"
                                   : "line.3.horizontal.decrease.circle")
                         }
+                        #if os(macOS)
+                        // macOS : la fenêtre a la place — actions secondaires
+                        // étalées en boutons icône seule + tooltip natif (.help),
+                        // au lieu du menu "⋯" iOS.
+                        Button { showFilteredDashboard = true } label: {
+                            Image(systemName: "chart.bar.xaxis.ascending")
+                        }
+                        .help("Analyse filtrée")
+                        Button { showTagSummary = true } label: {
+                            Image(systemName: "tag.circle")
+                        }
+                        .help("Dépenses par tag")
+                        if reimbursementsEnabled {
+                            Button { showReimbursements = true } label: {
+                                Image(systemName: "arrow.uturn.left.circle")
+                            }
+                            .help("Remboursements")
+                        }
+                        Button { isSelecting = true } label: {
+                            Image(systemName: "checkmark.circle")
+                        }
+                        .help("Sélectionner")
+                        #else
                         // Menu actions secondaires
                         Menu {
                             Button { showFilteredDashboard = true } label: {
@@ -433,6 +474,7 @@ struct TransactionsView: View {
                         } label: {
                             Image(systemName: "ellipsis.circle")
                         }
+                        #endif
                     }
                 }
             }
@@ -458,7 +500,7 @@ struct TransactionsView: View {
                     Text("\(tx.tiersName.isEmpty ? tx.information : tx.tiersName) · \(tx.amount.formatted(.currency(code: "EUR")))")
                 }
             }
-            .sheet(isPresented: $showFilters) {
+            .adaptivePane(isPresented: $showFilters) {
                 TransactionFiltersSheet(
                     accounts: accounts,
                     allCategories: allCategories,
@@ -476,7 +518,7 @@ struct TransactionsView: View {
                 )
                 .environment(appState)
             }
-            .sheet(item: $quickCategoryTx) { tx in
+            .adaptivePane(item: $quickCategoryTx) { tx in
                 CategoryQuickPickSheet(
                     currentCategoryId: tx.categoryId,
                     allCategories: allCategories
@@ -486,9 +528,22 @@ struct TransactionsView: View {
                     }
                 }
             }
-            .sheet(item: $editingTransaction) { draft in
+            .adaptiveEntityPane(
+                item: $selectedTransaction,
+                title: "Transaction",
+                refresh: { repository.fetchTransaction(id: $0.id) },
+                onDelete: { txToDelete = $0 }
+            ) { tx in
+                TransactionDetailPane(
+                    tx: tx,
+                    accounts: accounts,
+                    allTiers: allTiers,
+                    allCategories: allCategories,
+                    repository: repository
+                )
+            } edit: { tx in
                 TransactionEditSheet(
-                    draft: draft,
+                    draft: TransactionEditDraft(from: tx),
                     allTiers: allTiers,
                     allCategories: allCategories,
                     allMdps: allMdps,
@@ -498,7 +553,7 @@ struct TransactionsView: View {
                     resetAndLoad()
                 }
             }
-            .sheet(item: $tagQuickTx, onDismiss: {
+            .adaptivePane(item: $tagQuickTx, onDismiss: {
                 txTags = repository.fetchTagsForTransactions(transactions.map { $0.id })
             }) { tx in
                 TagQuickSheet(transactionId: tx.id, allTags: allTags, repository: repository) { newTag in
@@ -509,7 +564,7 @@ struct TransactionsView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showAddTransaction) {
+            .adaptivePane(isPresented: $showAddTransaction) {
                 // Si l'user est en mode "Tous" (selectedAccountId == 0), on retombe
                 // sur le premier compte disponible pour l'ajout manuel (impossible
                 // d'imputer une transaction au sentinel "Tous").
@@ -526,38 +581,34 @@ struct TransactionsView: View {
                     onSave: { resetAndLoad() }
                 )
             }
-            .sheet(isPresented: $showTagSummary) {
+            .adaptivePane(isPresented: $showTagSummary) {
                 TagSummaryView(repository: repository)
             }
-            .sheet(isPresented: $showFilteredDashboard) {
+            .adaptivePane(isPresented: $showFilteredDashboard) {
                 FilteredDashboardView(filter: buildFilter())
             }
-            .sheet(isPresented: $showReimbursements) {
+            .adaptivePane(isPresented: $showReimbursements) {
                 ReimbursementsSheet(repository: repository,
                                     initialFrom: appState.filterFromDate,
                                     initialTo: appState.filterToDate)
             }
-            .sheet(item: $tricountDetailGroup) { group in
-                NavigationStack {
-                    TricountDetailView(group: group, initialEntryId: tricountDetailEntryId)
-                        .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button("Fermer") {
-                                    tricountDetailGroup = nil
-                                    tricountDetailEntryId = nil
-                                }
-                            }
-                        }
-                }
+            // TricountDetailView gère son PROPRE chrome (Fermer/NavigationStack) —
+            // niveau 2 ici (nichée dans une vue déjà hébergée), donc sheet, cf.
+            // \.paneHostContext dans TricountDetailView.
+            .adaptivePane(item: $tricountDetailGroup, onDismiss: { tricountDetailEntryId = nil }) { group in
+                TricountDetailView(group: group, initialEntryId: tricountDetailEntryId)
             }
-            .sheet(isPresented: $showBulkRemboursementPicker) {
+            .adaptivePane(isPresented: $showBulkRemboursementPicker) {
                 RemboursementQuickPickSheet(allTiers: allTiers) { tiersId, tiersName in
-                    let updated = repository.updateTransactionsRemboursement(ids: selectedIds, tiersId: tiersId)
+                    let reimbursementRepo = ReimbursementRepository()
+                    let updated = selectedIds.reduce(0) { count, id in
+                        reimbursementRepo.setReimbursement(transactionId: id, payeeId: tiersId) ? count + 1 : count
+                    }
                     if updated > 0 { quickUpdateRemboursement(ids: selectedIds, tiersId: tiersId, tiersName: tiersName) }
                     cancelSelection()
                 }
             }
-            .sheet(isPresented: $showBulkCategoryPicker) {
+            .adaptivePane(isPresented: $showBulkCategoryPicker) {
                 CategoryQuickPickSheet(
                     currentCategoryId: nil,
                     allCategories: allCategories
@@ -567,7 +618,7 @@ struct TransactionsView: View {
                     cancelSelection()
                 }
             }
-            .sheet(isPresented: $showBulkTagPicker) {
+            .adaptivePane(isPresented: $showBulkTagPicker) {
                 BulkTagSheet(
                     allTags: allTags,
                     initialStates: bulkTagInitialStates,
@@ -615,18 +666,24 @@ struct TransactionsView: View {
                 }
                 .padding(.vertical, 4)
             }
-            .listRowBackground(AppTheme.Colors.surface)
+            .macGroupedRow()
 
             Section {
-                ForEach(0..<8, id: \.self) { _ in
+                ForEach(0..<8, id: \.self) { i in
                     SkeletonTransactionRow()
-                        .listRowBackground(AppTheme.Colors.surface)
+                        .macGroupedRow(first: i == 0, last: i == 7)
                 }
             } header: {
                 SkeletonLine(width: 180, height: 13)
                     .padding(.vertical, 2)
+                    .macGroupedSectionHeader()
             }
         }
+        #if os(macOS)
+        // Même base .plain que la liste chargée (cartes macGroupedRow).
+        .listStyle(.plain)
+        .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+        #endif
         .scrollContentBackground(.hidden)
         .background(AppTheme.Colors.background)
     }
@@ -985,7 +1042,8 @@ struct TransactionsView: View {
 
 struct TransactionFiltersSheet: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.dismiss) private var dismiss
+    // Fermeture via le panneau adaptatif (inspector macOS / sheet iOS), cf. AdaptivePane.
+    @Environment(\.paneDismiss) private var paneDismiss
 
     let accounts: [Account]
     let allCategories: [Category]
@@ -1133,18 +1191,19 @@ struct TransactionFiltersSheet: View {
                     .foregroundStyle(AppTheme.Colors.danger)
                 }
             }
+            .nemorisFormStyle()
             .navigationTitle("Filtres")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { localTiersSearch = tiersSearchText }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
+                    Button("Fermer") { paneDismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Appliquer") {
                         tiersSearchText = localTiersSearch
                         onApply()
-                        dismiss()
+                        paneDismiss()
                     }
                 }
             }
@@ -1182,7 +1241,8 @@ private struct TagChipsRow: View {
 // MARK: - Sélection rapide de catégorie
 
 struct CategoryQuickPickSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     let currentCategoryId: Int?
     let allCategories: [Category]
     let onSelect: (Int?, String) -> Void
@@ -1195,7 +1255,6 @@ struct CategoryQuickPickSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             List {
                 Button("Aucune catégorie") {
                     onSelect(nil, ""); dismiss()
@@ -1217,19 +1276,15 @@ struct CategoryQuickPickSheet: View {
                 }
             }
             .searchable(text: $search, prompt: "Rechercher une catégorie…")
-            .navigationTitle("Catégorie")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Annuler") { dismiss() } }
-            }
-        }
+            .paneChrome("Catégorie", cancelLabel: "Annuler", onCancel: { dismiss() })
     }
 }
 
 // MARK: - Sélection rapide de remboursement (masse)
 
 struct RemboursementQuickPickSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     let allTiers: [Tiers]
     let onSelect: (Int?, String) -> Void
 
@@ -1241,7 +1296,6 @@ struct RemboursementQuickPickSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             List {
                 Button("Aucun remboursement") {
                     onSelect(nil, ""); dismiss()
@@ -1257,12 +1311,7 @@ struct RemboursementQuickPickSheet: View {
                 }
             }
             .searchable(text: $search, prompt: "Rechercher un tiers…")
-            .navigationTitle("Remboursement par")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Annuler") { dismiss() } }
-            }
-        }
+            .paneChrome("Remboursement par", cancelLabel: "Annuler", onCancel: { dismiss() })
     }
 }
 
@@ -1384,6 +1433,7 @@ struct NewTiersFormSheet: View {
                     .pickerStyle(.menu)
                 }
             }
+            .nemorisFormStyle()
             .navigationTitle("Nouveau tiers")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1407,7 +1457,8 @@ struct NewTiersFormSheet: View {
 // MARK: - Édition transaction
 
 struct TransactionEditSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // Rebind sur paneDismiss (inspector macOS / sheet iOS) — dismiss() reste valide.
+    @Environment(\.paneDismiss) private var dismiss
 
     let draft: TransactionEditDraft
     let allCategories: [Category]
@@ -1466,7 +1517,6 @@ struct TransactionEditSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section("Détails") {
                     TextField("Description", text: $information)
@@ -1559,33 +1609,24 @@ struct TransactionEditSheet: View {
                     }
                 }
             }
+            .nemorisFormStyle()
             .onAppear {
                 selectedTagIds = Set(repository.fetchTags(forTransaction: draft.id).map(\.id))
             }
-            .navigationTitle("Modifier la transaction")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") { save() }
-                }
-            }
-            .sheet(isPresented: $showTagPicker) {
+            .adaptivePane(isPresented: $showTagPicker) {
                 TagPickerSheet(allTags: $localAllTags, selectedTagIds: $selectedTagIds, repository: repository)
             }
-            .sheet(isPresented: $showTiersPicker) {
+            .adaptivePane(isPresented: $showTiersPicker) {
                 TiersSearchSheet(allTiers: localTiers, selectedId: $tiersId,
                                  onCreateTiers: { prefill in
                                      newTiersPrefillName = prefill
                                      showCreateTiersForm = true
                                  })
             }
-            .sheet(isPresented: $showRemboursementPicker) {
+            .adaptivePane(isPresented: $showRemboursementPicker) {
                 TiersSearchSheet(allTiers: localTiers, selectedId: $remboursementTiersId)
             }
-            .sheet(isPresented: $showCreateTiersForm) {
+            .adaptivePane(isPresented: $showCreateTiersForm) {
                 PayeeCreationFormSheet(prefilledName: newTiersPrefillName, allCategories: allCategories) { newTiers in
                     // Insert le tiers minimal puis updatePayeeFull pour tous les champs
                     guard let id = repository.addTiersAndGetId(
@@ -1611,7 +1652,9 @@ struct TransactionEditSheet: View {
                     }
                 }
             }
-        }
+            .paneChrome("Modifier la transaction",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Enregistrer", onConfirm: { save() })
     }
 
     private func save() {
@@ -1626,6 +1669,7 @@ struct TransactionEditSheet: View {
         updated.amount              = amount
         updated.date                = date
         repository.updateTransaction(updated)
+        ReimbursementRepository().setReimbursement(transactionId: draft.id, payeeId: updated.remboursementTiersId)
         repository.setTags(Array(selectedTagIds), forTransaction: draft.id)
         onSave()
         dismiss()
@@ -1635,7 +1679,8 @@ struct TransactionEditSheet: View {
 // MARK: - Ajout manuel de transaction
 
 struct AddTransactionSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // Rebind sur paneDismiss (inspector macOS / sheet iOS) — dismiss() reste valide.
+    @Environment(\.paneDismiss) private var dismiss
 
     let accounts: [Account]
     let allCategories: [Category]
@@ -1686,7 +1731,6 @@ struct AddTransactionSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section("Compte") {
                     Picker("Compte", selection: $accountId) {
@@ -1766,28 +1810,18 @@ struct AddTransactionSheet: View {
                     }
                 }
             }
-            .navigationTitle("Nouvelle transaction")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Ajouter") { save() }
-                        .disabled(parsedAmount == nil || amountText.isEmpty)
-                }
-            }
-            .sheet(isPresented: $showTiersPicker) {
+            .nemorisFormStyle()
+            .adaptivePane(isPresented: $showTiersPicker) {
                 TiersSearchSheet(allTiers: localTiers, selectedId: $tiersId,
                                  onCreateTiers: { prefill in
                                      newTiersPrefillName = prefill
                                      showCreateTiersForm = true
                                  })
             }
-            .sheet(isPresented: $showRemboursementPicker) {
+            .adaptivePane(isPresented: $showRemboursementPicker) {
                 TiersSearchSheet(allTiers: localTiers, selectedId: $remboursementTiersId)
             }
-            .sheet(isPresented: $showCreateTiersForm) {
+            .adaptivePane(isPresented: $showCreateTiersForm) {
                 PayeeCreationFormSheet(prefilledName: newTiersPrefillName, allCategories: allCategories) { newTiers in
                     guard let id = repository.addTiersAndGetId(
                         name: newTiers.name,
@@ -1817,23 +1851,29 @@ struct AddTransactionSheet: View {
                     categoryId = tiers.categoryId ?? -1
                 }
             }
-        }
+            .paneChrome("Nouvelle transaction",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Ajouter",
+                        confirmDisabled: parsedAmount == nil || amountText.isEmpty,
+                        onConfirm: { save() })
     }
 
     private func save() {
         guard let absValue = parsedAmount else { return }
         let amount = type == .expense ? -abs(absValue) : abs(absValue)
-        let ok = repository.addTransaction(
+        let newId = repository.addTransaction(
             accountId: accountId,
             tiersId: tiersId == -1 ? nil : tiersId,
             categoryId: categoryId == -1 ? nil : categoryId,
             paymentTypeId: paymentTypeId == -1 ? nil : paymentTypeId,
-            remboursementTiersId: remboursementTiersId == -1 ? nil : remboursementTiersId,
             information: information,
             amount: amount,
             date: date
         )
-        if ok {
+        if let newId {
+            if remboursementTiersId != -1 {
+                ReimbursementRepository().setReimbursement(transactionId: newId, payeeId: remboursementTiersId)
+            }
             onSave()
             dismiss()
         } else {
@@ -1842,88 +1882,25 @@ struct AddTransactionSheet: View {
     }
 }
 
-// MARK: - Types unifiés pour les remboursements
-
-private enum UnifiedReimbursementItem: Identifiable {
-    case transaction(FinanceTransaction)
-    case tricount(TricountReimbursement)
-
-    var id: String {
-        switch self {
-        case .transaction(let t): return "tx-\(t.id)"
-        case .tricount(let r):    return "tc-\(r.id)"
-        }
-    }
-    var date: Date {
-        switch self {
-        case .transaction(let t): return t.date
-        case .tricount(let r):    return r.entryDate
-        }
-    }
-    /// Montant en EUR (ou meilleure estimation) pour les totaux.
-    /// - Transaction : montant en EUR directement
-    /// - Tricount : EUR converti si disponible, sinon montant brut
-    var amount: Double {
-        switch self {
-        case .transaction(let t): return t.amount
-        case .tricount(let r):    return r.signedEffectiveEurAmount
-        }
-    }
-    var label: String {
-        switch self {
-        case .transaction(let t): return t.information.isEmpty ? t.tiersName : t.information
-        case .tricount(let r):    return r.entryDescription.isEmpty ? "Tricount" : r.entryDescription
-        }
-    }
-    var subtitle: String? {
-        if case .transaction(let t) = self,
-           !t.tiersName.isEmpty, !t.information.isEmpty {
-            return t.tiersName
-        }
-        return nil
-    }
-    var isTricount: Bool {
-        if case .tricount = self { return true }
-        return false
-    }
-    /// Toujours EUR (le montant `amount` est déjà converti).
-    var currency: String { "EUR" }
-    /// Montant original en devise étrangère (non nil seulement si converti depuis une autre devise).
-    var originalAmount: Double? {
-        if case .tricount(let r) = self, r.isConverted { return r.signedAmount }
-        return nil
-    }
-    var originalCurrency: String {
-        if case .tricount(let r) = self { return r.currency }
-        return "EUR"
-    }
-    var needsConversion: Bool {
-        if case .tricount(let r) = self { return r.needsConversion }
-        return false
-    }
-}
-
-private struct UnifiedReimbursementGroup: Identifiable {
-    let tiersId: Int
-    let tiersName: String
-    let items: [UnifiedReimbursementItem]
-    var total: Double { items.reduce(0) { $0 + $1.amount } }
-    var id: Int { tiersId }
-    var txCount: Int     { items.filter { !$0.isTricount }.count }
-    var tricountCount: Int { items.filter {  $0.isTricount }.count }
-}
-
 // MARK: - Vue remboursements
 
 struct ReimbursementsSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.paneDismiss) private var paneDismiss
     let repository: TransactionRepository
-    private let tricountRepo = TricountRepository()
+    private let reimbursementRepo = ReimbursementRepository()
 
     @State private var fromDate: Date
     @State private var toDate: Date
-    @State private var unifiedGroups: [UnifiedReimbursementGroup] = []
+    @State private var groups: [ReimbursementGroup] = []
     @State private var expandedIds: Set<Int> = []
+    /// Groupement TOUJOURS par payee — ce toggle ne fait que sous-détailler les
+    /// items D'UN MÊME payee par catégorie, il ne remplace pas le groupement.
+    @State private var detailByCategory = false
+    /// Disclosure des sous-groupes catégorie, repliés par défaut. Clé composite
+    /// "payeeId|categoryId" : un même categoryId peut apparaître sous plusieurs
+    /// payees (ex. "Alimentation" chez Papa ET chez Maman) — un Set<Int> seul
+    /// ferait coïncider à tort leurs états d'expansion.
+    @State private var expandedCategoryKeys: Set<String> = []
 
     init(repository: TransactionRepository, initialFrom: Date, initialTo: Date) {
         self.repository = repository
@@ -1931,11 +1908,13 @@ struct ReimbursementsSheet: View {
         _toDate   = State(initialValue: initialTo)
     }
 
-    private var grandTotal: Double { unifiedGroups.reduce(0) { $0 + $1.total } }
+    private var isEmpty: Bool { groups.isEmpty }
+    private var grandTotal: Double { groups.reduce(0) { $0 + $1.total } }
 
     var body: some View {
-        NavigationStack {
-            List {
+            // Form (pas List) : contenu type formulaire → boxes arrondies
+            // natives macOS via nemorisFormStyle(), insetGrouped natif sur iOS.
+            Form {
                 // Période
                 Section("Période") {
                     DatePicker("Du", selection: $fromDate, displayedComponents: .date)
@@ -1944,7 +1923,13 @@ struct ReimbursementsSheet: View {
                         .frame(maxWidth: .infinity)
                 }
 
-                if unifiedGroups.isEmpty {
+                if !isEmpty {
+                    Section {
+                        Toggle("Détailler par catégorie", isOn: $detailByCategory)
+                    }
+                }
+
+                if isEmpty {
                     Section {
                         ContentUnavailableView(
                             "Aucun remboursement",
@@ -1964,83 +1949,140 @@ struct ReimbursementsSheet: View {
                         }
                     }
 
-                    // Liste unifiée — par tiers
-                    ForEach(unifiedGroups) { group in
+                    // Liste unifiée — toujours groupée par payee
+                    ForEach(groups) { group in
                         Section {
-                            // En-tête de groupe (tappable pour expand)
-                            Button {
-                                if expandedIds.contains(group.id) { expandedIds.remove(group.id) }
-                                else { expandedIds.insert(group.id) }
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(group.tiersName).font(.headline).foregroundStyle(AppTheme.Colors.textPrimary)
-                                        groupSubtitle(group)
-                                    }
-                                    Spacer()
-                                    Text(group.total, format: .currency(code: "EUR"))
-                                        .fontWeight(.semibold)
-                                        .foregroundStyle(group.total < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
-                                    Image(systemName: expandedIds.contains(group.id) ? "chevron.up" : "chevron.down")
-                                        .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
-                                }
-                            }
-                            .buttonStyle(.plain)
-
-                            // Lignes détail
+                            groupHeader(id: group.id, title: group.payeeName, total: group.total,
+                                        transactionCount: group.transactionCount, tricountCount: group.tricountCount)
                             if expandedIds.contains(group.id) {
-                                ForEach(group.items) { item in
-                                    unifiedItemRow(item)
+                                if detailByCategory {
+                                    ForEach(categorySubgroups(of: group.items)) { sub in
+                                        let key = categoryKey(payeeId: group.id, sub: sub)
+                                        categorySubheader(sub, isExpanded: expandedCategoryKeys.contains(key)) {
+                                            if expandedCategoryKeys.contains(key) { expandedCategoryKeys.remove(key) }
+                                            else { expandedCategoryKeys.insert(key) }
+                                        }
+                                        if expandedCategoryKeys.contains(key) {
+                                            ForEach(sub.items) { item in itemRow(item) }
+                                        }
+                                    }
+                                } else {
+                                    ForEach(group.items) { item in itemRow(item) }
                                 }
                             }
                         }
                     }
                 }
             }
-            .listStyle(.insetGrouped)
-            .navigationTitle("Remboursements")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
-                }
-            }
+            .nemorisFormStyle()
             .onAppear { load() }
+            .paneChrome("Remboursements", cancelLabel: "Fermer", onCancel: { paneDismiss() })
+    }
+
+    // MARK: En-tête de groupe (tappable pour expand)
+
+    @ViewBuilder
+    private func groupHeader(id: Int, title: String, total: Double, transactionCount: Int, tricountCount: Int) -> some View {
+        Button {
+            if expandedIds.contains(id) { expandedIds.remove(id) }
+            else { expandedIds.insert(id) }
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.headline).foregroundStyle(AppTheme.Colors.textPrimary)
+                    groupSubtitle(transactionCount: transactionCount, tricountCount: tricountCount)
+                }
+                Spacer()
+                Text(total, format: .currency(code: "EUR"))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(total < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                Image(systemName: expandedIds.contains(id) ? "chevron.up" : "chevron.down")
+                    .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
+            }
         }
+        .buttonStyle(.plain)
     }
 
     // MARK: Sous-titre du groupe
 
     @ViewBuilder
-    private func groupSubtitle(_ group: UnifiedReimbursementGroup) -> some View {
-        if group.txCount > 0 && group.tricountCount > 0 {
+    private func groupSubtitle(transactionCount: Int, tricountCount: Int) -> some View {
+        if transactionCount > 0 && tricountCount > 0 {
             HStack(spacing: 4) {
-                Text("\(group.txCount) transaction(s)").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
+                Text("\(transactionCount) transaction(s)").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
                 Text("·").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                 HStack(spacing: 3) {
                     Image(systemName: "person.2.fill").font(.caption2).foregroundStyle(AppTheme.Colors.accentSecondary)
-                    Text("\(group.tricountCount) Tricount").font(.caption).foregroundStyle(AppTheme.Colors.accentSecondary)
+                    Text("\(tricountCount) Tricount").font(.caption).foregroundStyle(AppTheme.Colors.accentSecondary)
                 }
             }
-        } else if group.tricountCount > 0 {
+        } else if tricountCount > 0 {
             HStack(spacing: 3) {
                 Image(systemName: "person.2.fill").font(.caption2).foregroundStyle(AppTheme.Colors.accentSecondary)
-                Text("\(group.tricountCount) dépense(s) Tricount").font(.caption).foregroundStyle(AppTheme.Colors.accentSecondary)
+                Text("\(tricountCount) dépense(s) Tricount").font(.caption).foregroundStyle(AppTheme.Colors.accentSecondary)
             }
         } else {
-            Text("\(group.txCount) transaction(s)").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
+            Text("\(transactionCount) transaction(s)").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
         }
+    }
+
+    // MARK: Sous-détail par catégorie (au sein d'un même payee)
+
+    /// Découpe les items d'UN payee par catégorie — calculé en mémoire à partir
+    /// des données déjà chargées (categoryId/categoryName portés par
+    /// Reimbursement), pas de requête supplémentaire. Tri par montant absolu
+    /// décroissant : la catégorie la plus lourde en premier.
+    private func categorySubgroups(of items: [Reimbursement]) -> [CategoryReimbursementGroup] {
+        var grouped: [Int: (name: String, items: [Reimbursement])] = [:]
+        for item in items {
+            let key = item.categoryId ?? -1
+            let name = item.categoryId == nil ? "Non catégorisé" : item.categoryName
+            grouped[key, default: (name, [])].items.append(item)
+        }
+        return grouped.map { id, pair in
+            CategoryReimbursementGroup(categoryId: id == -1 ? nil : id, categoryName: pair.name, items: pair.items)
+        }.sorted { abs($0.total) > abs($1.total) }
+    }
+
+    /// Clé composite payee+catégorie pour l'état d'expansion — cf. commentaire
+    /// sur `expandedCategoryKeys`.
+    private func categoryKey(payeeId: Int, sub: CategoryReimbursementGroup) -> String {
+        "\(payeeId)|\(sub.id)"
+    }
+
+    private func categorySubheader(_ sub: CategoryReimbursementGroup, isExpanded: Bool, toggle: @escaping () -> Void) -> some View {
+        Button(action: toggle) {
+            HStack {
+                Text(sub.categoryName).font(.subheadline).fontWeight(.semibold).foregroundStyle(AppTheme.Colors.textSecondary)
+                Spacer()
+                Text(sub.total, format: .currency(code: "EUR"))
+                    .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 4)
     }
 
     // MARK: Ligne item
 
+    /// Repli : la note libre (`information`) est souvent vide (transactions
+    /// importées, jamais annotées par l'user) → repli sur le payee ORIGINAL de
+    /// la transaction (ex. "Netflix"), pas sur un libellé générique.
+    private func displayLabel(_ item: Reimbursement) -> String {
+        if !item.originDescription.isEmpty { return item.originDescription }
+        if !item.originPayeeName.isEmpty { return item.originPayeeName }
+        return item.isTricountOrigin ? "Tricount" : "Transaction"
+    }
+
     @ViewBuilder
-    private func unifiedItemRow(_ item: UnifiedReimbursementItem) -> some View {
+    private func itemRow(_ item: Reimbursement) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
-                    Text(item.label).font(.subheadline)
-                    if item.isTricount {
+                    Text(displayLabel(item)).font(.subheadline)
+                    if item.isTricountOrigin {
                         HStack(spacing: 3) {
                             Image(systemName: "person.2.fill").font(.caption2)
                             Text("Tricount").font(.caption2).fontWeight(.semibold)
@@ -2051,26 +2093,23 @@ struct ReimbursementsSheet: View {
                         .foregroundStyle(AppTheme.Colors.accentSecondary)
                     }
                 }
-                Text(item.date.formatted(date: .abbreviated, time: .omitted))
+                Text(item.originDate.formatted(date: .abbreviated, time: .omitted))
                     .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
-                if let sub = item.subtitle {
-                    Text(sub).font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5)).lineLimit(1)
-                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
                 if item.needsConversion {
-                    Text(item.amount.formatted(.currency(code: item.originalCurrency)))
+                    Text(item.amount.formatted(.currency(code: item.currency)))
                         .font(.subheadline)
                         .foregroundStyle(AppTheme.Colors.warning)
                     Text("non converti")
                         .font(.caption2).foregroundStyle(AppTheme.Colors.warning)
                 } else {
-                    Text(item.amount.formatted(.currency(code: "EUR")))
+                    Text(item.effectiveEurAmount.formatted(.currency(code: "EUR")))
                         .font(.subheadline)
-                        .foregroundStyle(item.amount < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
-                    if let orig = item.originalAmount {
-                        Text(orig.formatted(.currency(code: item.originalCurrency)))
+                        .foregroundStyle(item.effectiveEurAmount < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                    if item.isConverted {
+                        Text(item.amount.formatted(.currency(code: item.currency)))
                             .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
                     }
                 }
@@ -2082,34 +2121,15 @@ struct ReimbursementsSheet: View {
     // MARK: Chargement
 
     private func load() {
-        let txGroups = repository.fetchReimbursementGroups(from: fromDate, to: toDate)
-        let tcGroups = tricountRepo.fetchReimbursementGroups(from: fromDate, to: toDate)
-
-        // Fusion par tiersId
-        var dict: [Int: (String, [UnifiedReimbursementItem])] = [:]
-        for g in txGroups {
-            dict[g.tiersId] = (g.tiersName, g.transactions.map { .transaction($0) })
-        }
-        for g in tcGroups {
-            let existing = dict[g.tiersId]?.1 ?? []
-            dict[g.tiersId] = (g.tiersName, existing + g.items.map { .tricount($0) })
-        }
-
-        unifiedGroups = dict.map { id, val in
-            UnifiedReimbursementGroup(
-                tiersId: id,
-                tiersName: val.0,
-                items: val.1.sorted { $0.date > $1.date }
-            )
-        }
-        .sorted { $0.tiersName.localizedCaseInsensitiveCompare($1.tiersName) == .orderedAscending }
+        groups = reimbursementRepo.fetchReimbursementGroups(from: fromDate, to: toDate)
     }
 }
 
 // MARK: - BulkTagSheet (sélection multiple avec état tri-state)
 
 struct BulkTagSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
 
     let initialStates: [Int: TagSelectionState]
     let repository: TransactionRepository
@@ -2131,7 +2151,6 @@ struct BulkTagSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             List {
                 Section {
                     HStack {
@@ -2159,15 +2178,11 @@ struct BulkTagSheet: View {
                     }
                 }
             }
-            .navigationTitle("Tags — sélection multiple")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Annuler") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Appliquer") { onSave(states); dismiss() }
-                }
+            .paneChrome("Tags — sélection multiple",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Appliquer") {
+                onSave(states); dismiss()
             }
-        }
     }
 
     @ViewBuilder
@@ -2208,7 +2223,8 @@ struct BulkTagSheet: View {
 // MARK: - TagManagementSheet (générique : transactions ET entrées Tricount)
 
 struct TagManagementSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     let initialTagIds: Set<Int>
     let allTags: [Tag]
     let repository: TransactionRepository
@@ -2232,7 +2248,6 @@ struct TagManagementSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             List {
                 Section {
                     HStack {
@@ -2274,15 +2289,11 @@ struct TagManagementSheet: View {
                     }
                 }
             }
-            .navigationTitle("Tags")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Annuler") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") { onSave(selectedTagIds); dismiss() }
-                }
+            .paneChrome("Tags",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Enregistrer") {
+                onSave(selectedTagIds); dismiss()
             }
-        }
     }
 
     private func createTag() {
@@ -2304,13 +2315,17 @@ struct TagManagementSheet: View {
 // MARK: - TagSummaryView (solde et liste des dépenses par tag)
 
 struct TagSummaryView: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.paneDismiss) private var paneDismiss
     let repository: TransactionRepository
     @State private var summaries: [TagExpenseSummary] = []
     @State private var isSyncingRates = false
+    /// État à la place d'un `NavigationLink` : un push depuis ce contenu, une
+    /// fois hébergé dans le panneau macOS, ferait remonter le titre/back-button
+    /// de `TagDetailView` dans la barre du MODULE (aucune fenêtre séparée pour
+    /// l'absorber). Le détail s'ouvre en sheet (niveau 2, scopée) à la place.
+    @State private var selectedTag: Tag?
 
     var body: some View {
-        NavigationStack {
             Group {
                 if summaries.isEmpty && !isSyncingRates {
                     ContentUnavailableView(
@@ -2329,19 +2344,22 @@ struct TagSummaryView: View {
                             .listRowSeparator(.hidden)
                         }
                         ForEach(summaries) { summary in
-                            NavigationLink {
-                                TagDetailView(tag: summary.tag, repository: repository)
+                            Button {
+                                selectedTag = summary.tag
                             } label: {
-                                tagSummaryRow(summary)
+                                HStack {
+                                    tagSummaryRow(summary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
+                                }
+                                .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
-            }
-            .navigationTitle("Dépenses par tag")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Fermer") { dismiss() } }
             }
             .onAppear {
                 summaries = repository.fetchTagExpenseSummary()
@@ -2352,7 +2370,11 @@ struct TagSummaryView: View {
                     isSyncingRates = false
                 }
             }
-        }
+            .adaptivePane(item: $selectedTag) { tag in
+                TagDetailView(tag: tag, repository: repository)
+                    .paneChrome(tag.name, cancelLabel: "Fermer", onCancel: { selectedTag = nil })
+            }
+            .paneChrome("Dépenses par tag", cancelLabel: "Fermer", onCancel: { paneDismiss() })
     }
 
     @ViewBuilder
@@ -2640,7 +2662,8 @@ struct TagPickerSheet: View {
 // MARK: - TagQuickSheet (raccourci swipe → tags)
 
 struct TagQuickSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     let transactionId: Int
     let allTags: [Tag]
     let repository: TransactionRepository
@@ -2660,7 +2683,6 @@ struct TagQuickSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             List {
                 Section {
                     HStack {
@@ -2699,22 +2721,14 @@ struct TagQuickSheet: View {
                     }
                 }
             }
-            .navigationTitle("Tags")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") { save() }
-                }
-            }
             .onAppear {
                 guard !isLoaded else { return }
                 selectedTagIds = Set(repository.fetchTags(forTransaction: transactionId).map(\.id))
                 isLoaded = true
             }
-        }
+            .paneChrome("Tags",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Enregistrer", onConfirm: { save() })
     }
 
     private func toggle(_ tagId: Int) {
@@ -2740,5 +2754,86 @@ struct TagQuickSheet: View {
     private func save() {
         repository.setTags(Array(selectedTagIds), forTransaction: transactionId)
         dismiss()
+    }
+}
+
+// MARK: - TransactionDetailPane (panneau détail macOS)
+
+/// Détail lecture seule d'une transaction, affiché dans le panneau latéral
+/// macOS par `adaptiveEntityPane` (jamais instancié sur iOS, où le tap ouvre
+/// directement l'édition en sheet — comportement historique).
+struct TransactionDetailPane: View {
+    let tx: FinanceTransaction
+    let accounts: [Account]
+    let allTiers: [Tiers]
+    let allCategories: [Category]
+    let repository: TransactionRepository
+
+    /// Lecture fraîche à chaque rendu : après une édition (tags modifiés dans
+    /// le sheet), le retour au détail reflète l'état réel en base.
+    private var tags: [Tag] {
+        repository.fetchTagsForTransactions([tx.id])[tx.id] ?? []
+    }
+
+    private var accountName: String {
+        accounts.first { $0.id == tx.accountId }?.name ?? "Compte #\(tx.accountId)"
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    MerchantLogo(transaction: tx, allTiers: allTiers, allCategories: allCategories, size: 44)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(tx.tiersName.isEmpty ? "Sans tiers" : tx.tiersName)
+                            .font(AppTheme.Typography.bodyMedium)
+                            .foregroundStyle(AppTheme.Colors.textPrimary)
+                            .lineLimit(2)
+                        Text(tx.date.formatted(date: .long, time: .omitted))
+                            .font(AppTheme.Typography.labelSmall)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                    Spacer()
+                    Text(tx.amount, format: .currency(code: "EUR"))
+                        .font(AppTheme.Typography.moneyMedium)
+                        .foregroundStyle(tx.amount >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
+                }
+                .padding(.vertical, 2)
+            }
+
+            Section("Détails") {
+                LabeledContent("Compte", value: accountName)
+                LabeledContent("Catégorie", value: tx.categoryName.isEmpty ? "—" : tx.categoryName)
+                LabeledContent("Moyen de paiement", value: tx.paymentTypeName.isEmpty ? "—" : tx.paymentTypeName)
+                if !tx.remboursementTiersName.isEmpty {
+                    LabeledContent("Remboursement", value: tx.remboursementTiersName)
+                }
+            }
+
+            if !tags.isEmpty {
+                Section("Tags") {
+                    Text(tags.map(\.name).joined(separator: " · "))
+                        .font(AppTheme.Typography.bodySmall)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                }
+            }
+
+            if !tx.information.isEmpty {
+                Section("Note") {
+                    Text(tx.information)
+                        .font(AppTheme.Typography.bodySmall)
+                }
+            }
+
+            if let brut = tx.libelleBrut, !brut.isEmpty {
+                Section("Libellé bancaire brut") {
+                    Text(brut)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .formStyle(.grouped)
     }
 }

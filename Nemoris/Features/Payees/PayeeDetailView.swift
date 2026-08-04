@@ -8,7 +8,8 @@ import NemorisEngine
 /// Le champ `engine_merchant_id` est lecture seule, avec un bouton "Rechercher
 /// dans le moteur" qui re-passe le `name` dans le pipeline et propose un nouvel ID.
 struct PayeeDetailView: View {
-    @Environment(\.dismiss) private var dismiss
+    // Rebind sur paneDismiss (inspector macOS / sheet iOS) — les appels dismiss() restent valides.
+    @Environment(\.paneDismiss) private var dismiss
 
     let initialPayee: Tiers
     let allCategories: [Category]
@@ -76,7 +77,6 @@ struct PayeeDetailView: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 typeSection
                 identitySection
@@ -86,18 +86,8 @@ struct PayeeDetailView: View {
                 classificationSection
                 if tierType != .contact { advancedSection }
             }
-            .navigationTitle("Tiers")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") { save() }
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-            .sheet(isPresented: $showGroupPicker) {
+            .nemorisFormStyle()
+            .adaptivePane(isPresented: $showGroupPicker) {
                 PayeeGroupPickerView(currentGroupId: groupId) { group in
                     groupId = group?.id
                     groupDisplayName = group?.displayName ?? ""
@@ -138,7 +128,11 @@ struct PayeeDetailView: View {
                 loadGroupName()
                 await loadContactPreview()
             }
-        }
+            .paneChrome("Tiers",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Enregistrer",
+                        confirmDisabled: name.trimmingCharacters(in: .whitespaces).isEmpty,
+                        onConfirm: { save() })
     }
 
     // MARK: Type section

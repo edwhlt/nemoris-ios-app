@@ -16,6 +16,11 @@ import Charts
 struct InvestmentAccountDetailView: View {
     @Bindable var viewModel: InvestmentsViewModel
     let account: InvestmentAccount
+    /// macOS : retour au dashboard global. Le compte est affiché EN PLEINE PAGE
+    /// dans la colonne du module (navigation interne par état — cf.
+    /// `InvestmentsView.dashboardContent`), il fournit donc lui-même son retour.
+    /// nil sur iOS, où la vue est poussée et le back du `NavigationStack` suffit.
+    var onBack: (() -> Void)? = nil
 
     @State private var localTimeRange: InvestmentTimeRange = .threeMonth
     @State private var evolution: [PortfolioEvolutionPoint] = []
@@ -27,6 +32,17 @@ struct InvestmentAccountDetailView: View {
     // "edit ouvre parfois le formulaire d'ajout" causé par la race state.
     @State private var showAddPositionForm = false
     @State private var editingPosition: InvestmentPosition?
+    #if os(macOS)
+    /// macOS : la fiche position s'ouvre dans le PANNEAU LATÉRAL global
+    /// (`.adaptivePane` → HStack custom de MainTabView, 100% SwiftUI).
+    /// Historique : le push cliqué profondeur 1 → 2 déclenchait une récursion
+    /// AutoLayout `_postWindowNeedsUpdateConstraints` (macOS 27 beta) même
+    /// PILOTÉ PAR ÉTAT (navigationDestination) — le harnais -nemorisCrashRepro
+    /// ne validait que les pushes programmés hors cycle d'événement, le clic
+    /// réel crashait toujours (23/07). Le panneau n'empile aucune vue dans la
+    /// NavigationStack → la machinerie en cause n'est plus jamais tapée.
+    @State private var panePosition: InvestmentPosition?
+    #endif
 
     // Édition / suppression compte
     @State private var showAccountEditForm = false
@@ -40,6 +56,13 @@ struct InvestmentAccountDetailView: View {
     /// Skeleton tant que le 1er `refresh()` n'est pas terminé.
     @State private var hasLoaded = false
     @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture depuis le panneau macOS (drill-down depuis
+    // InvestmentsView, plus un push — cf. \.paneHostContext ci-dessous). Sans
+    // effet sur iOS où cette vue reste poussée (NavigationLink, back auto).
+    @Environment(\.paneDismiss) private var paneDismiss
+    #if os(macOS)
+    @Environment(\.paneHostContext) private var paneHostContext
+    #endif
     @Environment(AppState.self) private var appState
 
     private var invested: Double {
@@ -110,24 +133,26 @@ struct InvestmentAccountDetailView: View {
                 await syncAllPositions()
             }
         }
+        // Contenu de module (pleine page) sur les DEUX plateformes → toolbar
+        // native. Sur macOS elle porte en plus le retour au dashboard.
         .navigationTitle(account.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
-        .sheet(isPresented: $showAddPositionForm) {
+        .adaptivePane(isPresented: $showAddPositionForm) {
             InvestmentPositionFormView(accountId: account.id, position: nil) { position, isNew in
                 viewModel.savePosition(position, isNew: isNew)
                 refresh()
                 appState.dataRefreshToken = UUID()
             }
         }
-        .sheet(item: $editingPosition) { position in
+        .adaptivePane(item: $editingPosition) { position in
             InvestmentPositionFormView(accountId: account.id, position: position) { updated, isNew in
                 viewModel.savePosition(updated, isNew: isNew)
                 refresh()
                 appState.dataRefreshToken = UUID()
             }
         }
-        .sheet(isPresented: $showAccountEditForm) {
+        .adaptivePane(isPresented: $showAccountEditForm) {
             InvestmentAccountFormView(account: account) { updated, isNew in
                 viewModel.saveAccount(updated, isNew: isNew)
                 refresh()
@@ -143,7 +168,10 @@ struct InvestmentAccountDetailView: View {
             Button("Supprimer le compte", role: .destructive) {
                 viewModel.deleteAccount(id: account.id)
                 appState.dataRefreshToken = UUID()
+                // Les deux : `dismiss` pop (iOS, push), `paneDismiss` ferme le
+                // panneau (macOS) — chacun no-op hors de son contexte.
                 dismiss()
+                paneDismiss()
             }
             Button("Annuler", role: .cancel) {}
         } message: {
@@ -194,6 +222,54 @@ struct InvestmentAccountDetailView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         // Sync déclenchée par pull-to-refresh sur la ScrollView — pas de bouton dédié.
+        #if os(macOS)
+        // Retour au dashboard global : le compte occupe la colonne du module
+        // (pas un push), il fournit donc son propre retour. `.navigation` est le
+        // placement du back système, à gauche du titre.
+        if let onBack {
+            ToolbarItem(placement: .navigation) {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                }
+                .help("Tous les comptes")
+                .accessibilityLabel("Tous les comptes")
+            }
+        }
+        // Menu "⋯" aplati en boutons icône + tooltip dans UNE pilule via
+        // `ToolbarItemGroup` (groupement natif — `ControlGroup` rendait des
+        // boutons isolés), cohérent avec les autres toolbars macOS de l'app.
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button {
+                showAddPositionForm = true
+            } label: {
+                Image(systemName: "plus")
+            }
+            .help("Ajouter une position")
+            // Apparaît uniquement si le compte contient des cryptos —
+            // utile pour réparer des valeurs corrompues par d'anciens
+            // sync Yahoo (FET → action FET cotée €53, ETH → Ethernity, etc.)
+            if positions.contains(where: { $0.isCryptoAsset }) {
+                Button {
+                    repairCryptoValues()
+                } label: {
+                    Image(systemName: "wrench.adjustable")
+                }
+                .help("Réparer les valeurs crypto")
+            }
+            Button {
+                showAccountEditForm = true
+            } label: {
+                Image(systemName: "pencil")
+            }
+            .help("Modifier le compte")
+            Button(role: .destructive) {
+                showDeleteAccountConfirm = true
+            } label: {
+                Image(systemName: "trash")
+            }
+            .help("Supprimer le compte")
+        }
+        #else
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 Button {
@@ -201,9 +277,6 @@ struct InvestmentAccountDetailView: View {
                 } label: {
                     Label("Ajouter une position", systemImage: "plus")
                 }
-                // Apparaît uniquement si le compte contient des cryptos —
-                // utile pour réparer des valeurs corrompues par d'anciens
-                // sync Yahoo (FET → action FET cotée €53, ETH → Ethernity, etc.)
                 if positions.contains(where: { $0.isCryptoAsset }) {
                     Button {
                         repairCryptoValues()
@@ -227,6 +300,7 @@ struct InvestmentAccountDetailView: View {
                     .tint(AppTheme.Colors.accent)
             }
         }
+        #endif
     }
 
     // MARK: - Cards
@@ -331,7 +405,8 @@ struct InvestmentAccountDetailView: View {
 
             // Chart bord-à-bord, chips SOUS le chart (pattern Apple Stocks).
             // PAS de .clipped() — ça couperait les labels d'axe X (cf. EvolutionChart)
-            EvolutionChart(points: evolution, height: 190, timeRange: localTimeRange)
+            EvolutionChart(points: evolution, height: 190, timeRange: localTimeRange,
+                           currency: account.currency)
                 .padding(.top, AppTheme.Spacing.xs)
 
             TimeRangeChips(
@@ -406,8 +481,38 @@ struct InvestmentAccountDetailView: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             SectionHeader(title: "Positions (\(positions.count))")
                 .padding(.horizontal, AppTheme.Spacing.sm)
-            // AXE M : List scrollDisabled pour bénéficier de .swipeActions natif
-            // (cohérent avec Transactions et ReferenceData).
+            #if os(macOS)
+            // ⚠️ macOS : ni List imbriquée, ni NavigationLink cliqué, ni PUSH
+            // profondeur 2 (cf. doc de `panePosition`) — la fiche position
+            // s'ouvre dans le panneau latéral global, comme les fiches de
+            // ReferenceDataView. Le compte reste visible à gauche.
+            VStack(spacing: 0) {
+                ForEach(positions) { position in
+                    Button {
+                        panePosition = position
+                    } label: {
+                        positionRow(position)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, AppTheme.Spacing.sm)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .rowActions(
+                        leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingPosition = position }],
+                        trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { positionToDelete = position }]
+                    )
+                    if position.id != positions.last?.id {
+                        Divider()
+                            .overlay(AppTheme.Colors.textSecondary.opacity(0.12))
+                            .padding(.leading, AppTheme.Spacing.sm)
+                    }
+                }
+            }
+            .adaptivePane(item: $panePosition) { pushed in
+                PositionPane(viewModel: viewModel, account: account, position: pushed)
+            }
+            #else
+            // iOS : List conservée pour le swipe natif (RowActions → .swipeActions).
             List {
                 ForEach(positions) { position in
                     NavigationLink {
@@ -422,22 +527,13 @@ struct InvestmentAccountDetailView: View {
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 6, leading: AppTheme.Spacing.sm, bottom: 6, trailing: AppTheme.Spacing.sm))
                     .listRowSeparatorTint(AppTheme.Colors.textSecondary.opacity(0.12))
-                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                        Button {
-                            // .sheet(item:) s'ouvre dès qu'editingPosition devient non-nil
-                            editingPosition = position
-                        } label: {
-                            Label("Modifier", systemImage: "pencil")
-                        }
-                        .tint(AppTheme.Colors.accent)
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            positionToDelete = position
-                        } label: {
-                            Label("Supprimer", systemImage: "trash")
-                        }
-                    }
+                    .rowActions(
+                        // .sheet(item:) s'ouvre dès qu'editingPosition devient non-nil
+                        leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingPosition = position }],
+                        trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { positionToDelete = position }],
+                        leadingFullSwipe: false,
+                        trailingFullSwipe: false
+                    )
                 }
             }
             .listStyle(.plain)
@@ -445,6 +541,7 @@ struct InvestmentAccountDetailView: View {
             .scrollDisabled(true)
             // Hauteur estimée : ~66pt par position (ticker + asset_name + valeur + PnL).
             .frame(height: CGFloat(positions.count) * 66)
+            #endif
         }
     }
 
@@ -643,3 +740,22 @@ struct InvestmentAccountDetailView: View {
         }
     }
 }
+
+#if os(macOS)
+/// Contenu du panneau latéral pour une fiche position (contrat AdaptivePane :
+/// la vue présentée garde sa NavigationStack + navigationTitle + toolbar).
+/// Le bouton « Fermer » passe par `\.paneDismiss`, injecté par le wrapper.
+/// `InvestmentPositionDetailView` déclare elle-même son chrome de panneau
+/// (`.paneChrome` : Fermer / Supprimer / Modifier) — ce wrapper ne fait plus que
+/// transmettre les paramètres. Un `NavigationStack` + `.toolbar` ici ferait
+/// remonter un second jeu de boutons dans la barre du module.
+private struct PositionPane: View {
+    @Bindable var viewModel: InvestmentsViewModel
+    let account: InvestmentAccount
+    let position: InvestmentPosition
+
+    var body: some View {
+        InvestmentPositionDetailView(viewModel: viewModel, account: account, position: position)
+    }
+}
+#endif

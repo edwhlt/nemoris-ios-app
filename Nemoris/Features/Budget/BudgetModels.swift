@@ -136,6 +136,14 @@ struct EnrichedPrevision: Identifiable {
     var displayAmount: Double { abs(amount) }
 }
 
+/// État de santé d'une enveloppe sur la période. Les seuils vivent ICI et nulle
+/// part ailleurs — avant, chaque écran refaisait sa propre comparaison de ratio.
+enum EnvelopeHealth {
+    case healthy   // < 80 % du budget consommé
+    case warning   // 80 % … 100 %
+    case exceeded  // > 100 %
+}
+
 /// Resume d'une enveloppe budgetaire pour un mois donne
 struct EnvelopeProgress: Identifiable {
     let envelope: BudgetEnvelope
@@ -149,11 +157,21 @@ struct EnvelopeProgress: Identifiable {
     var id: Int { envelope.id }
     var variableSpent: Double { max(spent - recurringSpent, 0) }
     var remaining: Double { allocated - spent }
+    /// ⚠️ Clampé à 1.0 — c'est une **largeur de barre de progression**, pas une mesure.
+    /// Pour classer/comparer, utiliser `rawRatio` ou `healthState`.
     var ratio: Double { allocated > 0 ? min(spent / allocated, 1.0) : 0 }
+    /// Ratio réel, non clampé. Sans lui, un dépassement est indétectable via `ratio`.
+    var rawRatio: Double { allocated > 0 ? spent / allocated : 0 }
     var recurringRatio: Double { allocated > 0 ? min(recurringSpent / allocated, 1.0) : 0 }
     var forecastedRatio: Double { allocated > 0 ? min(forecasted / allocated, 1.0) : 0 }
     var isOverBudget: Bool { spent > allocated }
     var forecastExceedsBudget: Bool { forecasted > allocated }
+
+    var healthState: EnvelopeHealth {
+        if isOverBudget { return .exceeded }
+        if rawRatio >= 0.8 { return .warning }
+        return .healthy
+    }
 }
 
 /// Resume budgetaire mensuel (pour le dashboard)

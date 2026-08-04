@@ -39,11 +39,37 @@ enum MainTabItem: String, CaseIterable, Identifiable {
         case .sqlConsole:   return "terminal"
         }
     }
+
+    /// Fonctionnalité payante qui verrouille ce module, si applicable. `nil` = accès
+    /// libre dès que le toggle des Réglages est actif (Patrimoine, Tricount, Données).
+    /// Source unique partagée par le paywall (`paywallOverlay`/`proToggle`) et la
+    /// disponibilité des cartes Dashboard (`AppState.isDashboardCardAvailable`) — les
+    /// deux ne doivent jamais diverger sur "quel module est payant".
+    var paywallFeature: AppFeature? {
+        switch self {
+        case .investments: return .investments
+        case .budget:      return .budget
+        case .sqlConsole:  return .sqlConsole
+        default:           return nil
+        }
+    }
 }
 
 @Observable
 final class AppState {
-    var selectedTab: String = MainTabItem.dashboard.rawValue
+    /// Tags des entrées "Outils" de la sidebar desktop (macOS/iPad) — ce ne
+    /// sont PAS des `MainTabItem`. Source unique réutilisée par `MainTabView`
+    /// (rendu sidebar) et tout call site qui route vers ces destinations
+    /// (ex : le bouton réglages du Dashboard sur Mac). Évite un literal dupliqué.
+    static let sidebarImportTag = "sidebar_import"
+    static let sidebarSettingsTag = "sidebar_settings"
+
+    // TEMP DEBUG (bissection crash macOS fiche position) — À RETIRER : avec
+    // l'argument -nemorisCrashRepro, ouvre directement l'onglet Investissements
+    // pour une reproduction scriptée sans interaction. Sans l'argument : dashboard.
+    var selectedTab: String = CommandLine.arguments.contains("-nemorisCrashRepro")
+        ? MainTabItem.investments.rawValue
+        : MainTabItem.dashboard.rawValue
     var selectedAccountId: Int? = nil
     var selectedAccountName: String = ""
     var filterFromDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
@@ -162,10 +188,17 @@ final class AppState {
     var pendingMoreDestination: MainTabItem? = nil
 
     /// Chantier D — document d'investissement déposé par un raccourci Siri
-    /// (`ImportInvestmentDocumentIntent`), à ouvrir dans l'import intelligent.
+    /// (`ImportInvestmentDocumentIntent`) ou la share extension Portefeuille,
+    /// à ouvrir dans l'import intelligent.
     /// Setté par NemorisApp au passage au premier plan (consommation de
     /// `PendingImportInbox`), consommé par `InvestmentsView` qui présente la sheet.
-    var pendingInvestmentImportURL: URL? = nil
+    var pendingInvestmentImportURLs: [URL] = []
+
+    /// AXE P — relevés bancaires déposés par le raccourci `ImportFileIntent` ou
+    /// la share extension Transactions, à ouvrir dans l'import V3 pré-rempli.
+    /// Setté par NemorisApp au passage au premier plan (consommation de
+    /// `PendingImportInbox`), consommé par `MainTabView` qui présente la sheet.
+    var pendingTransactionImportURLs: [URL] = []
 
     /// Liste des tabs effectivement actifs (filtrés selon les feature flags
     /// `showXxx`). Dérivé de `mainTabOrder` + flags. Le **4 premiers** sont
@@ -188,6 +221,46 @@ final class AppState {
     /// vivent dans MoreView). iOS gère 5 slots max = 4 tabs + bouton "Plus".
     var visibleTabsResolved: [MainTabItem] {
         Array(availableTabsResolved.prefix(4))
+    }
+
+    // MARK: - Mise en page du Dashboard
+
+    /// Ordre, visibilité et taille des cartes du Dashboard.
+    ///
+    /// ⚠️ Propriété **stockée** avec `didSet`, et surtout PAS une computed property
+    /// get/set sur UserDefaults comme `mainTabOrder` juste au-dessus : le macro
+    /// `@Observable` n'instrumente que les propriétés stockées, donc muter une
+    /// computed ne notifie aucun observateur. Ça ne se voit pas pour `mainTabOrder`
+    /// parce que son écran de réglages garde une copie `@State` locale, mais ici la
+    /// grille doit se rafraîchir en direct depuis l'écran de personnalisation.
+    var dashboardLayout: [DashboardCardPreference] = DashboardLayoutStore.load() {
+        didSet { DashboardLayoutStore.save(dashboardLayout) }
+    }
+
+    /// Une carte n'est affichable que si son module est actif ET, quand ce module est
+    /// payant, que l'entitlement Pro est toujours valide. On filtre **à la lecture**
+    /// sans jamais toucher à la préférence stockée : désactiver puis réactiver le
+    /// module, ou renouveler l'abonnement, restitue ainsi la position et la taille
+    /// choisies.
+    ///
+    /// ⚠️ Le flag module (`showBudget`/`showInvestments`, persisté en UserDefaults) et
+    /// `PurchaseManager.accessLevel` (JAMAIS persisté, recalculé à chaque lancement
+    /// depuis StoreKit — cf. PurchaseManager) peuvent diverger : un abonnement qui
+    /// expire laisse le flag à `true`. Sans le check `purchaseManager.isUnlocked`, un
+    /// utilisateur dont le Pro a expiré pouvait encore activer/désactiver — et voir
+    /// le contenu de — la carte d'un module qu'il ne peut plus ouvrir depuis l'onglet.
+    @MainActor
+    func isDashboardCardAvailable(_ card: DashboardCardID, purchaseManager: PurchaseManager) -> Bool {
+        guard let module = card.requiredModule else { return true }
+        guard availableTabsResolved.contains(module) else { return false }
+        guard let feature = module.paywallFeature else { return true }
+        return purchaseManager.isUnlocked(feature)
+    }
+
+    /// Cartes réellement affichables, dans l'ordre choisi par l'utilisateur.
+    @MainActor
+    func visibleDashboardCards(purchaseManager: PurchaseManager) -> [DashboardCardPreference] {
+        dashboardLayout.filter { $0.isVisible && isDashboardCardAvailable($0.card, purchaseManager: purchaseManager) }
     }
 
     /// Navigation cross-tab depuis n'importe où dans l'app (ex : bandeau

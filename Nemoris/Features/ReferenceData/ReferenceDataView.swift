@@ -53,6 +53,11 @@ struct ReferenceDataView: View {
     @State private var editDraftAccountType: String = "COURANT"
     @State private var editDraftLinkedCompteId: Int? = nil
     @State private var editItemId: Int? = nil   // nil = nouvel élément
+    /// Sélecteur d'icône catégorie : présentation par état (pas un `NavigationLink`
+    /// push) — un push depuis un formulaire hébergé dans le panneau macOS n'a pas
+    /// de `NavigationStack` ambiante fiable (cf. CLAUDE.md, crashs NavigationLink
+    /// macOS). Fonctionne identiquement sur iOS.
+    @State private var showIconPicker = false
 
     // AXE C : édition complète d'un payee via PayeeDetailView.
     @State private var editingPayee: Tiers? = nil
@@ -66,6 +71,26 @@ struct ReferenceDataView: View {
 
     // Suppression unitaire par swipe (toutes les tables).
     @State private var pendingDelete: DeleteTarget? = nil
+
+    /// Cible du panneau détail macOS (clic sur une row compte / catégorie /
+    /// moyen de paiement / tag). Jamais settée sur iOS (les taps y gardent
+    /// leur comportement historique).
+    enum ReferenceDetailTarget: Identifiable {
+        case account(Account)
+        case category(Category)
+        case paymentType(PaymentType)
+        case tag(Tag)
+
+        var id: String {
+            switch self {
+            case .account(let a):     return "account_\(a.id)"
+            case .category(let c):    return "category_\(c.id)"
+            case .paymentType(let p): return "payment_\(p.id)"
+            case .tag(let t):         return "tag_\(t.id)"
+            }
+        }
+    }
+    @State private var detailTarget: ReferenceDetailTarget? = nil
 
     // Arbre des catégories — recalculé à la volée pour réagir au tri.
     private var categoryForest: [CategoryNode] {
@@ -81,6 +106,33 @@ struct ReferenceDataView: View {
     // Import CSV des tiers : retiré lors du cleanup AXE B (cluster SmartImport legacy supprimé).
 
     // MARK: Filtrage + tri
+    //
+    // ⚠️ Ces listes sont mises en CACHE dans `@State`, elles ne sont PAS des
+    // propriétés calculées. En calculé, chaque évaluation du `body` les relisait
+    // deux fois (test `.isEmpty`, puis `ForEach`) → deux tris localisés complets
+    // sur ~1000 tiers à chaque frappe clavier, chaque bascule d'onglet et chaque
+    // toggle de sélection. Recalcul uniquement via `recomputeFiltered()`.
+    @State private var filteredAccounts: [Account] = []
+    @State private var filteredCategories: [Category] = []
+    @State private var filteredTiers: [Tiers] = []
+    @State private var filteredPaymentTypes: [PaymentType] = []
+    @State private var filteredTags: [Tag] = []
+
+    /// Recherche réellement appliquée aux listes = `searchText` debouncé
+    /// (cf. `.task(id: searchText)`), pour ne pas refiltrer à chaque caractère.
+    @State private var appliedSearch = ""
+
+    /// Pagination de l'onglet Tiers — la seule table volumineuse (~1000 lignes).
+    /// Même principe que `TransactionsView` : on ne matérialise que les premières
+    /// lignes, la suite s'ajoute quand la sentinelle de fin de liste apparaît.
+    private let tiersPageSize = 100
+    @State private var tiersDisplayLimit = 100
+
+    private var visibleTiers: [Tiers] {
+        tiersDisplayLimit >= filteredTiers.count
+            ? filteredTiers
+            : Array(filteredTiers.prefix(tiersDisplayLimit))
+    }
 
     private func sorted<T: Identifiable>(_ items: [T], name: (T) -> String) -> [T] where T.ID == Int {
         sortOrder == .alphabetical
@@ -88,36 +140,50 @@ struct ReferenceDataView: View {
             : items.sorted { $0.id < $1.id }
     }
 
-    var filteredAccounts: [Account] {
-        let base = searchText.isEmpty ? accounts
-            : accounts.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-        return sorted(base, name: \.name)
-    }
-    var filteredCategories: [Category] {
-        let base = searchText.isEmpty ? categories
-            : categories.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-        return sorted(base, name: \.name)
-    }
-    var filteredTiers: [Tiers] {
-        let base = searchText.isEmpty ? tiers
-            : tiers.filter {
-                $0.name.localizedCaseInsensitiveContains(searchText)
-                || ($0.regex?.localizedCaseInsensitiveContains(searchText) == true)
-            }
-        return sorted(base, name: \.name)
-    }
-    var filteredPaymentTypes: [PaymentType] {
-        let base = searchText.isEmpty ? paymentTypes
-            : paymentTypes.filter {
-                $0.name.localizedCaseInsensitiveContains(searchText)
-                || ($0.regex?.localizedCaseInsensitiveContains(searchText) == true)
-            }
-        return sorted(base, name: \.name)
-    }
-    var filteredTags: [Tag] {
-        let base = searchText.isEmpty ? tags
-            : tags.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-        return sorted(base, name: \.name)
+    /// Reconstruit les 5 listes affichées. `resetPaging` remet l'onglet Tiers à sa
+    /// première page : vrai quand la recherche ou le tri change (le contenu n'a
+    /// plus rien à voir), faux sur un simple rechargement des données (on ne veut
+    /// pas ramener l'utilisateur en haut de liste après une suppression).
+    private func recomputeFiltered(resetPaging: Bool) {
+        let q = appliedSearch
+
+        filteredAccounts = sorted(
+            q.isEmpty ? accounts
+                      : accounts.filter { $0.name.localizedCaseInsensitiveContains(q) },
+            name: \.name)
+
+        filteredCategories = sorted(
+            q.isEmpty ? categories
+                      : categories.filter { $0.name.localizedCaseInsensitiveContains(q) },
+            name: \.name)
+
+        filteredTiers = sorted(
+            q.isEmpty ? tiers
+                      : tiers.filter {
+                            $0.name.localizedCaseInsensitiveContains(q)
+                            || ($0.regex?.localizedCaseInsensitiveContains(q) == true)
+                        },
+            name: \.name)
+
+        filteredPaymentTypes = sorted(
+            q.isEmpty ? paymentTypes
+                      : paymentTypes.filter {
+                            $0.name.localizedCaseInsensitiveContains(q)
+                            || ($0.regex?.localizedCaseInsensitiveContains(q) == true)
+                        },
+            name: \.name)
+
+        filteredTags = sorted(
+            q.isEmpty ? tags
+                      : tags.filter { $0.name.localizedCaseInsensitiveContains(q) },
+            name: \.name)
+
+        if resetPaging {
+            tiersDisplayLimit = tiersPageSize
+        } else {
+            // On garde la page atteinte, sans dépasser le nouveau total.
+            tiersDisplayLimit = max(tiersPageSize, min(tiersDisplayLimit, filteredTiers.count))
+        }
     }
 
     // MARK: Body
@@ -178,57 +244,47 @@ struct ReferenceDataView: View {
                                     onEdit: { c in
                                         startEdit(id: c.id, name: c.name, regex: "", parentCategoryId: c.parentId, icon: c.icon)
                                     },
-                                    onDelete: { n in pendingDelete = deleteTargetForNode(n) }
+                                    onDelete: { n in pendingDelete = deleteTargetForNode(n) },
+                                    onSelect: { c in detailTarget = .category(c) }
                                 )
                             }
                         }
                     case .tiers:
                         if filteredTiers.isEmpty { emptyRow } else {
-                            ForEach(filteredTiers) { t in
-                                HStack(spacing: 12) {
-                                    if isSelectingTiers {
-                                        Image(systemName: selectedTiersIds.contains(t.id)
-                                              ? "checkmark.circle.fill" : "circle")
-                                            .foregroundStyle(selectedTiersIds.contains(t.id) ? AppTheme.Colors.danger : AppTheme.Colors.textSecondary)
-                                            .imageScale(.large)
-                                    }
-                                    MerchantLogo(tiers: t, allCategories: categories, size: 36)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(t.name)
-                                        if let subtitle = tierSubtitle(t) {
-                                            Text(subtitle)
-                                                .font(.caption)
-                                                .foregroundStyle(AppTheme.Colors.textSecondary)
-                                                .lineLimit(1)
+                            ForEach(visibleTiers) { t in
+                                TierRow(tiers: t,
+                                        allCategories: categories,
+                                        subtitle: tierSubtitle(t),
+                                        count: tierCounts[t.id] ?? 0,
+                                        isSelecting: isSelectingTiers,
+                                        isSelected: selectedTiersIds.contains(t.id))
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        if isSelectingTiers {
+                                            if selectedTiersIds.contains(t.id) { selectedTiersIds.remove(t.id) }
+                                            else { selectedTiersIds.insert(t.id) }
+                                        } else {
+                                            editingPayee = t
                                         }
                                     }
+                                    .rowActions(
+                                        leading: isSelectingTiers ? [] : [editAction { editingPayee = t }],
+                                        trailing: isSelectingTiers ? [] : [deleteAction(DeleteTarget(tab: .tiers, entityId: t.id, name: t.name,
+                                                                                                     count: tierCounts[t.id] ?? 0, childIds: [], blocked: false))],
+                                        leadingFullSwipe: false,
+                                        trailingFullSwipe: false
+                                    )
+                            }
+                            // Sentinelle de pagination : son apparition à l'écran
+                            // déclenche le chargement de la page suivante.
+                            if filteredTiers.count > visibleTiers.count {
+                                HStack {
                                     Spacer()
-                                    if t.linkedCompteId != nil {
-                                        Image(systemName: "arrow.left.arrow.right")
-                                            .font(.caption2).foregroundStyle(AppTheme.Colors.warning)
-                                    }
-                                    EntityIdCountBadge(id: t.id, count: tierCounts[t.id] ?? 0)
+                                    ProgressView()
+                                    Spacer()
                                 }
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    if isSelectingTiers {
-                                        if selectedTiersIds.contains(t.id) { selectedTiersIds.remove(t.id) }
-                                        else { selectedTiersIds.insert(t.id) }
-                                    } else {
-                                        editingPayee = t
-                                    }
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    if !isSelectingTiers {
-                                        deleteSwipe(DeleteTarget(tab: .tiers, entityId: t.id, name: t.name,
-                                                                 count: tierCounts[t.id] ?? 0, childIds: [], blocked: false))
-                                    }
-                                }
-                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                    if !isSelectingTiers {
-                                        editButton { editingPayee = t }
-                                    }
-                                }
+                                .listRowBackground(AppTheme.Colors.surface)
+                                .onAppear { tiersDisplayLimit += tiersPageSize }
                             }
                         }
                     case .moyensPaiement:
@@ -244,13 +300,15 @@ struct ReferenceDataView: View {
                                     Spacer()
                                     EntityIdCountBadge(id: p.id, count: paymentTypeCounts[p.id] ?? 0)
                                 }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    deleteSwipe(DeleteTarget(tab: .moyensPaiement, entityId: p.id, name: p.name,
-                                                             count: paymentTypeCounts[p.id] ?? 0, childIds: [], blocked: false))
-                                }
-                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                    editButton { startEdit(id: p.id, name: p.name, regex: p.regex ?? "") }
-                                }
+                                .contentShape(Rectangle())
+                                .macDetailTap { detailTarget = .paymentType(p) }
+                                .rowActions(
+                                    leading: [editAction { startEdit(id: p.id, name: p.name, regex: p.regex ?? "") }],
+                                    trailing: [deleteAction(DeleteTarget(tab: .moyensPaiement, entityId: p.id, name: p.name,
+                                                                         count: paymentTypeCounts[p.id] ?? 0, childIds: [], blocked: false))],
+                                    leadingFullSwipe: false,
+                                    trailingFullSwipe: false
+                                )
                             }
                         }
                     case .tags:
@@ -264,10 +322,13 @@ struct ReferenceDataView: View {
                                     Spacer()
                                     EntityIdCountBadge(id: tag.id, count: tagCounts[tag.id] ?? 0)
                                 }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    deleteSwipe(DeleteTarget(tab: .tags, entityId: tag.id, name: tag.name,
-                                                             count: tagCounts[tag.id] ?? 0, childIds: [], blocked: false))
-                                }
+                                .contentShape(Rectangle())
+                                .macDetailTap { detailTarget = .tag(tag) }
+                                .rowActions(
+                                    trailing: [deleteAction(DeleteTarget(tab: .tags, entityId: tag.id, name: tag.name,
+                                                                         count: tagCounts[tag.id] ?? 0, childIds: [], blocked: false))],
+                                    trailingFullSwipe: false
+                                )
                             }
                         }
                     }
@@ -309,7 +370,26 @@ struct ReferenceDataView: View {
                         .foregroundStyle(isSelectingTiers ? AppTheme.Colors.danger : AppTheme.Colors.accent)
                     }
                 }
-                // Actions secondaires dans un Menu explicite + bouton +
+                // Actions secondaires + bouton + groupés dans UNE pilule sur macOS.
+                // `ToolbarItemGroup` (et NON `ControlGroup`, qui rendait des boutons
+                // isolés) : c'est le groupement natif de la barre d'outils.
+                // Icônes seules + tooltip natif `.help`, cohérent avec le reste.
+                #if os(macOS)
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    Button { startAdd() } label: { Image(systemName: "plus") }
+                        .help("Ajouter")
+                        .opacity(isSelectingTiers ? 0 : 1)
+                        .disabled(isSelectingTiers)
+                    Button {
+                        sortOrder = sortOrder == .alphabetical ? .creation : .alphabetical
+                    } label: {
+                        Image(systemName: sortOrder == .alphabetical ? "clock" : "textformat.abc")
+                    }
+                    .help(sortOrder == .alphabetical ? "Trier par création" : "Trier par nom")
+                    .opacity(isSelectingTiers ? 0 : 1)
+                    .disabled(isSelectingTiers)
+                }
+                #else
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { startAdd() } label: { Image(systemName: "plus") }
                         .opacity(isSelectingTiers ? 0 : 1)
@@ -331,16 +411,47 @@ struct ReferenceDataView: View {
                     .opacity(isSelectingTiers ? 0 : 1)
                     .disabled(isSelectingTiers)
                 }
+                #endif
             }
-            .sheet(isPresented: $showEditSheet) {
+            .adaptivePane(isPresented: $showEditSheet) {
                 editSheet
             }
-            .sheet(item: $editingPayee) { payee in
+            .adaptiveEntityPane(
+                item: $editingPayee,
+                title: "Tiers",
+                refresh: { t in repository.fetchTiers().first { $0.id == t.id } },
+                onDelete: { t in
+                    pendingDelete = DeleteTarget(tab: .tiers, entityId: t.id, name: t.name,
+                                                 count: tierCounts[t.id] ?? 0, childIds: [], blocked: false)
+                }
+            ) { t in
+                PayeeDetailPane(
+                    tiers: t,
+                    allCategories: categories,
+                    payeeGroups: payeeGroups,
+                    accounts: accounts,
+                    transactionCount: tierCounts[t.id] ?? 0
+                )
+            } edit: { payee in
                 PayeeDetailView(
                     payee: payee,
                     allCategories: categories,
                     allAccounts: accounts,
                     onSave: { loadReferenceData(); appState.dataRefreshToken = UUID() }
+                )
+            }
+            .adaptivePane(item: $detailTarget) { target in
+                ReferenceDetailPane(
+                    target: target,
+                    categories: categories,
+                    counts: countsFor(target),
+                    onEdit: { startEditFor(target) },
+                    onDelete: { pendingDelete = deleteTargetFor(target) },
+                    onShowTransactions: { accountId, accountName in
+                        appState.selectedAccountId = accountId
+                        appState.selectedAccountName = accountName
+                        appState.selectedTab = MainTabItem.transactions.rawValue
+                    }
                 )
             }
             .confirmationDialog(
@@ -380,6 +491,21 @@ struct ReferenceDataView: View {
             .onChange(of: selectedTab) { _, _ in
                 isSelectingTiers = false
                 selectedTiersIds = []
+                tiersDisplayLimit = tiersPageSize
+            }
+            .onChange(of: sortOrder) { _, _ in
+                recomputeFiltered(resetPaging: true)
+            }
+            .task(id: searchText) {
+                // Debounce : sans ça, chaque caractère saisi refiltre et retrie
+                // les ~1000 tiers (comparaison localisée = la plus coûteuse).
+                if !(searchText.isEmpty && appliedSearch.isEmpty) {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    guard !Task.isCancelled else { return }
+                }
+                guard appliedSearch != searchText else { return }
+                appliedSearch = searchText
+                recomputeFiltered(resetPaging: true)
             }
             .task(id: appState.dataRefreshToken) {
                 // 1-frame guard pour afficher le skeleton avant la lecture SQLite.
@@ -394,7 +520,6 @@ struct ReferenceDataView: View {
 
     @ViewBuilder
     private var editSheet: some View {
-        NavigationStack {
             Form {
                 Section {
                     TextField("Nom", text: $editDraftName)
@@ -462,18 +587,8 @@ struct ReferenceDataView: View {
                         .pickerStyle(.menu)
                     }
                     Section {
-                        NavigationLink {
-                            ScrollView {
-                                CategoryIconPicker(
-                                    selectedIcon: $editDraftIcon,
-                                    categoryName: editDraftName,
-                                    isParent: editDraftParentCategoryId == nil
-                                )
-                                .padding()
-                            }
-                            .background(Color(.systemGroupedBackground))
-                            .navigationTitle("Choisir une icône")
-                            .navigationBarTitleDisplayMode(.inline)
+                        Button {
+                            showIconPicker = true
                         } label: {
                             HStack(spacing: 12) {
                                 ZStack {
@@ -495,8 +610,14 @@ struct ReferenceDataView: View {
                                         .font(.caption2)
                                         .foregroundStyle(AppTheme.Colors.textSecondary)
                                 }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                             }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     } header: { Text("Icône") }
                     footer: {
                         if editDraftIcon == nil {
@@ -505,18 +626,25 @@ struct ReferenceDataView: View {
                     }
                 }
             }
-            .navigationTitle(editItemId == nil ? "Ajouter" : "Modifier")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { showEditSheet = false }
+            .nemorisFormStyle()
+            .adaptivePane(isPresented: $showIconPicker) {
+                ScrollView {
+                    CategoryIconPicker(
+                        selectedIcon: $editDraftIcon,
+                        categoryName: editDraftName,
+                        isParent: editDraftParentCategoryId == nil
+                    )
+                    .padding()
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") { saveEdit() }
-                        .disabled(editDraftName.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
+                .background(Color(.systemGroupedBackground))
+                .paneChrome("Choisir une icône",
+                            cancelLabel: "Fermer", onCancel: { showIconPicker = false })
             }
-        }
+            .paneChrome(editItemId == nil ? "Ajouter" : "Modifier",
+                        cancelLabel: "Annuler", onCancel: { showEditSheet = false },
+                        confirmLabel: "Enregistrer",
+                        confirmDisabled: editDraftName.trimmingCharacters(in: .whitespaces).isEmpty,
+                        onConfirm: { saveEdit() })
     }
 
     // MARK: Helpers
@@ -531,9 +659,15 @@ struct ReferenceDataView: View {
     @ViewBuilder
     private func accountRow(_ a: Account) -> some View {
         Button {
+            #if os(macOS)
+            // macOS : clic = panneau détail (la navigation vers les transactions
+            // reste accessible via le bouton dédié du panneau).
+            detailTarget = .account(a)
+            #else
             appState.selectedAccountId = a.id
             appState.selectedAccountName = a.name
             appState.selectedTab = MainTabItem.transactions.rawValue
+            #endif
         } label: {
             HStack {
                 Text(a.name).foregroundStyle(AppTheme.Colors.textPrimary)
@@ -554,20 +688,19 @@ struct ReferenceDataView: View {
                     .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
             }
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            deleteSwipe(DeleteTarget(tab: .comptes, entityId: a.id, name: a.name,
-                                     count: accountCounts[a.id] ?? 0, childIds: [],
-                                     blocked: (accountCounts[a.id] ?? 0) > 0))
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            editButton { startEdit(id: a.id, name: a.name, regex: "", accountType: a.type) }
-        }
+        .rowActions(
+            leading: [editAction { startEdit(id: a.id, name: a.name, regex: "", accountType: a.type) }],
+            trailing: [deleteAction(DeleteTarget(tab: .comptes, entityId: a.id, name: a.name,
+                                                 count: accountCounts[a.id] ?? 0, childIds: [],
+                                                 blocked: (accountCounts[a.id] ?? 0) > 0))],
+            leadingFullSwipe: false,
+            trailingFullSwipe: false
+        )
     }
 
-    @ViewBuilder
-    private func editButton(action: @escaping () -> Void) -> some View {
-        Button(action: action) { Label("Modifier", systemImage: "pencil") }
-            .tint(AppTheme.Colors.accent)
+    /// Action "Modifier" adaptative (swipe iOS / clic droit macOS via RowActions).
+    private func editAction(_ action: @escaping () -> Void) -> RowAction {
+        RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent, action: action)
     }
 
     private func startEdit(id: Int, name: String, regex: String, categoryId: Int? = nil, parentCategoryId: Int? = nil, icon: String? = nil, accountType: String = "COURANT", linkedCompteId: Int? = nil) {
@@ -632,6 +765,8 @@ struct ReferenceDataView: View {
         paymentTypeCounts = repository.countTransactionsByPaymentType()
         accountCounts     = repository.countTransactionsByAccount()
         tagCounts         = repository.countTransactionsByTag()
+
+        recomputeFiltered(resetPaging: false)
     }
 
     // MARK: Suppression
@@ -676,12 +811,55 @@ struct ReferenceDataView: View {
     }
 
     /// Bouton de suppression (swipe leading = « glisser à droite »).
-    @ViewBuilder
-    private func deleteSwipe(_ target: DeleteTarget) -> some View {
-        Button(role: .destructive) { pendingDelete = target } label: {
-            Label("Supprimer", systemImage: "trash")
+    private func deleteAction(_ target: DeleteTarget) -> RowAction {
+        RowAction("Supprimer", systemImage: "trash", role: .destructive, tint: AppTheme.Colors.danger) {
+            pendingDelete = target
         }
-        .tint(AppTheme.Colors.danger)
+    }
+
+    // MARK: - Panneau détail macOS (helpers)
+
+    private func countsFor(_ target: ReferenceDetailTarget) -> Int {
+        switch target {
+        case .account(let a):     return accountCounts[a.id] ?? 0
+        case .category(let c):
+            let childIds = categories.filter { $0.parentId == c.id }.map(\.id)
+            return categoryTransactionCount([c.id] + childIds)
+        case .paymentType(let p): return paymentTypeCounts[p.id] ?? 0
+        case .tag(let t):         return tagCounts[t.id] ?? 0
+        }
+    }
+
+    /// « Modifier » du panneau détail : remplit les drafts et ouvre la fiche
+    /// d'édition partagée — qui REMPLACE le panneau détail (slot unique).
+    private func startEditFor(_ target: ReferenceDetailTarget) {
+        switch target {
+        case .account(let a):
+            startEdit(id: a.id, name: a.name, regex: "", accountType: a.type)
+        case .category(let c):
+            startEdit(id: c.id, name: c.name, regex: "", parentCategoryId: c.parentId, icon: c.icon)
+        case .paymentType(let p):
+            startEdit(id: p.id, name: p.name, regex: p.regex ?? "")
+        case .tag:
+            break   // Les tags n'ont pas d'édition (pas de rename en base).
+        }
+    }
+
+    private func deleteTargetFor(_ target: ReferenceDetailTarget) -> DeleteTarget {
+        switch target {
+        case .account(let a):
+            return DeleteTarget(tab: .comptes, entityId: a.id, name: a.name,
+                                count: accountCounts[a.id] ?? 0, childIds: [],
+                                blocked: (accountCounts[a.id] ?? 0) > 0)
+        case .category(let c):
+            return deleteTargetForCategory(c)
+        case .paymentType(let p):
+            return DeleteTarget(tab: .moyensPaiement, entityId: p.id, name: p.name,
+                                count: paymentTypeCounts[p.id] ?? 0, childIds: [], blocked: false)
+        case .tag(let t):
+            return DeleteTarget(tab: .tags, entityId: t.id, name: t.name,
+                                count: tagCounts[t.id] ?? 0, childIds: [], blocked: false)
+        }
     }
 
 
@@ -741,12 +919,14 @@ struct ReferenceDataView: View {
             Spacer()
             EntityIdCountBadge(id: c.id, count: categoryCounts[c.id] ?? 0)
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            deleteSwipe(deleteTargetForCategory(c))
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            editButton { startEdit(id: c.id, name: c.name, regex: "", parentCategoryId: c.parentId, icon: c.icon) }
-        }
+        .contentShape(Rectangle())
+        .macDetailTap { detailTarget = .category(c) }
+        .rowActions(
+            leading: [editAction { startEdit(id: c.id, name: c.name, regex: "", parentCategoryId: c.parentId, icon: c.icon) }],
+            trailing: [deleteAction(deleteTargetForCategory(c))],
+            leadingFullSwipe: false,
+            trailingFullSwipe: false
+        )
     }
 
     /// Construit la cible de suppression d'une catégorie, en emportant ses sous-catégories.
@@ -775,6 +955,8 @@ private struct CategoryTreeRow: View {
     let countFor: (Category) -> Int
     let onEdit: (Category) -> Void
     let onDelete: (CategoryNode) -> Void
+    /// Clic macOS sur une feuille → panneau détail (no-op iOS via macDetailTap).
+    let onSelect: (Category) -> Void
     @State private var isExpanded = true
 
     var body: some View {
@@ -783,18 +965,16 @@ private struct CategoryTreeRow: View {
         } else {
             DisclosureGroup(isExpanded: $isExpanded) {
                 ForEach(node.children) { child in
-                    CategoryTreeRow(node: child, countFor: countFor, onEdit: onEdit, onDelete: onDelete)
+                    CategoryTreeRow(node: child, countFor: countFor, onEdit: onEdit, onDelete: onDelete, onSelect: onSelect)
                 }
             } label: {
                 parentLabel(node)
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) { onDelete(node) } label: { Label("Supprimer", systemImage: "trash") }
-                            .tint(AppTheme.Colors.danger)
-                    }
-                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                        Button { onEdit(node.category) } label: { Label("Modifier", systemImage: "pencil") }
-                            .tint(AppTheme.Colors.accent)
-                    }
+                    .rowActions(
+                        leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { onEdit(node.category) }],
+                        trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive, tint: AppTheme.Colors.danger) { onDelete(node) }],
+                        leadingFullSwipe: false,
+                        trailingFullSwipe: false
+                    )
             }
         }
     }
@@ -854,13 +1034,57 @@ private struct CategoryTreeRow: View {
             Spacer()
             EntityIdCountBadge(id: category.id, count: countFor(category))
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) { onDelete(node) } label: { Label("Supprimer", systemImage: "trash") }
-                .tint(AppTheme.Colors.danger)
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            Button { onEdit(category) } label: { Label("Modifier", systemImage: "pencil") }
-                .tint(AppTheme.Colors.accent)
+        .contentShape(Rectangle())
+        .macDetailTap { onSelect(category) }
+        .rowActions(
+            leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { onEdit(category) }],
+            trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive, tint: AppTheme.Colors.danger) { onDelete(node) }],
+            leadingFullSwipe: false,
+            trailingFullSwipe: false
+        )
+    }
+}
+
+// MARK: - Tier row
+
+/// Ligne de l'onglet Tiers, extraite en vue à part entière.
+///
+/// Le corps vivait inline dans le `ForEach` du `body` de `ReferenceDataView` :
+/// toute modification d'un `@State` de l'écran (recherche, sélection, tri) le
+/// réévaluait pour chaque ligne montée. Isolé ici, SwiftUI ne recalcule la ligne
+/// que si l'un de ses paramètres change réellement — et le `.task` de
+/// `MerchantLogo` n'est plus relancé pour rien.
+private struct TierRow: View {
+    let tiers: Tiers
+    let allCategories: [Category]
+    let subtitle: String?
+    let count: Int
+    let isSelecting: Bool
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if isSelecting {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? AppTheme.Colors.danger : AppTheme.Colors.textSecondary)
+                    .imageScale(.large)
+            }
+            MerchantLogo(tiers: tiers, allCategories: allCategories, size: 36)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(tiers.name)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            if tiers.linkedCompteId != nil {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.caption2).foregroundStyle(AppTheme.Colors.warning)
+            }
+            EntityIdCountBadge(id: tiers.id, count: count)
         }
     }
 }
@@ -1166,5 +1390,237 @@ private struct CategoryIconPicker: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - ReferenceDetailPane (panneau détail macOS)
+
+/// Détail lecture seule d'une entité du référentiel (compte / catégorie /
+/// moyen de paiement / tag), affiché dans le panneau latéral macOS.
+/// « Modifier » ouvre la fiche d'édition partagée, qui remplace le panneau
+/// (slot unique). Jamais instancié sur iOS (`detailTarget` n'y est pas setté).
+private struct ReferenceDetailPane: View {
+    let target: ReferenceDataView.ReferenceDetailTarget
+    let categories: [Category]
+    let counts: Int
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    let onShowTransactions: (Int, String) -> Void
+
+    @Environment(\.paneDismiss) private var paneDismiss
+
+    private var canEdit: Bool {
+        if case .tag = target { return false }
+        return true
+    }
+
+    private var navTitle: String {
+        switch target {
+        case .account:     return "Compte"
+        case .category:    return "Catégorie"
+        case .paymentType: return "Moyen de paiement"
+        case .tag:         return "Tag"
+        }
+    }
+
+    var body: some View {
+            Form {
+                switch target {
+                case .account(let a):     accountSections(a)
+                case .category(let c):    categorySections(c)
+                case .paymentType(let p): paymentSections(p)
+                case .tag(let t):         tagSections(t)
+                }
+            }
+            .formStyle(.grouped)
+            .paneChrome(navTitle,
+                        cancelLabel: "Fermer", onCancel: { paneDismiss() },
+                        destructiveLabel: "Supprimer", onDestructive: { onDelete(); paneDismiss() },
+                        confirmLabel: canEdit ? "Modifier" : nil,
+                        onConfirm: canEdit ? { onEdit() } : nil)
+    }
+
+    // MARK: Sections par entité
+
+    @ViewBuilder
+    private func accountSections(_ a: Account) -> some View {
+        Section {
+            HStack(spacing: AppTheme.Spacing.md) {
+                Image(systemName: "building.columns.fill")
+                    .font(.title3)
+                    .foregroundStyle(AppTheme.Colors.accent)
+                    .frame(width: 36, height: 36)
+                    .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(a.name).font(AppTheme.Typography.bodyMedium)
+                    Text(a.accountType.label)
+                        .font(AppTheme.Typography.labelSmall)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                }
+            }
+        }
+        Section("Détails") {
+            LabeledContent("Type", value: a.accountType.label)
+            LabeledContent("Transactions", value: "\(counts)")
+            LabeledContent("Identifiant", value: "#\(a.id)")
+        }
+        Section {
+            Button {
+                onShowTransactions(a.id, a.name)
+                paneDismiss()
+            } label: {
+                Label("Voir les transactions", systemImage: "list.bullet.rectangle")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func categorySections(_ c: Category) -> some View {
+        Section {
+            HStack(spacing: AppTheme.Spacing.md) {
+                Image(systemName: c.displayIcon)
+                    .font(.title3)
+                    .foregroundStyle(AppTheme.Colors.accent)
+                    .frame(width: 36, height: 36)
+                    .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
+                Text(c.name).font(AppTheme.Typography.bodyMedium)
+            }
+        }
+        Section("Détails") {
+            if let parentId = c.parentId,
+               let parent = categories.first(where: { $0.id == parentId }) {
+                LabeledContent("Catégorie parente", value: parent.name)
+            } else {
+                let childCount = categories.filter { $0.parentId == c.id }.count
+                if childCount > 0 {
+                    LabeledContent("Sous-catégories", value: "\(childCount)")
+                }
+            }
+            LabeledContent("Transactions", value: "\(counts)")
+            LabeledContent("Identifiant", value: "#\(c.id)")
+        }
+    }
+
+    @ViewBuilder
+    private func paymentSections(_ p: PaymentType) -> some View {
+        Section {
+            HStack(spacing: AppTheme.Spacing.md) {
+                Image(systemName: "creditcard.fill")
+                    .font(.title3)
+                    .foregroundStyle(AppTheme.Colors.accent)
+                    .frame(width: 36, height: 36)
+                    .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
+                Text(p.name).font(AppTheme.Typography.bodyMedium)
+            }
+        }
+        Section("Détails") {
+            if let r = p.regex, !r.isEmpty {
+                LabeledContent("Regex") {
+                    Text(r).font(.system(.caption, design: .monospaced))
+                }
+            }
+            LabeledContent("Transactions", value: "\(counts)")
+            LabeledContent("Identifiant", value: "#\(p.id)")
+        }
+    }
+
+    @ViewBuilder
+    private func tagSections(_ t: Tag) -> some View {
+        Section {
+            HStack(spacing: AppTheme.Spacing.md) {
+                Circle()
+                    .fill(t.displayColor)
+                    .frame(width: 14, height: 14)
+                Text(t.name).font(AppTheme.Typography.bodyMedium)
+            }
+        }
+        Section {
+            LabeledContent("Transactions", value: "\(counts)")
+            LabeledContent("Identifiant", value: "#\(t.id)")
+        } header: {
+            Text("Détails")
+        } footer: {
+            Text("Le renommage des tags n'est pas encore disponible.")
+        }
+    }
+}
+
+// MARK: - PayeeDetailPane (panneau détail macOS)
+
+/// Détail lecture seule d'un tiers — mode « voir » du panneau macOS.
+/// « Modifier » bascule sur `PayeeDetailView` (l'éditeur complet existant).
+private struct PayeeDetailPane: View {
+    let tiers: Tiers
+    let allCategories: [Category]
+    let payeeGroups: [PayeeGroup]
+    let accounts: [Account]
+    let transactionCount: Int
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    MerchantLogo(tiers: tiers, allCategories: allCategories, size: 44)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(tiers.name)
+                            .font(AppTheme.Typography.bodyMedium)
+                            .lineLimit(2)
+                        Text(tiers.tierType.displayName)
+                            .font(AppTheme.Typography.labelSmall)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 2)
+            }
+
+            Section("Détails") {
+                if let cat = allCategories.first(where: { $0.id == tiers.categoryId }) {
+                    LabeledContent("Catégorie", value: cat.name)
+                }
+                if let gid = tiers.groupId,
+                   let group = payeeGroups.first(where: { $0.id == gid }) {
+                    LabeledContent("Groupe", value: group.displayName)
+                }
+                if let linkedId = tiers.linkedCompteId,
+                   let account = accounts.first(where: { $0.id == linkedId }) {
+                    LabeledContent("Virement interne", value: account.name)
+                }
+                LabeledContent("Transactions", value: "\(transactionCount)")
+                LabeledContent("Identifiant", value: "#\(tiers.id)")
+            }
+
+            if (tiers.address?.isEmpty == false) || (tiers.city?.isEmpty == false) || (tiers.country?.isEmpty == false) {
+                Section("Localisation") {
+                    if let address = tiers.address, !address.isEmpty {
+                        LabeledContent("Adresse", value: address)
+                    }
+                    if let city = tiers.city, !city.isEmpty {
+                        LabeledContent("Ville", value: city)
+                    }
+                    if let country = tiers.country, !country.isEmpty {
+                        LabeledContent("Pays", value: country.uppercased())
+                    }
+                }
+            }
+
+            if (tiers.domain?.isEmpty == false) || (tiers.engineMerchantId?.isEmpty == false) {
+                Section("Avancé") {
+                    if let domain = tiers.domain, !domain.isEmpty {
+                        LabeledContent("Domaine", value: domain)
+                    }
+                    if let engineId = tiers.engineMerchantId, !engineId.isEmpty {
+                        LabeledContent("ID moteur", value: engineId)
+                    }
+                }
+            }
+
+            if let note = tiers.note, !note.isEmpty {
+                Section("Note") {
+                    Text(note).font(AppTheme.Typography.bodySmall)
+                }
+            }
+        }
+        .formStyle(.grouped)
     }
 }

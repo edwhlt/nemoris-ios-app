@@ -40,6 +40,26 @@ final class DatabaseManager: @unchecked Sendable {
         fallbackURL()
     }
 
+    /// Nombre de transactions dans la base (0 si base absente, table manquante ou
+    /// erreur). Utilisé par le garde-fou d'auto-backup (`BackupService`) pour ne
+    /// PAS snapshoter une base vide — sinon un backup quasi-vide occuperait un slot
+    /// de la rotation des 30 et pousserait un vrai snapshot dehors.
+    func transactionCount() -> Int {
+        guard hasDatabase() else { return 0 }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(sqliteURL().path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            sqlite3_close(db)
+            return 0
+        }
+        defer { sqlite3_close(db) }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM transactions;", -1, &stmt, nil) == SQLITE_OK else {
+            return 0
+        }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int64(stmt, 0)) : 0
+    }
+
     /// Imports an external SQLite file by copying it into the app sandbox, then runs migrations.
     func linkExternalFile(from pickerURL: URL) throws {
         guard pickerURL.pathExtension.lowercased() == "sqlite" else {
@@ -1187,6 +1207,74 @@ final class DatabaseManager: @unchecked Sendable {
                 ]
             }
         ),
+
+        // v43 — AXE L : file des records distants différés (FK NOT NULL dont
+        // la cible n'est pas encore arrivée). Avant ce fix, l'INSERT violait
+        // la contrainte NOT NULL et le record était PERDU définitivement
+        // (CloudKit ne re-livre pas un record fetché non appliqué). Cas réel :
+        // à la descente initiale sur le Mac, les investment_orders arrivés
+        // avant leurs investment_positions (et des positions avant leur
+        // compte) ont tous été rejetés → module Investissements vide.
+        // Le payload complet est désormais stocké dans sync_deferred_rows et
+        // rejoué en fin de batch dès que les cibles existent (SyncPayloadStore).
+        Migration(version: 43, statements: SyncSchema.deferredRowsDDL),
+
+        // v44 — AXE R : remboursement unifié transaction simple + Tricount.
+        // Remplace `transactions.reimbursement_payee_id` (colonne posée sur la
+        // table cœur, présente NULL sur CHAQUE transaction) et généralise
+        // `tricount_reimbursements` en une seule table `reimbursements`,
+        // rattachée via transaction_id XOR tricount_entry_id.
+        //
+        // Le CHECK XOR n'est pas qu'une contrainte d'intégrité : c'est ce qui
+        // permet à sync_deferred_rows (v43) de rattraper le cas où un batch
+        // CloudKit livre une ligne reimbursements avant sa transaction/entrée
+        // cible — sans lui, l'INSERT réussirait avec les 2 FK à NULL (ligne
+        // fantôme jamais réparée) au lieu d'échouer et d'être différée.
+        //
+        // amount reste NULL côté transaction_id (montant = celui de la
+        // transaction entière, pas de notion de part) ; requis en pratique
+        // côté tricount_entry_id (part personnelle calculée depuis
+        // tricount_shares, indépendante du montant de l'entrée).
+        Migration(version: 44, statements: [
+            """
+            CREATE TABLE IF NOT EXISTS reimbursements (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                transaction_id    INTEGER REFERENCES transactions(id) ON DELETE CASCADE,
+                tricount_entry_id INTEGER REFERENCES tricount_entries(id) ON DELETE CASCADE,
+                payee_id          INTEGER NOT NULL REFERENCES payees(id),
+                amount            REAL,
+                currency          TEXT NOT NULL DEFAULT 'EUR',
+                status            TEXT NOT NULL DEFAULT 'PENDING',
+                uuid              TEXT,
+                updated_at        TEXT,
+                CHECK ((transaction_id IS NOT NULL) <> (tricount_entry_id IS NOT NULL))
+            );
+            """,
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_reimbursements_transaction ON reimbursements(transaction_id) WHERE transaction_id IS NOT NULL;",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_reimbursements_tricount ON reimbursements(tricount_entry_id, payee_id) WHERE tricount_entry_id IS NOT NULL;",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_reimbursements_uuid ON reimbursements(uuid);",
+            """
+            INSERT INTO reimbursements (transaction_id, payee_id, amount, currency, status, uuid, updated_at)
+            SELECT id, reimbursement_payee_id, NULL, 'EUR', 'PENDING',
+                   lower(hex(randomblob(16))), strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            FROM transactions WHERE reimbursement_payee_id IS NOT NULL;
+            """,
+            """
+            INSERT INTO reimbursements (tricount_entry_id, payee_id, amount, currency, status, uuid, updated_at)
+            SELECT entry_id, payee_id, amount, currency, 'PENDING',
+                   lower(hex(randomblob(16))), strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            FROM tricount_reimbursements;
+            """,
+            """
+            INSERT OR REPLACE INTO sync_pending (table_name, row_uuid, queued_at)
+            SELECT 'reimbursements', uuid, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            FROM reimbursements
+            WHERE uuid IS NOT NULL
+              AND COALESCE((SELECT value FROM sync_meta WHERE key = 'sync_enabled'), '0') = '1';
+            """,
+            "DROP TABLE tricount_reimbursements;",
+            "ALTER TABLE transactions DROP COLUMN reimbursement_payee_id;",
+        ]),
     ]
 
     // MARK: - Helpers privés

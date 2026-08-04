@@ -54,7 +54,7 @@ struct TaxReportView: View {
                     .padding(.bottom, AppTheme.Spacing.xxxl)
                 }
             }
-            .navigationTitle("Rapport fiscal \(selectedYear)")
+            .navigationTitle("Rapport fiscal \(selectedYear.yearLabel)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -109,7 +109,7 @@ struct TaxReportView: View {
             )
 
             if report.ctoGains.isEmpty {
-                Text("Aucune cession sur \(report.year). Rien à déclarer en case 3VG.")
+                Text("Aucune cession sur \(report.year.yearLabel). Rien à déclarer en case 3VG.")
                     .font(AppTheme.Typography.bodyMedium)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             } else {
@@ -296,7 +296,7 @@ struct TaxReportView: View {
             Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: 36, weight: .light))
                 .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.4))
-            Text("Aucune donnée fiscale pour \(selectedYear)")
+            Text("Aucune donnée fiscale pour \(selectedYear.yearLabel)")
                 .font(AppTheme.Typography.titleSmall)
             Text("Aucune vente CTO, aucun PEA, aucun loyer détecté sur cette année. Réessayez avec une autre année ou importez vos données.")
                 .font(AppTheme.Typography.bodySmall)

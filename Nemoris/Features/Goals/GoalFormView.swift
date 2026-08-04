@@ -16,7 +16,7 @@ import SwiftUI
 //   - tous les autres → targetAmount visible, current dérivé du snapshot patrimoine
 
 struct GoalFormView: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.paneDismiss) private var dismiss
     @Environment(AppState.self) private var appState
     let viewModel: PatrimoineViewModel
     let existingGoal: Goal?
@@ -65,7 +65,6 @@ struct GoalFormView: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 // ── Templates (création uniquement) ────────────────
                 if existingGoal == nil {
@@ -181,17 +180,7 @@ struct GoalFormView: View {
                     }
                 }
             }
-            .navigationTitle(existingGoal == nil ? "Nouvel objectif" : "Modifier")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") { save() }
-                        .disabled(!canSave)
-                }
-            }
+            .nemorisFormStyle()
             .confirmationDialog(
                 "Supprimer cet objectif ?",
                 isPresented: $showDeleteConfirm,
@@ -204,7 +193,10 @@ struct GoalFormView: View {
                     }
                 }
             }
-        }
+            .paneChrome(existingGoal == nil ? "Nouvel objectif" : "Modifier",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Enregistrer", confirmDisabled: !canSave,
+                        onConfirm: { save() })
     }
 
     // MARK: - Template row

@@ -13,7 +13,7 @@ import SwiftUI
 // (utile pour un bien en construction ou en sinistre avant indemnisation).
 
 struct RealEstateFormView: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.paneDismiss) private var dismiss
     @Environment(AppState.self) private var appState
     let viewModel: PatrimoineViewModel
     let existingItem: PatrimoineRealEstate?
@@ -79,7 +79,6 @@ struct RealEstateFormView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section("Identité") {
                     TextField("Nom (ex. Appart Paris 11e)", text: $name)
@@ -176,17 +175,7 @@ struct RealEstateFormView: View {
                     }
                 }
             }
-            .navigationTitle(existingItem == nil ? "Nouveau bien" : "Modifier")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") { save() }
-                        .disabled(!canSave)
-                }
-            }
+            .nemorisFormStyle()
             .confirmationDialog(
                 "Supprimer ce bien immobilier ?",
                 isPresented: $showDeleteConfirm,
@@ -201,7 +190,10 @@ struct RealEstateFormView: View {
             } message: {
                 Text("Les prêts liés à ce bien deviendront orphelins mais ne seront pas supprimés (vous pourrez les rattacher à un autre bien plus tard).")
             }
-        }
+            .paneChrome(existingItem == nil ? "Nouveau bien" : "Modifier",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Enregistrer", confirmDisabled: !canSave,
+                        onConfirm: { save() })
     }
 
     // MARK: - Save

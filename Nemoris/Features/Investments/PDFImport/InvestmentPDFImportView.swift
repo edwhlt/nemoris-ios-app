@@ -12,7 +12,8 @@ import PhotosUI
 /// 5. Commit en base : création positions + ordres (BUY synthétique en mode snapshot)
 struct InvestmentPDFImportView: View {
 
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
 
     // MARK: - State
 
@@ -35,13 +36,11 @@ struct InvestmentPDFImportView: View {
 
     // File picker
     @State private var showFilePicker = false
-    @State private var pdfURL: URL?
-    @State private var pdfFileName: String = ""
+    @State private var pdfURLs: [URL] = []
 
-    // Chantier C — capture depuis la photothèque (screenshots de PEA/CTO).
-    @State private var photoItem: PhotosPickerItem?
-    @State private var pickedImageData: Data?
-    @State private var pickedImageName: String?
+    // Chantier C — captures depuis la photothèque (screenshots de PEA/CTO).
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var pickedImages: [Data] = []
 
     private let repository = InvestmentRepository()
     private let parser = InvestmentPDFParser.shared
@@ -56,12 +55,11 @@ struct InvestmentPDFImportView: View {
         self.onFallbackToCSV = onFallbackToCSV
     }
 
-    /// Chantier D — init pré-rempli avec un fichier déposé par un raccourci Siri.
-    /// L'utilisateur choisit le compte cible puis lance l'analyse (aucun import
-    /// automatique).
-    init(preloadedFileURL url: URL, onFallbackToCSV: (() -> Void)? = nil) {
-        _pdfURL = State(initialValue: url)
-        _pdfFileName = State(initialValue: url.lastPathComponent)
+    /// Chantier D — init pré-rempli avec les fichiers déposés par un raccourci
+    /// Siri ou la share extension. L'utilisateur choisit le compte cible puis
+    /// lance l'analyse (aucun import automatique).
+    init(preloadedFileURLs urls: [URL], onFallbackToCSV: (() -> Void)? = nil) {
+        _pdfURLs = State(initialValue: urls)
         self.onFallbackToCSV = onFallbackToCSV
     }
 
@@ -76,7 +74,6 @@ struct InvestmentPDFImportView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
             Group {
                 switch step {
                 case .selectFile:
@@ -91,15 +88,7 @@ struct InvestmentPDFImportView: View {
                     doneView
                 }
             }
-            .navigationTitle("Import intelligent")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
-                        .tint(AppTheme.Colors.accent)
-                }
-            }
-        }
+            .paneChrome("Import intelligent", cancelLabel: "Fermer", onCancel: { dismiss() })
         .onAppear { loadAccounts() }
         .fileImporter(
             isPresented: $showFilePicker,
@@ -109,28 +98,26 @@ struct InvestmentPDFImportView: View {
                 UTType.commaSeparatedText, UTType.tabSeparatedText, UTType.plainText,
                 UTType.data  // fallback pour tout format
             ],
-            allowsMultipleSelection: false
+            allowsMultipleSelection: true
         ) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
-            pdfURL = url
-            pdfFileName = url.lastPathComponent
-            // Choisir un fichier annule une éventuelle capture photo (source unique).
-            pickedImageData = nil
-            pickedImageName = nil
+            guard case .success(let urls) = result, !urls.isEmpty else { return }
+            pdfURLs = urls
         }
-        // Chantier C — chargement de la capture choisie dans la photothèque.
-        .onChange(of: photoItem) { _, newItem in
-            guard let newItem else { return }
+        // Chantier C — chargement des captures choisies dans la photothèque.
+        // Fichiers et captures se CUMULENT désormais (un relevé PDF plus une
+        // capture de la même appli sont deux vues complémentaires du même
+        // portefeuille) : la déduplication par ISIN/ticker de `aggregatePositions`
+        // absorbe les recouvrements.
+        .onChange(of: photoItems) { _, items in
+            guard !items.isEmpty else { return }
             Task {
-                if let data = try? await newItem.loadTransferable(type: Data.self) {
-                    await MainActor.run {
-                        pickedImageData = data
-                        pickedImageName = "Capture d'écran"
-                        // Une capture annule un fichier précédemment choisi.
-                        pdfURL = nil
-                        pdfFileName = ""
+                var loaded: [Data] = []
+                for item in items {
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        loaded.append(data)
                     }
                 }
+                await MainActor.run { pickedImages = loaded }
             }
         }
     }
@@ -184,10 +171,10 @@ struct InvestmentPDFImportView: View {
                             .font(.title2)
                             .foregroundStyle(AppTheme.Colors.accent)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(pdfURL != nil ? pdfFileName : "Choisir un fichier")
+                            Text(fileSelectionLabel)
                                 .font(.subheadline)
                                 .foregroundStyle(AppTheme.Colors.textPrimary)
-                            if pdfURL != nil {
+                            if !pdfURLs.isEmpty {
                                 Text("Toucher pour changer")
                                     .font(.caption)
                                     .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -202,16 +189,16 @@ struct InvestmentPDFImportView: View {
                 .buttonStyle(.plain)
 
                 // Chantier C — capture depuis la photothèque (screenshot d'app PEA/CTO).
-                PhotosPicker(selection: $photoItem, matching: .images) {
+                PhotosPicker(selection: $photoItems, maxSelectionCount: 10, matching: .images) {
                     HStack {
                         Image(systemName: "photo.on.rectangle.angled")
                             .font(.title2)
                             .foregroundStyle(AppTheme.Colors.accent)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(pickedImageData != nil ? (pickedImageName ?? "Capture sélectionnée") : "Choisir une capture d'écran")
+                            Text(imageSelectionLabel)
                                 .font(.subheadline)
                                 .foregroundStyle(AppTheme.Colors.textPrimary)
-                            Text(pickedImageData != nil ? "Toucher pour changer" : "Depuis la photothèque")
+                            Text(pickedImages.isEmpty ? "Depuis la photothèque" : "Toucher pour changer")
                                 .font(.caption)
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
                         }
@@ -256,7 +243,7 @@ struct InvestmentPDFImportView: View {
                 } label: {
                     HStack {
                         Spacer()
-                        Label("Analyser le PDF", systemImage: "sparkles")
+                        Label("Analyser", systemImage: "sparkles")
                             .fontWeight(.semibold)
                         Spacer()
                     }
@@ -265,10 +252,27 @@ struct InvestmentPDFImportView: View {
                 .tint(AppTheme.Colors.accent)
             }
         }
+        .nemorisFormStyle()
+    }
+
+    private var fileSelectionLabel: String {
+        switch pdfURLs.count {
+        case 0:  return "Choisir un ou plusieurs fichiers"
+        case 1:  return pdfURLs[0].lastPathComponent
+        default: return "\(pdfURLs.count) fichiers sélectionnés"
+        }
+    }
+
+    private var imageSelectionLabel: String {
+        switch pickedImages.count {
+        case 0:  return "Choisir une ou plusieurs captures"
+        case 1:  return "1 capture sélectionnée"
+        default: return "\(pickedImages.count) captures sélectionnées"
+        }
     }
 
     private var canStartParsing: Bool {
-        (pdfURL != nil || pickedImageData != nil) && selectedAccountId != nil && parser.isAIAvailable
+        (!pdfURLs.isEmpty || !pickedImages.isEmpty) && selectedAccountId != nil && parser.isAIAvailable
     }
 
     // MARK: - Step 2 : Parsing en cours
@@ -315,7 +319,9 @@ struct InvestmentPDFImportView: View {
     // MARK: - Step 3 : Preview des ordres
 
     private var previewView: some View {
-        List {
+        // Form (pas List) : review type formulaire → boxes arrondies natives
+        // macOS via nemorisFormStyle(), insetGrouped natif sur iOS.
+        Form {
             // Résumé
             Section {
                 if !allOrders.isEmpty {
@@ -337,8 +343,16 @@ struct InvestmentPDFImportView: View {
                     }
                 }
                 HStack {
-                    Label("\(pageResults.count) page(s) analysée(s)", systemImage: "doc.text")
+                    // Vocabulaire adapté au format réel : « page » n'a de sens
+                    // que pour un PDF depuis que l'import accepte captures,
+                    // images et CSV.
+                    Label("\(pageResults.count) \(analyzedUnitLabel)", systemImage: analyzedUnitIcon)
                     Spacer()
+                }
+                if usedDeterministicFallback {
+                    Label("Extraction automatique utilisée (sans IA)", systemImage: "gearshape.2")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
             } header: {
                 Text("Résumé")
@@ -352,13 +366,34 @@ struct InvestmentPDFImportView: View {
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                         Text("Rien à importer")
                             .font(.headline)
-                        Text("Le document ne semble pas contenir d'ordres ni de positions reconnaissables, ou le format n'a pas pu être interprété.")
+                        // Raison PRÉCISE plutôt qu'un message unique : sans
+                        // elle, impossible de distinguer un OCR muet, une IA
+                        // indisponible, une IA en échec et un document
+                        // réellement sans opération.
+                        Text(emptyStateReason)
                             .font(.subheadline)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
+                }
+
+                // Ce que l'app a réellement lu : permet à l'utilisateur de voir
+                // si le problème vient de la lecture (OCR illisible) ou de
+                // l'interprétation (texte correct mais non reconnu).
+                if let sample = extractedTextSample {
+                    Section {
+                        DisclosureGroup("Voir le texte lu (\(extractedTextLength) caractères)") {
+                            Text(sample)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(AppTheme.Colors.textSecondary)
+                                .textSelection(.enabled)
+                                .padding(.vertical, 4)
+                        }
+                    } header: {
+                        Text("Diagnostic")
+                    }
                 }
             } else {
                 // Mode capture de portefeuille — positions détectées
@@ -436,7 +471,7 @@ struct InvestmentPDFImportView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        .nemorisFormStyle()
     }
 
     private var selectedImportCount: Int {
@@ -690,6 +725,56 @@ struct InvestmentPDFImportView: View {
         }
     }
 
+    // MARK: - Résumé & diagnostic
+
+    /// Nature du document analysé (toutes les unités viennent du même fichier).
+    private var analyzedKind: InvestmentDocumentKind {
+        pageResults.first?.kind ?? .unknown
+    }
+
+    private var analyzedUnitLabel: String {
+        analyzedKind.unitLabel(count: pageResults.count)
+    }
+
+    private var analyzedUnitIcon: String {
+        switch analyzedKind {
+        case .pdf:     return "doc.text"
+        case .image:   return "photo"
+        case .text:    return "tablecells"
+        case .unknown: return "questionmark.square.dashed"
+        }
+    }
+
+    private var usedDeterministicFallback: Bool {
+        pageResults.contains { $0.usedDeterministicFallback }
+    }
+
+    /// Raison la plus informative parmi les unités analysées : un vrai échec
+    /// (OCR muet, IA en erreur) prime sur un simple « rien de reconnu ».
+    private var emptyStateReason: String {
+        let diagnostics = pageResults.map(\.diagnostic)
+        if let hard = diagnostics.first(where: {
+            if case .nothingRecognized = $0 { return false }
+            if case .extracted = $0 { return false }
+            return true
+        }) {
+            return hard.userMessage
+        }
+        return PDFPageDiagnostic.nothingRecognized.userMessage
+    }
+
+    private var extractedTextLength: Int {
+        pageResults.reduce(0) { $0 + $1.rawText.count }
+    }
+
+    /// Extrait du texte lu, borné pour ne pas noyer l'écran.
+    private var extractedTextSample: String? {
+        let joined = pageResults.map(\.rawText).joined(separator: "\n---\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !joined.isEmpty else { return nil }
+        return joined.count > 1500 ? String(joined.prefix(1500)) + "\n…" : joined
+    }
+
     // MARK: - Actions
 
     private func loadAccounts() {
@@ -700,34 +785,59 @@ struct InvestmentPDFImportView: View {
     private func startParsing() {
         step = .parsing
         parsingError = nil
+        parsingCurrent = 0
+        parsingTotal = 0
+        parsingProgress = 0
 
-        // Chantier C — chemin capture (photothèque) : données en mémoire, OCR direct.
-        if let data = pickedImageData {
-            parsingTotal = 1
-            parsingCurrent = 0
-            parsingProgress = 0
-            Task {
-                let results = await parser.parseImageData(data)
-                await MainActor.run { finishParsing(results) }
-            }
-            return
-        }
-
-        // Chemin fichier (PDF, image, CSV, texte)
-        guard let url = pdfURL else { return }
-        let hasAccess = url.startAccessingSecurityScopedResource()
+        let urls = pdfURLs
+        let images = pickedImages
         Task {
-            defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+            var results: [PDFPageResult] = []
 
-            // Point d'entrée universel — détecte PDF, image, CSV, texte automatiquement
-            let results = await parser.parseFile(from: url) { current, total in
-                Task { @MainActor in
-                    parsingCurrent = current
-                    parsingTotal = total
-                    parsingProgress = total > 0 ? Double(current) / Double(total) : 0
+            // Fichiers (PDF, image, CSV, texte) — le type réel est sniffé par
+            // `parseFile`, l'extension n'est qu'un dernier recours.
+            for url in urls {
+                let hasAccess = url.startAccessingSecurityScopedResource()
+                defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+                let fileResults = await parser.parseFile(from: url) { current, total in
+                    Task { @MainActor in
+                        // Progression cumulée : le total d'un fichier n'est connu
+                        // qu'une fois ouvert (nombre de pages d'un PDF), on
+                        // l'agrège donc au fil de l'eau plutôt que de l'annoncer.
+                        parsingCurrent = results.count + current
+                        parsingTotal = max(parsingCurrent, results.count + total)
+                        parsingProgress = parsingTotal > 0
+                            ? Double(parsingCurrent) / Double(parsingTotal) : 0
+                    }
+                }
+                results.append(contentsOf: fileResults)
+            }
+
+            // Captures de la photothèque (données en mémoire, OCR direct).
+            for data in images {
+                let imageResults = await parser.parseImageData(data)
+                results.append(contentsOf: imageResults)
+                await MainActor.run {
+                    parsingCurrent = results.count
+                    parsingTotal = max(parsingTotal, results.count)
+                    parsingProgress = parsingTotal > 0
+                        ? Double(parsingCurrent) / Double(parsingTotal) : 0
                 }
             }
-            await MainActor.run { finishParsing(results) }
+
+            // Renumérotation globale : chaque fichier repart à 1 côté parseur,
+            // deux unités porteraient sinon le même numéro dans la revue (et
+            // dans les notes « Import PDF — p.N » des ordres créés).
+            let renumbered = results.enumerated().map { index, unit -> PDFPageResult in
+                var copy = unit
+                copy.orders = unit.orders.map { order in
+                    var o = order
+                    o.pageNumber = index + 1
+                    return o
+                }
+                return copy
+            }
+            await MainActor.run { finishParsing(renumbered) }
         }
     }
 

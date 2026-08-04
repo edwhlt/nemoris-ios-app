@@ -341,6 +341,7 @@ struct InvestmentMarketDataService {
               let quotes = result.indicators.quote.first?.close,
               !timestamps.isEmpty else { return [] }
 
+        let opens = result.indicators.quote.first?.open
         var points: [InvestmentPricePoint] = []
         for (idx, ts) in timestamps.enumerated() {
             guard idx < quotes.count, let close = quotes[idx], close > 0 else { continue }
@@ -349,10 +350,18 @@ struct InvestmentMarketDataService {
                 id: "\(symbol)-\(Int(ts))",
                 identifier: symbol,
                 date: date,
-                close: close
+                close: close,
+                open: openValue(opens, at: idx)
             ))
         }
         return points.sorted { $0.date < $1.date }
+    }
+
+    /// Ouverture de la bougie `idx`, ou nil si la source ne l'a pas fournie
+    /// (tableau absent, plus court que les timestamps, ou valeur nulle/négative).
+    private func openValue(_ opens: [Double?]?, at idx: Int) -> Double? {
+        guard let opens, idx < opens.count, let value = opens[idx], value > 0 else { return nil }
+        return value
     }
 
     /// Cours INTRADAY ~30 min sur les dernières 48 h (Yahoo `range=2d&interval=30m`).
@@ -372,6 +381,7 @@ struct InvestmentMarketDataService {
               let quotes = result.indicators.quote.first?.close,
               !timestamps.isEmpty else { return [] }
 
+        let opens = result.indicators.quote.first?.open
         var points: [InvestmentPricePoint] = []
         for (idx, ts) in timestamps.enumerated() {
             guard idx < quotes.count, let close = quotes[idx], close > 0 else { continue }
@@ -379,7 +389,8 @@ struct InvestmentMarketDataService {
                 id: "\(symbol)-i30-\(Int(ts))",
                 identifier: symbol,
                 date: Date(timeIntervalSince1970: TimeInterval(ts)),
-                close: close
+                close: close,
+                open: openValue(opens, at: idx)
             ))
         }
         return points.sorted { $0.date < $1.date }
@@ -400,14 +411,17 @@ struct InvestmentMarketDataService {
         var points: [InvestmentPricePoint] = []
         for line in lines {
             let cols = line.components(separatedBy: ",")
+            // Colonnes Stooq : Date,Open,High,Low,Close,Volume
             guard cols.count >= 5,
                   let date = isoDateFormatter.date(from: cols[0]),
                   let close = Double(cols[4]), close > 0 else { continue }
+            let open = Double(cols[1]).flatMap { $0 > 0 ? $0 : nil }
             points.append(InvestmentPricePoint(
                 id: "\(symbol)-\(cols[0])",
                 identifier: symbol,
                 date: date,
-                close: close
+                close: close,
+                open: open
             ))
         }
         return points.sorted { $0.date < $1.date }
@@ -433,6 +447,10 @@ private struct YahooIndicators: Decodable {
 
 private struct YahooQuote: Decodable {
     let close: [Double?]
+    /// Yahoo renvoie toujours l'OHLC complet ; on ne garde que l'ouverture
+    /// (le « prix d'entrée » du pas de temps, affiché au scrub du chart).
+    /// Optionnel par prudence : certains instruments exotiques n'ont que `close`.
+    let open: [Double?]?
 }
 
 private struct YahooSearchResponse: Decodable {

@@ -24,9 +24,16 @@ struct EnrichmentSheetView: View {
     @State private var useLLM: Bool = false   // off par défaut : génère parfois du bruit
     @State private var isSearching: Bool = false
     @State private var hasSearched: Bool = false
-    @State private var candidates: [Candidate] = []
+    @State private var candidates: [SearchCandidate] = []
     @State private var selectedCandidateId: UUID? = nil
     @State private var cameraPosition: MapCameraPosition = .automatic
+    /// AXE S — résultat structuré du registre : plan, tentatives réellement exécutées,
+    /// entreprises classées avec leurs établissements. Séparé de `candidates`, qui reste
+    /// la liste plate des sources cartographiques et IA.
+    @State private var searchResult: MerchantSearchResult? = nil
+    /// Pins de carte dérivés des établissements géolocalisés du registre
+    /// (cf. `MerchantSearchResult.establishmentPins`, chemin partagé des 3 écrans).
+    @State private var sireneGeoCandidates: [SearchCandidate] = []
 
     init(row: ImportSessionRow, onApply: @escaping (MerchantEnrichment) -> Void) {
         self.row = row
@@ -34,7 +41,7 @@ struct EnrichmentSheetView: View {
         // Priorité au RAW LABEL — le canonical du moteur perd souvent les indices
         // géographiques (ex. "VNPAY HUNG RES PSC VN P HA GIANG" → "vnpay" sans VN ni HA GIANG).
         _query = State(initialValue: row.rawLabel)
-        _useLLM = State(initialValue: Self.isFoundationModelsAvailable)
+        _useLLM = State(initialValue: AIEnrichmentBackend.isAvailable)
     }
 
     var body: some View {
@@ -44,12 +51,15 @@ struct EnrichmentSheetView: View {
                 querySection
                 sourcesSection
                 if hasSearched {
+                    planSection
+                    companiesSection
                     if !geoCandidates.isEmpty {
                         mapSection
                     }
                     resultsSection
                 }
             }
+            .nemorisFormStyle()
             .navigationTitle("Enrichir cette ligne")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -61,8 +71,16 @@ struct EnrichmentSheetView: View {
     }
 
     /// Candidats ayant des coordonnées GPS (utilisable sur la map).
-    private var geoCandidates: [Candidate] {
+    private var geoCandidates: [SearchCandidate] {
         candidates.filter { $0.result.latitude != nil && $0.result.longitude != nil }
+            + sireneGeoCandidates
+    }
+
+    /// Pin établissement actuellement sélectionné sur la carte (nil si la
+    /// sélection est un candidat MapKit/IA, déjà couvert par la liste).
+    private var selectedEstablishmentPin: SearchCandidate? {
+        guard let selectedCandidateId else { return nil }
+        return sireneGeoCandidates.first { $0.id == selectedCandidateId }
     }
 
     // MARK: Sections
@@ -112,8 +130,8 @@ struct EnrichmentSheetView: View {
         Section {
             Toggle("Sources entreprises (registres)", isOn: $useSirene)
             Toggle("Apple Maps (POI)", isOn: $useMapKit)
-            Toggle("Foundation Models (IA on-device)", isOn: $useLLM)
-                .disabled(!Self.isFoundationModelsAvailable)
+            Toggle("Intelligence artificielle", isOn: $useLLM)
+                .disabled(!AIEnrichmentBackend.isAvailable)
             Button {
                 Task { await runSearch() }
             } label: {
@@ -127,10 +145,86 @@ struct EnrichmentSheetView: View {
                       || (!useSirene && !useMapKit && !useLLM))
         } header: { Text("Sources") }
         footer: {
-            if !Self.isFoundationModelsAvailable {
-                Text("Foundation Models requiert iOS 26+. Sur cet appareil, IA on-device indisponible.")
+            if let message = Self.aiUnavailableFooter {
+                Text(message)
             }
         }
+    }
+
+    /// Explique pourquoi le toggle IA est grisé, selon le backend actuellement
+    /// sélectionné dans Réglages → Intelligence artificielle. `nil` quand l'IA est
+    /// disponible (rien à expliquer).
+    private static var aiUnavailableFooter: String? {
+        guard !AIEnrichmentBackend.isAvailable else { return nil }
+        switch AIBackendPreference.current {
+        case .automatic:
+            return "Foundation Models requiert iOS 26+. Sur cet appareil, IA on-device indisponible."
+        case .localServer:
+            return "Aucun serveur local configuré — Réglages → Intelligence artificielle."
+        case .off:
+            return "IA désactivée — Réglages → Intelligence artificielle."
+        }
+    }
+
+    // MARK: AXE S — plan de recherche et résultats du registre
+
+    /// Ce que le planificateur a retiré du nom, et ce qu'il a réellement tenté.
+    @ViewBuilder
+    private var planSection: some View {
+        if let searchResult, !isSearching {
+            Section {
+                DroppedTokenChips(extraction: searchResult.plan.extraction) { token in
+                    // Réinjecte le jeton dans la requête et relance : c'est la boucle de
+                    // correction visible, préférable à une étape IA opaque.
+                    let base = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                    query = base.isEmpty ? token : "\(base) \(token)"
+                    Task { await runSearch() }
+                }
+                SearchDetailsDisclosure(result: searchResult)
+            } header: {
+                Text("Plan de recherche")
+            }
+        }
+    }
+
+    /// Entreprises trouvées, dépliables vers leurs établissements.
+    @ViewBuilder
+    private var companiesSection: some View {
+        if let searchResult, !searchResult.companies.isEmpty, !isSearching {
+            Section {
+                ForEach(searchResult.companies) { ranked in
+                    CompanyMatchRow(
+                        ranked: ranked,
+                        initiallyExpanded: ranked.id == searchResult.companies.first?.id,
+                        onPickCompany: { match in
+                            apply(match.enrichment(for: nil, confidence: ranked.score))
+                        },
+                        onPickEstablishment: { match, establishment in
+                            apply(match.enrichment(for: establishment, confidence: ranked.score))
+                        }
+                    )
+                }
+            } header: {
+                Text("Entreprises (\(searchResult.companies.count))")
+            } footer: {
+                // `matching_etablissements` ne renvoie que les branches dont le nom matche
+                // la requête. Le dire évite de laisser croire à une liste exhaustive.
+                Text("Déplie une entreprise pour voir les établissements correspondant au nom recherché. C'est l'adresse qui distingue la bonne boutique.")
+            }
+        }
+    }
+
+    private func apply(_ enrichment: MerchantEnrichment) {
+        var result = enrichment
+        // Cette vue n'a pas le référentiel de catégories sous la main : on transmet le NOM
+        // de catégorie déduit du code NAF, et l'orchestrateur le résout en `category_id`
+        // (même mécanisme `categoryHint` que pour la catégorie proposée par l'IA).
+        if result.categoryId == nil, let naf = result.nafCode,
+           let category = NAFCategoryMapper.shared.lookup(naf) {
+            result.categoryHint = category.category
+        }
+        onApply(result)
+        dismiss()
     }
 
     /// Map interactive : pins pour chaque candidat geo-localisable, tap = sélection.
@@ -153,11 +247,61 @@ struct EnrichmentSheetView: View {
             }
             .frame(height: 220)
             .cornerRadius(8)
+
+            // Un pin ÉTABLISSEMENT n'a pas de row dans la liste (les entreprises
+            // vivent dans companiesSection) — et `apply` ferme la sheet, donc pas
+            // d'auto-apply au tap : le choix passe par ce bouton explicite.
+            if let pin = selectedEstablishmentPin {
+                Button {
+                    apply(pin.result)
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "storefront.fill")
+                            .foregroundStyle(AppTheme.Colors.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text("Utiliser cet établissement")
+                                    .font(.subheadline.weight(.semibold))
+                                if pin.establishment?.isHeadquarters == true {
+                                    establishmentBadge("Siège", color: AppTheme.Colors.accent)
+                                }
+                                if pin.establishment?.isActive == false {
+                                    establishmentBadge("Fermé", color: AppTheme.Colors.danger)
+                                }
+                            }
+                            if let addr = pin.result.address, !addr.isEmpty {
+                                Text(addr)
+                                    .font(.caption)
+                                    .foregroundStyle(AppTheme.Colors.textSecondary)
+                                    .lineLimit(2)
+                            }
+                            if let siret = pin.result.siret {
+                                Text("SIRET \(siret)")
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
+                            }
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.up.right")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
         } header: {
             Text("Carte (\(geoCandidates.count) lieux)")
         } footer: {
-            Text("Tape un pin pour mettre en surbrillance le candidat dans la liste ci-dessous.")
+            Text("Tape un pin pour le sélectionner — un établissement propose un bouton d'application, un candidat Maps/IA est mis en surbrillance dans la liste.")
         }
+    }
+
+    private func establishmentBadge(_ label: String, color: Color) -> some View {
+        Text(label)
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(color.opacity(0.15), in: Capsule())
+            .foregroundStyle(color)
     }
 
     @ViewBuilder
@@ -168,16 +312,18 @@ struct EnrichmentSheetView: View {
                     SkeletonCandidateRow()
                 }
             }
-        } else if candidates.isEmpty {
+        } else if candidates.isEmpty && (searchResult?.companies.isEmpty ?? true) {
             Section {
                 ContentUnavailableView(
                     "Aucun résultat",
                     systemImage: "magnifyingglass",
-                    description: Text("Aucune source n'a trouvé de correspondance. Essaie de simplifier la recherche.")
+                    description: Text("Aucune source n'a trouvé de correspondance. Déplie « Détails de la recherche » pour voir ce qui a été tenté, ou réintègre un élément retiré du nom.")
                 )
             }
+        } else if candidates.isEmpty {
+            EmptyView()
         } else {
-            Section("Résultats (\(candidates.count))") {
+            Section("Autres sources (\(candidates.count))") {
                 ForEach(candidates) { candidate in
                     Button {
                         onApply(candidate.result)
@@ -197,7 +343,7 @@ struct EnrichmentSheetView: View {
     }
 
     @ViewBuilder
-    private func candidateRow(_ c: Candidate) -> some View {
+    private func candidateRow(_ c: SearchCandidate) -> some View {
         HStack(alignment: .top, spacing: 12) {
             sourceBadge(c.source)
             VStack(alignment: .leading, spacing: 3) {
@@ -260,35 +406,34 @@ struct EnrichmentSheetView: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    private static var isFoundationModelsAvailable: Bool {
-        EnrichmentLLMService.shared.isAvailable
-    }
-
     private static func style(for s: MerchantEnrichmentSource) -> (String, String, Color) {
         switch s {
-        case .sirene:  return ("SIRENE", "building.2.fill", .blue)
-        case .mapkit:  return ("MAPS",   "map.fill",        .green)
-        case .llm:     return ("IA",     "sparkles",        .purple)
-        case .merged:  return ("FUSION", "circle.grid.cross.fill", AppTheme.Colors.accent)
-        case .manual:  return ("MANUEL", "hand.point.up.fill", .orange)
+        case .sirene:   return ("SIRENE", "building.2.fill", .blue)
+        case .mapkit:   return ("MAPS",   "map.fill",        .green)
+        case .llm:      return ("IA",     "sparkles",        .purple)
+        case .localLLM: return ("LOCAL",  "server.rack",     .teal)
+        case .merged:   return ("FUSION", "circle.grid.cross.fill", AppTheme.Colors.accent)
+        case .manual:   return ("MANUEL", "hand.point.up.fill", .orange)
         }
     }
 
     private static func markerIcon(for s: MerchantEnrichmentSource) -> String {
         switch s {
-        case .sirene:  return "building.2.fill"
-        case .mapkit:  return "mappin.circle.fill"
-        case .llm:     return "sparkles"
-        default:       return "mappin"
+        case .sirene:   return "building.2.fill"
+        case .mapkit:   return "mappin.circle.fill"
+        case .llm:      return "sparkles"
+        case .localLLM: return "server.rack"
+        default:        return "mappin"
         }
     }
 
     private static func markerColor(for s: MerchantEnrichmentSource) -> Color {
         switch s {
-        case .sirene:  return .blue
-        case .mapkit:  return .green
-        case .llm:     return .purple
-        default:       return .red
+        case .sirene:   return .blue
+        case .mapkit:   return .green
+        case .llm:      return .purple
+        case .localLLM: return .teal
+        default:        return .red
         }
     }
 
@@ -301,26 +446,41 @@ struct EnrichmentSheetView: View {
             hasSearched = true
         }
         candidates.removeAll()
+        searchResult = nil
+        sireneGeoCandidates = []
         selectedCandidateId = nil
 
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let pc = postalCode.trimmingCharacters(in: .whitespaces)
 
-        var collected: [Candidate] = []
+        var collected: [SearchCandidate] = []
 
         if useSirene {
-            // Dispatch sur toutes les sources d'entreprises actives.
-            // Le registry filtre par pays automatiquement ; ici on passe nil (l'enrichment
-            // sheet est utilisée hors contexte form, donc on essaie toutes les sources
-            // globales — Sirene apparaitra si pays FR détecté ou non filtré).
-            let results = await CompanyDataSourcesRegistry.shared.search(
-                query: trimmedQuery,
-                country: nil,
-                postalCode: pc.count == 5 ? pc : nil
+            // AXE S — passe par le planificateur + l'exécuteur de cascade.
+            //
+            // Avant, la requête entière (donc le libellé brut avec sa ville et ses codes)
+            // partait dans le `q=` du registre. Or l'API matche `q` contre la raison
+            // sociale et les enseignes, JAMAIS contre l'adresse : y mettre la ville ne
+            // restreint pas la recherche, elle la fait échouer.
+            //
+            // `userQueryOverride` n'est renseigné que si l'utilisateur a RÉELLEMENT édité
+            // le champ. Sinon on laisse le planificateur découper le libellé brut, ce
+            // qu'il fait bien mieux qu'une chaîne recopiée telle quelle.
+            let userEdited = trimmedQuery != row.rawLabel
+            let input = MerchantQueryPlanner.Input(
+                rawLabel: row.rawLabel,
+                userPostalCode: pc.count == 5 ? pc : nil,
+                userQueryOverride: userEdited ? trimmedQuery : nil
             )
-            for enrichment in results {
-                collected.append(Candidate(source: enrichment.source, result: enrichment))
-            }
+            let result = await MerchantQueryExecutor.shared.search(
+                input: input,
+                budget: .interactive,
+                knownNafPrefixes: NAFCategoryMapper.shared.knownPrefixes
+            )
+            searchResult = result
+            // Pas de resolveCategory ici : cette vue n'a pas le référentiel de
+            // catégories — `apply()` transmet le NAF en `categoryHint`.
+            sireneGeoCandidates = result.establishmentPins()
         }
 
         if useMapKit {
@@ -332,7 +492,7 @@ struct EnrichmentSheetView: View {
             for map in mapResults {
                 var fixed = map
                 fixed.displayName = (fixed.displayName ?? trimmedQuery).titleCased
-                collected.append(Candidate(source: .mapkit, result: fixed))
+                collected.append(SearchCandidate(source: .mapkit, result: fixed))
             }
         }
 
@@ -350,10 +510,10 @@ struct EnrichmentSheetView: View {
                 country: nil,
                 engineMerchantId: nil
             )
-            if let llm = await EnrichmentLLMService.shared.identify(context: context) {
+            if let llm = await AIEnrichmentBackend.identify(context: context) {
                 var fixed = llm
                 fixed.displayName = (fixed.displayName ?? trimmedQuery).titleCased
-                collected.append(Candidate(source: .llm, result: fixed))
+                collected.append(SearchCandidate(source: llm.source, result: fixed))
             }
         }
 
@@ -373,18 +533,11 @@ struct EnrichmentSheetView: View {
 
     private static func sourceRank(_ s: MerchantEnrichmentSource) -> Int {
         switch s {
-        case .sirene: return 0
-        case .mapkit: return 1
-        case .llm:    return 2
-        default:      return 3
+        case .sirene:            return 0
+        case .mapkit:            return 1
+        case .llm, .localLLM:    return 2
+        default:                 return 3
         }
     }
 
-    // MARK: Model
-
-    private struct Candidate: Identifiable {
-        let id = UUID()
-        let source: MerchantEnrichmentSource
-        let result: MerchantEnrichment
-    }
 }

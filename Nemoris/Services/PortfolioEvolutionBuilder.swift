@@ -95,8 +95,25 @@ enum PortfolioEvolutionBuilder {
         //    honnête et évite un chart qui "s'arrête" sans raison visible).
         //    Début = début de plage, ou le plus ancien cours connu pour « Max ».
         let earliest = priced.compactMap { $0.history.first?.date }.min() ?? now
-        let start = max(range.startDate ?? earliest, earliest)
-        let end = max(now, priced.compactMap { $0.history.last?.date }.max() ?? now)
+        let latest = priced.compactMap { $0.history.last?.date }.max() ?? now
+
+        // Cas particulier de la plage 1J : la grille est ancrée sur la dernière
+        // cotation, pas sur `now`. Hors séance (soir, week-end, avant
+        // l'ouverture) la dernière séance est entièrement à plus de 24 h, donc
+        // une grille [now-24h, now] ne contiendrait AUCUN point réel : la
+        // courbe s'aplatissait sur une seule valeur back-fillée. On montre
+        // plutôt les dernières 24 h COTÉES — même règle que le chart de
+        // position (cf. `lastQuotedWindow`).
+        let oneDayWindow: TimeInterval = 86_400
+        let start: Date
+        let end: Date
+        if range == .oneDay, latest < now.addingTimeInterval(-oneDayWindow) {
+            end = latest
+            start = max(latest.addingTimeInterval(-oneDayWindow), earliest)
+        } else {
+            start = max(range.startDate ?? earliest, earliest)
+            end = max(now, latest)
+        }
         guard end > start else {
             // Plage dégénérée (une seule date) : un point unique, pas de grille.
             let total = priced.reduce(0.0) { acc, input in

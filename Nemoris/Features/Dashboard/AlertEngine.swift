@@ -64,17 +64,36 @@ struct Alert: Identifiable, Hashable {
     let route: AlertRoute
 }
 
+/// Contexte d'entrée du moteur. Toutes les données sont fournies par l'appelant —
+/// le moteur ne touche PAS la base.
+///
+/// ⚠️ C'est ce qui évite le double chargement : avant, `AlertEngine` refaisait son
+/// propre `fetchTransactionsAllAccounts(limit: 5000)` sur le mois en cours alors que
+/// le Dashboard venait de charger exactement les mêmes lignes pour son bandeau Budget.
+struct AlertContext {
+    /// Progressions d'enveloppes déjà calculées par `EnvelopeSpendingCalculator`.
+    let envelopeProgresses: [EnvelopeProgress]
+    let goals: [Goal]
+    let assets: [PatrimoineAsset]
+    /// Ids des comptes qui existent réellement — sert à détecter les liens rompus.
+    let bankAccountIds: Set<Int>
+    let investmentAccountIds: Set<Int>
+}
+
 enum AlertEngine {
 
-    /// Calcule la liste d'alertes courantes en interrogeant les repos. Devrait
-    /// rester < 100 ms même avec une grosse base — on lit goals + envelopes +
-    /// dernières transactions du mois + assets Patrimoine.
-    static func compute() -> [Alert] {
+    /// Calcule la liste d'alertes courantes. **Moteur pur** : tout vient du contexte,
+    /// donc testable et sans requête cachée.
+    static func compute(_ context: AlertContext) -> [Alert] {
         var alerts: [Alert] = []
 
-        alerts.append(contentsOf: overdueGoalsAlerts())
-        alerts.append(contentsOf: overspentEnvelopesAlerts())
-        alerts.append(contentsOf: brokenPatrimoineLinksAlerts())
+        alerts.append(contentsOf: overdueGoalsAlerts(goals: context.goals))
+        alerts.append(contentsOf: overspentEnvelopesAlerts(progresses: context.envelopeProgresses))
+        alerts.append(contentsOf: brokenPatrimoineLinksAlerts(
+            assets: context.assets,
+            bankIds: context.bankAccountIds,
+            invIds: context.investmentAccountIds
+        ))
 
         // Tri : critical > warning > info, puis ordre d'insertion stable
         return alerts.sorted { $0.severity > $1.severity }
@@ -82,8 +101,7 @@ enum AlertEngine {
 
     // MARK: - 1. Goals en retard
 
-    private static func overdueGoalsAlerts() -> [Alert] {
-        let goals = GoalRepository().fetchGoals()
+    private static func overdueGoalsAlerts(goals: [Goal]) -> [Alert] {
         let now = Date()
         var result: [Alert] = []
         for goal in goals {
@@ -113,61 +131,38 @@ enum AlertEngine {
 
     // MARK: - 2. Enveloppes budget dépassées
 
-    private static func overspentEnvelopesAlerts() -> [Alert] {
-        let envelopes = BudgetRepository.shared.fetchEnvelopes().filter { $0.isActive }
-        guard !envelopes.isEmpty else { return [] }
-
-        // Période = mois courant (1er du mois → maintenant). Cohérent avec
-        // l'usage standard "budget mensuel".
-        let cal = Calendar.current
-        let now = Date()
-        let comps = cal.dateComponents([.year, .month], from: now)
-        guard let monthStart = cal.date(from: comps) else { return [] }
-
-        // On charge les transactions du mois en cours (tous comptes) pour sommer
-        // les dépenses par catégorie. fetchMonthlyTotals donne juste la somme
-        // globale ; on a besoin d'un breakdown par cat → on récupère les tx brutes.
-        let txs = TransactionRepository().fetchTransactionsAllAccounts(
-            from: monthStart, to: now, limit: 5000, offset: 0
-        )
-
-        // Σ par categoryId pour les dépenses uniquement (amount < 0)
-        var spentByCategory: [Int: Double] = [:]
-        for tx in txs where tx.amount < 0 {
-            guard let cid = tx.categoryId else { continue }
-            spentByCategory[cid, default: 0] += abs(tx.amount)
-        }
-
-        var result: [Alert] = []
-        for env in envelopes {
-            guard let cid = env.categoryId, let spent = spentByCategory[cid] else { continue }
-            // Seulement quand vraiment dépassé. La seuil "approche dépassement"
-            // (90%) pourrait être une `.info` plus tard ; pour MVP on reste simple.
-            guard spent > env.amount else { continue }
-            let overshoot = spent - env.amount
-            result.append(Alert(
-                id: "env_overspent_\(env.id)",
+    /// ⚠️ Le comportement a changé lors de la factorisation : les progressions
+    /// viennent désormais d'`EnvelopeSpendingCalculator`, donc une enveloppe
+    /// hiérarchique capte les dépenses de ses sous-catégories (avant : catégorie
+    /// exacte seulement) et une enveloppe annuelle est mensualisée (avant : jamais
+    /// dépassée car on comparait un budget d'un an à un mois de dépenses).
+    private static func overspentEnvelopesAlerts(progresses: [EnvelopeProgress]) -> [Alert] {
+        progresses.compactMap { progress in
+            // Seulement quand vraiment dépassé. Le seuil "approche dépassement"
+            // (`.warning`) pourrait devenir une `.info` plus tard ; on reste simple.
+            guard progress.healthState == .exceeded else { return nil }
+            let overshoot = progress.spent - progress.allocated
+            return Alert(
+                id: "env_overspent_\(progress.envelope.id)",
                 severity: .critical,
-                title: "Budget dépassé : \(env.name)",
+                title: "Budget dépassé : \(progress.envelope.name)",
                 message: "Dépassement de \(overshoot.formatted(.currency(code: "EUR").presentation(.narrow))) ce mois",
                 systemIcon: "chart.bar.fill",
                 route: .budget
-            ))
+            )
         }
-        return result
     }
 
     // MARK: - 3. Liens Patrimoine rompus
 
-    private static func brokenPatrimoineLinksAlerts() -> [Alert] {
-        let assets = PatrimoineRepository().fetchAssets()
+    /// Un lien est "rompu" quand l'asset référence un account/investment_account qui
+    /// n'existe plus (cascade SET NULL non propagée — cas edge mais possible).
+    private static func brokenPatrimoineLinksAlerts(
+        assets: [PatrimoineAsset],
+        bankIds: Set<Int>,
+        invIds: Set<Int>
+    ) -> [Alert] {
         guard !assets.isEmpty else { return [] }
-
-        // Un lien est "rompu" quand l'asset référence un account/investment_account
-        // qui n'existe plus (cascade SET NULL ne l'a pas effacé — cas edge mais
-        // possible si le delete ne s'est pas propagé pour une raison).
-        let bankIds = Set(TransactionRepository().fetchAccounts().map(\.id))
-        let invIds = Set(InvestmentRepository().fetchAccounts().map(\.id))
 
         let broken = assets.filter { asset in
             if let id = asset.linkedAccountId, !bankIds.contains(id) { return true }

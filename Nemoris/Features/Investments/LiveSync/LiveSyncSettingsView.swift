@@ -14,20 +14,32 @@ import SwiftUI
 struct LiveSyncSettingsView: View {
     @State private var links: [InvestmentLiveSyncLink] = []
     @State private var showAddSheet = false
+    #if os(macOS)
+    /// macOS : le détail d'un lien s'ouvre dans le panneau, pas un push — un
+    /// `NavigationLink` ici masquerait le panneau "Ajouter une source" s'il
+    /// était déjà ouvert quand l'user clique une row (le panneau est un volet
+    /// latéral non modal, la liste reste cliquable pendant qu'il est affiché).
+    /// Même bug que documenté dans CLAUDE.md AXE N.1 « Panneau macOS masqué
+    /// par du contenu poussé ». `LiveSyncLinkDetailView` est une feuille
+    /// (détail d'UN lien), pas un conteneur → panneau, cohérent avec le reste
+    /// de l'app (Tricount, tiers, comptes Investissements…).
+    @State private var selectedLink: InvestmentLiveSyncLink?
+    #endif
 
     var body: some View {
-        ZStack {
-            AppTheme.Colors.background.ignoresSafeArea()
-            List {
-                explanationSection
-                if links.isEmpty {
-                    emptyStateSection
-                } else {
-                    linksSection
-                }
+        // Form (pas List) : boxes arrondies natives macOS via nemorisFormStyle,
+        // identique sur iOS. Fond via .background (pas de ZStack+Color, cf. N.1).
+        Form {
+            explanationSection
+            if links.isEmpty {
+                emptyStateSection
+            } else {
+                linksSection
             }
-            .scrollContentBackground(.hidden)
         }
+        .scrollContentBackground(.hidden)
+        .nemorisFormStyle()
+        .background(AppTheme.Colors.background.ignoresSafeArea())
         .navigationTitle("Synchronisation auto")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -40,11 +52,16 @@ struct LiveSyncSettingsView: View {
                 .tint(AppTheme.Colors.accent)
             }
         }
-        .sheet(isPresented: $showAddSheet, onDismiss: load) {
+        .adaptivePane(isPresented: $showAddSheet, onDismiss: load) {
             NavigationStack {
                 LiveSyncProviderPickerView()
             }
         }
+        #if os(macOS)
+        .adaptivePane(item: $selectedLink, onDismiss: load) { link in
+            LiveSyncLinkDetailView(link: link, onChange: load)
+        }
+        #endif
         .onAppear(perform: load)
     }
 
@@ -88,11 +105,27 @@ struct LiveSyncSettingsView: View {
     private var linksSection: some View {
         Section("Sources synchronisées") {
             ForEach(links) { link in
+                #if os(macOS)
+                Button {
+                    selectedLink = link
+                } label: {
+                    HStack {
+                        linkRow(link)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                #else
                 NavigationLink {
                     LiveSyncLinkDetailView(link: link, onChange: load)
                 } label: {
                     linkRow(link)
                 }
+                #endif
             }
         }
         .listRowBackground(AppTheme.Colors.surface)
@@ -158,40 +191,53 @@ struct LiveSyncSettingsView: View {
 // MARK: - Provider picker (catalogue)
 
 struct LiveSyncProviderPickerView: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
+    /// État à la place d'un `NavigationLink` : un push depuis ce contenu, une
+    /// fois hébergé dans le panneau macOS, ferait remonter le titre/back-button
+    /// du form de credentials dans la barre du MODULE. Sheet niveau 2 à la place.
+    @State private var selectedProviderType: InvestmentLiveSyncProvider.Type?
 
     var body: some View {
-        ZStack {
-            AppTheme.Colors.background.ignoresSafeArea()
-            List {
-                Section {
-                    Text("Choisissez la source à lier. Vous serez ensuite invité à saisir les identifiants (clé API ou adresse publique).")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                }
-                .listRowBackground(Color.clear)
+        Form {
+            Section {
+                Text("Choisissez la source à lier. Vous serez ensuite invité à saisir les identifiants (clé API ou adresse publique).")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+            }
+            .listRowBackground(Color.clear)
 
-                Section {
-                    ForEach(LiveSyncRegistry.availableProviders) { entry in
-                        NavigationLink {
-                            LiveSyncLinkFormView(providerType: entry.providerType, existingLink: nil)
-                        } label: {
+            Section {
+                ForEach(LiveSyncRegistry.availableProviders) { entry in
+                    Button {
+                        selectedProviderType = entry.providerType
+                    } label: {
+                        HStack {
                             providerRow(entry)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                         }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
-                .listRowBackground(AppTheme.Colors.surface)
             }
-            .scrollContentBackground(.hidden)
+            .listRowBackground(AppTheme.Colors.surface)
         }
-        .navigationTitle("Ajouter une source")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Annuler") { dismiss() }
-                    .tint(AppTheme.Colors.accent)
+        .scrollContentBackground(.hidden)
+        .nemorisFormStyle()
+        .background(AppTheme.Colors.background.ignoresSafeArea())
+        .adaptivePane(isPresented: Binding(
+            get: { selectedProviderType != nil },
+            set: { if !$0 { selectedProviderType = nil } }
+        )) {
+            if let providerType = selectedProviderType {
+                LiveSyncLinkFormView(providerType: providerType, existingLink: nil)
             }
         }
+        .paneChrome("Ajouter une source", cancelLabel: "Annuler", onCancel: { dismiss() })
     }
 
     private func providerRow(_ entry: LiveSyncProviderEntry) -> some View {
@@ -217,7 +263,7 @@ struct LiveSyncProviderPickerView: View {
 // MARK: - Form de credentials (création/édition)
 
 struct LiveSyncLinkFormView: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.paneDismiss) private var dismiss
 
     let providerType: InvestmentLiveSyncProvider.Type
     let existingLink: InvestmentLiveSyncLink?
@@ -283,19 +329,14 @@ struct LiveSyncLinkFormView: View {
                 .listRowBackground(Color.clear)
             }
             .scrollContentBackground(.hidden)
+            .nemorisFormStyle()
             .background(AppTheme.Colors.background.ignoresSafeArea())
-        .navigationTitle(isEditing ? "Modifier la source" : providerType.displayName)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button(isEditing ? "Mettre à jour" : "Enregistrer") {
-                    save()
-                }
-                .disabled(!canSave)
-                .tint(AppTheme.Colors.accent)
-            }
-        }
         .onAppear { populate() }
+        .paneChrome(isEditing ? "Modifier la source" : providerType.displayName,
+                    cancelLabel: "Annuler", onCancel: { dismiss() },
+                    confirmLabel: isEditing ? "Mettre à jour" : "Enregistrer",
+                    confirmDisabled: !canSave,
+                    onConfirm: { save() })
     }
 
     // MARK: - Field renderer (dynamique selon LiveSyncCredentialField)
@@ -424,9 +465,20 @@ struct LiveSyncLinkDetailView: View {
     let link: InvestmentLiveSyncLink
     let onChange: () -> Void
 
+    // dismiss : pop natif (iOS, poussée depuis LiveSyncSettingsView). paneDismiss :
+    // ferme le panneau (macOS, cf. `.adaptivePane(item: $selectedLink)` dans
+    // LiveSyncSettingsView) — no-op de chaque côté hors de son contexte.
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.paneDismiss) private var paneDismiss
     @Environment(AppState.self) private var appState
     @State private var showDeleteConfirm = false
+    /// Remplace l'ancien `NavigationLink` vers le form de credentials : un push
+    /// interne depuis cette vue, une fois hébergée dans le panneau macOS (pas
+    /// de `NavigationStack` locale dans ce cas), n'aurait aucun contexte de
+    /// navigation où pousser. `.adaptivePane` marche dans les deux contextes,
+    /// cohérent avec `LiveSyncProviderPickerView` qui présente déjà ce même
+    /// `LiveSyncLinkFormView` de cette façon pour la création.
+    @State private var showEditForm = false
     @State private var enabledLocal: Bool
     @State private var isSyncing = false
     @State private var lastSyncFeedback: String?
@@ -442,107 +494,111 @@ struct LiveSyncLinkDetailView: View {
     var body: some View {
         let providerType = LiveSyncRegistry.provider(for: link.providerId)
 
-        ZStack {
-            AppTheme.Colors.background.ignoresSafeArea()
-            List {
-                Section {
-                    Toggle("Activé", isOn: $enabledLocal)
-                        .onChange(of: enabledLocal) { _, newValue in
-                            var updated = link
-                            updated.enabled = newValue
-                            LiveSyncRepository.shared.updateLink(updated)
-                            onChange()
-                        }
-                }
-                .listRowBackground(AppTheme.Colors.surface)
+        Form {
+            Section {
+                Toggle("Activé", isOn: $enabledLocal)
+                    .onChange(of: enabledLocal) { _, newValue in
+                        var updated = link
+                        updated.enabled = newValue
+                        LiveSyncRepository.shared.updateLink(updated)
+                        onChange()
+                    }
+            }
+            .listRowBackground(AppTheme.Colors.surface)
 
-                Section("Source") {
+            Section("Source") {
+                HStack {
+                    Text("Type")
+                    Spacer()
+                    Text(providerType?.displayName ?? liveLink.providerId)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                }
+                if let chain = liveLink.config["chain"] {
                     HStack {
-                        Text("Type")
+                        Text("Chaîne")
                         Spacer()
-                        Text(providerType?.displayName ?? liveLink.providerId)
+                        Text(chain.capitalized)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
-                    if let chain = liveLink.config["chain"] {
-                        HStack {
-                            Text("Chaîne")
-                            Spacer()
-                            Text(chain.capitalized)
-                                .foregroundStyle(AppTheme.Colors.textSecondary)
-                        }
-                    }
-                    if let lastSync = liveLink.lastSyncAt {
-                        HStack {
-                            Text("Dernière sync")
-                            Spacer()
-                            Text(lastSync, format: .dateTime.day().month().year().hour().minute())
-                                .foregroundStyle(AppTheme.Colors.textSecondary)
-                        }
-                    }
-                    if let message = liveLink.lastSyncMessage, !message.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Statut")
-                            Text(message)
-                                .font(.caption)
-                                .foregroundStyle(
-                                    liveLink.lastSyncStatus == .error
-                                        ? AppTheme.Colors.danger
-                                        : AppTheme.Colors.textSecondary
-                                )
-                        }
+                }
+                if let lastSync = liveLink.lastSyncAt {
+                    HStack {
+                        Text("Dernière sync")
+                        Spacer()
+                        Text(lastSync, format: .dateTime.day().month().year().hour().minute())
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
                 }
-                .listRowBackground(AppTheme.Colors.surface)
-
-                // AXE I Couche 1c — Bouton sync now + feedback inline
-                Section {
-                    Button {
-                        Task { await syncNow() }
-                    } label: {
-                        HStack {
-                            if isSyncing {
-                                ProgressView().controlSize(.small)
-                                Text("Synchronisation en cours…")
-                            } else {
-                                Image(systemName: "arrow.clockwise")
-                                Text("Synchroniser maintenant")
-                            }
-                            Spacer()
-                        }
-                        .foregroundStyle(AppTheme.Colors.accent)
-                    }
-                    .disabled(isSyncing || !enabledLocal)
-
-                    if let feedback = lastSyncFeedback {
-                        Text(feedback)
+                if let message = liveLink.lastSyncMessage, !message.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Statut")
+                        Text(message)
                             .font(.caption)
                             .foregroundStyle(
                                 liveLink.lastSyncStatus == .error
                                     ? AppTheme.Colors.danger
-                                    : AppTheme.Colors.success
+                                    : AppTheme.Colors.textSecondary
                             )
                     }
                 }
-                .listRowBackground(AppTheme.Colors.surface)
-
-                Section {
-                    if let providerType {
-                        NavigationLink("Modifier les identifiants") {
-                            LiveSyncLinkFormView(providerType: providerType, existingLink: link)
-                        }
-                    }
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
-                    } label: {
-                        Text("Supprimer ce lien")
-                    }
-                }
-                .listRowBackground(AppTheme.Colors.surface)
             }
-            .scrollContentBackground(.hidden)
+            .listRowBackground(AppTheme.Colors.surface)
+
+            // AXE I Couche 1c — Bouton sync now + feedback inline
+            Section {
+                Button {
+                    Task { await syncNow() }
+                } label: {
+                    HStack {
+                        if isSyncing {
+                            ProgressView().controlSize(.small)
+                            Text("Synchronisation en cours…")
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                            Text("Synchroniser maintenant")
+                        }
+                        Spacer()
+                    }
+                    .foregroundStyle(AppTheme.Colors.accent)
+                }
+                .disabled(isSyncing || !enabledLocal)
+
+                if let feedback = lastSyncFeedback {
+                    Text(feedback)
+                        .font(.caption)
+                        .foregroundStyle(
+                            liveLink.lastSyncStatus == .error
+                                ? AppTheme.Colors.danger
+                                : AppTheme.Colors.success
+                        )
+                }
+            }
+            .listRowBackground(AppTheme.Colors.surface)
+
+            Section {
+                if providerType != nil {
+                    Button("Modifier les identifiants") { showEditForm = true }
+                }
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    Text("Supprimer ce lien")
+                }
+            }
+            .listRowBackground(AppTheme.Colors.surface)
         }
-        .navigationTitle(link.displayName)
-        .navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden)
+        .nemorisFormStyle()
+        .background(AppTheme.Colors.background.ignoresSafeArea())
+        // Chrome adaptatif : NavigationStack+toolbar natifs avec bouton "Fermer"
+        // (iOS poussée / macOS niveau 2) ou barre système du panneau (macOS
+        // niveau 1) — cf. `.paneChrome`.
+        .paneChrome(link.displayName, cancelLabel: "Fermer", onCancel: { paneDismiss() })
+        .adaptivePane(isPresented: $showEditForm) {
+            if let providerType {
+                LiveSyncLinkFormView(providerType: providerType, existingLink: link)
+            }
+        }
         .confirmationDialog("Supprimer ce lien ?",
                             isPresented: $showDeleteConfirm,
                             titleVisibility: .visible) {
@@ -558,6 +614,7 @@ struct LiveSyncLinkDetailView: View {
         LiveSyncRepository.shared.deleteLink(id: link.id)
         onChange()
         dismiss()
+        paneDismiss()
     }
 
     @MainActor

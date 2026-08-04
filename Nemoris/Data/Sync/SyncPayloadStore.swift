@@ -49,7 +49,6 @@ struct SyncPayloadStore: Sendable {
             "payee_id": "payees",
             "category_id": "categories",
             "payment_type_id": "payment_types",
-            "reimbursement_payee_id": "payees",
         ],
         "payees": [
             "category_id": "categories",
@@ -95,8 +94,10 @@ struct SyncPayloadStore: Sendable {
         "tricount_shares": [
             "entry_id": "tricount_entries",
         ],
-        "tricount_reimbursements": [
-            "entry_id": "tricount_entries",
+        // — Remboursement unifié (L.3+, AXE R)
+        "reimbursements": [
+            "transaction_id": "transactions",
+            "tricount_entry_id": "tricount_entries",
             "payee_id": "payees",
         ],
     ]
@@ -411,6 +412,7 @@ struct SyncPayloadStore: Sendable {
             "DELETE FROM sync_tombstones;",
             "DELETE FROM sync_record_meta;",
             "DELETE FROM sync_unresolved_refs;",
+            "DELETE FROM sync_deferred_rows;",
             "DELETE FROM sync_meta WHERE key IN ('ck_state', 'last_sync_at', 'last_sync_error');",
         ] {
             sqlite3_exec(db, sql, nil, nil, nil)
@@ -590,6 +592,11 @@ struct SyncPayloadStore: Sendable {
         // local : les colonnes d'une version plus récente de l'app sont
         // ignorées, les colonnes locales absentes du payload → NULL).
         var assignments: [(column: String, value: Any?)] = []
+        // Vrai si au moins une FK du payload pointe une cible pas encore
+        // arrivée. Si l'écriture échoue ensuite sur une contrainte (colonne
+        // FK NOT NULL, ex : investment_orders.position_id), le payload est
+        // DIFFÉRÉ au lieu d'être perdu (cf. sync_deferred_rows).
+        var hadMissingRef = false
         for column in columns where column != "id" && column != "uuid" && column != "updated_at" {
             if let targetTable = fkMap[column] {
                 if let targetUuid = refs[column] {
@@ -598,6 +605,7 @@ struct SyncPayloadStore: Sendable {
                     } else {
                         // Cible pas encore arrivée → NULL + ref en attente.
                         assignments.append((column, nil))
+                        hadMissingRef = true
                         storeUnresolvedRef(db, table: table, uuid: uuid, column: column,
                                            targetTable: targetTable, targetUuid: targetUuid)
                     }
@@ -612,8 +620,13 @@ struct SyncPayloadStore: Sendable {
 
         if let localId {
             let setClause = assignments.map { "\($0.column) = ?" }.joined(separator: ", ")
-            guard execBind(db, "UPDATE \(table) SET \(setClause) WHERE id = \(localId);",
-                           values: assignments.map(\.value)) else { return .failed }
+            if !execBind(db, "UPDATE \(table) SET \(setClause) WHERE id = \(localId);",
+                         values: assignments.map(\.value)) {
+                // Échec probable : NULL sur une FK NOT NULL dont la cible
+                // n'est pas arrivée → on garde le payload pour le rejouer.
+                if hadMissingRef { storeDeferredRow(db, table: table, uuid: uuid, payload: payload) }
+                return .failed
+            }
         } else {
             // Fusion PROACTIVE par nom (categories, payment_types — tables de
             // référence SANS contrainte UNIQUE) : une row locale homonyme =
@@ -654,6 +667,14 @@ struct SyncPayloadStore: Sendable {
                     // Ré-application : la row adoptée porte maintenant
                     // l'uuid distant → chemin UPDATE + LWW standard.
                     return apply(db, table: table, payload: payload, allowAdoption: false)
+                }
+                // FK NOT NULL dont la cible n'est pas encore descendue (les
+                // batchs CloudKit n'ont pas d'ordre garanti) : le payload est
+                // mis de côté et rejoué quand la cible arrive — sinon le
+                // record serait PERDU définitivement (pas de re-livraison).
+                if isConstraint, hadMissingRef {
+                    storeDeferredRow(db, table: table, uuid: uuid, payload: payload)
+                    return .failed
                 }
                 // Local uuid <= distant : record distant ignoré — il sera
                 // tombstoné par l'appareil qui le porte (pas de retry : un
@@ -761,6 +782,8 @@ struct SyncPayloadStore: Sendable {
         sqlite3_step(delStmt)
 
         _ = execBind(db, "DELETE FROM sync_unresolved_refs WHERE table_name = ? AND row_uuid = ?;", values: [table, uuid])
+        // Une row différée qui reçoit sa tombstone n'a plus lieu d'être rejouée.
+        _ = execBind(db, "DELETE FROM sync_deferred_rows WHERE table_name = ? AND row_uuid = ?;", values: [table, uuid])
     }
 
     // MARK: - Application par batch (perf)
@@ -796,7 +819,15 @@ struct SyncPayloadStore: Sendable {
         sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
         _ = Self.execBind(db, "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('suppress_triggers', '1');", values: [])
 
-        for mod in modifications {
+        // Référencées d'abord (ordre de tableOrder) : un batch contenant à la
+        // fois comptes, positions et ordres s'applique dans le bon sens — la
+        // plupart des FK NOT NULL se résolvent inline, sans passer par la
+        // file des différés (qui couvre le cas inter-batchs).
+        let ordered = modifications.sorted {
+            (Self.tableOrder.firstIndex(of: $0.table) ?? Int.max)
+                < (Self.tableOrder.firstIndex(of: $1.table) ?? Int.max)
+        }
+        for mod in ordered {
             guard Self.tableOrder.contains(mod.table) else { continue }
             guard let obj = try? JSONSerialization.jsonObject(with: mod.payloadData),
                   let payload = obj as? [String: Any],
@@ -809,6 +840,11 @@ struct SyncPayloadStore: Sendable {
                 _ = Self.execBind(db, "INSERT OR REPLACE INTO sync_record_meta (table_name, row_uuid, system_fields) VALUES (?, ?, ?);",
                                   values: [mod.table, mod.uuid, mod.systemFields])
             case .failed:
+                // Si apply() vient de DIFFÉRER le record (FK NOT NULL dont la
+                // cible manque), on attache ses system fields : le rejeu devra
+                // repartir de la version serveur courante lui aussi.
+                _ = Self.execBind(db, "UPDATE sync_deferred_rows SET system_fields = ? WHERE table_name = ? AND row_uuid = ?;",
+                                  values: [mod.systemFields, mod.table, mod.uuid])
                 print("[SyncPayloadStore] Application échouée : \(mod.table)/\(mod.uuid)")
             }
         }
@@ -822,6 +858,11 @@ struct SyncPayloadStore: Sendable {
 
         // Les FK dont la cible vient d'arriver dans ce batch.
         Self.resolveUnresolvedRefs(db)
+
+        // Les records DIFFÉRÉS (FK NOT NULL) dont les cibles existent
+        // désormais : ordres qui attendaient leurs positions, positions qui
+        // attendaient leur compte…
+        Self.applyDeferredRows(db)
 
         _ = Self.execBind(db, "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('suppress_triggers', '0');", values: [])
         sqlite3_exec(db, "COMMIT;", nil, nil, nil)
@@ -865,6 +906,89 @@ struct SyncPayloadStore: Sendable {
             _ = Self.execBind(db, "DELETE FROM sync_unresolved_refs WHERE table_name = ? AND row_uuid = ? AND column_name = ?;",
                               values: [ref.table, ref.uuid, ref.column])
         }
+    }
+
+    // MARK: - Records différés (FK NOT NULL en attente de cible)
+
+    /// Met de côté un payload distant refusé parce qu'une FK NOT NULL n'est
+    /// pas encore résoluble. `INSERT OR REPLACE` : re-différer la même row
+    /// écrase l'entrée (le payload le plus récent gagne).
+    private static func storeDeferredRow(_ db: OpaquePointer, table: String,
+                                         uuid: String, payload: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        _ = execBind(db, """
+            INSERT OR REPLACE INTO sync_deferred_rows (table_name, row_uuid, payload, queued_at)
+            VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+            """, values: [table, uuid, data])
+    }
+
+    /// Rejoue les payloads différés. Boucle jusqu'à stabilité (appliquer une
+    /// row peut en débloquer d'autres : compte → position → ordre), cap de
+    /// sécurité à 5 passes. Une row toujours bloquée est re-différée par
+    /// apply() et retentera au prochain batch.
+    static func applyDeferredRows(_ db: OpaquePointer) {
+        for _ in 0..<5 {
+            var rows: [(table: String, uuid: String, payload: Data, systemFields: Data?)] = []
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "SELECT table_name, row_uuid, payload, system_fields FROM sync_deferred_rows;", -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let table = String(cString: sqlite3_column_text(stmt, 0))
+                let uuid = String(cString: sqlite3_column_text(stmt, 1))
+                var payload = Data()
+                if let bytes = sqlite3_column_blob(stmt, 2) {
+                    payload = Data(bytes: bytes, count: Int(sqlite3_column_bytes(stmt, 2)))
+                }
+                var sf: Data?
+                if let bytes = sqlite3_column_blob(stmt, 3) {
+                    sf = Data(bytes: bytes, count: Int(sqlite3_column_bytes(stmt, 3)))
+                }
+                rows.append((table, uuid, payload, sf))
+            }
+            sqlite3_finalize(stmt)
+            if rows.isEmpty { return }
+
+            // Référencées d'abord, comme les batchs.
+            rows.sort {
+                (tableOrder.firstIndex(of: $0.table) ?? Int.max)
+                    < (tableOrder.firstIndex(of: $1.table) ?? Int.max)
+            }
+
+            var progressed = false
+            for row in rows {
+                guard let obj = try? JSONSerialization.jsonObject(with: row.payload),
+                      let payload = obj as? [String: Any] else {
+                    _ = execBind(db, "DELETE FROM sync_deferred_rows WHERE table_name = ? AND row_uuid = ?;", values: [row.table, row.uuid])
+                    continue
+                }
+                // Retirer AVANT le ré-apply : si la cible manque toujours,
+                // apply() ré-écrit l'entrée ; sinon elle est soldée.
+                _ = execBind(db, "DELETE FROM sync_deferred_rows WHERE table_name = ? AND row_uuid = ?;", values: [row.table, row.uuid])
+                switch apply(db, table: row.table, payload: payload, allowAdoption: true) {
+                case .applied, .skippedLocalNewer:
+                    progressed = true
+                    if let sf = row.systemFields {
+                        _ = execBind(db, "INSERT OR REPLACE INTO sync_record_meta (table_name, row_uuid, system_fields) VALUES (?, ?, ?);",
+                                     values: [row.table, row.uuid, sf])
+                    }
+                case .failed:
+                    // Re-différée par apply() si FK toujours manquante :
+                    // ré-attacher les system fields (storeDeferredRow ne les
+                    // connaît pas).
+                    if let sf = row.systemFields {
+                        _ = execBind(db, "UPDATE sync_deferred_rows SET system_fields = ? WHERE table_name = ? AND row_uuid = ?;",
+                                     values: [sf, row.table, row.uuid])
+                    }
+                }
+            }
+            if !progressed { return }
+        }
+    }
+
+    /// Variante hors batch (tests, réparations) : ouvre sa propre connexion.
+    func retryDeferredRows() {
+        guard let db = openDB() else { return }
+        defer { sqlite3_close(db) }
+        Self.applyDeferredRows(db)
     }
 
     // MARK: - Helpers privés
@@ -1022,6 +1146,17 @@ struct SyncPayloadStore: Sendable {
                 // JSONSerialization produit des NSNumber : discrimine int/double.
                 if CFNumberIsFloatType(v) { sqlite3_bind_double(stmt, idx, v.doubleValue) }
                 else { sqlite3_bind_int64(stmt, idx, v.int64Value) }
+            case let v as Data:
+                // BLOB (payloads différés, system fields CKRecord). Sans ce
+                // case, Data tombait dans `default:` → bindé NULL en silence
+                // (les system_fields du chemin batch n'étaient JAMAIS stockés).
+                if v.isEmpty {
+                    sqlite3_bind_zeroblob(stmt, idx, 0)
+                } else {
+                    _ = v.withUnsafeBytes { bytes in
+                        sqlite3_bind_blob(stmt, idx, bytes.baseAddress, Int32(v.count), SQLITE_TRANSIENT)
+                    }
+                }
             case nil: sqlite3_bind_null(stmt, idx)
             default: sqlite3_bind_null(stmt, idx)
             }

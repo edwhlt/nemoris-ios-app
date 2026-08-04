@@ -441,6 +441,7 @@
 "Importer" = "Import";
 "Importer un CSV" = "Import CSV";
 "Importer un fichier CSV" = "Import CSV File";
+"Importer des transactions (CSV)" = "Import Transactions (CSV)";
 "Exportez le relevé de votre compte bancaire au format CSV depuis votre banque en ligne, puis importez-le ici pour commencer à suivre vos finances." = "Export your bank statement in CSV format from your online banking, then import it here to start tracking your finances.";
 "Une fois le fichier choisi, vous mapperez les colonnes (date / montant / libellé). Le mapping est mémorisé pour les prochains imports du même format." = "Once the file is chosen, you'll map the columns (date / amount / label). The mapping is remembered for future imports of the same format.";
 "Choisir un CSV" = "Choose CSV";
@@ -654,6 +655,19 @@
 "Comment ça marche" = "How it works";
 "État actuel" = "Current Status";
 "À savoir" = "Good to Know";
+"Source" = "Source";
+"Automatique" = "Automatic";
+"Serveur local" = "Local server";
+"Désactivée" = "Disabled";
+"Adresse du serveur" = "Server address";
+"Nom du modèle" = "Model name";
+"Clé API (optionnel)" = "API key (optional)";
+"Test en cours…" = "Testing…";
+"Tester la connexion" = "Test connection";
+"Utilise Apple Foundation Models si disponible sur cet appareil, sinon aucune IA. Ce réglage est propre à cet appareil — les autres appareils Nemoris peuvent utiliser une source différente." = "Uses Apple Foundation Models if available on this device, otherwise no AI. This setting is specific to this device — your other Nemoris devices can use a different source.";
+"Nemoris envoie le libellé de la transaction à l'adresse configurée (LM Studio, Ollama, ou tout serveur compatible OpenAI). L'adresse et la clé restent sur cet appareil, rien n'est envoyé à un serveur Nemoris. Ce réglage est propre à cet appareil — les autres appareils Nemoris peuvent utiliser une source différente." = "Nemoris sends the transaction label to the configured address (LM Studio, Ollama, or any OpenAI-compatible server). The address and key stay on this device — nothing is sent to a Nemoris server. This setting is specific to this device — your other Nemoris devices can use a different source.";
+"Aucune source IA n'est appelée. L'enrichissement reste fonctionnel via Sirene, MapKit et le moteur embarqué. Ce réglage est propre à cet appareil — les autres appareils Nemoris peuvent utiliser une source différente." = "No AI source is ever called. Enrichment still works via Sirene, MapKit, and the embedded engine. This setting is specific to this device — your other Nemoris devices can use a different source.";
+"Avec un serveur local, le libellé de la transaction part vers l'adresse configurée ci-dessus — pas vers un serveur Nemoris." = "With a local server, the transaction label is sent to the address configured above — not to a Nemoris server.";
 
 /* MARK: - Common UI */
 "Sélectionner…" = "Select…";

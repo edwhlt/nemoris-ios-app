@@ -136,10 +136,116 @@ private func sqlHighlight(_ text: String) -> NSAttributedString {
 }
 
 // MARK: - Variable Form
+//
+// Syntaxe des tokens : {{nom}} | {{nom:type}} | {{nom:type=défaut}} | {{nom=défaut}}.
+// Un {{nom}} nu (sans ":") reste traité comme .text — les .sql déjà sauvegardés
+// avec leurs propres guillemets autour de {{x}} continuent de marcher à l'identique.
+
+/// Type déclaré pour une variable. `.text` est le défaut si omis.
+enum SQLVariableType: String {
+    case text     // chaîne libre — substituée entre guillemets SQL (échappés)
+    case number   // nombre — substitué tel quel, sans guillemets
+    case year     // année 4 chiffres — clavier numérique ; substituée ENTRE GUILLEMETS
+                  // car comparée à strftime('%Y', ...), qui renvoie du texte, jamais un entier
+    case date     // date — DatePicker natif ; substituée en 'yyyy-MM-dd'
+}
+
+struct SQLVariableSpec: Identifiable, Hashable {
+    let name: String
+    let type: SQLVariableType
+    let defaultValue: String?
+    var id: String { name }
+}
+
+/// Grammaire des tokens `{{...}}`, centralisée pour que la détection
+/// (formulaire), le pré-remplissage et la substitution (exécution) ne
+/// puissent jamais diverger entre eux.
+enum SQLVariableParsing {
+    private static let tokenRegex = try? NSRegularExpression(pattern: "\\{\\{([^}]+)\\}\\}")
+
+    /// Parse le contenu d'un seul token (le texte déjà extrait des `{{ }}`).
+    static func parse(_ raw: String) -> SQLVariableSpec {
+        var namePart = raw
+        var defaultValue: String?
+        if let eq = raw.firstIndex(of: "=") {
+            namePart = String(raw[raw.startIndex..<eq])
+            let def = String(raw[raw.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+            defaultValue = def.isEmpty ? nil : def
+        }
+        var name = namePart.trimmingCharacters(in: .whitespaces)
+        var type = SQLVariableType.text
+        if let colon = namePart.firstIndex(of: ":") {
+            name = String(namePart[namePart.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
+            let typeStr = String(namePart[namePart.index(after: colon)...])
+                .trimmingCharacters(in: .whitespaces).lowercased()
+            type = SQLVariableType(rawValue: typeStr) ?? .text
+        }
+        return SQLVariableSpec(name: name, type: type, defaultValue: defaultValue)
+    }
+
+    /// Variables détectées dans un texte SQL, dédupliquées par nom (garde la
+    /// première occurrence si le même nom est annoté différemment ailleurs —
+    /// cas limite, mais le champ du formulaire doit rester unique par nom).
+    static func extract(from sql: String) -> [SQLVariableSpec] {
+        guard let re = tokenRegex else { return [] }
+        let range = NSRange(sql.startIndex..., in: sql)
+        var seen = Set<String>()
+        var result: [SQLVariableSpec] = []
+        re.enumerateMatches(in: sql, range: range) { m, _, _ in
+            guard let r = m?.range(at: 1), let sr = Range(r, in: sql) else { return }
+            let spec = parse(String(sql[sr]).trimmingCharacters(in: .whitespaces))
+            if seen.insert(spec.name).inserted { result.append(spec) }
+        }
+        return result
+    }
+
+    /// Encode une valeur brute tapée par l'user en littéral SQL selon le type
+    /// déclaré. Seul `.number` reste non guillemété — tout le reste (y compris
+    /// `.year`) est quoté et échappé pour être un littéral SQL valide sans que
+    /// l'user ait à retaper ses propres guillemets dans le corps de la requête.
+    static func sqlLiteral(_ rawValue: String, type: SQLVariableType) -> String {
+        switch type {
+        case .number:
+            return rawValue.trimmingCharacters(in: .whitespaces)
+        case .text, .year, .date:
+            let escaped = rawValue.replacingOccurrences(of: "'", with: "''")
+            return "'\(escaped)'"
+        }
+    }
+
+    /// Substitue chaque `{{...}}` par son littéral SQL. Reparse CHAQUE
+    /// occurrence indépendamment (plutôt qu'un remplacement nom→texte global)
+    /// pour rester correct même si un même nom apparaît avec des annotations
+    /// différentes à plusieurs endroits du fichier.
+    static func substitute(_ sql: String, values: [String: String]) -> String {
+        guard let re = tokenRegex else { return sql }
+        let ns = sql as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        var result = ""
+        var lastEnd = 0
+        for m in re.matches(in: sql, range: full) {
+            result += ns.substring(with: NSRange(location: lastEnd, length: m.range.location - lastEnd))
+            let spec = parse(ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces))
+            let raw = values[spec.name] ?? spec.defaultValue ?? ""
+            result += sqlLiteral(raw, type: spec.type)
+            lastEnd = m.range.location + m.range.length
+        }
+        result += ns.substring(from: lastEnd)
+        return result
+    }
+
+    static let isoDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }()
+}
 
 private struct VariableFormView: View {
     @Binding var variables: [String: String]
-    let names: [String]
+    let specs: [SQLVariableSpec]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -153,20 +259,12 @@ private struct VariableFormView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
-                    ForEach(names, id: \.self) { name in
+                    ForEach(specs) { spec in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("{{\(name)}}")
+                            Text("{{\(spec.name)}}")
                                 .font(.system(.caption2, design: .monospaced))
                                 .foregroundStyle(AppTheme.Colors.warning)
-                            TextField("valeur", text: Binding(
-                                get: { variables[name] ?? "" },
-                                set: { variables[name] = $0 }
-                            ))
-                            .textFieldStyle(.roundedBorder)
-                            .frame(minWidth: 100, maxWidth: 200)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .font(.system(.caption, design: .monospaced))
+                            field(for: spec)
                         }
                     }
                 }
@@ -175,6 +273,43 @@ private struct VariableFormView: View {
             }
         }
         .background(Color(.tertiarySystemBackground))
+    }
+
+    @ViewBuilder
+    private func field(for spec: SQLVariableSpec) -> some View {
+        let textBinding = Binding<String>(
+            get: { variables[spec.name] ?? "" },
+            set: { variables[spec.name] = $0 }
+        )
+        switch spec.type {
+        case .date:
+            DatePicker("", selection: Binding<Date>(
+                get: { SQLVariableParsing.isoDateFormatter.date(from: variables[spec.name] ?? "") ?? Date() },
+                set: { variables[spec.name] = SQLVariableParsing.isoDateFormatter.string(from: $0) }
+            ), displayedComponents: .date)
+            .datePickerStyle(.compact)
+            .labelsHidden()
+            .frame(minWidth: 110, maxWidth: 160)
+        case .year:
+            TextField("aaaa", text: textBinding)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 70, maxWidth: 90)
+                .keyboardType(.numberPad)
+                .font(.system(.caption, design: .monospaced))
+        case .number:
+            TextField("valeur", text: textBinding)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 80, maxWidth: 140)
+                .keyboardType(.decimalPad)
+                .font(.system(.caption, design: .monospaced))
+        case .text:
+            TextField("valeur", text: textBinding)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 100, maxWidth: 200)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .font(.system(.caption, design: .monospaced))
+        }
     }
 }
 
@@ -194,7 +329,14 @@ enum SQLConsoleHelper {
     static func linkFolder(from pickerURL: URL) throws {
         let hasAccess = pickerURL.startAccessingSecurityScopedResource()
         defer { if hasAccess { pickerURL.stopAccessingSecurityScopedResource() } }
+        #if os(macOS)
+        // Sous App Sandbox, une bookmark créée sans .withSecurityScope se résout
+        // en URL "plate" — startAccessingSecurityScopedResource() échoue au
+        // prochain lancement et l'accès au dossier est silencieusement perdu.
+        let data = try pickerURL.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+        #else
         let data = try pickerURL.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+        #endif
         UserDefaults.standard.set(data, forKey: folderBookmarkKey)
     }
 
@@ -205,11 +347,22 @@ enum SQLConsoleHelper {
     private static func resolveStoredFolder() -> URL? {
         guard let data = UserDefaults.standard.data(forKey: folderBookmarkKey) else { return nil }
         var isStale = false
-        guard let url = try? URL(resolvingBookmarkData: data, options: .withoutUI, relativeTo: nil, bookmarkDataIsStale: &isStale) else { return nil }
+        #if os(macOS)
+        let resolutionOptions: URL.BookmarkResolutionOptions = [.withoutUI, .withSecurityScope]
+        #else
+        let resolutionOptions: URL.BookmarkResolutionOptions = [.withoutUI]
+        #endif
+        guard let url = try? URL(resolvingBookmarkData: data, options: resolutionOptions, relativeTo: nil, bookmarkDataIsStale: &isStale) else { return nil }
         _ = url.startAccessingSecurityScopedResource()
+        #if os(macOS)
+        if isStale, let newData = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
+            UserDefaults.standard.set(newData, forKey: folderBookmarkKey)
+        }
+        #else
         if isStale, let newData = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) {
             UserDefaults.standard.set(newData, forKey: folderBookmarkKey)
         }
+        #endif
         return url
     }
 
@@ -282,6 +435,29 @@ enum SQLConsoleHelper {
         folders.sort { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
         files.sort { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
         return folders.map { .folder($0) } + files.map { .file($0) }
+    }
+
+    /// Nœud de l'arborescence du browser. Chargement EAGER récursif — le
+    /// répertoire SQL de l'utilisateur est petit (quelques dizaines d'entrées),
+    /// le coût d'un scan complet est négligeable devant la simplicité gagnée.
+    struct TreeNode: Identifiable {
+        let entry: Entry
+        let depth: Int
+        var children: [TreeNode]
+        var id: String { entry.id }   // = url.path : clé stable pour le Set d'expansion
+    }
+
+    /// Construit l'arborescence complète depuis la racine (ou `root`).
+    /// S'appuie sur `listEntries(in:)` à chaque niveau — l'ordre « dossiers
+    /// d'abord, tri alpha » est donc conservé à chaque profondeur.
+    static func buildTree(rootedAt root: URL? = nil, depth: Int = 0) -> [TreeNode] {
+        listEntries(in: root ?? sqlDirectory()).map { entry in
+            TreeNode(
+                entry: entry,
+                depth: depth,
+                children: entry.isFolder ? buildTree(rootedAt: entry.url, depth: depth + 1) : []
+            )
+        }
     }
 
     /// Tous les dossiers récursivement, racine incluse. Utilisé par le picker "Déplacer vers…".
@@ -388,88 +564,168 @@ struct SQLQuerySection: Identifiable {
 // MARK: - Files List View
 
 struct SQLFilesListView: View {
-    /// `nil` = racine (`SQLConsoleHelper.sqlDirectory()`).
-    /// Sinon = sous-dossier à afficher.
-    let directory: URL?
-
-    init(directory: URL? = nil) {
-        self.directory = directory
-    }
 
     @Environment(PurchaseManager.self) private var store
-    @State private var entries: [SQLConsoleHelper.Entry] = []
+    /// Arborescence COMPLÈTE (eager) — les dossiers ne sont plus des vues
+    /// poussées mais des nœuds pliables/dépliables dans une même liste.
+    @State private var tree: [SQLConsoleHelper.TreeNode] = []
+    /// Paths (= `TreeNode.id`) des dossiers actuellement dépliés. `@State`
+    /// suffit : re-déplier après un aller-retour coûte un tap, et persister
+    /// l'expansion en AppStorage serait du bruit pour un répertoire user petit.
+    @State private var expandedPaths: Set<String> = []
+    /// Dossier cible des alertes de création. `nil` = racine (toolbar « + ») ;
+    /// posé par le menu contextuel « Nouveau … ici » d'une row dossier.
+    @State private var creationDir: URL?
     @State private var showCreateFileAlert = false
     @State private var showCreateFolderAlert = false
     @State private var newName = ""
     @State private var selectedFile: URL?
     @State private var showEditor = false
+    /// Doc du schéma en panneau (cf. `.adaptivePane` dans le body) plutôt qu'en push.
+    @State private var showSchema = false
     @State private var renamingEntry: SQLConsoleHelper.Entry?
     @State private var movingEntry: SQLConsoleHelper.Entry?
     @State private var renameInput = ""
     @State private var errorMessage: String?
     private let consoleTip = SQLConsoleTip()
 
-    private var currentDir: URL {
-        directory ?? SQLConsoleHelper.sqlDirectory()
+    private var navTitle: String {
+        #if os(macOS)
+        if let file = selectedFile { return file.deletingPathExtension().lastPathComponent }
+        return "Console SQL"
+        #else
+        "Console SQL"
+        #endif
     }
 
-    private var navTitle: String {
-        directory?.lastPathComponent ?? "Console SQL"
+    /// Aplatissement préfixe de l'arbre : on ne descend dans `children` que si
+    /// le dossier est déplié. Les paths périmés de `expandedPaths` (dossier
+    /// supprimé/déplacé) sont simplement ignorés par le parcours.
+    private var visibleRows: [SQLConsoleHelper.TreeNode] {
+        var rows: [SQLConsoleHelper.TreeNode] = []
+        func walk(_ nodes: [SQLConsoleHelper.TreeNode]) {
+            for node in nodes {
+                rows.append(node)
+                if node.entry.isFolder, expandedPaths.contains(node.id) {
+                    walk(node.children)
+                }
+            }
+        }
+        walk(tree)
+        return rows
     }
 
     var body: some View {
-        List {
-            if directory == nil {
-                TipView(consoleTip, arrowEdge: .none)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
+        #if os(macOS)
+        // ⚠️ Sur macOS, le fichier n'est PAS ouvert par un push (même via
+        // `.navigationDestination(isPresented:)`, la forme "sûre"). Constaté
+        // sur device (2026-08-01) : dès qu'une vue est poussée dans CETTE
+        // NavigationStack, tout `.adaptivePane` ouvert depuis elle (le panneau
+        // latéral desktop de `MainTabView`, cf. `AdaptivePane.swift`) se peint
+        // SOUS le contenu poussé au lieu d'à côté — repro à 100% en ouvrant
+        // l'assistant IA depuis l'éditeur ; redevient visible dès qu'on revient
+        // (pop) à la racine. Root cause côté AppKit/NavigationStack (macOS 27
+        // beta). Remède : zéro push, swap de contenu conditionnel par @State
+        // (`selectedFile`) pour que la NavigationStack du module reste TOUJOURS
+        // à sa racine. Les dossiers, eux, ne naviguent plus DU TOUT depuis la
+        // refonte en arborescence : ils se plient/déplient sur place.
+        Group {
+            if let file = selectedFile {
+                SQLEditorView(fileURL: file)
+            } else {
+                fileListBody
             }
-            if entries.isEmpty {
+        }
+        .navigationTitle(navTitle)
+        .toolbar {
+            if selectedFile != nil {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        selectedFile = nil
+                    } label: {
+                        Label("Retour", systemImage: "chevron.left")
+                    }
+                }
+            }
+        }
+        #else
+        fileListBody
+            .navigationTitle(navTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(isPresented: $showEditor) {
+                if let file = selectedFile { SQLEditorView(fileURL: file) }
+            }
+        #endif
+    }
+
+    // MARK: - File list (contenu partagé, jamais lui-même poussé sur macOS)
+
+    @ViewBuilder
+    private var fileListBody: some View {
+        // L'état vide est rendu HORS de la `List` : dans une row il hérite de la
+        // largeur de la row et se retrouve calé à gauche sur une fenêtre large
+        // (au lieu d'être centré dans la vue). En overlay il occupe toute la
+        // surface disponible et se centre naturellement.
+        List {
+            TipView(consoleTip, arrowEdge: .none)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            ForEach(visibleRows) { node in
+                entryRow(node)
+            }
+        }
+        .overlay {
+            if tree.isEmpty {
                 ContentUnavailableView(
                     "Aucun fichier SQL",
                     systemImage: "doc.text",
                     description: Text("Appuyez sur + pour créer un fichier ou un dossier.")
                 )
-            } else {
-                ForEach(entries) { entry in
-                    entryRow(entry)
-                }
             }
         }
-        .navigationTitle(navTitle)
-        .navigationBarTitleDisplayMode(.inline)
         .paywallOverlay(for: .sqlConsole)
+        // Doc du schéma : contenu de RÉFÉRENCE (une feuille qu'on consulte à côté
+        // de sa requête) → panneau, pas un push. Un push depuis un module empile
+        // une vue dans sa NavigationStack, ce qui pose les problèmes de bascule
+        // de module déjà rencontrés sur Tricount/Investissements (et, depuis,
+        // le masquage du panneau documenté dans `body` ci-dessus).
+        .adaptivePane(isPresented: $showSchema) {
+            DatabaseSchemaView()
+                .paneChrome("Schéma de la base",
+                            cancelLabel: "Fermer", onCancel: { showSchema = false })
+        }
         .toolbar {
-            if directory == nil {
-                ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink {
-                        DatabaseSchemaView()
+            ToolbarItem(placement: .topBarLeading) {
+                ToolbarPaywallGate(feature: .sqlConsole) {
+                    Button {
+                        showSchema = true
                     } label: {
                         Label("Schéma", systemImage: "tablecells")
                     }
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button {
-                        newName = ""
-                        showCreateFileAlert = true
+                ToolbarPaywallGate(feature: .sqlConsole) {
+                    Menu {
+                        Button {
+                            creationDir = nil
+                            newName = ""
+                            showCreateFileAlert = true
+                        } label: {
+                            Label("Nouveau fichier .sql", systemImage: "doc.badge.plus")
+                        }
+                        Button {
+                            creationDir = nil
+                            newName = ""
+                            showCreateFolderAlert = true
+                        } label: {
+                            Label("Nouveau dossier", systemImage: "folder.badge.plus")
+                        }
                     } label: {
-                        Label("Nouveau fichier .sql", systemImage: "doc.badge.plus")
+                        Image(systemName: "plus")
                     }
-                    Button {
-                        newName = ""
-                        showCreateFolderAlert = true
-                    } label: {
-                        Label("Nouveau dossier", systemImage: "folder.badge.plus")
-                    }
-                } label: {
-                    Image(systemName: "plus")
                 }
             }
-        }
-        .navigationDestination(isPresented: $showEditor) {
-            if let file = selectedFile { SQLEditorView(fileURL: file) }
         }
         .alert("Nouveau fichier SQL", isPresented: $showCreateFileAlert) {
             TextField("nom_du_fichier", text: $newName)
@@ -492,7 +748,7 @@ struct SQLFilesListView: View {
             Button("Renommer") { handleRename() }
             Button("Annuler", role: .cancel) { renamingEntry = nil }
         }
-        .sheet(item: $movingEntry) { entry in
+        .adaptivePane(item: $movingEntry) { entry in
             FolderPickerSheet(
                 title: "Déplacer « \(entry.displayName) » vers…",
                 excludingFolder: entry.isFolder ? entry.url : nil
@@ -511,76 +767,132 @@ struct SQLFilesListView: View {
         .onAppear { reload() }
     }
 
+    /// Row de l'arbre — indentation MANUELLE + chevron animé, PAS de
+    /// `DisclosureGroup` : les rows restent des `Button` plats, ce qui garantit
+    /// par construction la compatibilité avec `rowActions` (swipe iOS / clic
+    /// droit macOS) et évite de composer notre indentation avec celle,
+    /// automatique, du DisclosureGroup.
     @ViewBuilder
-    private func entryRow(_ entry: SQLConsoleHelper.Entry) -> some View {
+    private func entryRow(_ node: SQLConsoleHelper.TreeNode) -> some View {
+        let entry = node.entry
         switch entry {
         case .folder(let folderURL):
-            NavigationLink {
-                SQLFilesListView(directory: folderURL)
+            Button {
+                withAnimation(.snappy) {
+                    if expandedPaths.contains(node.id) {
+                        expandedPaths.remove(node.id)
+                    } else {
+                        expandedPaths.insert(node.id)
+                    }
+                }
             } label: {
-                Label(entry.displayName, systemImage: "folder.fill")
-                    .foregroundStyle(AppTheme.Colors.accent)
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .rotationEffect(.degrees(expandedPaths.contains(node.id) ? 90 : 0))
+                        .frame(width: 14)
+                    Label(entry.displayName, systemImage: "folder.fill")
+                        .foregroundStyle(AppTheme.Colors.accent)
+                    Spacer()
+                }
+                .padding(.leading, CGFloat(node.depth) * 18)
+                .contentShape(Rectangle())
             }
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(role: .destructive) {
-                    handleDelete(entry)
-                } label: { Label("Supprimer", systemImage: "trash") }
+            .buttonStyle(.plain)
+            .contextMenu {
                 Button {
-                    movingEntry = entry
-                } label: { Label("Déplacer", systemImage: "folder") }
-                    .tint(AppTheme.Colors.accentSecondary)
+                    creationDir = folderURL
+                    newName = ""
+                    showCreateFileAlert = true
+                } label: {
+                    Label("Nouveau fichier ici", systemImage: "doc.badge.plus")
+                }
                 Button {
+                    creationDir = folderURL
+                    newName = ""
+                    showCreateFolderAlert = true
+                } label: {
+                    Label("Nouveau dossier ici", systemImage: "folder.badge.plus")
+                }
+            }
+            .rowActions(trailing: [
+                RowAction("Supprimer", systemImage: "trash", role: .destructive) { handleDelete(entry) },
+                RowAction("Déplacer", systemImage: "folder", tint: AppTheme.Colors.accentSecondary) { movingEntry = entry },
+                RowAction("Renommer", systemImage: "pencil", tint: AppTheme.Colors.accent) {
                     renameInput = entry.displayName
                     renamingEntry = entry
-                } label: { Label("Renommer", systemImage: "pencil") }
-                    .tint(AppTheme.Colors.accent)
-            }
+                }
+            ], trailingFullSwipe: false)
         case .file(let fileURL):
             Button {
                 selectedFile = fileURL
+                #if !os(macOS)
                 showEditor = true
+                #endif
             } label: {
-                Label(entry.displayName, systemImage: "doc.text.fill")
-                    .foregroundStyle(AppTheme.Colors.textPrimary)
+                HStack(spacing: 6) {
+                    // Réserve la largeur du chevron des dossiers : fichiers et
+                    // dossiers d'une même profondeur restent alignés.
+                    Color.clear.frame(width: 14, height: 1)
+                    Label(entry.displayName, systemImage: "doc.text.fill")
+                        .foregroundStyle(AppTheme.Colors.textPrimary)
+                    Spacer()
+                }
+                .padding(.leading, CGFloat(node.depth) * 18)
+                .contentShape(Rectangle())
             }
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(role: .destructive) {
-                    handleDelete(entry)
-                } label: { Label("Supprimer", systemImage: "trash") }
-                Button {
-                    movingEntry = entry
-                } label: { Label("Déplacer", systemImage: "folder") }
-                    .tint(AppTheme.Colors.accentSecondary)
-                Button {
+            .buttonStyle(.plain)
+            .rowActions(trailing: [
+                RowAction("Supprimer", systemImage: "trash", role: .destructive) { handleDelete(entry) },
+                RowAction("Déplacer", systemImage: "folder", tint: AppTheme.Colors.accentSecondary) { movingEntry = entry },
+                RowAction("Renommer", systemImage: "pencil", tint: AppTheme.Colors.accent) {
                     renameInput = entry.displayName
                     renamingEntry = entry
-                } label: { Label("Renommer", systemImage: "pencil") }
-                    .tint(AppTheme.Colors.accent)
-            }
+                }
+            ], trailingFullSwipe: false)
         }
     }
 
     // MARK: - Actions
 
     private func reload() {
-        entries = SQLConsoleHelper.listEntries(in: directory)
+        tree = SQLConsoleHelper.buildTree()
+    }
+
+    /// Rend visible ce qu'on vient de créer/déplacer : déplie le dossier cible.
+    /// Ses ancêtres sont forcément déjà dépliés quand la cible vient d'un menu
+    /// contextuel (la row était visible) ; après un « Déplacer vers… », on
+    /// déplie toute la chaîne d'ancêtres sous la racine SQL.
+    private func revealFolder(_ folder: URL?) {
+        guard let folder else { return }
+        let rootPath = SQLConsoleHelper.sqlDirectory().path
+        var current = folder
+        while current.path.hasPrefix(rootPath), current.path != rootPath {
+            expandedPaths.insert(current.path)
+            current = current.deletingLastPathComponent()
+        }
     }
 
     private func handleCreateFile() {
-        guard let url = SQLConsoleHelper.createFile(name: newName, in: directory) else {
+        guard let url = SQLConsoleHelper.createFile(name: newName, in: creationDir) else {
             errorMessage = "Impossible de créer ce fichier (nom invalide ou déjà existant)."
             return
         }
+        revealFolder(creationDir)
         reload()
         selectedFile = url
+        #if !os(macOS)
         showEditor = true
+        #endif
     }
 
     private func handleCreateFolder() {
-        guard SQLConsoleHelper.createFolder(name: newName, in: directory) != nil else {
+        guard SQLConsoleHelper.createFolder(name: newName, in: creationDir) != nil else {
             errorMessage = "Impossible de créer ce dossier (nom invalide ou déjà existant)."
             return
         }
+        revealFolder(creationDir)
         reload()
     }
 
@@ -599,6 +911,7 @@ struct SQLFilesListView: View {
             errorMessage = "Déplacement impossible (un élément du même nom existe déjà)."
             return
         }
+        revealFolder(destination)
         reload()
     }
 
@@ -617,7 +930,8 @@ private struct FolderPickerSheet: View {
     let excludingFolder: URL?
     let onSelect: (URL) -> Void
 
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
 
     private var folders: [(label: String, url: URL)] {
         let all = SQLConsoleHelper.listAllFoldersRecursive()
@@ -670,79 +984,44 @@ struct SQLEditorView: View {
     @State private var sections: [SQLQuerySection] = []
     @State private var isExecuting = false
     @State private var saveStatus: String? = nil
-    @State private var detectedVars: [String] = []
+    @State private var detectedVarSpecs: [SQLVariableSpec] = []
     @State private var variables: [String: String] = [:]
     @State private var currentPage: Int = 0   // 0 = results, 1 = editor
     @State private var showAssistant: Bool = false
 
     private var fileName: String { fileURL.deletingPathExtension().lastPathComponent }
-    private var hasUnfilledVars: Bool { detectedVars.contains { (variables[$0] ?? "").isEmpty } }
+    private var hasUnfilledVars: Bool { detectedVarSpecs.contains { (variables[$0.name] ?? "").isEmpty } }
 
     var body: some View {
-        TabView(selection: $currentPage) {
-
-            // ── Page 0: Results ──────────────────────────────────────────
-            VStack(spacing: 0) {
-                if !detectedVars.isEmpty {
-                    VariableFormView(variables: $variables, names: detectedVars)
-                }
-
-                if isExecuting {
-                    Spacer()
-                    ProgressView("Exécution…").frame(maxWidth: .infinity)
-                    Spacer()
-                } else if sections.isEmpty {
-                    VStack(spacing: 20) {
-                        Image(systemName: "play.circle")
-                            .font(.system(size: 56)).foregroundStyle(AppTheme.Colors.textSecondary)
-                        Text("Appuyez sur Exécuter pour lancer la requête")
-                            .foregroundStyle(AppTheme.Colors.textSecondary).multilineTextAlignment(.center)
-                        Button("Exécuter") { runAndStay() }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(sqlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasUnfilledVars)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding()
-                } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 12) {
-                            ForEach(sections) { SQLResultSectionView(section: $0) }
-                        }
-                        .padding()
-                    }
-                }
-
-                // Swipe hint
-                swipeHint(label: "Glisser pour éditer", icon: "chevron.right")
+        Group {
+            #if os(macOS)
+            // Le swipe entre pages n'existe pas au trackpad de la même façon,
+            // et `.tabViewStyle(.page(...))` est shimmé vers le TabView natif
+            // macOS (PlatformShims.swift) qui, sans `.tabItem`, dessine deux
+            // boutons de bascule VIERGES (le "pilule transparente" observée) —
+            // seule issue : le picker segmenté explicite ci-dessous.
+            if currentPage == 0 { resultsPage } else { editorPage }
+            #else
+            TabView(selection: $currentPage) {
+                resultsPage.tag(0)
+                editorPage.tag(1)
             }
-            .tag(0)
-
-            // ── Page 1: Editor ───────────────────────────────────────────
-            VStack(spacing: 0) {
-                SyntaxHighlightingEditor(text: $sqlText)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.secondarySystemBackground))
-                    .onChange(of: sqlText) { _, new in
-                        autoSave()
-                        refreshVariables(new)
-                    }
-
-                if let status = saveStatus {
-                    Text(status)
-                        .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .padding(.horizontal, 12).padding(.bottom, 2)
-                }
-
-                // Swipe hint
-                swipeHint(label: "Glisser pour les résultats", icon: "chevron.left")
-            }
-            .tag(1)
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            #endif
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
         .navigationTitle(fileName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            #if os(macOS)
+            ToolbarItem(placement: .principal) {
+                Picker("Page", selection: $currentPage) {
+                    Text("Résultats").tag(0)
+                    Text("Éditeur").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+            #endif
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showAssistant = true } label: {
                     Image(systemName: "sparkles")
@@ -754,7 +1033,7 @@ struct SQLEditorView: View {
                     .disabled(isExecuting || sqlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .sheet(isPresented: $showAssistant) {
+        .adaptivePane(isPresented: $showAssistant) {
             SQLAssistantSheet { generatedSQL in
                 // Si l'éditeur a déjà du contenu, on append (avec un saut de section
                 // SQL pour que le parseur de queries nommées le voie comme un nouveau bloc).
@@ -771,6 +1050,71 @@ struct SQLEditorView: View {
         .onAppear { loadFile() }
     }
 
+    // ── Page 0: Results ──────────────────────────────────────────────────
+    @ViewBuilder
+    private var resultsPage: some View {
+        VStack(spacing: 0) {
+            if !detectedVarSpecs.isEmpty {
+                VariableFormView(variables: $variables, specs: detectedVarSpecs)
+            }
+
+            if isExecuting {
+                Spacer()
+                ProgressView("Exécution…").frame(maxWidth: .infinity)
+                Spacer()
+            } else if sections.isEmpty {
+                VStack(spacing: 20) {
+                    Image(systemName: "play.circle")
+                        .font(.system(size: 56)).foregroundStyle(AppTheme.Colors.textSecondary)
+                    Text("Appuyez sur Exécuter pour lancer la requête")
+                        .foregroundStyle(AppTheme.Colors.textSecondary).multilineTextAlignment(.center)
+                    Button("Exécuter") { runAndStay() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(sqlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasUnfilledVars)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(sections) { SQLResultSectionView(section: $0) }
+                    }
+                    .padding()
+                }
+            }
+
+            #if !os(macOS)
+            swipeHint(label: "Glisser pour éditer", icon: "chevron.right")
+            #endif
+        }
+    }
+
+    // ── Page 1: Editor ───────────────────────────────────────────────────
+    @ViewBuilder
+    private var editorPage: some View {
+        VStack(spacing: 0) {
+            SyntaxHighlightingEditor(text: $sqlText)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.secondarySystemBackground))
+                .onChange(of: sqlText) { _, new in
+                    autoSave()
+                    refreshVariables(new)
+                }
+
+            if let status = saveStatus {
+                Text(status)
+                    .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.horizontal, 12).padding(.bottom, 2)
+            }
+
+            #if !os(macOS)
+            swipeHint(label: "Glisser pour les résultats", icon: "chevron.left")
+            #endif
+        }
+    }
+
+    #if !os(macOS)
     @ViewBuilder
     private func swipeHint(label: String, icon: String) -> some View {
         HStack(spacing: 4) {
@@ -781,6 +1125,7 @@ struct SQLEditorView: View {
         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
         .padding(.vertical, 6)
     }
+    #endif
 
     // MARK: - File I/O
 
@@ -789,9 +1134,9 @@ struct SQLEditorView: View {
         refreshVariables(sqlText)
         // Auto-run if file has content and no variables to fill
         let trimmed = sqlText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty && detectedVars.isEmpty {
+        if !trimmed.isEmpty && detectedVarSpecs.isEmpty {
             executeSQL()          // run immediately, stay on results page
-        } else if !detectedVars.isEmpty {
+        } else if !detectedVarSpecs.isEmpty {
             currentPage = 1       // go to editor so user can fill in variables
         }
     }
@@ -808,24 +1153,11 @@ struct SQLEditorView: View {
     // MARK: - Variables
 
     private func refreshVariables(_ sql: String) {
-        let found = extractVariables(from: sql)
+        let found = SQLVariableParsing.extract(from: sql)
         var updated: [String: String] = [:]
-        for v in found { updated[v] = variables[v] ?? "" }
-        detectedVars = found
+        for spec in found { updated[spec.name] = variables[spec.name] ?? spec.defaultValue ?? "" }
+        detectedVarSpecs = found
         variables = updated
-    }
-
-    private func extractVariables(from sql: String) -> [String] {
-        guard let re = try? NSRegularExpression(pattern: "\\{\\{([^}]+)\\}\\}") else { return [] }
-        let range = NSRange(sql.startIndex..., in: sql)
-        var seen = Set<String>(); var result: [String] = []
-        re.enumerateMatches(in: sql, range: range) { m, _, _ in
-            if let r = m?.range(at: 1), let sr = Range(r, in: sql) {
-                let name = String(sql[sr]).trimmingCharacters(in: .whitespaces)
-                if seen.insert(name).inserted { result.append(name) }
-            }
-        }
-        return result
     }
 
     // MARK: - Execution
@@ -848,12 +1180,9 @@ struct SQLEditorView: View {
         let repo = repository
         let vars = variables
         Task.detached(priority: .userInitiated) { [vars] in
-            func sub(_ sql: String) -> String {
-                vars.reduce(sql) { $0.replacingOccurrences(of: "{{\($1.key)}}", with: $1.value) }
-            }
             var results: [SQLQuerySection] = []
             for q in queries {
-                let sql = vars.isEmpty ? q.sql : sub(q.sql)
+                let sql = vars.isEmpty ? q.sql : SQLVariableParsing.substitute(q.sql, values: vars)
                 let outcome = repo.executeSQL(sql)
                 switch outcome {
                 case .success(let res): results.append(SQLQuerySection(label: q.name, sql: sql, result: res, error: nil))
@@ -862,10 +1191,6 @@ struct SQLEditorView: View {
             }
             await MainActor.run { sections = results; isExecuting = false }
         }
-    }
-
-    private func substituteVariables(_ sql: String, values: [String: String]) -> String {
-        values.reduce(sql) { $0.replacingOccurrences(of: "{{\($1.key)}}", with: $1.value) }
     }
 
     // MARK: - Query Parsing

@@ -24,29 +24,33 @@ struct EnrichmentRepository {
     /// Sémantique UPSERT identique à l'ancien SQL (COALESCE par champ, MAX(confidence)) :
     /// les valeurs non-nil du nouveau résultat écrasent l'existant, sinon on garde l'ancien.
     /// La confidence stockée est le max des deux.
+    ///
+    /// ⚠️ Écrit par **overlay sur l'existant**, pas en ré-énumérant chaque champ dans un
+    /// initialiseur. La version précédente reconstruisait un `MerchantEnrichment` champ par
+    /// champ et avait donc silencieusement perdu `searchHint` le jour où il a été ajouté.
+    /// Avec l'overlay, un nouveau champ optionnel est conservé par défaut : il n'y a plus
+    /// de liste à tenir à jour, donc plus rien à oublier.
     @discardableResult
     func save(cacheKey: String, result: MerchantEnrichment) async -> Bool {
         await MainActor.run {
-            let merged: MerchantEnrichment
+            var merged = result
             if let existing = Self.store.get(cacheKey) {
-                merged = MerchantEnrichment(
-                    displayName: result.displayName ?? existing.displayName,
-                    domain:      result.domain      ?? existing.domain,
-                    categoryId:  result.categoryId  ?? existing.categoryId,
-                    address:     result.address     ?? existing.address,
-                    city:        result.city        ?? existing.city,
-                    country:     result.country     ?? existing.country,
-                    latitude:    result.latitude    ?? existing.latitude,
-                    longitude:   result.longitude   ?? existing.longitude,
-                    phone:       result.phone       ?? existing.phone,
-                    siret:       result.siret       ?? existing.siret,
-                    nafCode:     result.nafCode     ?? existing.nafCode,
-                    source:      result.source,
-                    confidence:  max(result.confidence, existing.confidence),
-                    enrichedAt:  result.enrichedAt
-                )
-            } else {
-                merged = result
+                merged.displayName  = result.displayName  ?? existing.displayName
+                merged.domain       = result.domain       ?? existing.domain
+                merged.categoryId   = result.categoryId   ?? existing.categoryId
+                merged.address      = result.address      ?? existing.address
+                merged.city         = result.city         ?? existing.city
+                merged.country      = result.country      ?? existing.country
+                merged.latitude     = result.latitude     ?? existing.latitude
+                merged.longitude    = result.longitude    ?? existing.longitude
+                merged.phone        = result.phone        ?? existing.phone
+                merged.siret        = result.siret        ?? existing.siret
+                merged.nafCode      = result.nafCode      ?? existing.nafCode
+                merged.searchHint   = result.searchHint   ?? existing.searchHint
+                merged.siren        = result.siren        ?? existing.siren
+                merged.postalCode   = result.postalCode   ?? existing.postalCode
+                merged.categoryHint = result.categoryHint ?? existing.categoryHint
+                merged.confidence   = max(result.confidence, existing.confidence)
             }
             Self.store.set(cacheKey, value: merged)
             return true

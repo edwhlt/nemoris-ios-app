@@ -661,13 +661,14 @@ struct BinanceTaxView: View {
         Form {
             apiSection
             Section("Année fiscale") {
-                Stepper("Année \(vm.year)", value: $vm.year, in: 2017...Calendar.current.component(.year, from: Date()))
+                Stepper("Année \(vm.year.yearLabel)", value: $vm.year, in: 2017...Calendar.current.component(.year, from: Date()))
             }
             calculationSection
             additionalAssetsSection
             if let report = vm.report { reportSection(report) }
             disclaimerSection
         }
+        .nemorisFormStyle()
         .navigationTitle("Fiscal Binance")
         .navigationBarTitleDisplayMode(.large)
     }
@@ -729,7 +730,7 @@ struct BinanceTaxView: View {
                             .font(.subheadline)
                     }
                 } else {
-                    Label("Calculer le rapport \(vm.year)", systemImage: "doc.text.magnifyingglass")
+                    Label("Calculer le rapport \(vm.year.yearLabel)", systemImage: "doc.text.magnifyingglass")
                         .fontWeight(.medium)
                 }
             }
@@ -784,7 +785,7 @@ struct BinanceTaxView: View {
                     .foregroundStyle(AppTheme.Colors.warning)
             }
         } header: {
-            Text("Résumé \(report.year)")
+            Text("Résumé \(report.year.yearLabel)")
         } footer: {
             Text("Symboles analysés : \(report.scannedSymbols.joined(separator: ", "))")
                 .font(.caption2)
@@ -812,12 +813,12 @@ struct BinanceTaxView: View {
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .font(.subheadline)
                 } else {
-                    Label("Aucune cession en \(report.year). Les ventes ont eu lieu sur d'autres années.", systemImage: "calendar.badge.minus")
+                    Label("Aucune cession en \(report.year.yearLabel). Les ventes ont eu lieu sur d'autres années.", systemImage: "calendar.badge.minus")
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .font(.subheadline)
                 }
             } header: {
-                Text("Cessions \(report.year)")
+                Text("Cessions \(report.year.yearLabel)")
             }
         } else {
             Section {
@@ -825,13 +826,13 @@ struct BinanceTaxView: View {
                     tradeRow(trade)
                 }
             } header: {
-                Text("Cessions \(report.year) (\(report.trades.count))")
+                Text("Cessions \(report.year.yearLabel) (\(report.trades.count))")
             }
 
             Section {
                 ShareLink(
                     item: generateCSV(report),
-                    preview: SharePreview("rapport_fiscal_\(report.year).csv",
+                    preview: SharePreview("rapport_fiscal_\(report.year.yearLabel).csv",
                                          image: Image(systemName: "doc.text"))
                 ) {
                     Label("Exporter le rapport CSV", systemImage: "square.and.arrow.up")

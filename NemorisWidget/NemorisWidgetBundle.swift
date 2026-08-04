@@ -14,6 +14,5 @@ struct NemorisWidgetBundle: WidgetBundle {
         NemorisWidget()
         BudgetWidget()
         BudgetLockWidget()
-        NemorisWidgetControl()
     }
 }

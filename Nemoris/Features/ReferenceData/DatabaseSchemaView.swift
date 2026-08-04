@@ -9,7 +9,11 @@ import UIKit
 ///
 /// ⚠️ Source statique : si tu ajoutes une migration qui change le schéma, mets à
 /// jour `SchemaDoc.domains` ci-dessous (cf. version courante du schéma dans
-/// `DatabaseManager.migrations` — v39 au moment de l'écriture).
+/// `DatabaseManager.migrations` — v44 au moment de l'écriture).
+///
+/// Cette doc alimente AUSSI le prompt de l'assistant SQL (`SQLAssistantService.
+/// systemInstructions` → `SchemaDoc.llmSchemaPrompt`) : une colonne listée ici
+/// mais absente en base fait halluciner l'assistant sur une colonne inexistante.
 struct DatabaseSchemaView: View {
     @State private var expandedTables: Set<String> = []
     @State private var copiedQuery: String? = nil
@@ -424,7 +428,6 @@ enum SchemaDoc {
                     .init("payee_id",                 "INTEGER", fk: true, "Tiers (peut être NULL pour opé bancaire interne)"),
                     .init("category_id",              "INTEGER", fk: true, "NULL = non catégorisé"),
                     .init("payment_type_id",          "INTEGER", fk: true, "CB, Virement, Prélèvement…"),
-                    .init("reimbursement_payee_id",   "INTEGER", fk: true, "Si dépense remboursée par un tiers"),
                     .init("information",              "TEXT", "Note libre user"),
                     .init("libelle_brut",             "TEXT", "Libellé bancaire original (depuis v9)"),
                     .init("amount",                   "REAL", "Négatif = dépense, positif = revenu"),
@@ -432,13 +435,34 @@ enum SchemaDoc {
                 ],
                 relations: [
                     "→ accounts.id",
-                    "→ payees.id (payee_id, reimbursement_payee_id)",
+                    "→ payees.id (payee_id)",
                     "→ categories.id",
-                    "→ payment_types.id"
+                    "→ payment_types.id",
+                    "← reimbursements.transaction_id (0..1, si remboursée par un tiers — v44)"
                 ],
                 example: .init(
                     title: "Dépenses par mois sur l'année",
                     sql: "SELECT strftime('%Y-%m', tx_date) AS mois,\n       SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END) AS depenses,\n       SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS revenus\nFROM transactions\nWHERE strftime('%Y', tx_date) = strftime('%Y', 'now')\nGROUP BY mois\nORDER BY mois;"
+                )
+            ),
+            SchemaTable(
+                name: "reimbursements",
+                systemImage: "arrow.uturn.left.circle",
+                summary: "Suivi des remboursements attendus d'un tiers",
+                description: "Rattachée à une transaction simple OU une entrée Tricount (jamais les deux — v44). Côté transaction : 0..1 payee, `amount` NULL (= montant entier de la transaction). Côté Tricount : 0..N payees, `amount` = part personnelle éditable.",
+                columns: [
+                    .init("id",                "INTEGER", nullable: false, pk: true),
+                    .init("transaction_id",    "INTEGER", fk: true, "XOR avec tricount_entry_id"),
+                    .init("tricount_entry_id", "INTEGER", fk: true, "XOR avec transaction_id"),
+                    .init("payee_id",          "INTEGER", nullable: false, fk: true, "Le tiers qui doit rembourser"),
+                    .init("amount",            "REAL", "NULL si transaction_id (montant implicite = celui de la transaction)"),
+                    .init("currency",          "TEXT", nullable: false),
+                    .init("status",            "TEXT", nullable: false, "PENDING | RECEIVED"),
+                ],
+                relations: ["→ transactions.id", "→ tricount_entries.id", "→ payees.id"],
+                example: .init(
+                    title: "Total attendu par tiers (en attente)",
+                    sql: "SELECT p.name, SUM(r.amount) AS total\nFROM reimbursements r\nJOIN payees p ON p.id = r.payee_id\nWHERE r.status = 'PENDING'\nGROUP BY p.id\nORDER BY total DESC;"
                 )
             ),
             SchemaTable(
@@ -679,21 +703,6 @@ enum SchemaDoc {
                 relations: ["→ tricount_entries.id"],
                 example: nil
             ),
-            SchemaTable(
-                name: "tricount_reimbursements",
-                systemImage: "arrow.uturn.left.circle",
-                summary: "Remboursements liés à une entrée vers un payee",
-                description: "Quand un participant d'un Tricount te rembourse via un payee Nemoris.",
-                columns: [
-                    .init("id",       "INTEGER", nullable: false, pk: true),
-                    .init("entry_id", "INTEGER", nullable: false, fk: true),
-                    .init("payee_id", "INTEGER", nullable: false, fk: true),
-                    .init("amount",   "REAL", nullable: false),
-                    .init("currency", "TEXT", nullable: false),
-                ],
-                relations: ["→ tricount_entries.id", "→ payees.id"],
-                example: nil
-            ),
         ]
     )
 
@@ -706,15 +715,13 @@ enum SchemaDoc {
                 name: "investment_accounts",
                 systemImage: "chart.line.uptrend.xyaxis",
                 summary: "Comptes d'investissement (CTO, PEA, etc.)",
-                description: "Account_type : CTO | PEA | ASSURANCE_VIE | CRYPTO_EXCHANGE | CRYPTO_WALLET. Séparé de la table accounts. `current_value` et `invested_amount` sont calculés à la volée depuis les positions/ordres (legacy, conservés pour rétro-compat).",
+                description: "Account_type : CTO | PEA | ASSURANCE_VIE | CRYPTO_EXCHANGE | CRYPTO_WALLET. Séparé de la table accounts. Pas de colonne `current_value`/`invested_amount` stockée (DROP COLUMN en v30) — valorisation totale = SUM(investment_positions.current_value) + cash_balance, voir l'exemple ci-dessous.",
                 columns: [
                     .init("id",              "INTEGER", nullable: false, pk: true),
                     .init("name",            "TEXT", nullable: false),
                     .init("broker",          "TEXT", nullable: false),
                     .init("currency",        "TEXT", nullable: false, "EUR par défaut"),
                     .init("account_type",    "TEXT", nullable: false),
-                    .init("current_value",   "REAL", nullable: false, "Legacy / cache"),
-                    .init("invested_amount", "REAL", nullable: false, "Legacy / cache"),
                     .init("opened_at",       "TEXT", nullable: false),
                     .init("cash_balance",    "REAL", nullable: false, "Trésorerie disponible (v34)"),
                 ],
@@ -728,7 +735,7 @@ enum SchemaDoc {
                 name: "investment_positions",
                 systemImage: "chart.bar",
                 summary: "Positions individuelles (actions, ETF, etc.)",
-                description: "Asset_type : STOCK | ETF | BOND | CRYPTO. `quantity`, `average_buy_price` et `purchase_date` sont DÉRIVÉS des `investment_orders` (recalculés par `recomputePositionFromOrders`). Cours historiques en cache disque (Library/Caches), plus en SQL.",
+                description: "Asset_type : STOCK | ETF | BOND | CRYPTO. Pas de colonne `quantity`/`average_buy_price`/`purchase_date` stockée (DROP COLUMN en v30) — calculées à la volée depuis `investment_orders` (voir l'exemple : même logique que `InvestmentRepository.fetchAccounts()`). `current_value` reste une colonne stockée (qty × dernier cours connu, mise à jour par la sync). Cours historiques en cache disque (Library/Caches), plus en SQL.",
                 columns: [
                     .init("id",                  "INTEGER", nullable: false, pk: true),
                     .init("account_id",          "INTEGER", nullable: false, fk: true),
@@ -736,15 +743,12 @@ enum SchemaDoc {
                     .init("asset_name",          "TEXT", nullable: false),
                     .init("ticker",              "TEXT", "Ex. « HO.PA », « AAPL », « BTC »"),
                     .init("isin",                "TEXT", "Identifiant universel ISIN (v31, ex. « FR0000121329 »)"),
-                    .init("quantity",            "REAL", nullable: false, "DÉRIVÉ des ordres"),
-                    .init("average_buy_price",   "REAL", nullable: false, "PRU pondéré DÉRIVÉ des BUY"),
                     .init("current_value",       "REAL", nullable: false, "qty × dernier cours connu"),
-                    .init("purchase_date",       "TEXT", nullable: false, "Date du 1er BUY"),
                 ],
                 relations: ["→ investment_accounts.id", "investment_orders.position_id → investment_positions.id"],
                 example: .init(
-                    title: "Performance par position",
-                    sql: "SELECT p.asset_name, p.ticker, p.quantity,\n       p.average_buy_price AS pru,\n       p.current_value,\n       (p.current_value - p.quantity * p.average_buy_price) AS gain_perte\nFROM investment_positions p\nWHERE p.quantity > 0\nORDER BY gain_perte DESC;"
+                    title: "Performance par position (qty/PRU dérivés des ordres)",
+                    sql: "WITH position_summary AS (\n    SELECT p.id, p.asset_name, p.ticker, p.current_value,\n           COALESCE(SUM(CASE WHEN o.order_type='BUY'  THEN o.quantity ELSE 0 END), 0)\n             - COALESCE(SUM(CASE WHEN o.order_type='SELL' THEN o.quantity ELSE 0 END), 0) AS qty,\n           COALESCE(SUM(CASE WHEN o.order_type='BUY' THEN o.quantity*o.unit_price + o.fees ELSE 0 END), 0)\n             / NULLIF(SUM(CASE WHEN o.order_type='BUY' THEN o.quantity ELSE 0 END), 0) AS pru\n    FROM investment_positions p\n    LEFT JOIN investment_orders o ON o.position_id = p.id\n    GROUP BY p.id\n)\nSELECT asset_name, ticker, qty, pru, current_value,\n       (current_value - qty * pru) AS gain_perte\nFROM position_summary\nWHERE qty > 0\nORDER BY gain_perte DESC;"
                 )
             ),
             SchemaTable(
@@ -955,7 +959,7 @@ enum SchemaDoc {
         SchemaRecipe(
             title: "Patrimoine net (actifs − dettes)",
             icon: "building.columns.fill",
-            sql: "SELECT 'Immobilier' AS type, SUM(current_value) AS valeur FROM patrimoine_real_estate\nUNION ALL\nSELECT 'Mobilier & Liquidités', SUM(COALESCE(last_known_value, manual_value)) FROM patrimoine_assets\nUNION ALL\nSELECT 'Investissements', SUM(current_value) FROM investment_positions WHERE quantity > 0\nUNION ALL\nSELECT 'Dettes (prêts)', -SUM(principal) FROM patrimoine_loans;"
+            sql: "SELECT 'Immobilier' AS type, SUM(current_value) AS valeur FROM patrimoine_real_estate\nUNION ALL\nSELECT 'Mobilier & Liquidités', SUM(COALESCE(last_known_value, manual_value)) FROM patrimoine_assets\nUNION ALL\nSELECT 'Investissements', SUM(p.current_value)\nFROM investment_positions p\nWHERE (\n    SELECT COALESCE(SUM(CASE WHEN o.order_type='BUY'  THEN o.quantity ELSE 0 END), 0)\n         - COALESCE(SUM(CASE WHEN o.order_type='SELL' THEN o.quantity ELSE 0 END), 0)\n    FROM investment_orders o WHERE o.position_id = p.id\n) > 0\nUNION ALL\nSELECT 'Dettes (prêts)', -SUM(principal) FROM patrimoine_loans;"
         ),
     ]
 }

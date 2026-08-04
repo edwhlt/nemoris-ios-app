@@ -52,11 +52,12 @@ struct CandidatePin: View {
 
     private var sourceColor: Color {
         switch source {
-        case .sirene: return .blue
-        case .mapkit: return .green
-        case .llm:    return .purple
-        case .merged: return AppTheme.Colors.accent
-        case .manual: return .orange
+        case .sirene:   return .blue
+        case .mapkit:   return .green
+        case .llm:      return .purple
+        case .localLLM: return .teal
+        case .merged:   return AppTheme.Colors.accent
+        case .manual:   return .orange
         }
     }
 
@@ -131,11 +132,12 @@ struct CandidatePin: View {
 
         // Fallback selon source
         switch source {
-        case .sirene: return "building.2.fill"
-        case .mapkit: return "mappin.circle.fill"
-        case .llm:    return "sparkles"
-        case .merged: return "circle.grid.cross.fill"
-        case .manual: return "hand.point.up.fill"
+        case .sirene:   return "building.2.fill"
+        case .mapkit:   return "mappin.circle.fill"
+        case .llm:      return "sparkles"
+        case .localLLM: return "server.rack"
+        case .merged:   return "circle.grid.cross.fill"
+        case .manual:   return "hand.point.up.fill"
         }
     }
 }

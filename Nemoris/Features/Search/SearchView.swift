@@ -16,7 +16,8 @@ import SwiftUI
 // scope. L'user voit la liste filtrable directement.
 
 struct SearchView: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     @Environment(AppState.self) private var appState
     @State private var query: String = ""
     @State private var results: [SearchResult] = []
@@ -38,7 +39,6 @@ struct SearchView: View {
     }
 
     var body: some View {
-        NavigationStack {
             ZStack {
                 AppTheme.Colors.background.ignoresSafeArea()
                 VStack(spacing: 0) {
@@ -89,13 +89,6 @@ struct SearchView: View {
                     }
                 }
             }
-            .navigationTitle("Rechercher")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
-                }
-            }
             .onAppear {
                 // ⚠️ Pas d'auto-focus sur Mac (Designed for iPad) : le focus
                 // programmatique traverse UIScreen dans la couche de compat
@@ -106,7 +99,7 @@ struct SearchView: View {
                     queryFieldFocused = true
                 }
             }
-        }
+            .paneChrome("Rechercher", cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 
     // MARK: - Search bar

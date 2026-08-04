@@ -7,13 +7,13 @@ import TipKit
 struct FilteredDashboardView: View {
     let filter: TransactionFilter
 
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     @Environment(PurchaseManager.self) private var store
     @State private var vm = FilteredDashboardViewModel()
     private let chartTip = FilteredChartTip()
 
     var body: some View {
-        NavigationStack {
             ZStack {
                 AppTheme.Colors.background.ignoresSafeArea()
                 ScrollView {
@@ -55,20 +55,12 @@ struct FilteredDashboardView: View {
                     .padding(.bottom, AppTheme.Spacing.xxxl)
                 }
             }
-            .navigationTitle("Analyse filtrée")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
-                        .foregroundStyle(AppTheme.Colors.accent)
-                }
-            }
             .task {
                 await Task.yield()
                 vm.load(filter: filter)
             }
-        }
-        .paywallOverlay(for: .filteredDashboard)
+            .paywallOverlay(for: .filteredDashboard)
+            .paneChrome("Analyse filtrée", cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 
     // MARK: - Filter Badges

@@ -347,7 +347,14 @@ final class InvestmentsViewModel {
     private func seriesHistory(for position: InvestmentPosition,
                                range: InvestmentTimeRange) -> [InvestmentPricePoint] {
         if range == .oneDay {
-            let intraday = resolveHistory(for: position, cutoff: range.startDate, resolution: .intraday30m)
+            // ⚠️ Pas de `cutoff: range.startDate` ici : une fenêtre calée sur
+            // `Date()` est VIDE dès qu'on consulte hors séance (le samedi, la
+            // dernière cotation du vendredi a plus de 24 h) → repli sur le
+            // quotidien → courbe à 2 points. On récupère la série intraday
+            // entière (rétention 96 h) puis on garde les dernières 24 h COTÉES,
+            // ancrées sur le dernier point réel. Cf. `lastQuotedWindow`.
+            let intraday = resolveHistory(for: position, cutoff: nil, resolution: .intraday30m)
+                .lastQuotedWindow()
             if !intraday.isEmpty { return intraday }
             return resolveHistory(for: position, cutoff: nil, resolution: .daily)
         }

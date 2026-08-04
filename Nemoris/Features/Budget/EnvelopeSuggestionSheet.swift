@@ -10,7 +10,8 @@ import SwiftUI
 // max — sinon l'user va à la pêche aux montants à la main et abandonne.
 
 struct EnvelopeSuggestionSheet: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     @Environment(AppState.self) private var appState
     let viewModel: BudgetViewModel
     let existingEnvelopes: [BudgetEnvelope]
@@ -23,7 +24,6 @@ struct EnvelopeSuggestionSheet: View {
     @State private var isCreating: Bool = false
 
     var body: some View {
-        NavigationStack {
             Group {
                 if isLoading {
                     loadingState
@@ -34,27 +34,13 @@ struct EnvelopeSuggestionSheet: View {
                 }
             }
             .background(AppTheme.Colors.background)
-            .navigationTitle("Suggestions")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task { await createSelected() }
-                    } label: {
-                        if isCreating {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Text("Créer (\(selected.count))")
-                        }
-                    }
-                    .disabled(selected.isEmpty || isCreating)
-                }
-            }
             .task { await loadSuggestions() }
-        }
+            .paneChrome("Suggestions",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: isCreating ? "Création…" : "Créer (\(selected.count))",
+                        confirmDisabled: selected.isEmpty || isCreating) {
+                Task { await createSelected() }
+            }
     }
 
     // MARK: - States

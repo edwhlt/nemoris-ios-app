@@ -2,60 +2,56 @@ import AppIntents
 import Foundation
 import UniformTypeIdentifiers
 
-// MARK: - Get Monthly Balance
+// (GetMonthlyBalanceIntent supprimé 2026-07-22 — doublon du widget Solde,
+//  jamais utilisé en vocal. Le widget lit toujours WidgetDataStore directement.)
 
-struct GetMonthlyBalanceIntent: AppIntent {
-    static let title: LocalizedStringResource = "Solde du mois"
-    static let description = IntentDescription(
-        "Affiche vos dépenses, revenus et balance nette du mois en cours."
-    )
+// MARK: - Import Transactions CSV
 
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        let snapshot = WidgetDataStore.load()
-
-        let fmt = NumberFormatter()
-        fmt.numberStyle = .currency
-        fmt.currencyCode = "EUR"
-        fmt.maximumFractionDigits = 2
-
-        func money(_ v: Double) -> String {
-            fmt.string(from: NSNumber(value: v)) ?? "\(v) €"
-        }
-
-        let sign = snapshot.netBalance >= 0 ? "+" : ""
-        let monthFmt = DateFormatter()
-        monthFmt.dateFormat = "MMMM yyyy"
-        let month = monthFmt.string(from: snapshot.updatedAt).capitalized
-
-        let text = """
-        \(snapshot.accountName) · \(month)
-        Dépenses : \(money(snapshot.monthExpense))
-        Revenus : \(money(snapshot.monthIncome))
-        Balance : \(sign)\(money(snapshot.netBalance))
-        """
-
-        return .result(dialog: IntentDialog(stringLiteral: text))
-    }
-}
-
-// MARK: - Import CSV File
-
+/// Dépose un relevé bancaire CSV dans Nemoris via Siri, un raccourci ou la share
+/// extension. AUCUN import silencieux : le fichier part dans `PendingImportInbox`
+/// (kind `.transactions`) et l'app s'ouvre sur `ImportV3EntryView` pré-rempli —
+/// l'utilisateur confirme le compte cible puis passe par le mapping habituel.
 struct ImportFileIntent: AppIntent {
-    static let title: LocalizedStringResource = "Importer un fichier CSV"
+    static let title: LocalizedStringResource = "Importer des transactions (CSV)"
     static let description = IntentDescription(
-        "Envoie un relevé bancaire CSV à Nemoris pour import immédiat."
+        "Envoie un relevé bancaire CSV à Nemoris. L'app s'ouvre sur l'import pour choisir le compte, mapper les colonnes et valider les transactions."
     )
     static let openAppWhenRun: Bool = true
 
-    @Parameter(title: "Fichier CSV") var file: IntentFile
+    @Parameter(title: "Fichiers") var files: [IntentFile]
+
+    // Expose le paramètre comme jeton inline dans l'éditeur Raccourcis :
+    // sans ça, le paramètre est résolu à l'exécution (= file picker Fichiers
+    // imposé) et on ne peut PAS y déposer une variable / l'entrée du raccourci.
+    // Avec le summary, le champ accepte une variable, un fichier partagé, la
+    // sortie d'une action précédente, ou l'entrée du raccourci.
+    static var parameterSummary: some ParameterSummary {
+        Summary("Importer les transactions des fichiers \(\.$files)")
+    }
 
     func perform() async throws -> some IntentResult {
-        let data = try file.data
-        guard let defaults = UserDefaults(suiteName: "group.fr.hedwin.nemoris") else {
-            throw $file.needsValueError("Impossible d'accéder au conteneur partagé.")
+        let payload: [(data: Data, fileExtension: String)] = files.compactMap { file in
+            guard let data = try? file.data else { return nil }
+            return (data, Self.fileExtension(of: file, fallback: "csv"))
         }
-        defaults.set(data, forKey: "nemoris.pendingCSV")
+        guard !payload.isEmpty else {
+            throw $files.needsValueError("Aucun fichier lisible.")
+        }
+        let ok = await MainActor.run {
+            PendingImportInbox.stash(files: payload, kind: .transactions)
+        }
+        guard ok else {
+            throw $files.needsValueError("Impossible d'enregistrer les fichiers dans Nemoris.")
+        }
         return .result()
+    }
+
+    /// Extension : depuis le nom de fichier, sinon depuis le type déclaré.
+    /// Elle n'est qu'indicative — la boîte de réception tranche sur les OCTETS.
+    static func fileExtension(of file: IntentFile, fallback: String) -> String {
+        let fromName = (file.filename as NSString?)?.pathExtension ?? ""
+        if !fromName.isEmpty { return fromName }
+        return file.type?.preferredFilenameExtension ?? fallback
     }
 }
 
@@ -75,22 +71,28 @@ struct ImportInvestmentDocumentIntent: AppIntent {
 
     // Accepte tout fichier (PDF, image/capture, CSV) — le parser détecte le
     // format. Comme `ImportFileIntent`, on n'impose pas de supportedContentTypes
-    // (l'API @Parameter ne l'accepte pas ici de façon fiable multiplateforme).
-    @Parameter(title: "Document")
-    var file: IntentFile
+    // (l'API @Parameter ne l'accepte pas ici de façon fiable multiplateforme),
+    // ce qui laisse aussi le champ accepter n'importe quel type de variable.
+    @Parameter(title: "Documents")
+    var files: [IntentFile]
+
+    // Rend le paramètre fillable par une variable / l'entrée du raccourci
+    // dans l'éditeur Raccourcis (cf. commentaire détaillé sur ImportFileIntent).
+    static var parameterSummary: some ParameterSummary {
+        Summary("Importer les documents d'investissement \(\.$files)")
+    }
 
     func perform() async throws -> some IntentResult {
-        let data = try file.data
-        // Extension : depuis le nom de fichier, sinon depuis le type déclaré.
-        let ext: String = {
-            let fromName = (file.filename as NSString?)?.pathExtension ?? ""
-            if !fromName.isEmpty { return fromName }
-            return file.type?.preferredFilenameExtension ?? "dat"
-        }()
-
-        let ok = await MainActor.run { PendingImportInbox.stash(data: data, fileExtension: ext) }
+        let payload: [(data: Data, fileExtension: String)] = files.compactMap { file in
+            guard let data = try? file.data else { return nil }
+            return (data, ImportFileIntent.fileExtension(of: file, fallback: "dat"))
+        }
+        guard !payload.isEmpty else {
+            throw $files.needsValueError("Aucun document lisible.")
+        }
+        let ok = await MainActor.run { PendingImportInbox.stash(files: payload, kind: .investment) }
         guard ok else {
-            throw $file.needsValueError("Impossible d'enregistrer le document dans Nemoris.")
+            throw $files.needsValueError("Impossible d'enregistrer les documents dans Nemoris.")
         }
         return .result()
     }
@@ -101,23 +103,13 @@ struct ImportInvestmentDocumentIntent: AppIntent {
 struct NemorisShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
-            intent: GetMonthlyBalanceIntent(),
-            phrases: [
-                "Mon solde dans \(.applicationName)",
-                "Mes dépenses du mois dans \(.applicationName)",
-                "Ma balance dans \(.applicationName)",
-                "Combien j'ai dépensé dans \(.applicationName)"
-            ],
-            shortTitle: "Solde du mois",
-            systemImageName: "chart.bar.fill"
-        )
-        AppShortcut(
             intent: ImportFileIntent(),
             phrases: [
+                "Importer mes transactions dans \(.applicationName)",
                 "Importer un relevé dans \(.applicationName)",
                 "Ajouter un fichier bancaire dans \(.applicationName)"
             ],
-            shortTitle: "Importer un CSV",
+            shortTitle: "Importer transactions",
             systemImageName: "square.and.arrow.down"
         )
         AppShortcut(

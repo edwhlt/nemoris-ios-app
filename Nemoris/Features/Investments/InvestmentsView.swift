@@ -7,7 +7,7 @@ import TipKit
 /// pré-rempli via `.sheet(item:)` (document déposé par un raccourci Siri).
 struct PreloadedInvestmentImport: Identifiable {
     let id = UUID()
-    let url: URL
+    let urls: [URL]
 }
 
 struct InvestmentsView: View {
@@ -24,6 +24,17 @@ struct InvestmentsView: View {
     @State private var editingAccount: InvestmentAccount?
     @State private var accountToDelete: InvestmentAccount?
 
+    #if os(macOS)
+    /// macOS : push des comptes PILOTÉ PAR ÉTAT (navigationDestination) — même
+    /// prévention que `positionsCard` (InvestmentAccountDetailView). Au niveau
+    /// racine le NavigationLink cliqué est empiriquement sain (le crash
+    /// `_postWindowNeedsUpdateConstraints` n'apparaît que depuis une vue déjà
+    /// poussée), mais on aligne le pattern par cohérence.
+    @State private var pushedAccount: InvestmentAccount?
+    /// Pour fermer le panneau au retour vers le dashboard (cf. `onBack`).
+    @Environment(InspectorPaneCenter.self) private var paneCenter: InspectorPaneCenter?
+    #endif
+
     @State private var showAddPositionForm = false
     @State private var editingPosition: InvestmentPosition?
 
@@ -34,6 +45,12 @@ struct InvestmentsView: View {
 
     /// Chantier D — import intelligent pré-rempli par un raccourci Siri.
     @State private var preloadedImport: PreloadedInvestmentImport?
+    /// Paywall affiché quand un document déposé par Siri/Share Extension arrive
+    /// alors que l'utilisateur n'est pas débloqué — cf. `consumePendingInvestmentImport`.
+    /// `.paywallOverlay` sur le contenu ne suffit pas ici : `.adaptivePane`/`.sheet`
+    /// se présentent par-dessus, pas à l'intérieur, donc le sheet d'import IA
+    /// s'afficherait quand même par-dessus l'écran verrouillé sans ce garde-fou.
+    @State private var showPaywallFromPendingImport = false
 
     @State private var csvRawContent = ""
     @State private var csvMapping = InvestmentCSVMapping(
@@ -56,6 +73,79 @@ struct InvestmentsView: View {
     }
 
     @ViewBuilder private var navContent: some View {
+        // ── TEMP DEBUG (bissection crash macOS fiche position) — À RETIRER ──
+        // Lancé avec l'argument -nemorisCrashRepro : rejoue le PARCOURS RÉEL
+        // en programmé (push compte à 0,8 s puis push position à 2,3 s).
+        // Sans l'argument : strictement aucun changement.
+        if CommandLine.arguments.contains("-nemorisCrashRepro"),
+           let acc = viewModel.accounts.first,
+           let pos = viewModel.fetchPositions(accountId: acc.id).first {
+            CrashReproDriver(viewModel: viewModel, account: acc, position: pos)
+        } else {
+            dashboardContent
+        }
+    }
+
+    // ── TEMP DEBUG — À RETIRER avec la branche -nemorisCrashRepro ──
+    // Rejoue le parcours réel à profondeur 2 sans interaction : racine →
+    // push InvestmentAccountDetailView → push InvestmentPositionDetailView.
+    private struct CrashReproDriver: View {
+        @Bindable var viewModel: InvestmentsViewModel
+        let account: InvestmentAccount
+        let position: InvestmentPosition
+        @State private var pushAccount = false
+        @State private var pushPosition = false
+
+        var body: some View {
+            Text("REPRO — parcours réel programmé (compte 0,8 s → position 2,3 s)")
+                .navigationDestination(isPresented: $pushAccount) {
+                    InvestmentAccountDetailView(viewModel: viewModel, account: account)
+                        .navigationDestination(isPresented: $pushPosition) {
+                            InvestmentPositionDetailView(viewModel: viewModel, account: account, position: position)
+                        }
+                }
+                .task {
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    pushAccount = true
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    pushPosition = true
+                }
+        }
+    }
+
+    @ViewBuilder private var dashboardContent: some View {
+        #if os(macOS)
+        // macOS : le détail d'un compte remplace le dashboard DANS LA COLONNE
+        // (navigation interne au module, pilotée par état). Ni push — qui
+        // désynchronisait l'affichage au changement de module et déclenchait la
+        // récursion AutoLayout à la profondeur 2 — ni panneau : un compte, c'est
+        // des graphiques, ça a besoin de toute la largeur. L'inspecteur reste
+        // réservé aux feuilles (positions) et aux formulaires.
+        if let account = pushedAccount {
+            InvestmentAccountDetailView(
+                viewModel: viewModel,
+                account: account,
+                // Le panneau est fermé EXPLICITEMENT ici (action user) et non via
+                // un `onDisappear` du site de présentation : muter l'état du
+                // panneau pendant le démontage d'une vue provoque une réentrance
+                // du moteur de rendu SwiftUI (crash). Sans cette fermeture, on
+                // revenait au dashboard avec la fiche d'une position encore
+                // ouverte à côté — et son bouton « Fermer » ne répondait plus,
+                // le binding qu'il pilote n'existant plus.
+                onBack: {
+                    paneCenter?.dismissCurrent()
+                    pushedAccount = nil
+                }
+            )
+        } else {
+            globalDashboard
+        }
+        #else
+        globalDashboard
+        #endif
+    }
+
+    @ViewBuilder private var globalDashboard: some View {
         ZStack {
             AppTheme.Colors.background.ignoresSafeArea()
             // AXE J Phase 2 : un seul écran d'accueil = dashboard global.
@@ -65,37 +155,64 @@ struct InvestmentsView: View {
         }
         .navigationTitle("Investissements")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
+            #if os(macOS)
+            // macOS : les 2 actions du menu "⋯" deviennent des boutons icône
+            // seule + tooltip natif, groupés dans UNE pilule via
+            // `ToolbarItemGroup` (le groupement natif — `ControlGroup` rendait
+            // des boutons isolés).
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                ToolbarPaywallGate(feature: .investments) {
                     Button {
                         showAddAccountForm = true
                     } label: {
-                        Label("Ajouter un compte", systemImage: "building.columns")
+                        Image(systemName: "building.columns")
                     }
+                    .help("Ajouter un compte")
                     // Entrée d'import UNIQUE : le parcours intelligent gère déjà
-                    // PDF / capture d'écran / image / CSV. Si Apple Intelligence
-                    // n'est pas dispo, il propose lui-même le repli vers l'import
-                    // CSV déterministe (mapping de colonnes) — l'offline-first
-                    // reste garanti sans IA.
+                    // PDF / capture d'écran / image / CSV (cf. branche iOS).
                     Button {
                         showPDFImportSheet = true
                     } label: {
-                        Label("Importer un relevé…", systemImage: "square.and.arrow.down")
+                        Image(systemName: "square.and.arrow.down")
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .tint(AppTheme.Colors.accent)
+                    .help("Importer un relevé…")
                 }
             }
+            #else
+            ToolbarItem(placement: .topBarTrailing) {
+                ToolbarPaywallGate(feature: .investments) {
+                    Menu {
+                        Button {
+                            showAddAccountForm = true
+                        } label: {
+                            Label("Ajouter un compte", systemImage: "building.columns")
+                        }
+                        // Entrée d'import UNIQUE : le parcours intelligent gère déjà
+                        // PDF / capture d'écran / image / CSV. Si Apple Intelligence
+                        // n'est pas dispo, il propose lui-même le repli vers l'import
+                        // CSV déterministe (mapping de colonnes) — l'offline-first
+                        // reste garanti sans IA.
+                        Button {
+                            showPDFImportSheet = true
+                        } label: {
+                            Label("Importer un relevé…", systemImage: "square.and.arrow.down")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .tint(AppTheme.Colors.accent)
+                    }
+                }
+            }
+            #endif
         }
         // Add : sheet déclenchée par un Bool, passe toujours nil → mode création.
-        .sheet(isPresented: $showAddAccountForm) {
+        .adaptivePane(isPresented: $showAddAccountForm) {
             InvestmentAccountFormView(account: nil) { account, isNew in
                 viewModel.saveAccount(account, isNew: isNew)
             }
         }
         // Edit : sheet item-driven, fresh View pour chaque account → pas de stale state.
-        .sheet(item: $editingAccount) { account in
+        .adaptivePane(item: $editingAccount) { account in
             InvestmentAccountFormView(account: account) { updated, isNew in
                 viewModel.saveAccount(updated, isNew: isNew)
             }
@@ -117,47 +234,42 @@ struct InvestmentsView: View {
         } message: { _ in
             Text("Toutes les positions et les ordres rattachés seront supprimés en cascade. Cette action est irréversible.")
         }
-        .sheet(isPresented: $showAddPositionForm) {
+        .adaptivePane(isPresented: $showAddPositionForm) {
             if let accountId = viewModel.selectedAccountId {
                 InvestmentPositionFormView(accountId: accountId, position: nil) { position, isNew in
                     viewModel.savePosition(position, isNew: isNew)
                 }
             }
         }
-        .sheet(item: $editingPosition) { position in
+        .adaptivePane(item: $editingPosition) { position in
             InvestmentPositionFormView(accountId: position.accountId, position: position) { updated, isNew in
                 viewModel.savePosition(updated, isNew: isNew)
             }
         }
-        .sheet(isPresented: $showImportSheet) {
-            NavigationStack {
-                importTab
-                    .navigationTitle("Importer un CSV")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Fermer") { showImportSheet = false }
-                                .tint(AppTheme.Colors.accent)
-                        }
-                    }
-            }
+        .adaptivePane(isPresented: $showImportSheet) {
+            importTab
+                .paneChrome("Importer un CSV", cancelLabel: "Fermer", onCancel: { showImportSheet = false })
         }
-        .sheet(isPresented: $showPDFImportSheet) {
+        .adaptivePane(isPresented: $showPDFImportSheet) {
             // Repli sans Apple Intelligence → import CSV déterministe.
             InvestmentPDFImportView(onFallbackToCSV: { showImportSheet = true })
         }
         // Chantier D — import intelligent ouvert par un raccourci Siri (document
         // pré-rempli). Consomme aussi l'URL en attente si la vue vient d'être
         // montée par navigateToTab(.investments) avant que .onChange ne s'attache.
-        .sheet(item: $preloadedImport) { item in
-            InvestmentPDFImportView(preloadedFileURL: item.url,
+        .adaptivePane(item: $preloadedImport) { item in
+            InvestmentPDFImportView(preloadedFileURLs: item.urls,
                                     onFallbackToCSV: { showImportSheet = true })
         }
-        .onChange(of: appState.pendingInvestmentImportURL) { _, url in
-            consumePendingInvestmentImport(url)
+        .adaptivePane(isPresented: $showPaywallFromPendingImport) {
+            PaywallView()
+                .environment(store)
+        }
+        .onChange(of: appState.pendingInvestmentImportURLs) { _, urls in
+            consumePendingInvestmentImport(urls)
         }
         .onAppear {
-            consumePendingInvestmentImport(appState.pendingInvestmentImportURL)
+            consumePendingInvestmentImport(appState.pendingInvestmentImportURLs)
         }
         .fileImporter(
             isPresented: $showFilePicker,
@@ -366,10 +478,17 @@ struct InvestmentsView: View {
 
     /// Chantier D — présente l'import intelligent pré-rempli et libère l'URL en
     /// attente (one-shot). No-op si nil ou si une sheet est déjà en cours.
-    private func consumePendingInvestmentImport(_ url: URL?) {
-        guard let url, preloadedImport == nil else { return }
-        preloadedImport = PreloadedInvestmentImport(url: url)
-        appState.pendingInvestmentImportURL = nil
+    /// Si l'utilisateur n'est pas débloqué, on ouvre le paywall à la place :
+    /// sans ce check, le document déposé par Siri/Share Extension ouvrirait
+    /// quand même le sheet d'import IA, par-dessus l'écran verrouillé.
+    private func consumePendingInvestmentImport(_ urls: [URL]) {
+        guard !urls.isEmpty, preloadedImport == nil else { return }
+        appState.pendingInvestmentImportURLs = []
+        guard store.isUnlocked(.investments) else {
+            showPaywallFromPendingImport = true
+            return
+        }
+        preloadedImport = PreloadedInvestmentImport(urls: urls)
     }
 
     // MARK: - Skeleton
@@ -444,12 +563,48 @@ struct InvestmentsView: View {
 
     /// Section comptes à plat (sans carte) avec NavigationLink vers AccountDetailView.
     /// Chantier B : style Apple Stocks — rows aérées, sparkline 1M au centre,
-    /// valeur en chiffres alignés à droite. `.swipeActions` natif conservé (AXE M).
+    /// valeur en chiffres alignés à droite. Actions via RowActions (swipe iOS / clic droit macOS).
     @ViewBuilder
     private func accountsListSection() -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             SectionHeader(title: "Comptes (\(viewModel.accounts.count))")
                 .padding(.horizontal, AppTheme.Spacing.sm)
+            #if os(macOS)
+            // macOS : le détail compte s'ouvre dans le PANNEAU (adaptivePane),
+            // pas un push — cohérent avec le reste du drill-down de l'app
+            // (Tricount, tiers, transactions…) et ça évite intégralement la
+            // récursion AutoLayout documentée sur le push profondeur 1→2 (le
+            // détail position, niveau 2 depuis ce panneau, retombe déjà en
+            // sheet automatiquement via \.paneHostContext — plus besoin du
+            // traitement spécial `panePosition` dans InvestmentAccountDetailView).
+            // Ni List imbriquée (boucle de contraintes AutoLayout documentée).
+            VStack(spacing: 0) {
+                ForEach(viewModel.accounts) { account in
+                    Button {
+                        pushedAccount = account
+                    } label: {
+                        accountRow(account)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, AppTheme.Spacing.sm)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .rowActions(
+                        leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingAccount = account }],
+                        trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { accountToDelete = account }]
+                    )
+                    if account.id != viewModel.accounts.last?.id {
+                        Divider()
+                            .overlay(AppTheme.Colors.textSecondary.opacity(0.12))
+                            .padding(.leading, AppTheme.Spacing.sm)
+                    }
+                }
+            }
+            // Pas de présentation ici : `pushedAccount` bascule le CONTENU du
+            // module (cf. `dashboardContent`) — le compte s'affiche en pleine
+            // largeur, pas dans le panneau.
+            #else
+            // iOS : List conservée pour le swipe natif (RowActions → .swipeActions).
             List {
                 ForEach(viewModel.accounts) { account in
                     NavigationLink {
@@ -460,22 +615,13 @@ struct InvestmentsView: View {
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 6, leading: AppTheme.Spacing.sm, bottom: 6, trailing: AppTheme.Spacing.sm))
                     .listRowSeparatorTint(AppTheme.Colors.textSecondary.opacity(0.12))
-                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                        Button {
-                            // .sheet(item:) s'ouvre dès qu'editingAccount devient non-nil
-                            editingAccount = account
-                        } label: {
-                            Label("Modifier", systemImage: "pencil")
-                        }
-                        .tint(AppTheme.Colors.accent)
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            accountToDelete = account
-                        } label: {
-                            Label("Supprimer", systemImage: "trash")
-                        }
-                    }
+                    .rowActions(
+                        // .sheet(item:) s'ouvre dès qu'editingAccount devient non-nil
+                        leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingAccount = account }],
+                        trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { accountToDelete = account }],
+                        leadingFullSwipe: false,
+                        trailingFullSwipe: false
+                    )
                 }
             }
             .listStyle(.plain)
@@ -483,6 +629,7 @@ struct InvestmentsView: View {
             .scrollDisabled(true)
             // Hauteur estimée : ~64pt par row (titre + sous-titre + paddings aérés).
             .frame(height: CGFloat(viewModel.accounts.count) * 64)
+            #endif
         }
     }
 
@@ -740,7 +887,8 @@ struct InvestmentsView: View {
 
 // Accessible aussi depuis InvestmentAccountDetailView (édition compte)
 struct InvestmentAccountFormView: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     let account: InvestmentAccount?
     let onSave: (InvestmentAccount, Bool) -> Void
 
@@ -769,7 +917,6 @@ struct InvestmentAccountFormView: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section("Identité") {
                     TextField("Nom du compte", text: $name)
@@ -833,41 +980,38 @@ struct InvestmentAccountFormView: View {
                     }
                 }
             }
-            .navigationTitle(isNew ? "Nouveau compte" : "Modifier compte")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Annuler") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") {
-                        onSave(InvestmentAccount(
-                            id: account?.id ?? 0,
-                            name: name,
-                            broker: broker,
-                            currency: currency.uppercased(),
-                            accountType: accountType,
-                            // Les 2 champs sont conservés dans le struct pour
-                            // rétro-compat des lectures, mais le repo n'écrit
-                            // plus ces colonnes (droppées en v30). On passe les
-                            // valeurs existantes pour une édition ou 0 pour
-                            // une création — sans effet sur le persisté.
-                            currentValue: account?.currentValue ?? 0,
-                            investedAmount: account?.investedAmount ?? 0,
-                            openedAt: openedAt,
-                            cashBalance: cashBalance
-                        ), isNew)
-                        dismiss()
-                    }
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
+            .nemorisFormStyle()
             // Pas de .onAppear pour repopulate — l'init() le fait déjà,
             // ce qui évite la stale state quand SwiftUI réutilise l'instance.
-        }
+            .paneChrome(isNew ? "Nouveau compte" : "Modifier compte",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Enregistrer",
+                        confirmDisabled: name.trimmingCharacters(in: .whitespaces).isEmpty) {
+                onSave(InvestmentAccount(
+                    id: account?.id ?? 0,
+                    name: name,
+                    broker: broker,
+                    currency: currency.uppercased(),
+                    accountType: accountType,
+                    // Les 2 champs sont conservés dans le struct pour
+                    // rétro-compat des lectures, mais le repo n'écrit
+                    // plus ces colonnes (droppées en v30). On passe les
+                    // valeurs existantes pour une édition ou 0 pour
+                    // une création — sans effet sur le persisté.
+                    currentValue: account?.currentValue ?? 0,
+                    investedAmount: account?.investedAmount ?? 0,
+                    openedAt: openedAt,
+                    cashBalance: cashBalance
+                ), isNew)
+                dismiss()
+            }
     }
 }
 
 // Accessible aussi depuis InvestmentAccountDetailView + InvestmentPositionDetailView (AXE J)
 struct InvestmentPositionFormView: View {
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
+    @Environment(\.paneDismiss) private var dismiss
     let accountId: Int
     let position: InvestmentPosition?
     let onSave: (InvestmentPosition, Bool) -> Void
@@ -910,7 +1054,6 @@ struct InvestmentPositionFormView: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section {
                     Picker("Type", selection: $assetType) {
@@ -976,37 +1119,33 @@ struct InvestmentPositionFormView: View {
                     }
                 }
             }
-            .navigationTitle(isNew ? "Nouvelle position" : "Modifier position")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Annuler") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") {
-                        onSave(InvestmentPosition(
-                            id: position?.id ?? 0,
-                            accountId: accountId,
-                            assetType: assetType,
-                            assetName: assetName,
-                            ticker: ticker.uppercased(),
-                            isin: isin.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
-                            // Pour une nouvelle position : 0/0/today (seront recalculés
-                            // au premier add d'ordre). Pour une édition : on relit
-                            // les valeurs DÉRIVÉES existantes (le repo ne les écrit
-                            // de toute façon plus).
-                            quantity: position?.quantity ?? 0,
-                            averageBuyPrice: position?.averageBuyPrice ?? 0,
-                            currentValue: currentValue,
-                            purchaseDate: position?.purchaseDate ?? Date()
-                        ), isNew)
-                        dismiss()
-                    }
-                    // Bloque le save si ISIN saisi mais format invalide — évite
-                    // de persister un ISIN bidon qui ferait planter la sync.
-                    .disabled(assetName.trimmingCharacters(in: .whitespaces).isEmpty
-                              || isinValidationError != nil)
-                }
-            }
+            .nemorisFormStyle()
             // Pas de .onAppear — init() set tout au build time.
-        }
+            .paneChrome(isNew ? "Nouvelle position" : "Modifier position",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Enregistrer",
+                        // Bloque le save si ISIN saisi mais format invalide — évite
+                        // de persister un ISIN bidon qui ferait planter la sync.
+                        confirmDisabled: assetName.trimmingCharacters(in: .whitespaces).isEmpty
+                              || isinValidationError != nil) {
+                onSave(InvestmentPosition(
+                    id: position?.id ?? 0,
+                    accountId: accountId,
+                    assetType: assetType,
+                    assetName: assetName,
+                    ticker: ticker.uppercased(),
+                    isin: isin.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+                    // Pour une nouvelle position : 0/0/today (seront recalculés
+                    // au premier add d'ordre). Pour une édition : on relit
+                    // les valeurs DÉRIVÉES existantes (le repo ne les écrit
+                    // de toute façon plus).
+                    quantity: position?.quantity ?? 0,
+                    averageBuyPrice: position?.averageBuyPrice ?? 0,
+                    currentValue: currentValue,
+                    purchaseDate: position?.purchaseDate ?? Date()
+                ), isNew)
+                dismiss()
+            }
     }
 
     private func formattedQty(_ q: Double) -> String {

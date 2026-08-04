@@ -37,11 +37,9 @@ enum AccessLevel: Int, Comparable {
 
 /// Fonctionnalités de l'application pouvant être verrouillées derrière un niveau d'accès.
 enum AppFeature: CaseIterable {
-    case smartImport
     case investments
     //case tricount
     case filteredDashboard
-    case sync
     case sqlConsole
     case budget
 
@@ -50,11 +48,9 @@ enum AppFeature: CaseIterable {
 
     var title: String {
         switch self {
-        case .smartImport:       return "Import intelligent"
         case .investments:       return "Investissements"
         //case .tricount:          return "Tricount"
         case .filteredDashboard: return "Dashboard filtré"
-        case .sync:              return "Synchronisation"
         case .sqlConsole:        return "Console SQL"
         case .budget:            return "Budget & Prévisions"
         }
@@ -62,11 +58,9 @@ enum AppFeature: CaseIterable {
 
     var description: String {
         switch self {
-        case .smartImport:       return "Reconnaissance automatique des tiers par IA"
         case .investments:       return "Suivi de portefeuille et performance"
         //case .tricount:          return "Partage de dépenses en groupe"
         case .filteredDashboard: return "Analyses par période, compte ou catégorie"
-        case .sync:              return "Sauvegarde automatique vers iCloud / OneDrive"
         case .sqlConsole:        return "Requêtes SQL directes sur votre base de données"
         case .budget:            return "Prévisions, récurrents, enveloppes et calendrier"
         }
@@ -74,11 +68,9 @@ enum AppFeature: CaseIterable {
 
     var icon: String {
         switch self {
-        case .smartImport:       return "wand.and.stars"
         case .investments:       return "chart.line.uptrend.xyaxis"
         //case .tricount:          return "person.2.fill"
         case .filteredDashboard: return "line.3.horizontal.decrease.circle"
-        case .sync:              return "arrow.triangle.2.circlepath"
         case .sqlConsole:        return "terminal"
         case .budget:            return "chart.bar.fill"
         }

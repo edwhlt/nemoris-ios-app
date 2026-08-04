@@ -109,6 +109,42 @@ struct ImportSessionRepository {
         upsertSession(session, isInsert: true)
     }
 
+    /// SEUL fabricant de session d'import : insère, programme le rappel 12 h et
+    /// renvoie le résumé prêt pour `AppState`. `nil` si l'insert a échoué.
+    ///
+    /// Centralisé parce que le parcours a maintenant DEUX producteurs de lignes
+    /// (mapping de colonnes CSV et extraction de documents PDF/captures) : leur
+    /// laisser dupliquer cette fin de course ferait diverger la notification de
+    /// rappel ou le statut initial dès la première évolution de l'un des deux.
+    func createSession(rows: [ImportSessionRow],
+                       accountId: Int,
+                       sourceFile: String?) -> ImportSessionSummary? {
+        guard !rows.isEmpty else { return nil }
+        let session = ImportSession(
+            id: UUID(),
+            createdAt: Date(),
+            updatedAt: Date(),
+            status: .active,
+            sourceFile: sourceFile,
+            accountId: accountId,
+            rows: rows
+        )
+        guard insertSession(session) else { return nil }
+
+        Task { await ImportNotificationService.scheduleReminder(forSessionId: session.id,
+                                                               pendingRows: rows.count) }
+        return ImportSessionSummary(
+            id: session.id,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+            status: .active,
+            sourceFile: session.sourceFile,
+            accountId: session.accountId,
+            totalRows: session.rows.count,
+            pendingRows: session.rows.count
+        )
+    }
+
     /// Met à jour le payload complet d'une session existante (UPDATE).
     /// Atomique : un seul UPDATE. Met aussi à jour `updated_at`.
     @discardableResult

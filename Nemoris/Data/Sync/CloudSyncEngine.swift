@@ -44,6 +44,11 @@ actor CloudSyncEngine {
     /// l'envoi (sa nouvelle version doit repartir).
     private var inFlightQueuedAt: [String: String] = [:]   // recordName → queued_at
 
+    /// Vrai dès qu'un batch du cycle courant a produit au moins un échec
+    /// d'envoi — empêche `markSyncDone()` d'afficher un « Dernier sync »
+    /// à jour alors que des records ont été refusés par le serveur.
+    private var cycleHadSaveFailures = false
+
     private init() {}
 
     // MARK: - API publique
@@ -54,6 +59,10 @@ actor CloudSyncEngine {
         var pendingCount: Int
         var lastSyncAt: String?
         var lastError: String?
+        /// Erreur PERMANENTE côté serveur (ex : schéma CloudKit non déployé
+        /// en Production) — le sync est actif mais rien ne part tant qu'une
+        /// action externe n'a pas été faite. Rien n'est perdu (sync_pending).
+        var isBlocked: Bool
     }
 
     enum SyncError: LocalizedError {
@@ -84,7 +93,8 @@ actor CloudSyncEngine {
             accountAvailable: account == .available,
             pendingCount: store.pendingCount(),
             lastSyncAt: store.metaValue("last_sync_at"),
-            lastError: store.metaValue("last_sync_error")
+            lastError: store.metaValue("last_sync_error"),
+            isBlocked: store.metaValue("last_sync_error_permanent") == "1"
         )
     }
 
@@ -124,6 +134,8 @@ actor CloudSyncEngine {
 
         store.setMeta("sync_enabled", "1")
         store.deleteMeta("last_sync_error")
+        store.deleteMeta("last_sync_error_permanent")
+        cycleHadSaveFailures = false
         startEngine()
 
         guard let engine else { return }
@@ -139,7 +151,7 @@ actor CloudSyncEngine {
         pushLocalChangesToEngine()
         try await engine.sendChanges()
         try await engine.fetchChanges()
-        markSyncDone()
+        if !cycleHadSaveFailures { markSyncDone() }
         await registerForPushes()
     }
 
@@ -154,15 +166,20 @@ actor CloudSyncEngine {
     }
 
     /// Cycle manuel : pousse la queue locale, envoie, récupère.
+    /// `markSyncDone()` seulement si aucun record n'a été refusé — les
+    /// événements `sentRecordZoneChanges` (et donc `handleFailedSave`) sont
+    /// délivrés avant le retour de `sendChanges()`, tout est actor-isolé.
     func syncNow() async throws {
         guard isEnabled else { throw SyncError.notEnabled }
         if engine == nil { startEngine() }
         guard let engine else { return }
         store.deleteMeta("last_sync_error")
+        store.deleteMeta("last_sync_error_permanent")
+        cycleHadSaveFailures = false
         pushLocalChangesToEngine()
         try await engine.sendChanges()
         try await engine.fetchChanges()
-        markSyncDone()
+        if !cycleHadSaveFailures { markSyncDone() }
     }
 
     /// Auto-sync léger déclenché sur les transitions d'app (background /
@@ -221,6 +238,31 @@ actor CloudSyncEngine {
     private func recordError(_ message: String) {
         store.setMeta("last_sync_error", message)
         print("[CloudSyncEngine] Erreur : \(message)")
+    }
+
+    /// Erreur PERMANENTE : le serveur refuse le record et retenter ne changera
+    /// rien tant qu'une action externe (déploiement du schéma CloudKit en
+    /// Production, typiquement) n'a pas été faite. Les rows restent en
+    /// sync_pending — elles repartiront d'elles-mêmes une fois l'action faite.
+    private func recordBlockingError(_ message: String) {
+        store.setMeta("last_sync_error", message)
+        store.setMeta("last_sync_error_permanent", "1")
+        print("[CloudSyncEngine] Erreur bloquante : \(message)")
+    }
+
+    /// Message actionnable pour un refus serveur définitif. Le cas connu est
+    /// « Cannot create new type <table> in production schema » : les builds
+    /// TestFlight/App Store tapent l'environnement CloudKit Production, où la
+    /// création JIT des record types est interdite — il faut déployer le
+    /// schéma Development → Production dans la console CloudKit (checklist
+    /// CLAUDE.md §AXE L). Le texte exact n'étant pas contractuel côté Apple,
+    /// un fallback générique couvre les autres refus.
+    private static func rejectionMessage(for error: CKError, table: String) -> String {
+        let raw = String(describing: error).lowercased()
+        if raw.contains("production schema") || raw.contains("cannot create new type") {
+            return "Le schéma CloudKit n'est pas déployé en production. Vos données restent en attente sur cet appareil — rien n'est perdu. Action requise : déployer le schéma dans la console CloudKit (icloud.developer.apple.com)."
+        }
+        return "Envoi refusé par iCloud (\(table)) : \(error.localizedDescription). Les données restent en attente sur cet appareil."
     }
 
     // MARK: - Identité record ↔ row
@@ -360,6 +402,15 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
             )
 
         case .sentRecordZoneChanges(let sent):
+            // Auto-guérison : un batch entièrement accepté efface l'état
+            // « bloqué » (ex : le schéma vient d'être déployé en Production —
+            // le premier envoi qui passe remet le statut au vert sans action
+            // manuelle).
+            if sent.failedRecordSaves.isEmpty, sent.failedRecordDeletes.isEmpty,
+               !sent.savedRecords.isEmpty || !sent.deletedRecordIDs.isEmpty {
+                store.deleteMeta("last_sync_error")
+                store.deleteMeta("last_sync_error_permanent")
+            }
             for record in sent.savedRecords {
                 guard let (table, uuid) = Self.parseRecordName(record.recordID.recordName) else { continue }
                 store.setRecordSystemFields(table: table, uuid: uuid, data: Self.encodeSystemFields(record))
@@ -387,6 +438,12 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
                 case .networkFailure, .networkUnavailable, .serviceUnavailable, .requestRateLimited, .zoneBusy:
                     // Transitoire : retry au prochain cycle.
                     syncEngine.state.add(pendingRecordZoneChanges: [.deleteRecord(Self.recordID(table: table, uuid: uuid))])
+                case .invalidArguments, .serverRejectedRequest:
+                    // Refus définitif (ex : schéma non déployé en Production) :
+                    // la tombstone doit SURVIVRE — la suppression repartira
+                    // après l'action externe. Ne pas solder.
+                    cycleHadSaveFailures = true
+                    recordBlockingError(Self.rejectionMessage(for: error, table: table))
                 default:
                     // Erreur inattendue : on solde pour ne pas boucler, en la loggant.
                     recordError("Suppression échouée (\(table)) : \(error.localizedDescription)")
@@ -472,7 +529,23 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
             // en sync_pending.
             break
 
+        case .invalidArguments, .serverRejectedRequest:
+            // Refus DÉFINITIF côté serveur — le cas vécu : record type absent
+            // du schéma Production (« Cannot create new type … in production
+            // schema »). La row RESTE en sync_pending : elle repartira toute
+            // seule après le déploiement du schéma (l'auto-guérison de
+            // sentRecordZoneChanges remettra alors le statut au vert).
+            cycleHadSaveFailures = true
+            recordBlockingError(Self.rejectionMessage(for: error, table: table))
+
+        case .batchRequestFailed:
+            // Victime collatérale d'un batch atomique : l'erreur racine est
+            // portée par un AUTRE record du même batch (qui passera par le cas
+            // ci-dessus). Silencieux pour ne pas écraser le vrai message.
+            cycleHadSaveFailures = true
+
         default:
+            cycleHadSaveFailures = true
             recordError("Envoi échoué (\(table)) : \(error.localizedDescription)")
         }
     }

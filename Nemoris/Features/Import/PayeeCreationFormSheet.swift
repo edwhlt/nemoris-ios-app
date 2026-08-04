@@ -43,6 +43,13 @@ struct PayeeCreationFormSheet: View {
     @State private var isSearching: Bool = false
     @State private var hasSearched: Bool = false
     @State private var candidates: [SearchCandidate] = []
+    /// AXE S — résultat structuré du registre (plan + entreprises + établissements),
+    /// distinct de `candidates` qui reste la liste plate des sources carto et IA.
+    @State private var searchResult: MerchantSearchResult? = nil
+    /// Pins de carte dérivés des établissements géolocalisés du registre.
+    /// Séparés de `candidates` : les y injecter dupliquerait `companiesList`
+    /// dans la liste des résultats — ils n'existent que pour la carte.
+    @State private var sireneGeoCandidates: [SearchCandidate] = []
     @State private var selectedCandidateId: UUID? = nil
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var showFullscreenMap: Bool = false
@@ -75,7 +82,7 @@ struct PayeeCreationFormSheet: View {
         _engineMerchantId = State(initialValue: cand.engineMerchantId)
         _categoryId       = State(initialValue: cand.categoryId)
         _searchQuery      = State(initialValue: row.rawLabel)
-        _useLLM           = State(initialValue: EnrichmentLLMService.shared.isAvailable)
+        _useLLM           = State(initialValue: AIEnrichmentBackend.isAvailable)
     }
 
     // MARK: - Init standalone (sans import)
@@ -98,7 +105,7 @@ struct PayeeCreationFormSheet: View {
         _engineMerchantId = State(initialValue: "")
         _categoryId       = State(initialValue: prefilledCategoryId)
         _searchQuery      = State(initialValue: prefilledName)
-        _useLLM           = State(initialValue: EnrichmentLLMService.shared.isAvailable)
+        _useLLM           = State(initialValue: AIEnrichmentBackend.isAvailable)
     }
 
     var body: some View {
@@ -111,6 +118,7 @@ struct PayeeCreationFormSheet: View {
                 advancedSection
                 searchHelperSection
             }
+            .nemorisFormStyle()
             .navigationTitle("Nouveau tier")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -134,9 +142,18 @@ struct PayeeCreationFormSheet: View {
                 EnrichmentMapFullscreenSheet(
                     initialQuery: searchQuery,
                     initialCandidates: candidates.filter { $0.result.latitude != nil }
+                        + sireneGeoCandidates
                 ) { picked in
                     applyCandidate(picked)
                 }
+            }
+            // Tap sur un pin ÉTABLISSEMENT de la mini-carte → pré-remplit la fiche
+            // (les pins Sirene ne sont pas dans `resultsList`, le tap-liste ne les
+            // couvre donc pas — contrairement aux candidats MapKit/IA).
+            .onChange(of: selectedCandidateId) { _, newValue in
+                guard let newValue,
+                      let pin = sireneGeoCandidates.first(where: { $0.id == newValue }) else { return }
+                applyCandidate(pin)
             }
             .overlay(alignment: .top) {
                 if let feedback = autoApplyFeedback {
@@ -274,6 +291,10 @@ struct PayeeCreationFormSheet: View {
         Section {
             DisclosureGroup(isExpanded: $showSearchHelper) {
                 searchControls
+                if hasSearched {
+                    planInspector
+                    companiesList
+                }
                 if hasSearched, !geoCandidates.isEmpty {
                     miniMap
                 }
@@ -305,8 +326,8 @@ struct PayeeCreationFormSheet: View {
             .keyboardType(.numberPad)
         Toggle("Sources entreprises (Sirene, Companies House, …)", isOn: $useSirene)
         Toggle("Apple Maps", isOn: $useMapKit)
-        Toggle("Foundation Models (IA)", isOn: $useLLM)
-            .disabled(!EnrichmentLLMService.shared.isAvailable)
+        Toggle("Intelligence artificielle", isOn: $useLLM)
+            .disabled(!AIEnrichmentBackend.isAvailable)
         Button {
             Task { await runSearch() }
         } label: {
@@ -322,6 +343,7 @@ struct PayeeCreationFormSheet: View {
 
     private var geoCandidates: [SearchCandidate] {
         candidates.filter { $0.result.latitude != nil && $0.result.longitude != nil }
+            + sireneGeoCandidates
     }
 
     @ViewBuilder
@@ -478,6 +500,84 @@ struct PayeeCreationFormSheet: View {
 
     // MARK: - Apply candidate (fills form, doesn't dismiss)
 
+    // MARK: - AXE S — plan de recherche et entreprises
+
+    /// Ce qui a été retiré du nom, et ce qui a réellement été tenté.
+    @ViewBuilder
+    private var planInspector: some View {
+        if let searchResult, !isSearching {
+            VStack(alignment: .leading, spacing: 10) {
+                DroppedTokenChips(extraction: searchResult.plan.extraction) { token in
+                    let base = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    searchQuery = base.isEmpty ? token : "\(base) \(token)"
+                    Task { await runSearch() }
+                }
+                SearchDetailsDisclosure(result: searchResult)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    /// Entreprises trouvées, dépliables vers leurs établissements.
+    /// Contrairement à la sheet de recherche rapide, un tap PRÉ-REMPLIT le formulaire
+    /// sans fermer : l'utilisateur reste maître de la fiche qu'il est en train de créer.
+    @ViewBuilder
+    private var companiesList: some View {
+        if let searchResult, !searchResult.companies.isEmpty, !isSearching {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Entreprises (\(searchResult.companies.count))")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+                ForEach(searchResult.companies) { ranked in
+                    CompanyMatchRow(
+                        ranked: ranked,
+                        initiallyExpanded: ranked.id == searchResult.companies.first?.id,
+                        onPickCompany: { match in
+                            prefill(from: match.enrichment(for: nil, confidence: ranked.score))
+                        },
+                        onPickEstablishment: { match, establishment in
+                            prefill(from: match.enrichment(for: establishment,
+                                                           confidence: ranked.score))
+                        }
+                    )
+                }
+                Text("C'est l'adresse de l'établissement qui distingue la bonne boutique d'une enseigne.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    /// NAF → id de catégorie locale, même logique que `prefill`.
+    private var resolveNAFCategory: (String) -> Int? {
+        { naf in
+            guard let cat = NAFCategoryMapper.shared.lookup(naf) else { return nil }
+            return allCategories.first {
+                $0.name.localizedCaseInsensitiveCompare(cat.category) == .orderedSame
+            }?.id
+        }
+    }
+
+    /// Remplit les champs du formulaire depuis une entreprise ou un établissement retenu.
+    /// Ne remplace que ce qui est vide côté catégorie — le reste est une proposition
+    /// explicite de l'utilisateur, donc prioritaire sur ce qu'il avait éventuellement saisi.
+    private func prefill(from enrichment: MerchantEnrichment) {
+        if let n = enrichment.displayName, !n.isEmpty { name = n }
+        if let c = enrichment.city, !c.isEmpty { city = c }
+        if let cc = enrichment.country, !cc.isEmpty { country = cc.uppercased() }
+        if let addr = enrichment.address, !addr.isEmpty { address = addr }
+        if let siret = enrichment.siret, !siret.isEmpty, engineMerchantId.isEmpty {
+            engineMerchantId = siret
+        }
+        if categoryId == nil, let naf = enrichment.nafCode,
+           let category = NAFCategoryMapper.shared.lookup(naf) {
+            categoryId = allCategories.first {
+                $0.name.localizedCaseInsensitiveCompare(category.category) == .orderedSame
+            }?.id
+        }
+    }
+
     private func applyCandidate(_ c: SearchCandidate) {
         let r = c.result
         if let n = r.displayName, !n.isEmpty { name = n }
@@ -518,6 +618,8 @@ struct PayeeCreationFormSheet: View {
         isSearching = true
         defer { isSearching = false; hasSearched = true }
         candidates.removeAll()
+        searchResult = nil
+        sireneGeoCandidates = []
         selectedCandidateId = nil
 
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -525,27 +627,26 @@ struct PayeeCreationFormSheet: View {
         var collected: [SearchCandidate] = []
 
         if useSirene {
-            // Dispatch sur toutes les sources d'entreprises actives matchant le pays
-            // détecté (Sirene si FR, Companies House si GB, Zefix si CH, etc.).
-            // Le pays vient du formulaire (rempli par LocationExtractor à l'init).
-            let countryForLookup = country.trimmingCharacters(in: .whitespaces).nilIfEmpty
-            let results = await CompanyDataSourcesRegistry.shared.search(
-                query: trimmedQuery,
-                country: countryForLookup,
-                postalCode: pc.count == 5 ? pc : nil
+            // AXE S — planificateur + cascade au lieu d'un `q=` construit depuis le libellé
+            // entier. L'API matche `q` contre la raison sociale et les enseignes, jamais
+            // contre l'adresse : y laisser la ville faisait échouer la recherche
+            // (`q=carrefour market flanches` → 0 ; `q=carrefour market` → 1411).
+            let rawLabel = row?.rawLabel ?? trimmedQuery
+            let userEdited = trimmedQuery != rawLabel
+            let input = MerchantQueryPlanner.Input(
+                rawLabel: rawLabel,
+                // Le pays et le code postal du formulaire PRIMENT : l'utilisateur les a
+                // saisis ou corrigés, ils valent mieux que toute déduction automatique.
+                userCountry: country.trimmingCharacters(in: .whitespaces).nilIfEmpty,
+                userPostalCode: pc.count == 5 ? pc : nil,
+                userQueryOverride: userEdited ? trimmedQuery : nil
             )
-            // Post-process : mapping NAF → categoryId pour les résultats Sirene FR
-            // (les autres sources n'ont pas de NAF code à mapper).
-            for var enrichment in results {
-                if enrichment.categoryId == nil,
-                   let naf = enrichment.nafCode,
-                   let cat = NAFCategoryMapper.shared.lookup(naf) {
-                    enrichment.categoryId = allCategories.first(where: {
-                        $0.name.localizedCaseInsensitiveCompare(cat.category) == .orderedSame
-                    })?.id
-                }
-                collected.append(SearchCandidate(source: enrichment.source, result: enrichment))
-            }
+            searchResult = await MerchantQueryExecutor.shared.search(
+                input: input,
+                budget: .interactive,
+                knownNafPrefixes: NAFCategoryMapper.shared.knownPrefixes
+            )
+            sireneGeoCandidates = searchResult?.establishmentPins(resolveCategory: resolveNAFCategory) ?? []
         }
 
         if useMapKit {
@@ -566,10 +667,10 @@ struct PayeeCreationFormSheet: View {
                 amount: row?.amount,
                 city: nil, country: nil, engineMerchantId: nil
             )
-            if let llm = await EnrichmentLLMService.shared.identify(context: context) {
+            if let llm = await AIEnrichmentBackend.identify(context: context) {
                 var fixed = llm
                 fixed.displayName = (fixed.displayName ?? trimmedQuery).titleCased
-                collected.append(SearchCandidate(source: .llm, result: fixed))
+                collected.append(SearchCandidate(source: llm.source, result: fixed))
             }
         }
 
@@ -657,10 +758,11 @@ struct PayeeCreationFormSheet: View {
 
     private func badgeLabel(for s: MerchantEnrichmentSource) -> String {
         switch s {
-        case .sirene: return "SIRENE"
-        case .mapkit: return "Maps"
-        case .llm:    return "IA"
-        default:      return ""
+        case .sirene:   return "SIRENE"
+        case .mapkit:   return "Maps"
+        case .llm:      return "IA"
+        case .localLLM: return "LOCAL"
+        default:        return ""
         }
     }
 
@@ -668,38 +770,41 @@ struct PayeeCreationFormSheet: View {
 
     private static func style(for s: MerchantEnrichmentSource) -> (String, String, Color) {
         switch s {
-        case .sirene:  return ("SIRENE", "building.2.fill", .blue)
-        case .mapkit:  return ("MAPS",   "map.fill",        .green)
-        case .llm:     return ("IA",     "sparkles",        .purple)
-        case .merged:  return ("FUSION", "circle.grid.cross.fill", AppTheme.Colors.accent)
-        case .manual:  return ("MANUEL", "hand.point.up.fill", .orange)
+        case .sirene:   return ("SIRENE", "building.2.fill", .blue)
+        case .mapkit:   return ("MAPS",   "map.fill",        .green)
+        case .llm:      return ("IA",     "sparkles",        .purple)
+        case .localLLM: return ("LOCAL",  "server.rack",     .teal)
+        case .merged:   return ("FUSION", "circle.grid.cross.fill", AppTheme.Colors.accent)
+        case .manual:   return ("MANUEL", "hand.point.up.fill", .orange)
         }
     }
 
     private static func markerIcon(for s: MerchantEnrichmentSource) -> String {
         switch s {
-        case .sirene: return "building.2.fill"
-        case .mapkit: return "mappin.circle.fill"
-        case .llm:    return "sparkles"
-        default:      return "mappin"
+        case .sirene:   return "building.2.fill"
+        case .mapkit:   return "mappin.circle.fill"
+        case .llm:      return "sparkles"
+        case .localLLM: return "server.rack"
+        default:        return "mappin"
         }
     }
 
     private static func markerColor(for s: MerchantEnrichmentSource) -> Color {
         switch s {
-        case .sirene: return .blue
-        case .mapkit: return .green
-        case .llm:    return .purple
-        default:      return .red
+        case .sirene:   return .blue
+        case .mapkit:   return .green
+        case .llm:      return .purple
+        case .localLLM: return .teal
+        default:        return .red
         }
     }
 
     private static func sourceRank(_ s: MerchantEnrichmentSource) -> Int {
         switch s {
-        case .sirene: return 0
-        case .mapkit: return 1
-        case .llm:    return 2
-        default:      return 3
+        case .sirene:         return 0
+        case .mapkit:         return 1
+        case .llm, .localLLM: return 2
+        default:              return 3
         }
     }
 }
@@ -710,6 +815,50 @@ struct SearchCandidate: Identifiable {
     let id = UUID()
     let source: MerchantEnrichmentSource
     let result: MerchantEnrichment
+    /// Renseigné quand le candidat EST un établissement Sirene (pin de carte
+    /// issu du drill-down entreprise → établissements). Le modèle reste plat :
+    /// `result` porte déjà l'adresse/SIRET/coords de l'établissement via
+    /// `CompanyMatch.enrichment(for:)` — ce contexte ne sert qu'aux badges UI.
+    var establishment: EstablishmentContext? = nil
+}
+
+/// Contexte d'affichage d'un candidat-établissement (badges Siège/Fermé).
+struct EstablishmentContext {
+    let isHeadquarters: Bool
+    let isActive: Bool
+    let siren: String
+}
+
+extension MerchantSearchResult {
+    /// Pins de carte : un candidat par établissement GÉOLOCALISÉ des meilleures
+    /// entreprises. Cap 5 entreprises × 8 établissements, 25 pins au total —
+    /// une grande enseigne matcherait des centaines de branches et noierait la
+    /// carte. CHEMIN UNIQUE partagé par les 3 écrans (fiche création, recherche
+    /// rapide, plein écran) — avant ce helper, la carte plein écran aplatissait
+    /// chaque entreprise sur son seul meilleur établissement et les deux autres
+    /// écrans n'affichaient RIEN du registre.
+    func establishmentPins(resolveCategory: (String) -> Int? = { _ in nil }) -> [SearchCandidate] {
+        var pins: [SearchCandidate] = []
+        for ranked in companies.prefix(5) {
+            let located = ranked.match.allEstablishments
+                .filter { $0.latitude != nil && $0.longitude != nil }
+                .prefix(8)
+            for est in located {
+                pins.append(SearchCandidate(
+                    source: .sirene,
+                    result: ranked.match.enrichment(for: est, confidence: ranked.score,
+                                                    resolveCategory: resolveCategory),
+                    establishment: EstablishmentContext(
+                        isHeadquarters: est.isHeadquarters,
+                        isActive: est.isActive,
+                        siren: ranked.match.siren
+                    )
+                ))
+                if pins.count >= 25 { return pins }
+            }
+        }
+        return pins
+    }
 }
 
 // MARK: - Initial candidate (extrait depuis row.resolution)

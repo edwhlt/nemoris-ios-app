@@ -82,7 +82,8 @@ enum SyncSchema {
         "tricount_groups",
         "tricount_entries",
         "tricount_shares",
-        "tricount_reimbursements",
+        // — Remboursement unifié (v44, AXE R) — remplace tricount_reimbursements
+        "reimbursements",
     ]
 
     /// Tables ajoutées par la migration v42 (L.3) — NE JAMAIS MODIFIER après
@@ -185,6 +186,26 @@ enum SyncSchema {
     ///
     /// DROP + CREATE systématique : idempotent, et permet de faire évoluer le
     /// corps des triggers sans migration.
+    /// v43 — file des payloads distants DIFFÉRÉS : records dont une FK
+    /// NOT NULL n'est pas encore résoluble (cible pas arrivée — les batchs
+    /// CloudKit n'ont aucun ordre garanti). Avant ce fix, l'INSERT violait la
+    /// contrainte et le record était PERDU définitivement (un record fetché
+    /// non appliqué n'est jamais re-livré). Cas réel : 683 investment_orders
+    /// arrivés avant leurs investment_positions à la descente initiale Mac.
+    /// ⚠️ Utilisée par la migration v43 : ne jamais en modifier la sortie.
+    static let deferredRowsDDL: [String] = [
+        """
+        CREATE TABLE IF NOT EXISTS sync_deferred_rows (
+            table_name    TEXT NOT NULL,
+            row_uuid      TEXT NOT NULL,
+            payload       BLOB NOT NULL,
+            system_fields BLOB,
+            queued_at     TEXT NOT NULL,
+            PRIMARY KEY (table_name, row_uuid)
+        );
+        """,
+    ]
+
     static func installTriggers(_ db: OpaquePointer) {
         var statements: [String] = []
         // Garde d'existence : un device dont la migration v42 a échoué (version

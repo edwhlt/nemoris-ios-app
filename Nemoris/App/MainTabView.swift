@@ -3,14 +3,31 @@ import SwiftUI
 import UIKit
 #endif
 
+/// AXE P — wrapper Identifiable pour présenter l'import V3 pré-rempli via
+/// `.sheet(item:)` (CSV déposé par un raccourci Siri ou la share extension).
+/// Miroir de `PreloadedInvestmentImport` côté Investissements.
+struct PreloadedTransactionImport: Identifiable {
+    let id = UUID()
+    let urls: [URL]
+}
+
 struct MainTabView: View {
     @Environment(AppState.self) private var appState
+    @Environment(PurchaseManager.self) private var purchaseManager
     @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var showCancelImportConfirm = false
+    /// AXE P — import V3 pré-rempli par un CSV partagé/raccourci.
+    @State private var preloadedTransactionImport: PreloadedTransactionImport?
+    #if os(macOS)
+    /// Slot unique de l'inspecteur global desktop : les `.adaptivePane` de
+    /// niveau 1 routent leur contenu ici (cf. doc `AdaptivePane.swift`).
+    @State private var paneCenter = InspectorPaneCenter()
+    #endif
     private let moreTag = "more"
     /// Entrées "Outils" propres à la sidebar (pas des MainTabItem).
-    private let sidebarImportTag = "sidebar_import"
-    private let sidebarSettingsTag = "sidebar_settings"
+    /// Source unique dans AppState (réutilisée par le gear Dashboard sur Mac).
+    private let sidebarImportTag = AppState.sidebarImportTag
+    private let sidebarSettingsTag = AppState.sidebarSettingsTag
 
     /// AXE M — layout desktop : sidebar sur Mac et iPad en paysage, où une
     /// tab bar iPhone dépareille dans une grande fenêtre. iPhone (et iPad
@@ -45,12 +62,21 @@ struct MainTabView: View {
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: appState.activeImportSession?.id)
         .appToast($state.currentToast)
-        .sheet(isPresented: $state.showImportSessionSheet) {
+        .adaptivePane(isPresented: $state.showImportSessionSheet) {
             if let summary = appState.activeImportSession {
                 NavigationStack {
                     ImportSessionView(sessionId: summary.id)
                 }
             }
+        }
+        // AXE P — CSV déposé par le raccourci "Importer des transactions (CSV)"
+        // ou la share extension Transactions : import V3 pré-rempli. Si une
+        // session est déjà active, ImportV3EntryView affiche l'alerte de reprise.
+        .adaptivePane(item: $preloadedTransactionImport) { item in
+            ImportV3EntryView(preloadedFileURLs: item.urls)
+        }
+        .onChange(of: appState.pendingTransactionImportURLs) { _, urls in
+            consumePendingTransactionImport(urls)
         }
         .confirmationDialog(
             "Annuler la session d'import ?",
@@ -71,6 +97,7 @@ struct MainTabView: View {
         .onAppear {
             ensureValidSelection()
             appState.reloadActiveImportSession()
+            consumePendingTransactionImport(appState.pendingTransactionImportURLs)
         }
         .onChange(of: appState.mainTabOrder)    { _, _ in ensureValidSelection() }
         .onChange(of: appState.showTricount)    { _, _ in ensureValidSelection() }
@@ -83,7 +110,24 @@ struct MainTabView: View {
         .onChange(of: hSizeClass) { _, _ in ensureValidSelection() }
         .onChange(of: appState.selectedTab) { _, _ in
             if useSidebar { ensureValidSelection() }
+            #if os(macOS)
+            // L'inspecteur est contextuel au module affiché → changement de
+            // module = fermeture (reset du binding du call site inclus).
+            paneCenter.dismissCurrent()
+            #endif
         }
+        #if os(macOS)
+        .environment(paneCenter)
+        #endif
+    }
+
+    /// AXE P — présente l'import V3 pré-rempli et libère l'URL en attente
+    /// (one-shot). No-op si nil ou si une sheet préchargée est déjà en cours.
+    /// Miroir de `consumePendingInvestmentImport` dans InvestmentsView.
+    private func consumePendingTransactionImport(_ urls: [URL]) {
+        guard !urls.isEmpty, preloadedTransactionImport == nil else { return }
+        preloadedTransactionImport = PreloadedTransactionImport(urls: urls)
+        appState.pendingTransactionImportURLs = []
     }
 
     // MARK: - Layouts
@@ -123,33 +167,175 @@ struct MainTabView: View {
     /// Layout desktop (AXE M) : sidebar avec TOUS les modules (pas de limite
     /// à 4, pas d'onglet Plus) + section Outils. Chaque module garde sa propre
     /// NavigationStack dans le volet détail.
+    ///
+    /// Sur macOS, le panneau latéral droit (pane des `.adaptivePane` niveau 1)
+    /// est un **HStack custom** rendu DANS la colonne détail, PAS un `.inspector` :
+    /// sur macOS 27 beta, `.inspector` crashe à la présentation (ré-entrance
+    /// AutoLayout pendant la MoveTransition du slide-in avec du contenu
+    /// AppKit-backed — NavigationStack/Form).
+    ///
+    /// ⚠️ Le panneau est injecté DANS le `detail:` du `NavigationSplitView`, jamais
+    /// autour de lui. Une V1 wrappait tout le split view dans un HStack
+    /// (`HStack { NavigationSplitView; pane }`) → le split view, qui veut être
+    /// racine, négociait sa largeur en BOUCLE avec le HStack → la barre de fenêtre
+    /// (et le bouton retour des vues poussées, ex. Tricount) vibrait en permanence.
+    /// En gardant le split view racine et le pane comme simple contenu du détail,
+    /// la boucle disparaît.
     private var sidebarLayout: some View {
+        sidebarSplitView
+    }
+
+    private var sidebarSplitView: some View {
         @Bindable var state = appState
         return NavigationSplitView {
-            List(selection: Binding<String?>(
-                get: { state.selectedTab },
-                set: { if let value = $0 { state.selectedTab = value } }
-            )) {
-                Section("Modules") {
-                    ForEach(availableTabs) { tab in
-                        Label(tab.title, systemImage: tab.systemImage)
-                            .tag(tab.rawValue)
-                    }
-                }
-                Section("Outils") {
-                    Label("Importer un CSV", systemImage: "square.and.arrow.down")
-                        .tag(sidebarImportTag)
-                    Label("Réglages", systemImage: "gearshape")
-                        .tag(sidebarSettingsTag)
-                }
-            }
-            .listStyle(.sidebar)
-            .navigationTitle("Nemoris")
-            .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 280)
+            sidebarList
+                .navigationTitle("Nemoris")
+                .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 280)
         } detail: {
-            detailView(for: state.selectedTab)
+            // ⚠️ `.id(selection)` est OBLIGATOIRE ici : sans elle, `NavigationSplitView`
+            // sur macOS ne détruit PAS l'état de navigation interne (push) de l'ancien
+            // module quand la sélection change — le contenu poussé (détail Tricount,
+            // détail compte/position Investissements…) reste affiché à l'écran, et
+            // seul un pop (bouton retour) force enfin le re-rendu vers le nouveau
+            // module. `.id()` force une identité de vue liée à l'onglet : au
+            // changement, SwiftUI démonte tout l'ancien sous-arbre (donc son
+            // `NavigationStack`/push interne) au lieu de tenter de le réutiliser.
+            detailColumn(for: state.selectedTab)
+                .id(state.selectedTab)
         }
         .tint(AppTheme.Colors.accent)
+    }
+
+    /// Colonne détail = contenu du module + (macOS) panneau latéral à droite.
+    ///
+    /// ⚠️ La `HStack` est TOUJOURS présente, même sans panneau ouvert (le panneau
+    /// est une branche `if` À L'INTÉRIEUR). Une version antérieure basculait entre
+    /// `detailView` seul et `HStack { detailView; panneau }` : SwiftUI y voyait
+    /// deux structures différentes, DÉTRUISAIT la vue du module à l'ouverture du
+    /// panneau et la recréait — donc tout son `@State` était réinitialisé (l'onglet
+    /// courant de « Données » retombait sur Comptes, les filtres se vidaient…).
+    /// Structure stable = identité stable = état préservé.
+    ///
+    /// Le panneau ne reçoit AUCUN chrome d'ici : son contenu déclare lui-même sa
+    /// `.toolbar` (cf. `publishesInspectorChrome`), donc les actions sont toujours
+    /// celles du rendu courant — jamais des closures périmées.
+    @ViewBuilder
+    private func detailColumn(for selection: String) -> some View {
+        #if os(macOS)
+        HStack(spacing: 0) {
+            detailView(for: selection)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let pane = paneCenter.pane {
+                Divider()
+                // `.id(pane.id)` : un pane re-présenté repart avec un @State frais
+                // → cliquer une autre donnée change le détail sans passer par
+                // « Fermer ».
+                pane.content
+                    .id(pane.id)
+                    .frame(width: InspectorPaneMetrics.width)
+                    .frame(maxHeight: .infinity)
+                    .background(AppTheme.Colors.background)
+            }
+        }
+        #else
+        detailView(for: selection)
+        #endif
+    }
+
+    @ViewBuilder
+    private var sidebarList: some View {
+        @Bindable var state = appState
+        #if os(macOS)
+        // Sélection pilotée MANUELLEMENT : la List `.sidebar` macOS dessine son
+        // highlight de sélection avec la couleur d'accentuation SYSTÈME (bleu),
+        // non recolorable via `.tint` (même limitation que les icônes). On retire
+        // donc le binding `selection:` et on peint notre propre pastille ADN via
+        // `.listRowBackground` (cf. sidebarRow). Contrepartie assumée : plus de
+        // navigation clavier ↑/↓ entre modules (sidebar = clic).
+        List {
+            Section("Modules") {
+                ForEach(availableTabs) { tab in
+                    sidebarRow(title: tab.title, systemImage: tab.systemImage, tag: tab.rawValue)
+                }
+            }
+            Section("Outils") {
+                sidebarRow(title: "Importer un CSV", systemImage: "square.and.arrow.down", tag: sidebarImportTag)
+                sidebarRow(title: "Réglages", systemImage: "gearshape", tag: sidebarSettingsTag)
+            }
+        }
+        .listStyle(.sidebar)
+        #else
+        // iOS / iPad : sélection native (le highlight suit le `.tint` ici).
+        List(selection: Binding<String?>(
+            get: { state.selectedTab },
+            set: { if let value = $0 { state.selectedTab = value } }
+        )) {
+            Section("Modules") {
+                ForEach(availableTabs) { tab in
+                    sidebarLabel(tab.title, systemImage: tab.systemImage)
+                        .tag(tab.rawValue)
+                }
+            }
+            Section("Outils") {
+                sidebarLabel("Importer un CSV", systemImage: "square.and.arrow.down")
+                    .tag(sidebarImportTag)
+                sidebarLabel("Réglages", systemImage: "gearshape")
+                    .tag(sidebarSettingsTag)
+            }
+        }
+        .listStyle(.sidebar)
+        #endif
+    }
+
+    #if os(macOS)
+    /// Row de sidebar macOS à sélection custom. On reproduit le highlight NEUTRE
+    /// de macOS (façon Mail : gris translucide) plutôt que le highlight bleu
+    /// système accent — non recolorable via `.tint`. L'icône reste verte (ADN),
+    /// le libellé passe en semibold quand sélectionné (emphase à la Mail).
+    ///
+    /// Sélection sur un `Button` (pas `onTapGesture`) : hit-testing immédiat et
+    /// feedback au clic — l'`onTapGesture` sur une row de List donnait un ressenti
+    /// "mou". Reste custom (pas de nav clavier ↑/↓, prix de la couleur non-bleue).
+    @ViewBuilder
+    private func sidebarRow(title: String, systemImage: String, tag: String) -> some View {
+        let isSelected = appState.selectedTab == tag
+        Button {
+            appState.selectedTab = tag
+        } label: {
+            Label {
+                Text(title)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundStyle(AppTheme.Colors.textPrimary)
+            } icon: {
+                Image(systemName: systemImage)
+                    .foregroundStyle(AppTheme.Colors.accent)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
+            .padding(.horizontal, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isSelected ? Color.primary.opacity(0.12) : Color.clear)
+        )
+    }
+    #endif
+
+    /// Sur macOS, une `Label` dans une `List` `.listStyle(.sidebar)` teinte son
+    /// icône avec `controlAccentColor` (réglage système "Couleur d'accentuation"),
+    /// pas avec l'environnement `.tint()`/`accentColor` de SwiftUI — d'où les icônes
+    /// bleues malgré le `.tint(AppTheme.Colors.accent)` posé plus haut. Seul un
+    /// `.foregroundStyle` explicite sur l'icône (natif, pas de hack AppKit) permet
+    /// de forcer la couleur ADN ici.
+    private func sidebarLabel(_ title: String, systemImage: String) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: systemImage)
+                .foregroundStyle(AppTheme.Colors.accent)
+        }
     }
 
     @ViewBuilder
@@ -157,7 +343,7 @@ struct MainTabView: View {
         if selection == sidebarSettingsTag {
             NavigationStack { SettingsView(isEmbedded: true) }
         } else if selection == sidebarImportTag {
-            NavigationStack { ImportV3EntryView() }
+            NavigationStack { ImportV3EntryView(isEmbedded: true) }
         } else if let tab = MainTabItem(rawValue: selection) {
             tabView(for: tab)
         } else {
@@ -310,7 +496,7 @@ private struct MoreView: View {
                 label: "Import CSV",
                 icon: "square.and.arrow.down",
                 color: AppTheme.Colors.success,
-                destination: { AnyView(ImportV3EntryView()) }
+                destination: { AnyView(ImportV3EntryView(isEmbedded: true)) }
             ),
             MoreItem(
                 label: "Paramètres",
@@ -547,7 +733,7 @@ private struct MoreView: View {
             }
             .buttonStyle(.plain)
         case .importCSV:
-            NavigationLink(destination: ImportV3EntryView()) {
+            NavigationLink(destination: ImportV3EntryView(isEmbedded: true)) {
                 featureRowLabel(entry)
             }
             .buttonStyle(.plain)

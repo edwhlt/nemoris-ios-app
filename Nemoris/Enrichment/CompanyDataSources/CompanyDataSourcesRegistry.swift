@@ -7,8 +7,9 @@ import Observation
 ///   - État `enabled` persisté en UserDefaults
 ///   - Clés API persistées en UserDefaults
 ///   - Méthode `search(query:country:postalCode:)` qui dispatch sur les sources actives
-///     **filtrant automatiquement par pays** : si le tier est en VN, on ne tape pas
-///     Companies House (UK) ; si pays inconnu, on tape les sources globales uniquement.
+///     **filtrant par pays quand un pays est connu** : si le tier est en VN, on ne tape pas
+///     Companies House (UK). Si le pays est inconnu (`nil`), on interroge TOUTES les
+///     sources actives — cf. `activeSources(forCountry:)`.
 ///
 /// Pour ajouter une source : voir `CompanyDataSource.swift`.
 @MainActor
@@ -82,17 +83,29 @@ final class CompanyDataSourcesRegistry {
         enabledIds.contains(source.id) && source.isImplemented
     }
 
-    /// Sources actives pour ce pays. Inclut les sources globales (country = nil)
-    /// et les sources matchant le code ISO. Filtre les placeholders non-implémentés.
-    /// Filtre aussi celles qui ont `requiresAPIKey = true` mais pas de clé saisie.
+    /// Sources actives pour ce pays. Filtre les placeholders non-implémentés et celles
+    /// qui ont `requiresAPIKey = true` mais pas de clé saisie.
+    ///
+    /// **Sémantique de `country`** :
+    ///   - non-nil → contrainte stricte : seules les sources globales (`source.country == nil`)
+    ///     et celles dont le pays correspond exactement sont interrogées.
+    ///   - **nil → AUCUNE contrainte** : toutes les sources actives sont interrogées.
+    ///
+    /// ⚠️ `nil` signifiait auparavant l'inverse — il faisait échouer le `guard let normalized`
+    /// et excluait donc *toutes* les sources déclarant un pays, c'est-à-dire les trois qui
+    /// existent (Sirene FR, Companies House GB, Zefix CH). Les écrans qui passaient `nil`
+    /// (`EnrichmentSheetView`, `EnrichmentMapFullscreenSheet`) ne recevaient donc jamais le
+    /// moindre résultat d'entreprise : leur toggle « Sources entreprises » était inerte,
+    /// silencieusement, sans erreur ni liste vide distinguable d'une recherche infructueuse.
+    ///
+    /// « Pays inconnu » veut dire « cherche partout », jamais « ne cherche nulle part » :
+    /// une recherche manuelle sur un libellé étranger ne doit pas être condamnée d'avance.
     func activeSources(forCountry country: String?) -> [any CompanyDataSource] {
         let normalized = country?.uppercased()
         return allKnownSources.filter { source in
             guard isEnabled(source) else { return false }
-            // Filtre par pays
-            if let src = source.country {
-                guard let normalized, src == normalized else { return false }
-            }
+            // Filtre par pays — seulement si un pays est demandé.
+            if let normalized, let src = source.country, src != normalized { return false }
             // Si clé API requise, vérifier qu'on en a une
             if source.requiresAPIKey {
                 guard let key = apiKeys[source.id], !key.isEmpty else { return false }
@@ -104,8 +117,11 @@ final class CompanyDataSourcesRegistry {
     // MARK: - Search dispatch
 
     /// Interroge en parallèle toutes les sources actives matchant le pays donné.
-    /// Si `country == nil`, seules les sources globales sont interrogées.
+    /// Si `country == nil`, toutes les sources actives sont interrogées (aucune contrainte).
     /// Concatène les résultats (pas de dédup — l'appelant peut le faire).
+    /// ⚠️ L'ordre de sortie est celui d'ACHÈVEMENT des tâches, donc non déterministe :
+    /// ne jamais prendre `.first` comme « meilleur résultat ». Le classement est la
+    /// responsabilité de l'appelant.
     func search(query: String,
                 country: String?,
                 postalCode: String? = nil) async -> [MerchantEnrichment] {

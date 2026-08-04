@@ -41,6 +41,8 @@ struct SyncStoreTests {
         t10_purgeVirginSeed(storeB, urlB)
         t11_categoryNameAdoption(storeB, urlB)
         t12_dedupReferenceDuplicates(storeB, urlB)
+        t13_deferredNotNullFK(storeA, urlA, storeB, urlB)
+        t14_reimbursementXorDeferral(storeA, urlA, storeB, urlB)
 
         if failures == 0 {
             print("\n✅ SyncStoreTests : tous les tests passent")
@@ -74,7 +76,6 @@ struct SyncStoreTests {
                 payee_id INTEGER REFERENCES payees(id),
                 category_id INTEGER REFERENCES categories(id),
                 payment_type_id INTEGER REFERENCES payment_types(id),
-                reimbursement_payee_id INTEGER REFERENCES payees(id),
                 information TEXT, libelle_brut TEXT, amount REAL, tx_date TEXT
             );
             """,
@@ -95,6 +96,19 @@ struct SyncStoreTests {
                 PRIMARY KEY (entry_id, tag_id)
             );
             """,
+            // — Remboursement unifié (v44, AXE R) : XOR transaction_id/tricount_entry_id.
+            """
+            CREATE TABLE reimbursements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                transaction_id INTEGER REFERENCES transactions(id) ON DELETE CASCADE,
+                tricount_entry_id INTEGER REFERENCES tricount_entries(id) ON DELETE CASCADE,
+                payee_id INTEGER NOT NULL REFERENCES payees(id),
+                amount REAL, currency TEXT NOT NULL DEFAULT 'EUR', status TEXT NOT NULL DEFAULT 'PENDING',
+                CHECK ((transaction_id IS NOT NULL) <> (tricount_entry_id IS NOT NULL))
+            );
+            """,
+            "CREATE UNIQUE INDEX idx_reimbursements_transaction ON reimbursements(transaction_id) WHERE transaction_id IS NOT NULL;",
+            "CREATE UNIQUE INDEX idx_reimbursements_tricount ON reimbursements(tricount_entry_id, payee_id) WHERE tricount_entry_id IS NOT NULL;",
             "CREATE TABLE investment_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, opened_at TEXT NOT NULL DEFAULT '');",
             "CREATE TABLE investment_positions (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL REFERENCES investment_accounts(id) ON DELETE CASCADE, asset_name TEXT NOT NULL DEFAULT '', ticker TEXT NOT NULL DEFAULT '', quantity REAL NOT NULL DEFAULT 0, purchase_date TEXT NOT NULL DEFAULT '');",
             "CREATE TABLE investment_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, position_id INTEGER NOT NULL REFERENCES investment_positions(id) ON DELETE CASCADE, order_type TEXT NOT NULL DEFAULT 'BUY', quantity REAL NOT NULL DEFAULT 0, unit_price REAL NOT NULL DEFAULT 0, executed_at TEXT NOT NULL DEFAULT '', external_id TEXT);",
@@ -103,6 +117,7 @@ struct SyncStoreTests {
         for sql in schema { exec(db, sql) }
         for sql in SyncSchema.infrastructureStatements { exec(db, sql) }
         for sql in SyncSchema.engineStateStatements { exec(db, sql) }
+        for sql in SyncSchema.deferredRowsDDL { exec(db, sql) }
         for t in SyncSchema.syncedTables where tableExists(db, t) {
             for sql in SyncSchema.columnStatements(table: t) { exec(db, sql) }
         }
@@ -114,6 +129,118 @@ struct SyncStoreTests {
     }
 
     // MARK: - Tests
+
+    /// Fix "683 ordres perdus" : un record dont une FK NOT NULL pointe une
+    /// cible pas encore descendue (batchs CloudKit sans ordre garanti) doit
+    /// être DIFFÉRÉ puis rejoué quand la cible arrive — pas perdu. Cascade
+    /// complète : l'ordre attend sa position, qui attend son compte.
+    static func t13_deferredNotNullFK(_ storeA: SyncPayloadStore, _ urlA: URL,
+                                      _ storeB: SyncPayloadStore, _ urlB: URL) {
+        var accUuid = "", posUuid = "", ordUuid = ""
+        withDB(urlA) { db in
+            exec(db, "INSERT INTO investment_accounts (name) VALUES ('PEA-T13');")
+            exec(db, "INSERT INTO investment_positions (account_id, asset_name, ticker) VALUES ((SELECT id FROM investment_accounts WHERE name='PEA-T13'), 'Thales', 'HO-T13');")
+            exec(db, "INSERT INTO investment_orders (position_id, order_type, quantity, unit_price, executed_at) VALUES ((SELECT id FROM investment_positions WHERE ticker='HO-T13'), 'BUY', 3, 140, '2026-01-15');")
+            accUuid = query(db, "SELECT uuid FROM investment_accounts WHERE name='PEA-T13';")
+            posUuid = query(db, "SELECT uuid FROM investment_positions WHERE ticker='HO-T13';")
+            ordUuid = query(db, "SELECT uuid FROM investment_orders WHERE unit_price=140;")
+        }
+        guard let accP = storeA.payloadJSON(table: "investment_accounts", uuid: accUuid),
+              let posP = storeA.payloadJSON(table: "investment_positions", uuid: posUuid),
+              let ordP = storeA.payloadJSON(table: "investment_orders", uuid: ordUuid) else {
+            check("T13 payloads générés", false, "payloadJSON nil"); return
+        }
+
+        // Batch 1 : l'ORDRE seul — sa position n'existe pas encore sur B.
+        storeB.applyRemoteBatch(
+            modifications: [.init(table: "investment_orders", uuid: ordUuid, payloadData: ordP, systemFields: Data([9]))],
+            deletions: [])
+        withDB(urlB) { db in
+            check("T13 ordre PAS inséré (FK NOT NULL absente)",
+                  query(db, "SELECT COUNT(*) FROM investment_orders WHERE uuid='\(ordUuid)';") == "0", "")
+            check("T13 ordre DIFFÉRÉ (pas perdu)",
+                  query(db, "SELECT COUNT(*) FROM sync_deferred_rows WHERE row_uuid='\(ordUuid)';") == "1", "")
+            check("T13 system fields attachés au différé",
+                  query(db, "SELECT length(system_fields) FROM sync_deferred_rows WHERE row_uuid='\(ordUuid)';") == "1", "")
+        }
+
+        // Batch 2 : position et compte VOLONTAIREMENT dans le désordre — le
+        // tri interne (référencées d'abord) applique compte → position, puis
+        // le rejeu de fin de batch débloque l'ordre différé.
+        storeB.applyRemoteBatch(
+            modifications: [
+                .init(table: "investment_positions", uuid: posUuid, payloadData: posP, systemFields: Data([8])),
+                .init(table: "investment_accounts", uuid: accUuid, payloadData: accP, systemFields: Data([7])),
+            ],
+            deletions: [])
+        withDB(urlB) { db in
+            let posId = query(db, "SELECT id FROM investment_positions WHERE uuid='\(posUuid)';")
+            check("T13 position appliquée (compte trié avant)", posId != "<no row>", "posId=\(posId)")
+            check("T13 ordre rejoué avec la bonne FK",
+                  query(db, "SELECT position_id FROM investment_orders WHERE uuid='\(ordUuid)';") == posId, "")
+            check("T13 file des différés soldée",
+                  query(db, "SELECT COUNT(*) FROM sync_deferred_rows;") == "0", "")
+            check("T13 system fields promus en record_meta",
+                  query(db, "SELECT COUNT(*) FROM sync_record_meta WHERE row_uuid='\(ordUuid)';") == "1", "")
+        }
+    }
+
+    /// v44 AXE R : le CHECK XOR (transaction_id / tricount_entry_id) n'est pas
+    /// qu'une contrainte d'intégrité — il permet au mécanisme de report (v43)
+    /// de rattraper une ligne `reimbursements` dont la transaction cible
+    /// arrive APRÈS (batchs CloudKit sans ordre garanti). Sans lui, l'INSERT
+    /// réussirait avec transaction_id ET tricount_entry_id à NULL (ligne
+    /// fantôme jamais réparée) au lieu d'échouer et d'être différée.
+    static func t14_reimbursementXorDeferral(_ storeA: SyncPayloadStore, _ urlA: URL,
+                                             _ storeB: SyncPayloadStore, _ urlB: URL) {
+        var payeeUuid = "", txUuid = "", reimbUuid = ""
+        withDB(urlA) { db in
+            exec(db, "INSERT INTO payees (name) VALUES ('Papa-T14');")
+            exec(db, "INSERT INTO transactions (amount, information) VALUES (-80, 'Cadeau T14');")
+            exec(db, "INSERT INTO reimbursements (transaction_id, payee_id) VALUES ((SELECT id FROM transactions WHERE information='Cadeau T14'), (SELECT id FROM payees WHERE name='Papa-T14'));")
+            payeeUuid = query(db, "SELECT uuid FROM payees WHERE name='Papa-T14';")
+            txUuid = query(db, "SELECT uuid FROM transactions WHERE information='Cadeau T14';")
+            reimbUuid = query(db, "SELECT uuid FROM reimbursements WHERE payee_id=(SELECT id FROM payees WHERE name='Papa-T14');")
+        }
+        guard let payeeP = storeA.payloadJSON(table: "payees", uuid: payeeUuid),
+              let txP = storeA.payloadJSON(table: "transactions", uuid: txUuid),
+              let reimbP = storeA.payloadJSON(table: "reimbursements", uuid: reimbUuid) else {
+            check("T14 payloads générés", false, "payloadJSON nil"); return
+        }
+
+        // Précondition : le payee existe déjà côté B (FK payee_id résolue OK)
+        // — seule la FK transaction_id doit poser problème.
+        setSuppress(urlB, true)
+        check("T14 apply payee (précondition)", storeB.applyRemoteRecord(table: "payees", payloadData: payeeP) == .applied, "")
+        setSuppress(urlB, false)
+
+        // Batch 1 : le remboursement seul — sa transaction n'existe pas encore sur B.
+        storeB.applyRemoteBatch(
+            modifications: [.init(table: "reimbursements", uuid: reimbUuid, payloadData: reimbP, systemFields: Data([9]))],
+            deletions: [])
+        withDB(urlB) { db in
+            check("T14 remboursement PAS inséré (CHECK XOR violé)",
+                  query(db, "SELECT COUNT(*) FROM reimbursements WHERE uuid='\(reimbUuid)';") == "0", "")
+            check("T14 remboursement DIFFÉRÉ (pas perdu)",
+                  query(db, "SELECT COUNT(*) FROM sync_deferred_rows WHERE row_uuid='\(reimbUuid)';") == "1", "")
+        }
+
+        // Batch 2 : la transaction arrive — le rejeu de fin de batch débloque
+        // le remboursement différé.
+        storeB.applyRemoteBatch(
+            modifications: [.init(table: "transactions", uuid: txUuid, payloadData: txP, systemFields: Data([8]))],
+            deletions: [])
+        withDB(urlB) { db in
+            let txId = query(db, "SELECT id FROM transactions WHERE uuid='\(txUuid)';")
+            check("T14 transaction appliquée", txId != "<no row>", "txId=\(txId)")
+            check("T14 remboursement rejoué avec la bonne FK",
+                  query(db, "SELECT transaction_id FROM reimbursements WHERE uuid='\(reimbUuid)';") == txId, "")
+            check("T14 tricount_entry_id resté NULL (XOR respecté)",
+                  query(db, "SELECT tricount_entry_id IS NULL FROM reimbursements WHERE uuid='\(reimbUuid)';") == "1", "")
+            check("T14 file des différés soldée",
+                  query(db, "SELECT COUNT(*) FROM sync_deferred_rows;") == "0", "")
+        }
+    }
 
     /// Régression session L.1 : `Int32(Int.max)` crashait. Le clamp doit
     /// rendre TOUTES les rows sans surflow.

@@ -75,14 +75,14 @@ final class InvestmentPDFParser: Sendable {
     /// Chantier C — pipeline complet pour une image en mémoire (PhotosPicker).
     /// OCR → parsing IA bi-mode (ordres OU capture de portefeuille).
     @MainActor func parseImageData(_ data: Data) async -> [PDFPageResult] {
-        guard let text = extractTextFromImageData(data) else { return [] }
-        let parsed = await parsePage(text: text, pageNumber: 1)
-        return [PDFPageResult(
-            pageNumber: 1, rawText: text,
-            orders: parsed.orders, positions: parsed.positions,
-            detectedMode: parsed.mode,
-            parsingNote: parsed.isEmpty ? "Aucun ordre ni position détecté dans l'image" : nil
-        )]
+        guard let text = extractTextFromImageData(data),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return [PDFPageResult(pageNumber: 1, rawText: "", orders: [],
+                                  detectedMode: .unknown,
+                                  parsingNote: PDFPageDiagnostic.noTextExtracted.userMessage,
+                                  diagnostic: .noTextExtracted, kind: .image)]
+        }
+        return [await parseUnit(text: text, unitNumber: 1, kind: .image)]
     }
 
     /// Reconnaissance de texte via Vision.
@@ -127,65 +127,235 @@ final class InvestmentPDFParser: Sendable {
         var isEmpty: Bool { orders.isEmpty && positions.isEmpty }
     }
 
-    /// Point d'entrée universel — détecte le type de fichier et dispatch.
+    // MARK: - Détection du format par le CONTENU
+
+    /// Identifie la nature réelle d'un fichier par ses octets d'en-tête.
+    ///
+    /// ⚠️ Ne JAMAIS se fier à l'extension seule. Bug constaté en production :
+    /// une capture d'écran partagée via la share sheet arrive nommée
+    /// `<uuid>.dat` (le type abstrait `public.image` n'a pas de
+    /// `preferredFilenameExtension`), tombait dans la branche « texte brut »,
+    /// et `String(contentsOf:encoding:.isoLatin1)` — qui n'échoue JAMAIS,
+    /// n'importe quelle suite d'octets étant du Latin-1 valide — produisait
+    /// 670 000 caractères de binaire envoyés au modèle comme s'il s'agissait
+    /// d'un relevé. D'où « 1 page analysée · Rien à importer ».
+    static func detectKind(data: Data, fileExtension: String = "") -> InvestmentDocumentKind {
+        let magic = [UInt8](data.prefix(12))
+        func starts(_ bytes: [UInt8]) -> Bool {
+            guard magic.count >= bytes.count else { return false }
+            return Array(magic.prefix(bytes.count)) == bytes
+        }
+
+        if starts([0x25, 0x50, 0x44, 0x46]) { return .pdf }                     // %PDF
+        if starts([0x89, 0x50, 0x4E, 0x47]) { return .image }                   // PNG
+        if starts([0xFF, 0xD8, 0xFF])       { return .image }                   // JPEG
+        if starts([0x47, 0x49, 0x46, 0x38]) { return .image }                   // GIF8
+        if starts([0x42, 0x4D])             { return .image }                   // BM (BMP)
+        if starts([0x49, 0x49, 0x2A, 0x00]) || starts([0x4D, 0x4D, 0x00, 0x2A]) { return .image } // TIFF
+        if magic.count >= 12 {
+            let brand = String(decoding: magic[4..<12], as: UTF8.self)
+            if brand.hasPrefix("ftyp") {                                        // HEIC / HEIF / AVIF
+                return .image
+            }
+            if starts([0x52, 0x49, 0x46, 0x46]),                                 // RIFF….WEBP
+               String(decoding: magic[8..<12], as: UTF8.self) == "WEBP" { return .image }
+        }
+
+        if looksLikeText(data) { return .text }
+
+        // Dernier recours : l'extension, quand les octets ne disent rien
+        // (fichier vide, format exotique).
+        switch fileExtension.lowercased() {
+        case "pdf":                                  return .pdf
+        case "jpg", "jpeg", "png", "heic", "heif",
+             "tiff", "tif", "bmp", "webp", "gif":    return .image
+        case "csv", "txt", "tsv":                    return .text
+        default:                                     return .unknown
+        }
+    }
+
+    /// Extension de fichier déduite des octets, ou nil si le format n'est pas
+    /// reconnu. Utilisée par la boîte de réception (partage, Raccourcis) pour
+    /// nommer correctement le fichier déposé.
+    static func sniffFileExtension(data: Data) -> String? {
+        let magic = [UInt8](data.prefix(12))
+        func starts(_ bytes: [UInt8]) -> Bool {
+            guard magic.count >= bytes.count else { return false }
+            return Array(magic.prefix(bytes.count)) == bytes
+        }
+        if starts([0x25, 0x50, 0x44, 0x46]) { return "pdf" }
+        if starts([0x89, 0x50, 0x4E, 0x47]) { return "png" }
+        if starts([0xFF, 0xD8, 0xFF])       { return "jpg" }
+        if starts([0x47, 0x49, 0x46, 0x38]) { return "gif" }
+        if starts([0x42, 0x4D])             { return "bmp" }
+        if starts([0x49, 0x49, 0x2A, 0x00]) || starts([0x4D, 0x4D, 0x00, 0x2A]) { return "tiff" }
+        if magic.count >= 12 {
+            if String(decoding: magic[4..<12], as: UTF8.self).hasPrefix("ftyp") { return "heic" }
+            if starts([0x52, 0x49, 0x46, 0x46]),
+               String(decoding: magic[8..<12], as: UTF8.self) == "WEBP" { return "webp" }
+        }
+        return looksLikeText(data) ? "txt" : nil
+    }
+
+    /// Vrai si les octets ressemblent à du texte exploitable.
+    ///
+    /// Test sur un échantillon : présence d'octets NUL (jamais dans du texte)
+    /// et proportion de caractères de contrôle. Indispensable parce qu'aucun
+    /// décodage Latin-1 n'échoue jamais.
+    static func looksLikeText(_ data: Data) -> Bool {
+        let sample = data.prefix(2048)
+        guard !sample.isEmpty else { return false }
+        if sample.contains(0x00) { return false }
+        let control = sample.filter { byte in
+            byte < 0x09 || (byte > 0x0D && byte < 0x20) || byte == 0x7F
+        }.count
+        return Double(control) / Double(sample.count) < 0.02
+    }
+
+    /// Point d'entrée universel — détecte le type RÉEL du fichier et dispatch.
     @MainActor func parseFile(
         from url: URL,
         onPageParsed: @escaping (Int, Int) -> Void
     ) async -> [PDFPageResult] {
-        let ext = url.pathExtension.lowercased()
+        let data = (try? Data(contentsOf: url)) ?? Data()
+        let kind = Self.detectKind(data: data, fileExtension: url.pathExtension)
 
-        switch ext {
-        case "pdf":
+        switch kind {
+        case .pdf:
             return await parseAllPages(from: url, onPageParsed: onPageParsed)
 
-        case "jpg", "jpeg", "png", "heic", "heif", "tiff", "tif", "bmp", "webp":
+        case .image:
             onPageParsed(0, 1)
-            guard let text = extractTextFromImage(at: url) else {
-                onPageParsed(1, 1)
-                return []
-            }
-            let parsed = await parsePage(text: text, pageNumber: 1)
+            let text = extractTextFromImageData(data) ?? extractTextFromImage(at: url)
             onPageParsed(1, 1)
-            return [PDFPageResult(
-                pageNumber: 1, rawText: text,
-                orders: parsed.orders, positions: parsed.positions, detectedMode: parsed.mode,
-                parsingNote: parsed.isEmpty ? "Aucun ordre ni position détecté dans l'image" : nil
-            )]
+            guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return [PDFPageResult(pageNumber: 1, rawText: "", orders: [],
+                                      detectedMode: .unknown,
+                                      parsingNote: PDFPageDiagnostic.noTextExtracted.userMessage,
+                                      diagnostic: .noTextExtracted, kind: .image)]
+            }
+            return [await parseUnit(text: text, unitNumber: 1, kind: .image)]
 
-        case "csv", "txt", "tsv":
-            // Pour les fichiers texte, on découpe par blocs de ~4000 chars pour
-            // ne pas dépasser la capacité du modèle et améliorer la granularité.
+        case .text:
             guard let text = extractTextFromFile(at: url) else {
                 onPageParsed(1, 1)
-                return []
+                return [PDFPageResult(pageNumber: 1, rawText: "", orders: [],
+                                      detectedMode: .unknown,
+                                      parsingNote: PDFPageDiagnostic.noTextExtracted.userMessage,
+                                      diagnostic: .noTextExtracted, kind: .text)]
             }
+            // Découpage en blocs : le modèle embarqué a une fenêtre de contexte
+            // limitée, un gros CSV envoyé d'un bloc la fait déborder.
             let chunks = Self.splitTextIntoChunks(text, maxChars: 4000)
             var results: [PDFPageResult] = []
             for (index, chunk) in chunks.enumerated() {
-                let parsed = await parsePage(text: chunk, pageNumber: index + 1)
-                results.append(PDFPageResult(
-                    pageNumber: index + 1, rawText: chunk,
-                    orders: parsed.orders, positions: parsed.positions, detectedMode: parsed.mode,
-                    parsingNote: parsed.isEmpty ? "Aucun ordre détecté dans ce bloc" : nil
-                ))
+                results.append(await parseUnit(text: chunk, unitNumber: index + 1, kind: .text))
                 onPageParsed(index + 1, chunks.count)
             }
             return results
 
-        default:
-            // Tente comme texte brut en dernier recours
-            guard let text = extractTextFromFile(at: url) else {
-                onPageParsed(1, 1)
-                return []
-            }
-            let parsed = await parsePage(text: text, pageNumber: 1)
+        case .unknown:
             onPageParsed(1, 1)
-            return [PDFPageResult(
-                pageNumber: 1, rawText: text,
-                orders: parsed.orders, positions: parsed.positions, detectedMode: parsed.mode,
-                parsingNote: parsed.isEmpty ? "Format non reconnu, aucun ordre détecté" : nil
-            )]
+            return [PDFPageResult(pageNumber: 1, rawText: "", orders: [],
+                                  detectedMode: .unknown,
+                                  parsingNote: PDFPageDiagnostic.notTextContent.userMessage,
+                                  diagnostic: .notTextContent, kind: .unknown)]
         }
+    }
+
+    /// Analyse d'une unité (page, capture, bloc) : IA guidée → IA JSON →
+    /// extraction déterministe. Chaque étage rattrape l'échec du précédent.
+    @MainActor private func parseUnit(text: String, unitNumber: Int,
+                                      kind: InvestmentDocumentKind) async -> PDFPageResult {
+        let (parsed, diagnostic) = await parsePage(text: text, pageNumber: unitNumber)
+
+        // Extraction déterministe menée SYSTÉMATIQUEMENT, pas seulement en
+        // repli : elle ne coûte rien (aucune I/O) et elle est exacte là où le
+        // petit modèle embarqué dérape.
+        //
+        // ⚠️ Constaté sur une capture réelle à deux lignes : le modèle a
+        // recopié le nom et l'ISIN de la PREMIÈRE opération sur la seconde.
+        // Associer un libellé au bon code sur un texte OCR en colonne est
+        // précisément ce qu'un ancrage par ISIN fait sans se tromper. On
+        // réconcilie donc les deux sources plutôt que de choisir un camp.
+        let deterministic = InvestmentStatementExtractor.extractOrders(from: text)
+            .map { Self.convert($0, pageNumber: unitNumber) }
+
+        let merged = Self.reconcile(ai: parsed.orders, deterministic: deterministic)
+        let usedFallback = !deterministic.isEmpty && parsed.orders.isEmpty
+
+        if !merged.isEmpty || !parsed.positions.isEmpty {
+            return PDFPageResult(
+                pageNumber: unitNumber, rawText: text,
+                orders: merged, positions: parsed.positions,
+                detectedMode: merged.isEmpty ? parsed.mode : .orders,
+                // On garde la trace d'un échec IA même quand le déterministe a
+                // sauvé la mise : c'est l'information utile en support.
+                parsingNote: diagnostic.isFailure ? diagnostic.userMessage : nil,
+                diagnostic: .extracted, kind: kind,
+                usedDeterministicFallback: usedFallback
+            )
+        }
+
+        let finalDiagnostic: PDFPageDiagnostic = diagnostic.isFailure ? diagnostic : .nothingRecognized
+        return PDFPageResult(
+            pageNumber: unitNumber, rawText: text,
+            orders: [], positions: [],
+            detectedMode: .unknown,
+            parsingNote: finalDiagnostic.userMessage,
+            diagnostic: finalDiagnostic, kind: kind
+        )
+    }
+
+    /// Fusionne les deux extractions.
+    ///
+    /// L'extraction déterministe fait AUTORITÉ sur les titres qu'elle a
+    /// reconnus (elle lit les champs à leur place exacte autour de l'ISIN) ;
+    /// l'IA complète avec ce que l'ancrage ISIN ne peut pas voir : opérations
+    /// sans code ISIN, formats en prose, tickers.
+    static func reconcile(ai: [PDFExtractedOrder],
+                          deterministic: [PDFExtractedOrder]) -> [PDFExtractedOrder] {
+        guard !deterministic.isEmpty else { return ai }
+
+        let knownISINs = Set(deterministic.map { $0.isin.uppercased() }.filter { !$0.isEmpty })
+        // Le ticker est le seul champ que le déterministe ne cherche pas.
+        var tickerByISIN: [String: String] = [:]
+        for order in ai where !order.isin.isEmpty && !order.ticker.isEmpty {
+            tickerByISIN[order.isin.uppercased()] = order.ticker
+        }
+
+        var result = deterministic.map { order -> PDFExtractedOrder in
+            var enriched = order
+            if enriched.ticker.isEmpty, let ticker = tickerByISIN[order.isin.uppercased()] {
+                enriched.ticker = ticker
+            }
+            return enriched
+        }
+        // Ajout des opérations que seule l'IA a vues. Filtrer sur l'ISIN évite
+        // de réintroduire les doublons dont le modèle a mal recopié le code.
+        result.append(contentsOf: ai.filter { !knownISINs.contains($0.isin.uppercased()) })
+        return result
+    }
+
+    /// Pont moteur déterministe (pur) → modèle d'UI.
+    static func convert(_ order: ExtractedStatementOrder, pageNumber: Int) -> PDFExtractedOrder {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return PDFExtractedOrder(
+            orderType: order.orderType,
+            assetName: order.assetName,
+            ticker: "",
+            isin: order.isin,
+            quantity: order.quantity,
+            unitPrice: order.unitPrice,
+            fees: order.fees,
+            executedAt: formatter.date(from: order.executedAt) ?? Date(),
+            currency: order.currency,
+            notes: order.notes,
+            pageNumber: pageNumber,
+            confidence: order.confidence
+        )
     }
 
     /// Découpe un long texte en chunks d'environ `maxChars`, en coupant sur les sauts de ligne.
@@ -217,50 +387,217 @@ final class InvestmentPDFParser: Sendable {
 
         var results: [PDFPageResult] = []
         for (index, (pageNumber, text)) in pages.enumerated() {
-            let parsed = await parsePage(text: text, pageNumber: pageNumber)
-            let note = parsed.isEmpty ? "Aucun ordre détecté sur cette page" : nil
-            results.append(PDFPageResult(
-                pageNumber: pageNumber,
-                rawText: text,
-                orders: parsed.orders,
-                positions: parsed.positions,
-                detectedMode: parsed.mode,
-                parsingNote: note
-            ))
+            var result = await parseUnit(text: text, unitNumber: pageNumber, kind: .pdf)
+            // `parseUnit` numérote l'unité ; ici le numéro de page du PDF fait foi.
+            result = PDFPageResult(
+                pageNumber: pageNumber, rawText: result.rawText,
+                orders: result.orders, positions: result.positions,
+                detectedMode: result.detectedMode, parsingNote: result.parsingNote,
+                diagnostic: result.diagnostic, kind: .pdf,
+                usedDeterministicFallback: result.usedDeterministicFallback
+            )
+            results.append(result)
             onPageParsed(index + 1, pages.count)
         }
         return results
     }
 
     /// Parse une seule page via Foundation Models. Retourne ordres OU positions
-    /// (mode snapshot) selon la classification faite par l'IA.
-    @MainActor private func parsePage(text: String, pageNumber: Int) async -> PageParse {
+    /// (mode snapshot) selon la classification faite par l'IA, PLUS un
+    /// diagnostic — sans lui, un échec du modèle est indiscernable d'un
+    /// document réellement vide côté UI.
+    @MainActor private func parsePage(text: String, pageNumber: Int) async -> (PageParse, PDFPageDiagnostic) {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
             return await parsePageWithAI(text: text, pageNumber: pageNumber)
         }
         #endif
-        print("[PDFParser] Foundation Models non disponible — parsing impossible")
-        return PageParse()
+        print("[PDFParser] Foundation Models non disponible — repli déterministe")
+        return (PageParse(), .aiUnavailable)
     }
 
     #if canImport(FoundationModels)
     @available(iOS 26.0, macOS 26.0, *)
-    private func parsePageWithAI(text: String, pageNumber: Int) async -> PageParse {
-        guard SystemLanguageModel.default.isAvailable else { return PageParse() }
+    private func parsePageWithAI(text: String, pageNumber: Int) async -> (PageParse, PDFPageDiagnostic) {
+        guard SystemLanguageModel.default.isAvailable else { return (PageParse(), .aiUnavailable) }
 
-        let prompt = Self.buildPagePrompt(pageText: text, pageNumber: pageNumber)
-        let session = LanguageModelSession(instructions: Self.systemInstructions)
+        // Le texte envoyé est borné : la fenêtre de contexte du modèle embarqué
+        // est étroite et un dépassement fait échouer TOUTE la page.
+        let payload = String(text.prefix(4000))
 
+        // 1er choix : GÉNÉRATION GUIDÉE. Le schéma `@Generable` contraint le
+        // décodage côté modèle — plus de JSON à réparer, et mesuré ~3× plus
+        // rapide que la génération libre (7,5 s contre 21,4 s sur le même
+        // relevé) parce que le modèle n'écrit plus la syntaxe.
+        let session = LanguageModelSession(instructions: Self.guidedInstructions)
         do {
-            let response = try await session.respond(to: prompt)
-            let parsed = Self.parsePageResponse(response.content, pageNumber: pageNumber)
-            print("[PDFParser] Page \(pageNumber) [\(parsed.mode.rawValue)]: \(parsed.orders.count) ordres, \(parsed.positions.count) positions")
-            return parsed
+            let response = try await session.respond(
+                to: Self.buildGuidedPrompt(text: payload),
+                generating: AIStatementExtraction.self
+            )
+            let parsed = Self.convert(response.content, pageNumber: pageNumber)
+            print("[PDFParser] Unité \(pageNumber) [guidé/\(parsed.mode.rawValue)] : \(parsed.orders.count) ordres, \(parsed.positions.count) positions")
+            if !parsed.isEmpty { return (parsed, .extracted) }
         } catch {
-            print("[PDFParser] Erreur IA page \(pageNumber): \(error.localizedDescription)")
-            return PageParse()
+            print("[PDFParser] Génération guidée KO unité \(pageNumber) : \(error)")
         }
+
+        // 2e choix : génération libre + JSON. Conservée parce qu'un modèle peut
+        // refuser un schéma qu'il honore mal sur un document atypique.
+        let legacySession = LanguageModelSession(instructions: Self.systemInstructions)
+        do {
+            let response = try await legacySession.respond(
+                to: Self.buildPagePrompt(pageText: payload, pageNumber: pageNumber))
+            let parsed = Self.parsePageResponse(response.content, pageNumber: pageNumber)
+            print("[PDFParser] Unité \(pageNumber) [JSON/\(parsed.mode.rawValue)] : \(parsed.orders.count) ordres, \(parsed.positions.count) positions")
+            return (parsed, parsed.isEmpty ? .nothingRecognized : .extracted)
+        } catch {
+            print("[PDFParser] Erreur IA unité \(pageNumber) : \(error.localizedDescription)")
+            return (PageParse(), .aiFailed(Self.humanize(error)))
+        }
+    }
+
+    /// Message d'erreur lisible par l'utilisateur (les erreurs Foundation
+    /// Models sont verbeuses et anglophones).
+    @available(iOS 26.0, macOS 26.0, *)
+    private static func humanize(_ error: Error) -> String {
+        let raw = String(describing: error).lowercased()
+        if raw.contains("context") || raw.contains("exceeded") {
+            return "document trop long pour l'analyse en une fois"
+        }
+        if raw.contains("guardrail") || raw.contains("safety") {
+            return "contenu refusé par les garde-fous du modèle"
+        }
+        if raw.contains("unavailable") || raw.contains("notready") {
+            return "modèle indisponible pour le moment"
+        }
+        return "erreur du moteur d'analyse"
+    }
+
+    // MARK: - Schéma de génération guidée
+
+    /// Schéma imposé au modèle. Chaque champ est NON optionnel : la génération
+    /// guidée les remplit toujours, ce qui supprime la classe de bugs du
+    /// décodage JSON (une clé manquante faisait perdre la page ENTIÈRE, pas
+    /// seulement la ligne fautive).
+    @available(iOS 26.0, macOS 26.0, *)
+    @Generable
+    struct AIStatementExtraction {
+        @Guide(description: "orders si les lignes ont une date d'opération ; positions si c'est un état du portefeuille sans date ; unknown si aucune donnée")
+        var mode: String
+        @Guide(description: "Opérations datées : achats, ventes, dividendes", .count(0...25))
+        var orders: [AIStatementOrder]
+        @Guide(description: "Lignes détenues d'une capture de portefeuille", .count(0...25))
+        var positions: [AIStatementPosition]
+    }
+
+    @available(iOS 26.0, macOS 26.0, *)
+    @Generable
+    struct AIStatementOrder {
+        @Guide(description: "BUY pour un achat, SELL pour une vente, DIV pour un dividende ou coupon")
+        var orderType: String
+        @Guide(description: "Nom réel du titre tel qu'il apparaît, jamais un mot générique comme Action ou ETF")
+        var assetName: String
+        @Guide(description: "Code ISIN de 12 caractères commençant par 2 lettres de pays, chaîne vide si absent")
+        var isin: String
+        @Guide(description: "Symbole boursier court, chaîne vide si absent")
+        var ticker: String
+        @Guide(description: "Nombre de titres de l'opération")
+        var quantity: Double
+        @Guide(description: "Prix unitaire d'exécution, 0 si le document ne le donne pas")
+        var unitPrice: Double
+        @Guide(description: "Frais ou commission, 0 si absent")
+        var fees: Double
+        @Guide(description: "Date d'exécution au format yyyy-MM-dd")
+        var executedAt: String
+        @Guide(description: "Code devise à 3 lettres, EUR par défaut")
+        var currency: String
+    }
+
+    @available(iOS 26.0, macOS 26.0, *)
+    @Generable
+    struct AIStatementPosition {
+        @Guide(description: "Nom réel du titre détenu")
+        var assetName: String
+        @Guide(description: "Code ISIN de 12 caractères, chaîne vide si absent")
+        var isin: String
+        @Guide(description: "Symbole boursier court, chaîne vide si absent")
+        var ticker: String
+        @Guide(description: "Quantité détenue")
+        var quantity: Double
+        @Guide(description: "Prix de revient unitaire (PRU), 0 si absent")
+        var averagePrice: Double
+        @Guide(description: "Valorisation actuelle de la ligne, 0 si absente")
+        var currentValue: Double
+        @Guide(description: "Code devise à 3 lettres, EUR par défaut")
+        var currency: String
+    }
+
+    /// Instructions de la génération guidée — volontairement COURTES (~500
+    /// caractères contre 7 600 pour la génération libre) : le schéma porte
+    /// déjà la structure, et chaque token d'instruction est pris sur la
+    /// fenêtre de contexte disponible pour le document lui-même.
+    @available(iOS 26.0, macOS 26.0, *)
+    static let guidedInstructions = """
+    Tu extrais des opérations d'investissement depuis un relevé bancaire, un avis d'opéré ou une capture d'écran d'application de courtage (le texte peut venir d'un OCR, donc être en colonne et mal aligné).
+
+    Classement : mode = "orders" si les lignes portent une date d'opération ; "positions" si c'est un état du portefeuille (quantité + PRU, sans date) ; "unknown" si le document ne contient ni l'un ni l'autre.
+
+    Correspondances : ACHAT, ACHAT COMPTANT, SOUSCRIPTION, BUY → BUY ; VENTE, CESSION, SELL → SELL ; COUPON, COUPONS, DIVIDENDE → DIV.
+    Les dates sortent en yyyy-MM-dd. Les nombres sortent avec un point décimal (34.53, jamais 34,53).
+    Un ISIN fait 12 caractères et commence par deux lettres de pays (FR, LU, IE, US, DE, NL).
+    N'invente jamais une ligne : n'extrais que ce qui est écrit.
+    """
+
+    static func buildGuidedPrompt(text: String) -> String {
+        """
+        Extrais toutes les opérations de ce document :
+
+        \(text)
+        """
+    }
+
+    /// Conversion schéma guidé → modèle interne, avec les mêmes filtres de
+    /// validité que le chemin JSON (date parsable, type d'ordre reconnu).
+    @available(iOS 26.0, macOS 26.0, *)
+    static func convert(_ extraction: AIStatementExtraction, pageNumber: Int) -> PageParse {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+
+        let orders: [PDFExtractedOrder] = extraction.orders.compactMap { raw in
+            guard let executedAt = Self.parseDate(raw.executedAt, formatter: formatter),
+                  let orderType = Self.normalizeOrderType(raw.orderType) else { return nil }
+            return PDFExtractedOrder(
+                orderType: orderType,
+                assetName: raw.assetName.isEmpty ? "Inconnu" : raw.assetName,
+                ticker: raw.ticker, isin: raw.isin.uppercased(),
+                quantity: raw.quantity, unitPrice: raw.unitPrice, fees: raw.fees,
+                executedAt: executedAt,
+                currency: raw.currency.isEmpty ? "EUR" : raw.currency,
+                notes: nil, pageNumber: pageNumber, confidence: 0.9
+            )
+        }
+
+        let positions: [PDFExtractedPosition] = extraction.positions.compactMap { raw in
+            guard raw.quantity > 0 else { return nil }
+            return PDFExtractedPosition(
+                assetName: raw.assetName.isEmpty ? "Inconnu" : raw.assetName,
+                ticker: raw.ticker, isin: raw.isin.uppercased(),
+                quantity: raw.quantity, averageBuyPrice: raw.averagePrice,
+                currentValue: raw.currentValue > 0 ? raw.currentValue : nil,
+                currency: raw.currency.isEmpty ? "EUR" : raw.currency,
+                pageNumber: pageNumber, confidence: 0.9
+            )
+        }
+
+        let mode: PDFDocumentMode = {
+            switch extraction.mode.lowercased() {
+            case "orders":    return .orders
+            case "positions": return .positionsSnapshot
+            default:          return orders.isEmpty ? (positions.isEmpty ? .unknown : .positionsSnapshot) : .orders
+            }
+        }()
+        return PageParse(orders: orders, positions: positions, mode: mode)
     }
     #endif
 
@@ -458,8 +795,8 @@ final class InvestmentPDFParser: Sendable {
                 print("[PDFParser] Date invalide '\(raw.executed_at ?? "nil")' — ordre ignoré")
                 return nil
             }
-            guard let orderType = Self.normalizeOrderType(raw.order_type) else {
-                print("[PDFParser] Type d'ordre inconnu '\(raw.order_type)' — ordre ignoré")
+            guard let orderType = Self.normalizeOrderType(raw.order_type ?? "") else {
+                print("[PDFParser] Type d'ordre inconnu '\(raw.order_type ?? "nil")' — ordre ignoré")
                 return nil
             }
             return PDFExtractedOrder(
@@ -467,32 +804,32 @@ final class InvestmentPDFParser: Sendable {
                 assetName: raw.asset_name ?? "Inconnu",
                 ticker: raw.ticker ?? "",
                 isin: raw.isin ?? "",
-                quantity: raw.quantity ?? 0,
-                unitPrice: raw.unit_price ?? 0,
-                fees: raw.fees ?? 0,
+                quantity: raw.quantity?.value ?? 0,
+                unitPrice: raw.unit_price?.value ?? 0,
+                fees: raw.fees?.value ?? 0,
                 executedAt: executedAt,
                 currency: raw.currency ?? "EUR",
                 notes: raw.notes,
                 pageNumber: pageNumber,
-                confidence: max(0, min(1, raw.confidence ?? 0.5))
+                confidence: max(0, min(1, raw.confidence?.value ?? 0.5))
             )
         }
 
         // Positions (mode snapshot) — on ignore les lignes sans quantité exploitable.
         let positions: [PDFExtractedPosition] = (payload.positions ?? []).compactMap { raw in
-            let qty = raw.quantity ?? 0
+            let qty = raw.quantity?.value ?? 0
             guard qty > 0 else { return nil }
-            let pru = raw.average_price ?? 0
+            let pru = raw.average_price?.value ?? 0
             return PDFExtractedPosition(
                 assetName: raw.asset_name ?? "Inconnu",
                 ticker: raw.ticker ?? "",
                 isin: raw.isin ?? "",
                 quantity: qty,
                 averageBuyPrice: pru,
-                currentValue: raw.current_value,
+                currentValue: raw.current_value?.value,
                 currency: raw.currency ?? "EUR",
                 pageNumber: pageNumber,
-                confidence: max(0, min(1, raw.confidence ?? 0.5))
+                confidence: max(0, min(1, raw.confidence?.value ?? 0.5))
             )
         }
 
@@ -627,6 +964,26 @@ final class InvestmentPDFParser: Sendable {
 
     // MARK: - DTO décodage IA
 
+    /// Nombre tolérant : un petit modèle écrit souvent `"quantity": "7"` ou
+    /// `"unit_price": "34,53"` au lieu d'un littéral numérique.
+    ///
+    /// ⚠️ Sans ça, `JSONDecoder` lève sur la ligne fautive et **toute la page**
+    /// est perdue, pas seulement l'opération concernée — un document de dix
+    /// opérations était jeté pour un seul champ mal typé.
+    struct LenientDouble: Decodable {
+        let value: Double?
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let d = try? container.decode(Double.self) { value = d; return }
+            if let i = try? container.decode(Int.self) { value = Double(i); return }
+            if let s = try? container.decode(String.self) {
+                value = InvestmentStatementExtractor.parseNumber(s)
+                return
+            }
+            value = nil
+        }
+    }
+
     private struct AIPageResponse: Decodable {
         let mode: String?
         let orders: [AIOrder]?
@@ -635,27 +992,28 @@ final class InvestmentPDFParser: Sendable {
     }
 
     private struct AIOrder: Decodable {
-        let order_type: String
+        /// Optionnel : une clé absente ne doit pas invalider le lot entier.
+        let order_type: String?
         let asset_name: String?
         let ticker: String?
         let isin: String?
-        let quantity: Double?
-        let unit_price: Double?
-        let fees: Double?
+        let quantity: LenientDouble?
+        let unit_price: LenientDouble?
+        let fees: LenientDouble?
         let executed_at: String?
         let currency: String?
         let notes: String?
-        let confidence: Double?
+        let confidence: LenientDouble?
     }
 
     private struct AIPosition: Decodable {
         let asset_name: String?
         let ticker: String?
         let isin: String?
-        let quantity: Double?
-        let average_price: Double?
-        let current_value: Double?
+        let quantity: LenientDouble?
+        let average_price: LenientDouble?
+        let current_value: LenientDouble?
         let currency: String?
-        let confidence: Double?
+        let confidence: LenientDouble?
     }
 }

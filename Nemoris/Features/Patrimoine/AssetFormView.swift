@@ -20,7 +20,7 @@ import SwiftUI
 // "Supprimer" affiché en bas dans ce cas.
 
 struct AssetFormView: View {
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.paneDismiss) private var dismiss
     @Environment(AppState.self) private var appState
     let viewModel: PatrimoineViewModel
     /// Nil = création, sinon édition.
@@ -109,7 +109,6 @@ struct AssetFormView: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 // ── Bannière lien rompu (édition d'un asset orphelin) ────
                 if isEditingBrokenLink {
@@ -237,18 +236,8 @@ struct AssetFormView: View {
                     }
                 }
             }
-            .navigationTitle(existingAsset == nil ? "Nouvel actif" : "Modifier")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") { save() }
-                        .disabled(!canSave)
-                }
-            }
-            .sheet(isPresented: $showLinkPicker) {
+            .nemorisFormStyle()
+            .adaptivePane(isPresented: $showLinkPicker) {
                 AccountLinkPickerSheet(
                     viewModel: viewModel,
                     currentSelection: linkSelection,
@@ -276,7 +265,10 @@ struct AssetFormView: View {
             } message: {
                 Text("Cette action ne supprime pas le compte source lié, uniquement la fiche Patrimoine.")
             }
-        }
+            .paneChrome(existingAsset == nil ? "Nouvel actif" : "Modifier",
+                        cancelLabel: "Annuler", onCancel: { dismiss() },
+                        confirmLabel: "Enregistrer", confirmDisabled: !canSave,
+                        onConfirm: { save() })
     }
 
     // MARK: - Save

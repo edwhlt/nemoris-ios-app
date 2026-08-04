@@ -217,6 +217,163 @@ extension Array where Element == PortfolioEvolutionPoint {
     }
 }
 
+// MARK: - Chart Scrub Readout
+
+/// Un repère (valeur + date facultative) affiché dans le bandeau de lecture
+/// d'un chart. La date est optionnelle car certains repères n'en ont pas de
+/// pertinente (ex : le PRU, qui est une moyenne pondérée sur plusieurs ordres).
+struct ChartReadoutPoint: Equatable {
+    let date: Date?
+    let value: Double
+
+    init(date: Date? = nil, value: Double) {
+        self.date = date
+        self.value = value
+    }
+}
+
+/// Bandeau de lecture affiché SOUS le hero et AU-DESSUS du chart.
+///
+/// Il répond à la question « combien ça vaut là où je pose le doigt » sans
+/// dépendre d'une annotation flottante dans le plot : une annotation collée au
+/// point est tronquée dès que le point est près du haut ou d'un bord du chart,
+/// ce qui rendait les valeurs illisibles pendant le scrub.
+///
+/// Le bandeau est TOUJOURS rendu (jamais conditionné à `isScrubbing`) : aucune
+/// hauteur qui saute quand on pose/lève le doigt, et l'écart reste lisible au
+/// repos.
+///
+/// Deux modes selon `referenceLabel` :
+///   - **nil** (charts agrégés global / compte) : une seule valeur mise en
+///     avant, `reference` ne sert QUE de base au calcul de variation. Parler
+///     d'un prix d'entrée et de sortie n'a aucun sens sur une valorisation de
+///     portefeuille — ce sont des positions qui entrent et sortent en continu.
+///   - **non-nil** (chart de position) : deux colonnes, typiquement l'ouverture
+///     et la clôture de la bougie pointée, qui sont bien des prix.
+struct ChartScrubReadout: View {
+    /// Base du calcul de variation. Affichée en colonne seulement si
+    /// `referenceLabel` est renseigné.
+    let reference: ChartReadoutPoint?
+    /// Valeur mise en avant (point sous le doigt, ou dernier point au repos).
+    let current: ChartReadoutPoint?
+    var currency: String = "EUR"
+    var referenceLabel: String? = nil
+    var currentLabel: String = "Valeur"
+    /// Précision affichée sous la variation, ex. « depuis le début de la plage ».
+    var deltaCaption: String? = nil
+    /// `true` quand l'utilisateur parcourt la courbe : on met la valeur courante
+    /// en avant (accent) pour signaler que c'est elle qui bouge.
+    var isScrubbing: Bool = false
+    /// Ajoute l'heure aux dates (plages intraday : 1J).
+    var showsTime: Bool = false
+
+    private var delta: Double? {
+        guard let reference, let current else { return nil }
+        return current.value - reference.value
+    }
+
+    private var deltaPct: Double? {
+        guard let reference, let current, reference.value != 0 else { return nil }
+        return (current.value - reference.value) / abs(reference.value) * 100
+    }
+
+    private var isPositive: Bool { (delta ?? 0) >= 0 }
+
+    private var deltaColor: Color {
+        guard let delta else { return AppTheme.Colors.textSecondary }
+        return delta >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
+            if let referenceLabel, let reference {
+                pointColumn(label: referenceLabel, point: reference, emphasized: false)
+
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
+                    .padding(.top, 14)
+            }
+
+            if let current {
+                pointColumn(label: currentLabel, point: current, emphasized: isScrubbing)
+            }
+
+            Spacer(minLength: 0)
+
+            if let delta, let deltaPct {
+                VStack(alignment: .trailing, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Image(systemName: isPositive ? "arrow.up.right" : "arrow.down.right")
+                            .font(.system(size: 10, weight: .bold))
+                        MoneyText(
+                            amount: delta,
+                            currency: currency,
+                            font: .system(size: 13, weight: .semibold),
+                            color: deltaColor,
+                            maskedPlaceholder: "••• €"
+                        )
+                    }
+                    .foregroundStyle(deltaColor)
+
+                    Text(String(format: "%@%.2f %%", isPositive ? "+" : "", deltaPct))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(deltaColor)
+
+                    if let deltaCaption {
+                        Text(deltaCaption)
+                            .font(.system(size: 9))
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(deltaColor.opacity(0.12))
+                )
+            }
+        }
+        .animation(.easeInOut(duration: 0.12), value: isScrubbing)
+        // Hauteur minimale figée : la colonne date peut disparaître (repère sans
+        // date, ex. PRU) — sans ce plancher le chart remonterait de quelques
+        // points au premier scrub.
+        .frame(minHeight: 44, alignment: .top)
+    }
+
+    @ViewBuilder
+    private func pointColumn(label: String, point: ChartReadoutPoint, emphasized: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(AppTheme.Typography.labelMedium)
+                .foregroundStyle(emphasized ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary)
+            MoneyText(
+                amount: point.value,
+                currency: currency,
+                font: .system(size: 15, weight: .semibold),
+                color: AppTheme.Colors.textPrimary,
+                maskedPlaceholder: "••• €"
+            )
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            if let date = point.date {
+                Text(dateLabel(date))
+                    .font(.system(size: 10))
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+                    .lineLimit(1)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func dateLabel(_ date: Date) -> String {
+        if showsTime {
+            return date.formatted(.dateTime.day().month(.abbreviated).hour().minute())
+        }
+        return date.formatted(.dateTime.day().month(.abbreviated).year(.twoDigits))
+    }
+}
+
 // MARK: - Investment Hero Card
 
 /// Carte "hero" en haut d'un écran investments (Niveau Global ou Compte).
@@ -317,6 +474,11 @@ struct EvolutionChart: View {
     /// Plage temporelle pour adapter la granularité des labels d'axe X.
     /// nil = on calcule depuis les points (utilisé pour les charts sans chip).
     var timeRange: InvestmentTimeRange? = nil
+    /// Devise des montants du bandeau de lecture.
+    var currency: String = "EUR"
+    /// Bandeau entrée/sortie + variation au-dessus du chart. À désactiver pour
+    /// un chart purement décoratif.
+    var showsReadout: Bool = true
 
     @State private var selectedDate: Date? = nil
 
@@ -365,7 +527,40 @@ struct EvolutionChart: View {
         cleanPoints.map(\.value).min() ?? 0
     }
 
+    /// Base de la variation = premier point de la plage affichée. Jamais montrée
+    /// en colonne : sur une valorisation agrégée (portefeuille, compte) il n'y a
+    /// pas de « prix d'entrée » — les positions entrent et sortent en continu.
+    /// Elle ne sert qu'à chiffrer la hausse ou la baisse sur la plage.
+    private var readoutReference: ChartReadoutPoint? {
+        cleanPoints.first.map { ChartReadoutPoint(date: $0.date, value: $0.value) }
+    }
+
+    /// Valeur mise en avant = point sous le doigt pendant le scrub, dernier
+    /// point de la plage sinon.
+    private var readoutCurrent: ChartReadoutPoint? {
+        let point = selectedPoint ?? cleanPoints.last
+        return point.map { ChartReadoutPoint(date: $0.date, value: $0.value) }
+    }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+            if showsReadout && !cleanPoints.isEmpty {
+                ChartScrubReadout(
+                    reference: readoutReference,
+                    current: readoutCurrent,
+                    currency: currency,
+                    currentLabel: selectedDate != nil ? "Valeur pointée" : "Dernière valeur",
+                    deltaCaption: "sur la plage",
+                    isScrubbing: selectedDate != nil,
+                    showsTime: timeRange == .oneDay
+                )
+            }
+            chartBody
+        }
+    }
+
+    @ViewBuilder
+    private var chartBody: some View {
         if cleanPoints.isEmpty {
             // Placeholder élégant — pas un EmptyStateView lourd
             VStack(spacing: 8) {
@@ -406,7 +601,11 @@ struct EvolutionChart: View {
                     .interpolationMethod(.monotone)
                 }
 
-                // Marqueur sélection : règle verticale + point + tooltip
+                // Marqueur sélection : règle verticale + point sur la courbe.
+                // ⚠️ Pas d'annotation flottante ici : collée au point, elle est
+                // tronquée dès que le point approche le haut ou un bord du plot
+                // (c'est ce qui rendait les valeurs illisibles au scrub). Les
+                // chiffres sont lus dans `ChartScrubReadout`, au-dessus du chart.
                 if let selectedPoint {
                     RuleMark(x: .value("Sélection", selectedPoint.date))
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
@@ -417,20 +616,7 @@ struct EvolutionChart: View {
                         y: .value("Valeur", selectedPoint.value)
                     )
                     .foregroundStyle(trendColor)
-                    .symbolSize(60)
-                    .annotation(position: .top, alignment: .center, spacing: 6) {
-                        VStack(spacing: 2) {
-                            Text(selectedPoint.value, format: .currency(code: "EUR"))
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(AppTheme.Colors.textPrimary)
-                            Text(selectedPoint.date, format: .dateTime.day().month(.abbreviated).year())
-                                .font(.system(size: 10))
-                                .foregroundStyle(AppTheme.Colors.textSecondary)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: 6))
-                    }
+                    .symbolSize(90)
                 }
             }
             .chartYScale(domain: yDomain)
@@ -485,7 +671,14 @@ struct EvolutionChart: View {
                                     let origin = geo[plotFrame].origin
                                     let locationX = value.location.x - origin.x
                                     if let date: Date = proxy.value(atX: locationX) {
+                                        let previous = selectedPoint?.date
                                         selectedDate = date
+                                        // Tick discret à chaque changement de point
+                                        // (pas à chaque pixel) — repère tactile
+                                        // pendant qu'on lit les chiffres au-dessus.
+                                        if selectedPoint?.date != previous {
+                                            HapticService.shared.selection()
+                                        }
                                         onSelectPoint?(selectedPoint)
                                     }
                                 }

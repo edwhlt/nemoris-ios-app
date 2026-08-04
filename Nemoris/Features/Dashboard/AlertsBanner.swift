@@ -32,10 +32,12 @@ struct AlertsBanner: View {
                     navigate(to: primary.route)
                 }
             } label: {
-                row(for: primary)
+                // Seul le bandeau replié porte le compteur : il annonce « il y en a
+                // N en tout, touchez pour voir ».
+                row(for: primary, showsTotalBadge: alerts.count > 1)
             }
             .buttonStyle(.plain)
-            .sheet(isPresented: $showAllSheet) {
+            .adaptivePane(isPresented: $showAllSheet) {
                 allAlertsSheet
             }
             .transition(.move(edge: .top).combined(with: .opacity))
@@ -44,8 +46,12 @@ struct AlertsBanner: View {
 
     // MARK: - Row
 
+    /// - Parameter showsTotalBadge: affiche le **nombre total d'alertes**. Réservé au
+    ///   bandeau replié. Dans la liste « Toutes les alertes », la même row était
+    ///   rendue avec ce badge sur CHAQUE ligne — cinq alertes affichaient donc cinq
+    ///   pastilles « 5 », qu'on lisait comme un compteur propre à chaque enveloppe.
     @ViewBuilder
-    private func row(for alert: Alert) -> some View {
+    private func row(for alert: Alert, showsTotalBadge: Bool) -> some View {
         HStack(spacing: AppTheme.Spacing.md) {
             Image(systemName: alert.systemIcon)
                 .font(.system(size: 16, weight: .semibold))
@@ -66,7 +72,7 @@ struct AlertsBanner: View {
 
             Spacer()
 
-            if alerts.count > 1 {
+            if showsTotalBadge {
                 // Badge "N alertes au total" + chevron pour signaler qu'il y a + à voir
                 Text("\(alerts.count)")
                     .font(.system(size: 11, weight: .bold))
@@ -91,7 +97,6 @@ struct AlertsBanner: View {
     // MARK: - Sheet "toutes les alertes"
 
     @ViewBuilder private var allAlertsSheet: some View {
-        NavigationStack {
             ZStack {
                 AppTheme.Colors.background.ignoresSafeArea()
                 List {
@@ -104,7 +109,7 @@ struct AlertsBanner: View {
                                 navigate(to: alert.route)
                             }
                         } label: {
-                            row(for: alert)
+                            row(for: alert, showsTotalBadge: false)
                         }
                         .buttonStyle(.plain)
                         .listRowBackground(Color.clear)
@@ -119,14 +124,7 @@ struct AlertsBanner: View {
                 .scrollContentBackground(.hidden)
                 .background(AppTheme.Colors.background)
             }
-            .navigationTitle("Toutes les alertes")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { showAllSheet = false }
-                }
-            }
-        }
+            .paneChrome("Toutes les alertes", cancelLabel: "Fermer", onCancel: { showAllSheet = false })
     }
 
     // MARK: - Navigation

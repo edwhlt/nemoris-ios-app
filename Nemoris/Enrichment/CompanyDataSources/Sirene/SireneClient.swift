@@ -56,7 +56,6 @@ actor SireneClient {
         request.setValue("Nemoris/1.0 (iOS app)", forHTTPHeaderField: "User-Agent")
 
         let (data, response) = try await session.data(for: request)
-        print(response)
         guard let http = response as? HTTPURLResponse else {
             throw SireneError.transport("Pas de réponse HTTP")
         }

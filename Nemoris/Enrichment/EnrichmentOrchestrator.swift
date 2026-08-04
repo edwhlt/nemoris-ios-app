@@ -23,11 +23,12 @@ actor EnrichmentOrchestrator {
 
     /// Pondération par source pour le vote (somme libre, on normalise pas).
     private static let weights: [MerchantEnrichmentSource: Double] = [
-        .sirene: 1.0,   // données officielles, fiables
-        .mapkit: 0.7,   // bon pour POI physiques mais bruité
-        .llm:    0.6,   // utile pour catégoriser mais peut halluciner
-        .merged: 1.0,
-        .manual: 2.0    // user prime sur tout
+        .sirene:   1.0,   // données officielles, fiables
+        .mapkit:   0.7,   // bon pour POI physiques mais bruité
+        .llm:      0.6,   // utile pour catégoriser mais peut halluciner
+        .localLLM: 0.6,   // même niveau de confiance que .llm — une IA a deviné, peut halluciner
+        .merged:   1.0,
+        .manual:   2.0    // user prime sur tout
     ]
 
     // MARK: - Public API
@@ -58,30 +59,44 @@ actor EnrichmentOrchestrator {
     // MARK: - Source branches
 
     private func enrichViaSirene(_ context: MerchantEnrichmentContext) async -> MerchantEnrichment? {
-        // Dispatch via le registry de sources entreprises (Sirene FR, Companies House UK,
-        // Zefix CH, etc.) — le registry filtre automatiquement par pays.
-        let query = context.canonicalName ?? context.rawLabel
-        let results = await CompanyDataSourcesRegistry.shared.search(
-            query: query,
-            country: context.country,
-            postalCode: nil
+        // AXE S — passe par le planificateur + l'exécuteur de cascade au lieu d'envoyer le
+        // libellé entier dans `q=`.
+        //
+        // Avant : `q = canonicalName ?? rawLabel`, c'est-à-dire nom + ville + bruit mélangés.
+        // Or l'API matche `q` contre la raison sociale et les enseignes, JAMAIS contre
+        // l'adresse : mettre la ville dedans ne restreint pas la recherche, elle la fait
+        // échouer (`q=carrefour market flanches` → 0 ; `q=carrefour market` → 1907).
+        //
+        // Et le résultat était `results.first` d'une concaténation de `withTaskGroup` :
+        // « premier » y désignait l'ordre d'ACHÈVEMENT des tâches réseau, sans la moindre
+        // vérification que le candidat correspondait au lieu du libellé. Le classement est
+        // désormais un ordre TOTAL sur des critères explicites.
+        let input = MerchantQueryPlanner.Input(
+            rawLabel: context.rawLabel,
+            engineMerchantCandidate: context.canonicalName,
+            engineCityCandidate: context.city,
+            engineCountryCandidate: context.country,
+            userCountry: context.country
         )
-        guard var best = results.first else { return nil }
-        // Post-process NAF → categoryId (utile seulement pour Sirene FR)
-        if best.categoryId == nil, let naf = best.nafCode,
-           let cat = nafMapper.lookup(naf) {
-            best.categoryId = findCategoryId(byName: cat.category)
+        let result = await MerchantQueryExecutor.shared.search(
+            input: input,
+            budget: .batch,
+            knownNafPrefixes: nafMapper.knownPrefixes
+        )
+        guard let top = result.companies.first else { return nil }
+        // Conversion par le chemin UNIQUE partagé avec l'UI (cf. `CompanyMatch.enrichment`).
+        return top.enrichment(fallbackCity: context.city) { [self] naf in
+            nafMapper.lookup(naf).flatMap { findCategoryId(byName: $0.category) }
         }
-        // Fallback city si la source n'en a pas mais le contexte en a une
-        if best.city == nil { best.city = context.city }
-        return best
     }
 
     private func enrichViaLLM(_ context: MerchantEnrichmentContext) async -> MerchantEnrichment? {
-        // EnrichmentLLMService est @MainActor — le `await` gère le hop d'actor.
-        let isAvail = await EnrichmentLLMService.shared.isAvailable
-        guard isAvail else { return nil }
-        return await EnrichmentLLMService.shared.identify(context: context)
+        // AIEnrichmentBackend est @MainActor — le `await` gère le hop d'actor. C'est le
+        // point de dispatch unique (Foundation Models vs serveur local configuré par
+        // l'utilisateur) partagé avec EnrichmentSheetView et PayeeCreationFormSheet —
+        // ne pas revenir à un appel direct à EnrichmentLLMService.shared ici, ça
+        // recréerait la divergence que AIEnrichmentBackend existe pour éliminer.
+        await AIEnrichmentBackend.identify(context: context)
     }
 
     private func enrichViaMapKit(_ context: MerchantEnrichmentContext) async -> MerchantEnrichment? {
@@ -97,7 +112,9 @@ actor EnrichmentOrchestrator {
         // Stratégie simple : pour chaque champ, on prend la valeur du candidat avec
         // le plus haut score (confidence × weight). Source du merged = .merged
         // sauf si un seul candidat → garde sa source.
-        if candidates.count == 1, let only = candidates.first { return only }
+        if candidates.count == 1, let only = candidates.first {
+            return resolvingCategoryHint(only)
+        }
 
         func best<T: Equatable>(_ keyPath: KeyPath<MerchantEnrichment, T?>) -> T? {
             candidates
@@ -106,7 +123,7 @@ actor EnrichmentOrchestrator {
         }
 
         let topConfidence = candidates.map(score).max() ?? 0
-        return MerchantEnrichment(
+        var merged = MerchantEnrichment(
             displayName: best(\.displayName),
             domain: best(\.domain),
             categoryId: best(\.categoryId),
@@ -122,6 +139,27 @@ actor EnrichmentOrchestrator {
             confidence: min(1.0, topConfidence),
             enrichedAt: Date()
         )
+        // Champs qui ne sont pas dans l'initialiseur mémberwise (valeurs par défaut).
+        // Les oublier ici les fait disparaître dès qu'il y a plus d'un candidat —
+        // c'est précisément ce qui arrivait à `searchHint`, la seule information
+        // exploitable produite par le LLM quand il ne reconnaît pas le marchand.
+        merged.searchHint   = best(\.searchHint)
+        merged.siren        = best(\.siren)
+        merged.postalCode   = best(\.postalCode)
+        merged.categoryHint = best(\.categoryHint)
+        return resolvingCategoryHint(merged)
+    }
+
+    /// Une source sans accès au référentiel (le LLM) ne peut proposer qu'un NOM de
+    /// catégorie — "Alimentation", pas `category_id = 7`. On le résout ici, où le repo
+    /// est disponible. Sans ça la catégorie devinée par l'IA était décodée puis jetée.
+    /// Appliqué sur les DEUX chemins de `merge` : un LLM seul candidat est justement
+    /// le cas où sa catégorie est la seule qu'on ait.
+    private func resolvingCategoryHint(_ result: MerchantEnrichment) -> MerchantEnrichment {
+        guard result.categoryId == nil, let hint = result.categoryHint else { return result }
+        var out = result
+        out.categoryId = findCategoryId(byName: hint)
+        return out
     }
 
     private func score(_ r: MerchantEnrichment) -> Double {

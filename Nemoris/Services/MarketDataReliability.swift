@@ -17,42 +17,61 @@ import Foundation
 
 // MARK: - Providers de données de marché
 
-enum MarketDataProvider: String, Sendable, CaseIterable {
+/// Tout service HTTP tiers cadencé par `ProviderRateLimiter`.
+///
+/// ⚠️ S'appelait `MarketDataProvider` : le renommage accompagne l'arrivée de providers qui
+/// n'ont rien de boursier (registre d'entreprises, référentiel des communes). Le pacing,
+/// le disjoncteur 429 et le backoff sont exactement les mêmes besoins — d'où la
+/// mutualisation plutôt qu'une seconde couche parallèle. `typealias` conservé une version.
+enum RemoteProvider: String, Sendable, CaseIterable {
     case yahoo
     case stooq
     case openFIGI
     case coinGecko
+    /// recherche-entreprises.api.gouv.fr — ~7 req/s d'après la doc gouv.
+    case sireneGouv
+    /// geo.api.gouv.fr — référentiel des communes, sans clé.
+    case geoGouv
 
     /// Délai minimal entre 2 requêtes vers le même provider (pacing).
     var minInterval: TimeInterval {
         switch self {
-        case .yahoo:     return 0.4
-        case .stooq:     return 0.5
-        case .openFIGI:  return 2.5   // 25 req/min sans clé API
-        case .coinGecko: return 2.2   // ~30 req/min free tier
+        case .yahoo:      return 0.4
+        case .stooq:      return 0.5
+        case .openFIGI:   return 2.5   // 25 req/min sans clé API
+        case .coinGecko:  return 2.2   // ~30 req/min free tier
+        case .sireneGouv: return 0.15  // 7 req/s
+        case .geoGouv:    return 0.1
         }
     }
 
     /// Durée du circuit breaker après un 429 sans header Retry-After.
     var defaultCooldown: TimeInterval {
         switch self {
-        case .yahoo:     return 120
-        case .coinGecko: return 65
-        case .openFIGI:  return 65
-        case .stooq:     return 60
+        case .yahoo:      return 120
+        case .coinGecko:  return 65
+        case .openFIGI:   return 65
+        case .stooq:      return 60
+        case .sireneGouv: return 30
+        case .geoGouv:    return 30
         }
     }
 
     /// Nom affichable dans les messages utilisateur (FR).
     var displayName: String {
         switch self {
-        case .yahoo:     return "Yahoo"
-        case .stooq:     return "Stooq"
-        case .openFIGI:  return "OpenFIGI"
-        case .coinGecko: return "CoinGecko"
+        case .yahoo:      return "Yahoo"
+        case .stooq:      return "Stooq"
+        case .openFIGI:   return "OpenFIGI"
+        case .coinGecko:  return "CoinGecko"
+        case .sireneGouv: return "Annuaire des entreprises"
+        case .geoGouv:    return "Référentiel des communes"
         }
     }
 }
+
+/// Compatibilité descendante — à retirer une fois les appelants migrés.
+typealias MarketDataProvider = RemoteProvider
 
 // MARK: - Erreurs typées
 
