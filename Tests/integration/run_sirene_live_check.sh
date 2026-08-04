@@ -42,24 +42,24 @@ xcrun swiftc -parse-as-library SireneLiveCheck.swift -o "$BUILD/sirene_live_chec
 echo
 echo "══ Chaîne complète (fichiers réels de l'app) ══"
 xcrun swiftc \
-  ../../Nemoris/Services/MarketDataReliability.swift \
-  ../../Nemoris/Enrichment/EnrichmentModels.swift \
-  ../../Nemoris/Enrichment/CompanyDataSources/Sirene/SireneModels.swift \
-  ../../Nemoris/Enrichment/CompanyDataSources/Sirene/CompanyRegistryClient.swift \
-  ../../Nemoris/Enrichment/CompanyDataSources/CompanyMatchModels.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/MerchantQueryPlan.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/SearchBudget.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/LocalityResolver.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/MerchantTokenSimilarity.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/AbbreviationTable.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/ForeignLocalityTable.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/BankLabelTemplate.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/LLMQueryRefinement.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/DeterministicQueryRefiner.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/MerchantQueryPlanner.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/CandidateRanker.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/GeoCommuneResolver.swift \
-  ../../Nemoris/Enrichment/QueryPlanning/MerchantQueryExecutor.swift \
+  ../../Nemoris/Features/Investments/Service/MarketDataReliability.swift \
+  ../../Nemoris/Features/Enrichment/Model/EnrichmentModels.swift \
+  ../../Nemoris/Features/Enrichment/CompanyDataSources/Sirene/SireneModels.swift \
+  ../../Nemoris/Features/Enrichment/CompanyDataSources/Sirene/CompanyRegistryClient.swift \
+  ../../Nemoris/Features/Enrichment/CompanyDataSources/CompanyMatchModels.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/MerchantQueryPlan.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/SearchBudget.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/LocalityResolver.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/MerchantTokenSimilarity.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/AbbreviationTable.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/ForeignLocalityTable.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/BankLabelTemplate.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/LLMQueryRefinement.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/DeterministicQueryRefiner.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/MerchantQueryPlanner.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/CandidateRanker.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/GeoCommuneResolver.swift \
+  ../../Nemoris/Features/Enrichment/QueryPlanning/MerchantQueryExecutor.swift \
   ExecutorLiveCheck.swift \
   -o "$BUILD/executor_live_check"
 "$BUILD/executor_live_check"

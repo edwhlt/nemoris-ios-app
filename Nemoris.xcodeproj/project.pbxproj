@@ -105,46 +105,6 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		5CDA5F000000000000000000 /* App */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = App;
-			sourceTree = "<group>";
-		};
-		5CDA5F010000000000000000 /* Data */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Data;
-			sourceTree = "<group>";
-		};
-		5CDA5F020000000000000000 /* Engine */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Engine;
-			sourceTree = "<group>";
-		};
-		5CDA5F030000000000000000 /* Enrichment */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Enrichment;
-			sourceTree = "<group>";
-		};
-		5CDA5F040000000000000000 /* Features */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Features;
-			sourceTree = "<group>";
-		};
-		5CDA5F050000000000000000 /* Models */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Models;
-			sourceTree = "<group>";
-		};
-		5CDA5F060000000000000000 /* Security */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Security;
-			sourceTree = "<group>";
-		};
-		5CDA5F070000000000000000 /* UI */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = UI;
-			sourceTree = "<group>";
-		};
 		5AE0000000000000000000A3 /* NemorisShareTransactions */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -161,17 +121,32 @@
 			path = NemorisShareInvest;
 			sourceTree = "<group>";
 		};
+		5CDA5F000000000000000000 /* App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = App;
+			sourceTree = "<group>";
+		};
+		5CDA5F010000000000000000 /* Core */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Core;
+			sourceTree = "<group>";
+		};
+		5CDA5F020000000000000000 /* DesignSystem */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DesignSystem;
+			sourceTree = "<group>";
+		};
+		5CDA5F040000000000000000 /* Features */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Features;
+			sourceTree = "<group>";
+		};
 		E826BBFF2FBDA3580095EC62 /* NemorisWidget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				E826BC112FBDA3590095EC62 /* Exceptions for "NemorisWidget" folder in "NemorisWidgetExtension" target */,
 			);
 			path = NemorisWidget;
-			sourceTree = "<group>";
-		};
-		E8DC34472FC9ED69003EF244 /* Services */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Services;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -238,14 +213,9 @@
 			isa = PBXGroup;
 			children = (
 				5CDA5F000000000000000000 /* App */,
-				5CDA5F010000000000000000 /* Data */,
-				5CDA5F020000000000000000 /* Engine */,
-				5CDA5F030000000000000000 /* Enrichment */,
+				5CDA5F010000000000000000 /* Core */,
+				5CDA5F020000000000000000 /* DesignSystem */,
 				5CDA5F040000000000000000 /* Features */,
-				5CDA5F050000000000000000 /* Models */,
-				5CDA5F060000000000000000 /* Security */,
-				5CDA5F070000000000000000 /* UI */,
-				E8DC34472FC9ED69003EF244 /* Services */,
 				E826BBBC2FBD5AA60095EC62 /* Nemoris.entitlements */,
 				E826BC262FBE1F9F0095EC62 /* NemorisDebug.entitlements */,
 				395BDB2DAC06A5BFB531B355 /* Resources */,
@@ -325,14 +295,9 @@
 			);
 			fileSystemSynchronizedGroups = (
 				5CDA5F000000000000000000 /* App */,
-				5CDA5F010000000000000000 /* Data */,
-				5CDA5F020000000000000000 /* Engine */,
-				5CDA5F030000000000000000 /* Enrichment */,
+				5CDA5F010000000000000000 /* Core */,
+				5CDA5F020000000000000000 /* DesignSystem */,
 				5CDA5F040000000000000000 /* Features */,
-				5CDA5F050000000000000000 /* Models */,
-				5CDA5F060000000000000000 /* Security */,
-				5CDA5F070000000000000000 /* UI */,
-				E8DC34472FC9ED69003EF244 /* Services */,
 			);
 			name = Nemoris;
 			packageProductDependencies = (

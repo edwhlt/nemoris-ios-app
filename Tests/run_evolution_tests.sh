@@ -8,7 +8,7 @@ BUILD=$(mktemp -d)
 trap "rm -rf $BUILD" EXIT
 
 xcrun swiftc \
-  ../Nemoris/Services/PortfolioEvolutionBuilder.swift \
+  ../Nemoris/Features/Investments/Service/PortfolioEvolutionBuilder.swift \
   PortfolioEvolutionTests.swift \
   -o "$BUILD/evolution_tests"
 

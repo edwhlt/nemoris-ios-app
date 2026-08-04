@@ -7,8 +7,8 @@ BUILD=$(mktemp -d)
 trap "rm -rf $BUILD" EXIT
 
 xcrun swiftc \
-  ../Nemoris/Data/Database/SyncSchema.swift \
-  ../Nemoris/Data/Sync/SyncPayloadStore.swift \
+  ../Nemoris/Core/Database/SyncSchema.swift \
+  ../Nemoris/Core/Sync/SyncPayloadStore.swift \
   SyncStoreTests.swift \
   -o "$BUILD/syncstore_tests"
 
