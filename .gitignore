@@ -7,3 +7,6 @@ DerivedData/
 
 # macOS
 .DS_Store
+
+# Produits de build locaux (xcodebuild -derivedDataPath / build)
+build/
