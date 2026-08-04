@@ -167,8 +167,19 @@ final class DatabaseManager: @unchecked Sendable {
     @discardableResult
     func migrateIfNeeded() -> String? {
         guard hasDatabase() else { return "Aucune base de données" }
+        return Self.migrate(at: sqliteURL())
+    }
+
+    /// Applique la chaîne de migrations à une base arbitraire.
+    ///
+    /// Statique et paramétrée par l'URL pour que les tests puissent fabriquer
+    /// une base au schéma courant dans un dossier temporaire, sans toucher
+    /// celle de l'application ni instancier le singleton. Renvoie `nil` si tout
+    /// s'est bien passé, sinon les erreurs concaténées.
+    @discardableResult
+    static func migrate(at url: URL) -> String? {
         var db: OpaquePointer?
-        let openResult = sqlite3_open_v2(sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil)
+        let openResult = sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil)
         guard openResult == SQLITE_OK, let db else {
             let msg = "Impossible d'ouvrir la base en écriture : \(String(cString: sqlite3_errstr(openResult)))"
             sqlite3_close(db)
@@ -177,7 +188,7 @@ final class DatabaseManager: @unchecked Sendable {
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
 
-        let currentVersion = userVersion(db)
+        let currentVersion = Self.userVersion(db)
         var errors: [String] = []
 
         for migration in Self.migrations where migration.version > currentVersion {
@@ -227,7 +238,7 @@ final class DatabaseManager: @unchecked Sendable {
         // AXE L (sync CloudKit) : (ré)installe les triggers de dirty-tracking.
         // Hors migrations pour pouvoir évoluer librement (DROP + CREATE idempotent).
         // Prérequis : colonnes uuid/updated_at présentes (migration v40).
-        if userVersion(db) >= 40 {
+        if Self.userVersion(db) >= 40 {
             SyncSchema.installTriggers(db)
         }
 
@@ -236,7 +247,7 @@ final class DatabaseManager: @unchecked Sendable {
         // (chaque appareil avait uploadé son seed usine avant que l'adoption
         // déterministe existe). Tourne APRÈS installTriggers et HORS suppress :
         // les DELETE tombstonent → la fusion se propage aux autres appareils.
-        if userVersion(db) >= 42, SyncPayloadStore.metaValue(db, "ref_dedup_v1_done") != "1" {
+        if Self.userVersion(db) >= 42, SyncPayloadStore.metaValue(db, "ref_dedup_v1_done") != "1" {
             let merged = SyncPayloadStore.dedupReferenceDuplicates(db)
             SyncPayloadStore.setMeta(db, "ref_dedup_v1_done", "1")
             if merged > 0 {
@@ -256,7 +267,7 @@ final class DatabaseManager: @unchecked Sendable {
         }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
-        return userVersion(db)
+        return Self.userVersion(db)
     }
 
     // MARK: - Liste des migrations
@@ -1283,7 +1294,7 @@ final class DatabaseManager: @unchecked Sendable {
 
     // MARK: - Helpers privés
 
-    private func userVersion(_ db: OpaquePointer) -> Int {
+    private static func userVersion(_ db: OpaquePointer) -> Int {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "PRAGMA user_version;", -1, &stmt, nil) == SQLITE_OK, let stmt else { return 0 }
         defer { sqlite3_finalize(stmt) }
