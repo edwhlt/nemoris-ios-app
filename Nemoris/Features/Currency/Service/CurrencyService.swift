@@ -100,6 +100,7 @@ actor CurrencyService {
             return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         // Cherche le taux le plus récent dans une fenêtre de 30 jours autour
         // de la date demandée. Permet de tolérer les jours non cotés (week-end,
@@ -134,6 +135,7 @@ actor CurrencyService {
             return
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = """
         INSERT INTO currency_rates (from_currency, to_currency, date, rate)
         VALUES (?, ?, ?, ?);

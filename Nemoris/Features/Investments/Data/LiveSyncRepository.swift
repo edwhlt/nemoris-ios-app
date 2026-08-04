@@ -45,7 +45,14 @@ struct InvestmentLiveSyncLink: Identifiable, Hashable {
 final class LiveSyncRepository: @unchecked Sendable {
 
     static let shared = LiveSyncRepository()
-    private init() {}
+
+    private let store: SQLiteStore
+
+    /// `shared` reste le point d'accès de l'application ; l'init injectable
+    /// permet aux tests d'instancier le repository sur une base temporaire.
+    init(store: SQLiteStore = SQLiteStore()) {
+        self.store = store
+    }
 
     private let dateFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -223,12 +230,13 @@ final class LiveSyncRepository: @unchecked Sendable {
     }
 
     private func executeQuery(_ sql: String, _ bind: (OpaquePointer?) -> Void) {
-        guard DatabaseManager.shared.hasDatabase() else { return }
+        guard store.databaseExists else { return }
         var db: OpaquePointer?
-        let url = DatabaseManager.shared.sqliteURL()
+        let url = store.databaseURL
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
               let db else { sqlite3_close(db); return }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
@@ -240,12 +248,13 @@ final class LiveSyncRepository: @unchecked Sendable {
     @discardableResult
     private func executeWrite(_ sql: String,
                               _ bind: (OpaquePointer?, OpaquePointer?) -> Void) -> Void? {
-        guard DatabaseManager.shared.hasDatabase() else { return nil }
+        guard store.databaseExists else { return nil }
         var db: OpaquePointer?
-        let url = DatabaseManager.shared.sqliteURL()
+        let url = store.databaseURL
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
               let db else { sqlite3_close(db); return nil }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }

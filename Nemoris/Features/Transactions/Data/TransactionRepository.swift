@@ -4,6 +4,15 @@ import SQLite3
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 struct TransactionRepository {
+
+    private let store: SQLiteStore
+
+    /// La valeur par défaut vise la base de l'application : les sites d'appel
+    /// existants n'ont pas à changer.
+    init(store: SQLiteStore = SQLiteStore()) {
+        self.store = store
+    }
+
     func fetchAccounts() -> [Account] {
         query(read: { db in
             let sql = "SELECT id, COALESCE(name, ''), COALESCE(type, 'COURANT') FROM accounts ORDER BY name COLLATE NOCASE;"
@@ -355,13 +364,14 @@ struct TransactionRepository {
     }
 
     func addPayeeGroup(displayName: String, engineMerchantId: String? = nil, custom: Bool = true) -> Int? {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return nil }
+        guard store.databaseExists else { return nil }
         var db: OpaquePointer?
-        let dbURL = DatabaseManager.shared.sqliteURL()
+        let dbURL = store.databaseURL
         guard sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = "INSERT INTO payee_groups (display_name, engine_merchant_id, custom) VALUES (?, ?, ?)"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
@@ -419,7 +429,7 @@ struct TransactionRepository {
             )
         }
 
-        guard DatabaseManager.shared.hasDatabaseCopy() else {
+        guard store.databaseExists else {
             return TransactionImportResult(
                 insertedCount: 0,
                 failures: transactions.map { makeFailure($0, reason: "Aucune base de données configurée.") }
@@ -427,7 +437,7 @@ struct TransactionRepository {
         }
 
         var db: OpaquePointer?
-        let dbURL = DatabaseManager.shared.sqliteURL()
+        let dbURL = store.databaseURL
         guard sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             let reason: String
             if let db {
@@ -442,6 +452,7 @@ struct TransactionRepository {
             )
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -532,12 +543,13 @@ struct TransactionRepository {
     @discardableResult
     func addTransaction(accountId: Int, tiersId: Int?, categoryId: Int?, paymentTypeId: Int?,
                         information: String, amount: Double, date: Date) -> Int? {
-        guard DatabaseManager.shared.hasDatabase() else { return nil }
+        guard store.databaseExists else { return nil }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let fmt = DateFormatter()
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.dateFormat = "yyyy-MM-dd"
@@ -594,14 +606,15 @@ struct TransactionRepository {
 
     /// Insère un nouveau tiers et retourne son ID généré.
     func addTiersAndGetId(name: String, regex: String, categoryId: Int? = nil) -> Int? {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return nil }
+        guard store.databaseExists else { return nil }
         var db: OpaquePointer?
-        let dbURL = DatabaseManager.shared.sqliteURL()
+        let dbURL = store.databaseURL
         guard sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db)
             return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = "INSERT INTO payees (name, regex, category_id) VALUES (?, ?, ?)"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
@@ -634,12 +647,13 @@ struct TransactionRepository {
 
     @discardableResult
     func updateCategory(id: Int, name: String, parentId: Int? = nil, icon: String? = nil) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         if sqlite3_prepare_v2(db, "UPDATE categories SET name = ?, parent_id = ?, icon = ? WHERE id = ?", -1, &stmt, nil) == SQLITE_OK, let stmt {
             defer { sqlite3_finalize(stmt) }
@@ -661,12 +675,13 @@ struct TransactionRepository {
 
     @discardableResult
     func addCategory(name: String, parentId: Int? = nil, icon: String? = nil) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "INSERT INTO categories (name, parent_id, icon) VALUES (?, ?, ?)", -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
         defer { sqlite3_finalize(stmt) }
@@ -679,12 +694,13 @@ struct TransactionRepository {
     /// Déplace une catégorie dans l'arbre (change son parent, nil = racine).
     @discardableResult
     func moveCategory(id: Int, toParentId: Int?) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "UPDATE categories SET parent_id = ? WHERE id = ?", -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
         defer { sqlite3_finalize(stmt) }
@@ -700,12 +716,13 @@ struct TransactionRepository {
     @discardableResult
     func deleteCategory(id: Int, includingChildren childIds: [Int] = []) -> Bool {
         let allIds = [id] + childIds
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         sqlite3_exec(db, "PRAGMA foreign_keys = OFF;", nil, nil, nil)
         sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
@@ -813,12 +830,13 @@ struct TransactionRepository {
 
     /// Helper commun : exécute les UPDATE/DELETE de désassignation puis DELETE la row.
     private func deleteAndUnassign(table: String, id: Int, unassign: [String]) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         sqlite3_exec(db, "PRAGMA foreign_keys = OFF;", nil, nil, nil)
         sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
@@ -883,12 +901,13 @@ struct TransactionRepository {
     /// Met à jour la couleur d'un tag (hex sans #, nil = couleur par défaut).
     @discardableResult
     func updateTagColor(id: Int, colorHex: String?) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "UPDATE tags SET color = ? WHERE id = ?", -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
         defer { sqlite3_finalize(stmt) }
@@ -899,12 +918,13 @@ struct TransactionRepository {
 
     /// Crée le tag s'il n'existe pas (insensible à la casse), retourne son id.
     func findOrCreateTag(name: String) -> Int? {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return nil }
+        guard store.databaseExists else { return nil }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO tags (name) VALUES (?);", -1, &stmt, nil)
         sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT)
@@ -943,12 +963,13 @@ struct TransactionRepository {
 
     @discardableResult
     func setTags(_ tagIds: [Int], forTricountEntry entryId: Int) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         sqlite3_exec(db, "BEGIN;", nil, nil, nil)
         var stmt: OpaquePointer?
         sqlite3_prepare_v2(db, "DELETE FROM tricount_entry_tags WHERE entry_id = ?;", -1, &stmt, nil)
@@ -1166,12 +1187,13 @@ struct TransactionRepository {
     /// Remplace tous les tags d'une transaction (opération atomique).
     @discardableResult
     func setTags(_ tagIds: [Int], forTransaction txId: Int) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         sqlite3_exec(db, "BEGIN;", nil, nil, nil)
         var stmt: OpaquePointer?
         sqlite3_prepare_v2(db, "DELETE FROM transaction_tags WHERE transaction_id = ?;", -1, &stmt, nil)
@@ -1190,12 +1212,13 @@ struct TransactionRepository {
 
     @discardableResult
     func updateTiers(id: Int, name: String, regex: String, categoryId: Int? = nil, linkedCompteId: Int? = nil) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "UPDATE payees SET name = ?, regex = ?, category_id = ?, linked_account_id = ? WHERE id = ?", -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
         defer { sqlite3_finalize(stmt) }
@@ -1209,12 +1232,13 @@ struct TransactionRepository {
 
     @discardableResult
     func addTiers(name: String, regex: String, categoryId: Int? = nil, linkedCompteId: Int? = nil) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "INSERT INTO payees (name, regex, category_id, linked_account_id) VALUES (?, ?, ?, ?)", -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
         defer { sqlite3_finalize(stmt) }
@@ -1248,12 +1272,13 @@ struct TransactionRepository {
     /// Retourne le nombre de tiers effectivement supprimés.
     @discardableResult
     func deleteTiers(ids: Set<Int>) -> Int {
-        guard !ids.isEmpty, DatabaseManager.shared.hasDatabaseCopy() else { return 0 }
+        guard !ids.isEmpty, store.databaseExists else { return 0 }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return 0
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         sqlite3_exec(db, "PRAGMA foreign_keys = OFF;", nil, nil, nil)
         sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
@@ -1292,15 +1317,16 @@ struct TransactionRepository {
     // MARK: - Bulk import tiers
 
     func bulkInsertTiers(_ rows: [(name: String, regex: String, categoryId: Int?)]) -> TiersBulkImportResult {
-        guard !rows.isEmpty, DatabaseManager.shared.hasDatabaseCopy() else {
+        guard !rows.isEmpty, store.databaseExists else {
             return TiersBulkImportResult(insertedCount: 0, skippedCount: rows.count)
         }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db)
             return TiersBulkImportResult(insertedCount: 0, skippedCount: rows.count)
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         // Charger les noms existants (minuscules) pour déduplication
         var existingNames = Set<String>()
@@ -1746,12 +1772,13 @@ struct TransactionRepository {
     // MARK: - Console SQL
 
     func executeSQL(_ sql: String) -> Result<SQLQueryResult, SQLError> {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return .failure(SQLError(message: "Aucune base de données disponible")) }
+        guard store.databaseExists else { return .failure(SQLError(message: "Aucune base de données disponible")) }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return .failure(SQLError(message: "Impossible d'ouvrir la base de données"))
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
             return .failure(SQLError(message: "Erreur SQL : \(String(cString: sqlite3_errmsg(db)))"))
@@ -1777,20 +1804,9 @@ struct TransactionRepository {
         return .success(SQLQueryResult(columns: columns, rows: rows))
     }
 
+    @discardableResult
     private func writeSingle(sql: String, bind: (OpaquePointer) -> Void) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
-        var db: OpaquePointer?
-        let dbURL = DatabaseManager.shared.sqliteURL()
-        guard sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db)
-            return false
-        }
-        defer { sqlite3_close(db) }
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
-        defer { sqlite3_finalize(stmt) }
-        bind(stmt)
-        return sqlite3_step(stmt) == SQLITE_DONE
+        store.writeSingle(sql: sql, bind: bind)
     }
 
     // MARK: - Toutes transactions toutes comptes (budget)
@@ -1866,26 +1882,6 @@ struct TransactionRepository {
         }) ?? []
     }
 
-    private func query<T>(read block: (OpaquePointer) -> T) -> T? {
-        guard DatabaseManager.shared.hasDatabaseCopy() else {
-            return nil
-        }
+    private func query<T>(read block: (OpaquePointer) -> T) -> T? { store.read(block) }
 
-        var db: OpaquePointer?
-        let dbURL = DatabaseManager.shared.sqliteURL()
-        guard sqlite3_open_v2(dbURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db)
-            return nil
-        }
-        defer { sqlite3_close(db) }
-
-        return block(db)
-    }
-
-    private func string(from statement: OpaquePointer?, index: Int32) -> String {
-        guard let cString = sqlite3_column_text(statement, index) else {
-            return ""
-        }
-        return String(cString: cString)
-    }
 }

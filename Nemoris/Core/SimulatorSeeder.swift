@@ -14,6 +14,7 @@ enum SimulatorSeeder {
         guard sqlite3_open_v2(db.sqliteURL().path, &conn, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK,
               let conn else { sqlite3_close(conn); return }
         defer { sqlite3_close(conn) }
+        sqlite3_busy_timeout(conn, 3000)
 
         // Branche 1 : DB neuve (pas d'accounts) → seed complet, tout est virgin.
         if tableIsEmpty(conn, table: "accounts") {

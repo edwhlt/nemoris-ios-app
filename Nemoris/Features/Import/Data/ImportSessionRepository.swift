@@ -7,17 +7,27 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 /// Le contenu d'une session est sérialisé en JSON dans `import_sessions.rows_json`.
 struct ImportSessionRepository {
 
+    private let store: SQLiteStore
+
+    /// La valeur par défaut vise la base de l'application : les sites d'appel
+    /// existants n'ont pas à changer.
+    init(store: SQLiteStore = SQLiteStore()) {
+        self.store = store
+    }
+
+
     // MARK: - Sessions
 
     /// Renvoie le résumé léger des sessions, plus récente d'abord.
     func fetchSummaries(status: ImportSessionStatus? = nil) -> [ImportSessionSummary] {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return [] }
+        guard store.databaseExists else { return [] }
         var db: OpaquePointer?
-        let url = DatabaseManager.shared.sqliteURL()
+        let url = store.databaseURL
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return []
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         let sql: String
         if status != nil {
@@ -70,13 +80,14 @@ struct ImportSessionRepository {
 
     /// Charge intégralement une session (incluant toutes les rows) par id.
     func fetchSession(id: UUID) -> ImportSession? {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return nil }
+        guard store.databaseExists else { return nil }
         var db: OpaquePointer?
-        let url = DatabaseManager.shared.sqliteURL()
+        let url = store.databaseURL
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = "SELECT id, created_at, updated_at, status, source_file, account_id, rows_json FROM import_sessions WHERE id = ?;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
@@ -155,13 +166,14 @@ struct ImportSessionRepository {
     /// Supprime une session (ex : cancel).
     @discardableResult
     func deleteSession(id: UUID) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        let url = DatabaseManager.shared.sqliteURL()
+        let url = store.databaseURL
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "DELETE FROM import_sessions WHERE id = ?", -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
         defer { sqlite3_finalize(stmt) }
@@ -170,13 +182,14 @@ struct ImportSessionRepository {
     }
 
     private func upsertSession(_ session: ImportSession, isInsert: Bool) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        let url = DatabaseManager.shared.sqliteURL()
+        let url = store.databaseURL
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         let rowsData = (try? Self.jsonEncoder.encode(session.rows)) ?? Data("[]".utf8)
         let rowsJSON = String(data: rowsData, encoding: .utf8) ?? "[]"
@@ -227,13 +240,14 @@ struct ImportSessionRepository {
     // MARK: - CSV mappings
 
     func findMapping(headerSignature: String) -> ColumnMapping? {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return nil }
+        guard store.databaseExists else { return nil }
         var db: OpaquePointer?
-        let url = DatabaseManager.shared.sqliteURL()
+        let url = store.databaseURL
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = """
             SELECT date_column_index, amount_column_index, label_column_index,
                    separator, date_format, amount_decimal
@@ -265,13 +279,14 @@ struct ImportSessionRepository {
 
     @discardableResult
     func saveMapping(_ m: ColumnMapping) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        let url = DatabaseManager.shared.sqliteURL()
+        let url = store.databaseURL
         guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = """
             INSERT INTO csv_mappings (header_signature, date_column_index, amount_column_index,
                                       label_column_index, separator, date_format, amount_decimal, created_at)

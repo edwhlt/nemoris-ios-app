@@ -5,6 +5,15 @@ private let SQLITE_TRANSIENT_TC = unsafeBitCast(-1, to: sqlite3_destructor_type.
 
 struct TricountRepository {
 
+    private let store: SQLiteStore
+
+    /// La valeur par défaut vise la base de l'application : les sites d'appel
+    /// existants n'ont pas à changer.
+    init(store: SQLiteStore = SQLiteStore()) {
+        self.store = store
+    }
+
+
     nonisolated(unsafe) private(set) static var lastSaveError: String? = nil
 
     // MARK: - Table Setup
@@ -18,12 +27,13 @@ struct TricountRepository {
     // MARK: - Groups
 
     func fetchGroups() -> [TricountGroup] {
-        guard DatabaseManager.shared.hasDatabase() else { return [] }
+        guard store.databaseExists else { return [] }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return []
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         let sql = """
         SELECT g.id, g.tricount_key, g.title, g.currency, g.my_name, g.fetched_at,
@@ -57,12 +67,13 @@ struct TricountRepository {
     @discardableResult
     func saveGroup(key: String, title: String, currency: String, myName: String,
                    entries: [ParsedTCEntry]) -> Int? {
-        guard DatabaseManager.shared.hasDatabase() else { return nil }
+        guard store.databaseExists else { return nil }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         sqlite3_exec(db, "PRAGMA foreign_keys = ON;", nil, nil, nil)
         sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
@@ -288,12 +299,13 @@ struct TricountRepository {
 
     /// Charge un groupe par son ID local (utile pour la navigation depuis une transaction liée).
     func fetchGroup(id: Int) -> TricountGroup? {
-        guard DatabaseManager.shared.hasDatabase() else { return nil }
+        guard store.databaseExists else { return nil }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = """
         SELECT g.id, g.tricount_key, g.title, g.currency, g.my_name, g.fetched_at,
                COUNT(DISTINCT e.id)
@@ -320,12 +332,13 @@ struct TricountRepository {
     }
 
     func deleteGroup(id: Int) {
-        guard DatabaseManager.shared.hasDatabase() else { return }
+        guard store.databaseExists else { return }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         sqlite3_exec(db, "PRAGMA foreign_keys = ON;", nil, nil, nil)
         exec(db, "DELETE FROM tricount_groups WHERE id = ?") { sqlite3_bind_int($0, 1, Int32(id)) }
     }
@@ -333,12 +346,13 @@ struct TricountRepository {
     // MARK: - Entries + Shares
 
     func fetchEntries(groupId: Int) -> [TricountEntry] {
-        guard DatabaseManager.shared.hasDatabase() else { return [] }
+        guard store.databaseExists else { return [] }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return []
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
          let sql = """
          SELECT e.id, e.group_id, e.source_entry_uuid, e.source_updated_at,
@@ -387,12 +401,13 @@ struct TricountRepository {
 
     @discardableResult
     func updateEntryCategory(entryId: Int, categoryId: Int?) -> Bool {
-        guard DatabaseManager.shared.hasDatabase() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "UPDATE tricount_entries SET user_category_id = ? WHERE id = ?", -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
         defer { sqlite3_finalize(stmt) }
@@ -402,12 +417,13 @@ struct TricountRepository {
     }
 
     func fetchShares(groupId: Int) -> [TricountShare] {
-        guard DatabaseManager.shared.hasDatabase() else { return [] }
+        guard store.databaseExists else { return [] }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return []
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         let sql = """
         SELECT s.id, s.entry_id, s.member_name, s.amount
@@ -436,12 +452,13 @@ struct TricountRepository {
 
     @discardableResult
     func updateLinkedTransaction(entryId: Int, transactionId: Int?) -> Bool {
-        guard DatabaseManager.shared.hasDatabase() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "UPDATE tricount_entries SET linked_transaction_id = ? WHERE id = ?", -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
         defer { sqlite3_finalize(stmt) }

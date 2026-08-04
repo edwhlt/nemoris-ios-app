@@ -11,6 +11,15 @@ private let SQLITE_TRANSIENT_RB = unsafeBitCast(-1, to: sqlite3_destructor_type.
 /// `TricountRepository` (table `tricount_reimbursements`, migrée v44).
 struct ReimbursementRepository {
 
+    private let store: SQLiteStore
+
+    /// La valeur par défaut vise la base de l'application : les sites d'appel
+    /// existants n'ont pas à changer.
+    init(store: SQLiteStore = SQLiteStore()) {
+        self.store = store
+    }
+
+
     // MARK: - Transaction simple (0..1, pas de montant — cf. doctrine v44)
 
     /// Assigne (ou retire si `payeeId == nil`) le payee remboursant d'une
@@ -74,12 +83,13 @@ struct ReimbursementRepository {
     /// un couple (entrée, payee). Upsert sur `idx_reimbursements_tricount`.
     @discardableResult
     func addOrUpdateReimbursement(tricountEntryId: Int, payeeId: Int, amount: Double, currency: String) -> Bool {
-        guard DatabaseManager.shared.hasDatabase() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         sqlite3_exec(db, "PRAGMA foreign_keys = ON;", nil, nil, nil)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, """
@@ -101,12 +111,13 @@ struct ReimbursementRepository {
     /// jamais dupliquer silencieusement (fix du bug "Modifier…").
     @discardableResult
     func updateReimbursement(id: Int, payeeId: Int, amount: Double, currency: String) -> Bool {
-        guard DatabaseManager.shared.hasDatabase() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db); return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         sqlite3_exec(db, "PRAGMA foreign_keys = ON;", nil, nil, nil)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "UPDATE reimbursements SET payee_id = ?, amount = ?, currency = ? WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
@@ -379,32 +390,11 @@ struct ReimbursementRepository {
         return iso.date(from: raw) ?? Date()
     }
 
-    private func query<T>(read block: (OpaquePointer) -> T) -> T? {
-        guard DatabaseManager.shared.hasDatabase() else { return nil }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db); return nil
-        }
-        defer { sqlite3_close(db) }
-        return block(db)
-    }
+    private func query<T>(read block: (OpaquePointer) -> T) -> T? { store.read(block) }
 
+    @discardableResult
     private func writeSingle(sql: String, bind: (OpaquePointer) -> Void) -> Bool {
-        guard DatabaseManager.shared.hasDatabase() else { return false }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db); return false
-        }
-        defer { sqlite3_close(db) }
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
-        defer { sqlite3_finalize(stmt) }
-        bind(stmt)
-        return sqlite3_step(stmt) == SQLITE_DONE
+        store.writeSingle(sql: sql, bind: bind)
     }
 
-    private func string(from statement: OpaquePointer?, index: Int32) -> String {
-        guard let cString = sqlite3_column_text(statement, index) else { return "" }
-        return String(cString: cString)
-    }
 }

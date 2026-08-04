@@ -35,6 +35,7 @@ struct CurrencyRateService {
             sqlite3_close(db); return []
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "SELECT id FROM tricount_groups;", -1, &stmt, nil) == SQLITE_OK,
               let stmt else { return [] }
@@ -84,6 +85,7 @@ struct CurrencyRateService {
             sqlite3_close(db); return 0
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         // Récupère les paires (devise, date, taux dérivé) pour le groupe
         let selectSQL = """
@@ -142,6 +144,7 @@ struct CurrencyRateService {
             sqlite3_close(db); return []
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         let sql = """
         SELECT DISTINCT te.currency, te.date
@@ -209,6 +212,7 @@ struct CurrencyRateService {
             sqlite3_close(db); return
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = "INSERT OR REPLACE INTO currency_rates (from_currency, to_currency, date, rate) VALUES (?, ?, ?, ?);"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }

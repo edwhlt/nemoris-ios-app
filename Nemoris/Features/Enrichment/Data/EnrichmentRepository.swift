@@ -15,6 +15,15 @@ import Foundation
 /// l'orchestrator (actor) `await` pour faire un hop vers MainActor.
 struct EnrichmentRepository {
 
+    private let store: SQLiteStore
+
+    /// La valeur par défaut vise la base de l'application : les sites d'appel
+    /// existants n'ont pas à changer.
+    init(store: SQLiteStore = SQLiteStore()) {
+        self.store = store
+    }
+
+
     @MainActor private static let store = JSONFileCache<MerchantEnrichment>(name: "enrichment_cache")
 
     func fetch(cacheKey: String) async -> MerchantEnrichment? {

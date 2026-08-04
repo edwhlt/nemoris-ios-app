@@ -279,6 +279,7 @@ enum WidgetDataStore {
             return []
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         let cal = Calendar.current
         let now = Date()

@@ -160,6 +160,7 @@ final class TierResolver {
             sqlite3_close(db); return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         var groupId: Int? = suggestion.existingGroup?.id
         if useGroup, groupId == nil, let groupName = suggestion.suggestedGroupName {
@@ -177,6 +178,7 @@ final class TierResolver {
             sqlite3_close(db); return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = "INSERT INTO payees (name, custom) VALUES (?, 1)"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
@@ -194,6 +196,7 @@ final class TierResolver {
             sqlite3_close(db); return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         let sql: String
         if city != nil {
@@ -236,6 +239,7 @@ final class TierResolver {
             sqlite3_close(db); return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = "SELECT id, display_name, engine_merchant_id FROM payee_groups WHERE engine_merchant_id = ? LIMIT 1"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
@@ -254,6 +258,7 @@ final class TierResolver {
             sqlite3_close(db); return 0
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM payees WHERE engine_merchant_id = ?", -1, &stmt, nil) == SQLITE_OK, let stmt else { return 0 }
         defer { sqlite3_finalize(stmt) }

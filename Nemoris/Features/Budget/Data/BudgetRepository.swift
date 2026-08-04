@@ -10,13 +10,22 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 
 final class BudgetRepository: @unchecked Sendable {
     static let shared = BudgetRepository()
-    private init() {}
+
+    private let store: SQLiteStore
+
+    /// `shared` reste le point d'accès de l'application ; l'init injectable
+    /// permet aux tests d'instancier le repository sur une base temporaire.
+    init(store: SQLiteStore = SQLiteStore()) {
+        self.store = store
+    }
+
 
     // MARK: - Recurring Patterns
 
     func fetchPatterns() -> [RecurringPattern] {
         guard let db = openDB() else { return [] }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var results: [RecurringPattern] = []
         let sql = """
             SELECT id, name, amount_avg, amount_tolerance, category_id, payee_id,
@@ -42,6 +51,7 @@ final class BudgetRepository: @unchecked Sendable {
     func insertPattern(_ p: RecurringPattern) -> Int? {
         guard let db = openDB() else { return nil }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = """
             INSERT INTO recurring_patterns
             (name, amount_avg, amount_tolerance, category_id, payee_id,
@@ -80,6 +90,7 @@ final class BudgetRepository: @unchecked Sendable {
     func updatePattern(_ p: RecurringPattern) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = """
             UPDATE recurring_patterns
             SET name=?, amount_avg=?, amount_tolerance=?, category_id=?, payee_id=?,
@@ -116,6 +127,7 @@ final class BudgetRepository: @unchecked Sendable {
     func deletePattern(id: Int) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         sqlite3_prepare_v2(db, "DELETE FROM recurring_patterns WHERE id=?;", -1, &stmt, nil)
         sqlite3_bind_int(stmt, 1, Int32(id))
@@ -128,6 +140,7 @@ final class BudgetRepository: @unchecked Sendable {
     func fetchEnvelopes() -> [BudgetEnvelope] {
         guard let db = openDB() else { return [] }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var results: [BudgetEnvelope] = []
         let sql = """
             SELECT id, name, category_id, amount, period, start_date, is_active
@@ -147,6 +160,7 @@ final class BudgetRepository: @unchecked Sendable {
     func insertEnvelope(_ e: BudgetEnvelope) -> Int? {
         guard let db = openDB() else { return nil }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = """
             INSERT INTO budget_envelopes (name, category_id, amount, period, start_date, is_active)
             VALUES (?,?,?,?,?,?);
@@ -167,6 +181,7 @@ final class BudgetRepository: @unchecked Sendable {
     func updateEnvelope(_ e: BudgetEnvelope) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = """
             UPDATE budget_envelopes
             SET name=?, category_id=?, amount=?, period=?, is_active=?
@@ -187,6 +202,7 @@ final class BudgetRepository: @unchecked Sendable {
     func deleteEnvelope(id: Int) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         sqlite3_prepare_v2(db, "DELETE FROM budget_envelopes WHERE id=?;", -1, &stmt, nil)
         sqlite3_bind_int(stmt, 1, Int32(id))
@@ -199,6 +215,7 @@ final class BudgetRepository: @unchecked Sendable {
     func fetchPrevisions(from startDate: Date, to endDate: Date) -> [BudgetPrevision] {
         guard let db = openDB() else { return [] }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var results: [BudgetPrevision] = []
         let sql = """
             SELECT id, recurring_pattern_id, amount, expected_date, status,
@@ -221,6 +238,7 @@ final class BudgetRepository: @unchecked Sendable {
     func fetchPrevisions(forPatternId patternId: Int) -> [BudgetPrevision] {
         guard let db = openDB() else { return [] }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var results: [BudgetPrevision] = []
         let sql = """
             SELECT id, recurring_pattern_id, amount, expected_date, status,
@@ -243,6 +261,7 @@ final class BudgetRepository: @unchecked Sendable {
     func insertPrevision(_ p: BudgetPrevision) -> Int? {
         guard let db = openDB() else { return nil }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = """
             INSERT INTO budget_previsions
             (recurring_pattern_id, amount, expected_date, status, actual_transaction_id, notes)
@@ -268,6 +287,7 @@ final class BudgetRepository: @unchecked Sendable {
     func updatePrevisionStatus(id: Int, status: PrevisionStatus, transactionId: Int?) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         let sql = "UPDATE budget_previsions SET status=?, actual_transaction_id=? WHERE id=?;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
@@ -281,6 +301,7 @@ final class BudgetRepository: @unchecked Sendable {
     func deletePrevision(id: Int) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         sqlite3_prepare_v2(db, "DELETE FROM budget_previsions WHERE id=?;", -1, &stmt, nil)
         sqlite3_bind_int(stmt, 1, Int32(id))
@@ -294,6 +315,7 @@ final class BudgetRepository: @unchecked Sendable {
     func regeneratePrevisions(for pattern: RecurringPattern, monthsAhead: Int = 3) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         // Supprimer UNIQUEMENT les PENDING (MATCHED et SKIPPED sont preserves)
         var stmt: OpaquePointer?
@@ -415,13 +437,14 @@ final class BudgetRepository: @unchecked Sendable {
     // MARK: - SQLite Helpers
 
     private func openDB() -> OpaquePointer? {
-        guard DatabaseManager.shared.hasDatabase() else { return nil }
+        guard store.databaseExists else { return nil }
         var db: OpaquePointer?
         let result = sqlite3_open_v2(
-            DatabaseManager.shared.sqliteURL().path, &db,
+            store.databaseURL.path, &db,
             SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil
         )
         guard result == SQLITE_OK else { sqlite3_close(db); return nil }
+        sqlite3_busy_timeout(db, 3000)
         return db
     }
 

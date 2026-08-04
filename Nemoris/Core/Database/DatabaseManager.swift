@@ -52,6 +52,7 @@ final class DatabaseManager: @unchecked Sendable {
             return 0
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
         guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM transactions;", -1, &stmt, nil) == SQLITE_OK else {
@@ -111,6 +112,7 @@ final class DatabaseManager: @unchecked Sendable {
             sqlite3_close(db); return
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         let seeds: [String] = [
             // Catégories parentes (tables/colonnes désormais en anglais après migration v12)
@@ -173,6 +175,7 @@ final class DatabaseManager: @unchecked Sendable {
             return msg
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         let currentVersion = userVersion(db)
         var errors: [String] = []
@@ -252,6 +255,7 @@ final class DatabaseManager: @unchecked Sendable {
             sqlite3_close(db); return 0
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         return userVersion(db)
     }
 

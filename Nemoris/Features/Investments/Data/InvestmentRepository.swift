@@ -4,6 +4,15 @@ import SQLite3
 private let SQLITE_TRANSIENT_INVEST = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 struct InvestmentRepository {
+
+    private let store: SQLiteStore
+
+    /// La valeur par défaut vise la base de l'application : les sites d'appel
+    /// existants n'ont pas à changer.
+    init(store: SQLiteStore = SQLiteStore()) {
+        self.store = store
+    }
+
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -140,14 +149,15 @@ struct InvestmentRepository {
     /// AXE I Couche 4.
     func addAccountAndGetId(name: String, broker: String, currency: String, accountType: String,
                             openedAt: Date) -> Int? {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return nil }
+        guard store.databaseExists else { return nil }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db,
+        guard sqlite3_open_v2(store.databaseURL.path, &db,
                               SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db)
             return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         let sql = """
             INSERT INTO investment_accounts
@@ -226,14 +236,15 @@ struct InvestmentRepository {
             _ = deletePosition(id: position.id)  // cascade orders + trace + position
         }
 
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
+        guard store.databaseExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db,
+        guard sqlite3_open_v2(store.databaseURL.path, &db,
                               SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db)
             return false
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         // Étape 4 : retirer les LiveSync links rattachés au compte.
         // (Le credential Keychain est nettoyé par LiveSyncRepository.deleteLink
@@ -285,14 +296,15 @@ struct InvestmentRepository {
     /// `isin` (v31) est persisté pour permettre la sync via OpenFIGI.
     func addPositionAndGetId(accountId: Int, assetType: String, assetName: String,
                              ticker: String, isin: String = "", purchaseDate: Date) -> Int? {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return nil }
+        guard store.databaseExists else { return nil }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db,
+        guard sqlite3_open_v2(store.databaseURL.path, &db,
                               SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db)
             return nil
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         let sql = """
             INSERT INTO investment_positions
@@ -520,14 +532,15 @@ struct InvestmentRepository {
     /// Retourne le nombre d'ordres supprimés.
     @discardableResult
     func deleteSyntheticOrders(positionId: Int) -> Int {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return 0 }
+        guard store.databaseExists else { return 0 }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db,
+        guard sqlite3_open_v2(store.databaseURL.path, &db,
                               SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db)
             return 0
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
         var stmt: OpaquePointer?
         let sql = """
             DELETE FROM investment_orders
@@ -642,7 +655,7 @@ struct InvestmentRepository {
     @discardableResult
     func updatePositionsCurrentValueFromLatestPrice(identifier: String) -> Int {
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, DatabaseManager.shared.hasDatabaseCopy() else { return 0 }
+        guard !trimmed.isEmpty, store.databaseExists else { return 0 }
 
         // Depuis v33 : le dernier close vient du cache disque (plus de subquery SQL).
         guard let latestClose = PriceHistoryCache.shared.latestClose(identifier: trimmed) else {
@@ -650,12 +663,13 @@ struct InvestmentRepository {
         }
 
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db,
+        guard sqlite3_open_v2(store.databaseURL.path, &db,
                               SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db)
             return 0
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         // UPDATE direct : qty recalculée inline depuis investment_orders, prix
         // passé en bind depuis le cache. 1 seule passe SQL pour toutes les
@@ -691,14 +705,15 @@ struct InvestmentRepository {
     @MainActor
     @discardableResult
     func purgeCorruptedCryptoData() -> (positionsReset: Int, historyRowsDeleted: Int) {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return (0, 0) }
+        guard store.databaseExists else { return (0, 0) }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db,
+        guard sqlite3_open_v2(store.databaseURL.path, &db,
                               SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
             sqlite3_close(db)
             return (0, 0)
         }
         defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
 
         // 1. Liste les tickers des positions CRYPTO (typique : BTC, ETH, FET, SOL...)
         var cryptoTickers: [String] = []
@@ -755,39 +770,13 @@ struct InvestmentRepository {
         PriceHistoryCache.shared.fetch(identifier: identifier, limit: limit)
     }
 
-    private func query<T>(_ block: (OpaquePointer) -> T) -> T? {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return nil }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db)
-            return nil
-        }
-        defer { sqlite3_close(db) }
-        return block(db)
-    }
+    private func query<T>(_ block: (OpaquePointer) -> T) -> T? { store.read(block) }
 
     @discardableResult
     private func writeSingle(sql: String, bind: (OpaquePointer) -> Void) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db)
-            return false
-        }
-        defer { sqlite3_close(db) }
-
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
-        defer { sqlite3_finalize(stmt) }
-
-        bind(stmt)
-        return sqlite3_step(stmt) == SQLITE_DONE
+        store.writeSingle(sql: sql, bind: bind)
     }
 
-    private func string(from stmt: OpaquePointer?, index: Int32) -> String {
-        guard let cString = sqlite3_column_text(stmt, index) else { return "" }
-        return String(cString: cString)
-    }
 }
 
 struct InvestmentCSVPreviewRow: Identifiable {

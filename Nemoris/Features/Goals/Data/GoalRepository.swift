@@ -3,13 +3,22 @@ import SQLite3
 
 // MARK: - GoalRepository
 //
-// CRUD pour la table `goals` (migration v39). Pattern aligné sur les autres
-// repositories : struct + `query` READONLY + `writeSingle` READWRITE + helpers
-// (string, bindOptionalText) recopiés localement pour rester self-contained.
+// CRUD pour la table `goals` (migration v39). L'accès SQLite passe par
+// `SQLiteStore`, injecté à la construction : les tests peuvent ainsi pointer le
+// repository vers une base temporaire.
 
 private let SQLITE_TRANSIENT_GOAL = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 struct GoalRepository {
+
+    private let store: SQLiteStore
+
+    /// La valeur par défaut vise la base de l'application : les sites d'appel
+    /// existants n'ont pas à changer.
+    init(store: SQLiteStore = SQLiteStore()) {
+        self.store = store
+    }
+
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -112,34 +121,11 @@ struct GoalRepository {
 
     // MARK: - Helpers internes
 
-    private func query<T>(_ block: (OpaquePointer) -> T) -> T? {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return nil }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db); return nil
-        }
-        defer { sqlite3_close(db) }
-        return block(db)
-    }
+    private func query<T>(_ block: (OpaquePointer) -> T) -> T? { store.read(block) }
 
     @discardableResult
     private func writeSingle(sql: String, bind: (OpaquePointer) -> Void) -> Bool {
-        guard DatabaseManager.shared.hasDatabaseCopy() else { return false }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(DatabaseManager.shared.sqliteURL().path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
-            sqlite3_close(db); return false
-        }
-        defer { sqlite3_close(db) }
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
-        defer { sqlite3_finalize(stmt) }
-        bind(stmt)
-        return sqlite3_step(stmt) == SQLITE_DONE
-    }
-
-    private func string(from stmt: OpaquePointer?, index: Int32) -> String {
-        guard let cString = sqlite3_column_text(stmt, index) else { return "" }
-        return String(cString: cString)
+        store.writeSingle(sql: sql, bind: bind)
     }
 
     private func bindOptionalText(_ stmt: OpaquePointer?, _ index: Int32, _ value: String?) {
