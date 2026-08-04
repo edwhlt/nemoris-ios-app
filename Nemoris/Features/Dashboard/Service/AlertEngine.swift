@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 // MARK: - AlertEngine
 //
@@ -30,14 +29,9 @@ enum AlertSeverity: Int, Comparable {
         lhs.rawValue < rhs.rawValue
     }
 
-    var color: Color {
-        switch self {
-        case .info:     return AppTheme.Colors.accent
-        case .warning:  return AppTheme.Colors.warning
-        case .critical: return AppTheme.Colors.danger
-        }
-    }
-
+    /// La couleur associée vit dans `AlertsBanner.swift`, son unique
+    /// consommateur : ce moteur ne dépend d'aucun type SwiftUI, ce qui le rend
+    /// compilable dans un harnais de tests pur.
     var systemIcon: String {
         switch self {
         case .info:     return "info.circle.fill"

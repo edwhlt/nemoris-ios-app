@@ -19,17 +19,17 @@ BUILD=$(mktemp -d)
 trap "rm -rf $BUILD" EXIT
 
 xcrun swiftc \
-  ../Nemoris/Features/Enrichment/QueryPlanning/MerchantQueryPlan.swift \
-  ../Nemoris/Features/Enrichment/QueryPlanning/SearchBudget.swift \
-  ../Nemoris/Features/Enrichment/QueryPlanning/LocalityResolver.swift \
-  ../Nemoris/Features/Enrichment/QueryPlanning/MerchantTokenSimilarity.swift \
-  ../Nemoris/Features/Enrichment/QueryPlanning/AbbreviationTable.swift \
-  ../Nemoris/Features/Enrichment/QueryPlanning/ForeignLocalityTable.swift \
-  ../Nemoris/Features/Enrichment/QueryPlanning/BankLabelTemplate.swift \
-  ../Nemoris/Features/Enrichment/QueryPlanning/LLMQueryRefinement.swift \
-  ../Nemoris/Features/Enrichment/QueryPlanning/DeterministicQueryRefiner.swift \
-  ../Nemoris/Features/Enrichment/QueryPlanning/MerchantQueryPlanner.swift \
-  ../Nemoris/Features/Enrichment/QueryPlanning/CandidateRanker.swift \
+  ../Nemoris/Features/Enrichment/Service/QueryPlanning/MerchantQueryPlan.swift \
+  ../Nemoris/Features/Enrichment/Service/QueryPlanning/SearchBudget.swift \
+  ../Nemoris/Features/Enrichment/Service/QueryPlanning/LocalityResolver.swift \
+  ../Nemoris/Features/Enrichment/Service/QueryPlanning/MerchantTokenSimilarity.swift \
+  ../Nemoris/Features/Enrichment/Service/QueryPlanning/AbbreviationTable.swift \
+  ../Nemoris/Features/Enrichment/Service/QueryPlanning/ForeignLocalityTable.swift \
+  ../Nemoris/Features/Enrichment/Service/QueryPlanning/BankLabelTemplate.swift \
+  ../Nemoris/Features/Enrichment/Service/QueryPlanning/LLMQueryRefinement.swift \
+  ../Nemoris/Features/Enrichment/Service/QueryPlanning/DeterministicQueryRefiner.swift \
+  ../Nemoris/Features/Enrichment/Service/QueryPlanning/MerchantQueryPlanner.swift \
+  ../Nemoris/Features/Enrichment/Service/QueryPlanning/CandidateRanker.swift \
   MerchantQueryPlannerTests.swift \
   -o "$BUILD/query_planner_tests"
 

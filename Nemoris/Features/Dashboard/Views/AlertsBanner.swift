@@ -1,5 +1,20 @@
 import SwiftUI
 
+/// Traduction d'une sévérité en couleur du thème.
+///
+/// Vit ici plutôt que sur l'enum lui-même : `AlertEngine` est un moteur de
+/// calcul et ne doit dépendre d'aucun type SwiftUI. Ce bandeau en est le seul
+/// consommateur.
+extension AlertSeverity {
+    var color: Color {
+        switch self {
+        case .info:     return AppTheme.Colors.accent
+        case .warning:  return AppTheme.Colors.warning
+        case .critical: return AppTheme.Colors.danger
+        }
+    }
+}
+
 // MARK: - AlertsBanner
 //
 // Bandeau d'alertes affiché en haut du Dashboard quand `AlertEngine.compute()`

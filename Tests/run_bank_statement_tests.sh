@@ -14,8 +14,8 @@ BUILD=$(mktemp -d)
 trap "rm -rf $BUILD" EXIT
 
 xcrun swiftc \
-  ../Nemoris/Features/Investments/PDFImport/InvestmentStatementExtractor.swift \
-  ../Nemoris/Features/Import/BankStatementExtractor.swift \
+  ../Nemoris/Features/Investments/Service/PDFImport/InvestmentStatementExtractor.swift \
+  ../Nemoris/Features/Import/Service/BankStatementExtractor.swift \
   BankStatementExtractorTests.swift \
   -o "$BUILD/bank_statement_tests"
 

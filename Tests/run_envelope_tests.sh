@@ -11,8 +11,8 @@ BUILD=$(mktemp -d)
 trap "rm -rf $BUILD" EXIT
 
 xcrun swiftc \
-  ../Nemoris/Features/Budget/BudgetModels.swift \
-  ../Nemoris/Features/Budget/EnvelopeSpendingCalculator.swift \
+  ../Nemoris/Features/Budget/Model/BudgetModels.swift \
+  ../Nemoris/Features/Budget/Service/EnvelopeSpendingCalculator.swift \
   EnvelopeSpendingTests.swift \
   -o "$BUILD/envelope_tests"
 

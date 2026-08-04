@@ -14,7 +14,7 @@ xcrun swiftc \
   ../Nemoris/Features/Dashboard/Service/DashboardSnapshot.swift \
   ../Nemoris/Features/Dashboard/Model/DashboardCardID.swift \
   ../Nemoris/Features/Dashboard/Model/DashboardLayoutStore.swift \
-  ../Nemoris/Features/Dashboard/Layout/DashboardGridPlanner.swift \
+  ../Nemoris/Features/Dashboard/Service/Layout/DashboardGridPlanner.swift \
   DashboardLayoutTests.swift \
   -o "$BUILD/layout_tests"
 
