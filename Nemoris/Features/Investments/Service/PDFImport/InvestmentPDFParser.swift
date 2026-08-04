@@ -65,6 +65,17 @@ final class InvestmentPDFParser: Sendable {
     /// Chantier C — OCR direct depuis des `Data` en mémoire (PhotosPicker :
     /// `loadTransferable(type: Data.self)`, aucune écriture disque).
     func extractTextFromImageData(_ data: Data) -> String? {
+        Self.ocrText(from: data)
+    }
+
+    /// OCR d'une image en mémoire, appelable HORS du main actor.
+    ///
+    /// ⚠️ Vision est SYNCHRONE et gourmand (1 à 5 s sur une capture plein
+    /// écran). Appelé depuis un contexte `@MainActor`, il bloque le thread
+    /// principal : l'app paraît figée et la barre de progression ne se peint
+    /// jamais — le symptôme « ça charge indéfiniment » à l'import d'une image.
+    /// Les appelants doivent l'exécuter dans un `Task.detached`.
+    nonisolated static func ocrText(from data: Data) -> String? {
         guard let image = UIImage(data: data), let cgImage = image.cgImage else {
             print("[PDFParser] Data image illisible")
             return nil
@@ -75,7 +86,10 @@ final class InvestmentPDFParser: Sendable {
     /// Chantier C — pipeline complet pour une image en mémoire (PhotosPicker).
     /// OCR → parsing IA bi-mode (ordres OU capture de portefeuille).
     @MainActor func parseImageData(_ data: Data) async -> [PDFPageResult] {
-        guard let text = extractTextFromImageData(data),
+        let recognized = await Task.detached(priority: .userInitiated) {
+            Self.ocrText(from: data)
+        }.value
+        guard let text = recognized,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return [PDFPageResult(pageNumber: 1, rawText: "", orders: [],
                                   detectedMode: .unknown,
@@ -86,7 +100,7 @@ final class InvestmentPDFParser: Sendable {
     }
 
     /// Reconnaissance de texte via Vision.
-    private func recognizeText(in image: CGImage) -> String? {
+    nonisolated private static func recognizeText(in image: CGImage) -> String? {
         var result: String?
         let request = VNRecognizeTextRequest { req, error in
             guard error == nil,
@@ -226,7 +240,11 @@ final class InvestmentPDFParser: Sendable {
 
         case .image:
             onPageParsed(0, 1)
-            let text = extractTextFromImageData(data) ?? extractTextFromImage(at: url)
+            // OCR hors du main actor (cf. `ocrText`) : sur le thread principal
+            // il fige l'UI pendant toute la reconnaissance.
+            let text = await Task.detached(priority: .userInitiated) {
+                Self.ocrText(from: data)
+            }.value
             onPageParsed(1, 1)
             guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return [PDFPageResult(pageNumber: 1, rawText: "", orders: [],

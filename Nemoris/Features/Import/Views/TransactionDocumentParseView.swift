@@ -35,15 +35,28 @@ struct TransactionDocumentParseView: View {
         Form {
             if isParsing {
                 Section {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Analyse en cours…")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Analyse en cours…")
+                            .font(.subheadline.weight(.semibold))
+                        // Barre déterminée dès que le nombre d'unités est connu ;
+                        // indéterminée pendant l'extraction du texte (OCR / pages
+                        // PDF), où le total ne l'est pas encore.
+                        if progress.total > 0 {
+                            ProgressView(value: Double(progress.done),
+                                         total: Double(progress.total))
+                                .tint(AppTheme.Colors.accent)
                             Text("\(progress.done) / \(progress.total)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(AppTheme.Colors.textSecondary)
+                        } else {
+                            ProgressView()
+                                .tint(AppTheme.Colors.accent)
+                            Text("Lecture du document…")
                                 .font(.caption)
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
             } else {
                 resultsSection
@@ -194,9 +207,11 @@ struct TransactionDocumentParseView: View {
     private func runParsing() async {
         guard units.isEmpty else { return }   // `.task` peut rejouer sur re-render
         isParsing = true
-        progress = (0, max(1, sources.count))
+        // total = 0 tant que l'extraction du texte tourne : le nombre d'unités
+        // n'est connu qu'une fois les PDF ouverts et les images océrisées.
+        progress = (0, 0)
         let results = await TransactionDocumentParser.shared.parse(sources: sources) { done, total in
-            progress = (done, max(total, done))
+            progress = (done, total)
         }
         units = results
         isParsing = false

@@ -67,15 +67,30 @@ struct ImportV3EntryView: View {
     /// création d'UNE session unique.
     @State private var aggregatedRows: [ImportSessionRow] = []
     @State private var pendingMappings: [PendingCSV] = []
+    /// Index du mapping affiché. On AVANCE un curseur, on ne retire jamais
+    /// d'élément de `pendingMappings` pendant le parcours :
+    ///
+    /// ⚠️ Retirer l'élément courant depuis le callback de l'écran poussé (ce
+    /// que faisait `removeFirst()`) vide le contenu de la `navigationDestination`
+    /// PENDANT qu'elle est encore à l'écran — la destination s'évalue alors à
+    /// `EmptyView` dans le même cycle de rendu que la dépile, la fermeture de
+    /// la feuille et la présentation de la feuille de session. C'est la cause
+    /// du crash constaté à l'import d'un CSV.
+    @State private var mappingIndex: Int = 0
     @State private var documentSources: [TransactionDocumentParser.DocumentSource] = []
     /// Noms de tous les fichiers retenus, pour le libellé de la session.
     @State private var handledFileNames: [String] = []
     /// Étape poussée courante. UNE seule `navigationDestination` pilotée par
     /// cette valeur : deux destinations concurrentes qu'on bascule dans le même
-    /// cycle de rendu produisent des transitions incohérentes.
+    /// cycle de rendu produisent des transitions incohérentes. L'index du
+    /// mapping est porté PAR l'étape, pour que le contenu poussé reste toujours
+    /// valide (cf. `mappingIndex`).
     @State private var step: Step? = nil
 
-    private enum Step: Hashable { case documents, mapping }
+    private enum Step: Hashable {
+        case documents
+        case mapping(index: Int)
+    }
 
     private let repository = TransactionRepository()
     private let sessionRepo = ImportSessionRepository()
@@ -213,15 +228,19 @@ struct ImportV3EntryView: View {
                         documentSources = []
                         advance()
                     }
-                case .mapping:
-                    if let pending = pendingMappings.first, let accountId = selectedAccountId {
+                case .mapping(let index):
+                    // L'index vient de l'étape : `pendingMappings` n'est jamais
+                    // mutée en cours de parcours, donc ce contenu reste valide
+                    // tant que l'écran est poussé.
+                    if index < pendingMappings.count, let accountId = selectedAccountId {
+                        let pending = pendingMappings[index]
                         ColumnMappingView(
                             parsed: pending.parsed,
                             accountId: accountId,
                             sourceFile: pending.name,
                             onRowsReady: { rows in
                                 aggregatedRows.append(contentsOf: rows)
-                                pendingMappings.removeFirst()
+                                mappingIndex = index + 1
                                 advance()
                             },
                             startingRowNumber: aggregatedRows.count + 1
@@ -354,6 +373,7 @@ struct ImportV3EntryView: View {
             isParsing = false
             aggregatedRows = directRows
             pendingMappings = mappings
+            mappingIndex = 0
             documentSources = documents
             handledFileNames = names
             advance()
@@ -365,12 +385,18 @@ struct ImportV3EntryView: View {
     private func advance() {
         if !documentSources.isEmpty {
             step = .documents
-        } else if !pendingMappings.isEmpty {
-            step = .mapping
-        } else {
-            step = nil
-            finalize()
+            return
         }
+        if mappingIndex < pendingMappings.count {
+            step = .mapping(index: mappingIndex)
+            return
+        }
+        // Fin du parcours. On dépile D'ABORD, et la création de session (qui
+        // ferme cette feuille et en présente une autre) attend le cycle de
+        // rendu suivant : dépiler, fermer et présenter dans le même cycle fait
+        // crasher SwiftUI.
+        step = nil
+        Task { @MainActor in finalize() }
     }
 
     /// Crée UNE session pour l'ensemble des fichiers traités.
@@ -400,6 +426,7 @@ struct ImportV3EntryView: View {
     private func resetPipeline() {
         aggregatedRows = []
         pendingMappings = []
+        mappingIndex = 0
         documentSources = []
         handledFileNames = []
         step = nil

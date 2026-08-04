@@ -65,19 +65,28 @@ final class TransactionDocumentParser {
     /// connu qu'une fois ouvert).
     func parse(sources: [DocumentSource],
                onProgress: @escaping (Int, Int) -> Void) async -> [UnitResult] {
-        var results: [UnitResult] = []
-        var done = 0
+        // Phase 1 — extraction du TEXTE de chaque unité (OCR, pages PDF,
+        // découpage en blocs), entièrement hors du main actor. Le nombre réel
+        // d'unités n'est connu qu'à la fin : un PDF n'annonce son nombre de
+        // pages qu'une fois ouvert, une image en vaut une.
+        var pending: [(text: String, kind: InvestmentDocumentKind, source: String)] = []
         for source in sources {
-            let units = await units(for: source)
-            for (offset, unit) in units.enumerated() {
-                let parsed = await parseUnit(text: unit.text,
-                                             unitNumber: results.count + offset + 1,
-                                             sourceName: source.displayName,
-                                             kind: unit.kind)
-                results.append(parsed)
-                done += 1
-                onProgress(done, max(done, results.count))
+            for unit in await units(for: source) {
+                pending.append((unit.text, unit.kind, source.displayName))
             }
+        }
+
+        // Phase 2 — analyse unité par unité, avec une progression EXACTE
+        // (l'ancienne version rapportait toujours `done / done`, soit 100 %
+        // en permanence, donc une barre qui ne voulait rien dire).
+        onProgress(0, pending.count)
+        var results: [UnitResult] = []
+        for (index, unit) in pending.enumerated() {
+            results.append(await parseUnit(text: unit.text,
+                                           unitNumber: index + 1,
+                                           sourceName: unit.source,
+                                           kind: unit.kind))
+            onProgress(index + 1, pending.count)
         }
         return results
     }
@@ -86,7 +95,6 @@ final class TransactionDocumentParser {
     /// (sniffé sur les octets, jamais déduit de l'extension — cf. la classe de
     /// bug documentée dans `InvestmentPDFParser.detectKind`).
     private func units(for source: DocumentSource) async -> [(text: String, kind: InvestmentDocumentKind)] {
-        let parser = InvestmentPDFParser.shared
         let kind = InvestmentPDFParser.detectKind(data: source.data,
                                                   fileExtension: (source.displayName as NSString).pathExtension)
         switch kind {
@@ -107,7 +115,13 @@ final class TransactionDocumentParser {
             return pages.map { ($0, .pdf) }
 
         case .image:
-            let text = parser.extractTextFromImageData(source.data) ?? ""
+            // OCR Vision hors du main actor : synchrone et coûteux (1-5 s sur
+            // une capture plein écran), il fige sinon toute l'app et la barre
+            // de progression ne se peint jamais.
+            let data = source.data
+            let text = await Task.detached(priority: .userInitiated) {
+                InvestmentPDFParser.ocrText(from: data)
+            }.value ?? ""
             return [(text, .image)]
 
         case .text:
@@ -150,7 +164,11 @@ final class TransactionDocumentParser {
         }
 
         let (aiLines, aiDiagnostic) = await extractWithAI(text: text)
-        let deterministic = BankStatementExtractor.extractTransactions(from: text)
+        // Moteur pur mais gourmand en regex sur un relevé dense : hors du main
+        // actor, comme l'OCR, pour que l'UI reste vivante pendant l'analyse.
+        let deterministic = await Task.detached(priority: .userInitiated) {
+            BankStatementExtractor.extractTransactions(from: text)
+        }.value
         let merged = Self.reconcile(ai: aiLines, deterministic: deterministic)
         let usedFallback = !deterministic.isEmpty && aiLines.isEmpty
 

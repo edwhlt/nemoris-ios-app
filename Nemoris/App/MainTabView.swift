@@ -42,23 +42,25 @@ struct MainTabView: View {
 
     var body: some View {
         @Bindable var state = appState
-        // Banner en haut (style iOS "appel en cours") — n'interfère plus avec la tab bar.
-        // VStack { banner; layout } : le layout garde sa hauteur réelle.
+        // Position du bandeau : EN HAUT sur iOS (style "appel en cours", sous
+        // l'encoche et loin de la tab bar), EN BAS sur macOS — une barre d'état
+        // persistante y est une convention desktop (barre de statut de fenêtre),
+        // alors qu'en haut elle entre en concurrence avec la barre de titre et
+        // la toolbar du module.
         return VStack(spacing: 0) {
-            if let summary = appState.activeImportSession {
-                ImportSessionBanner(
-                    summary: summary,
-                    onTap: { appState.showImportSessionSheet = true },
-                    onCancel: { showCancelImportConfirm = true }
-                )
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
+            #if !os(macOS)
+            importBanner(edge: .top)
+            #endif
 
             if useSidebar {
                 sidebarLayout
             } else {
                 tabLayout
             }
+
+            #if os(macOS)
+            importBanner(edge: .bottom)
+            #endif
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: appState.activeImportSession?.id)
         .appToast($state.currentToast)
@@ -124,6 +126,19 @@ struct MainTabView: View {
     /// AXE P — présente l'import V3 pré-rempli et libère l'URL en attente
     /// (one-shot). No-op si nil ou si une sheet préchargée est déjà en cours.
     /// Miroir de `consumePendingInvestmentImport` dans InvestmentsView.
+    /// Bandeau « import en cours », glissant depuis le bord où il est ancré.
+    @ViewBuilder
+    private func importBanner(edge: Edge) -> some View {
+        if let summary = appState.activeImportSession {
+            ImportSessionBanner(
+                summary: summary,
+                onTap: { appState.showImportSessionSheet = true },
+                onCancel: { showCancelImportConfirm = true }
+            )
+            .transition(.move(edge: edge).combined(with: .opacity))
+        }
+    }
+
     private func consumePendingTransactionImport(_ urls: [URL]) {
         guard !urls.isEmpty, preloadedTransactionImport == nil else { return }
         preloadedTransactionImport = PreloadedTransactionImport(urls: urls)
