@@ -1,0 +1,48 @@
+import SwiftUI
+import Charts
+import TipKit
+
+struct EnvelopeDetailPane: View {
+    let envelope: BudgetEnvelope
+    let categories: [Category]
+
+    private var categoryName: String? {
+        categories.first { $0.id == envelope.categoryId }?.name
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    Image(systemName: "envelope.fill")
+                        .font(.title3)
+                        .foregroundStyle(AppTheme.Colors.accent)
+                        .frame(width: 36, height: 36)
+                        .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(envelope.name).font(AppTheme.Typography.bodyMedium)
+                        Text(envelope.period.label)
+                            .font(AppTheme.Typography.labelSmall)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                    Spacer()
+                    Text(envelope.amount, format: .currency(code: "EUR"))
+                        .font(AppTheme.Typography.moneySmall)
+                        .foregroundStyle(AppTheme.Colors.accent)
+                }
+                .padding(.vertical, 2)
+            }
+
+            Section("Détails") {
+                LabeledContent("Plafond", value: envelope.amount.formatted(.currency(code: "EUR")))
+                LabeledContent("Période", value: envelope.period.label)
+                if let categoryName {
+                    LabeledContent("Catégorie", value: categoryName)
+                }
+                LabeledContent("Début", value: envelope.startDate.formatted(date: .abbreviated, time: .omitted))
+                LabeledContent("Statut", value: envelope.isActive ? "Active" : "Inactive")
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
