@@ -174,18 +174,33 @@ struct TransactionRepositoryTests {
         #expect(db.count("transactions") == 0)
     }
 
-    @Test("Le compteur de suppression compte les instructions, pas les lignes touchées")
-    func semantiqueDuCompteurDeSuppression() throws {
+    @Test("Un identifiant périmé n'est pas compté comme supprimé")
+    func compteurDeSuppressionExact() throws {
         let (db, repo) = try fixture()
         defer { db.destroy() }
 
-        // SQLite renvoie SQLITE_DONE pour un DELETE qui ne touche aucune ligne.
-        // deleteTransactions additionne donc les instructions réussies, pas les
-        // lignes réellement supprimées : un identifiant périmé est compté. Sans
-        // conséquence tant que l'appelant part d'une sélection à jour, mais le
-        // comportement est verrouillé ici pour qu'un changement soit délibéré.
-        #expect(repo.deleteTransactions(ids: [999_998, 999_999]) == 2)
+        #expect(repo.addAccount(name: "Courant"))
+        let compte = repo.fetchAccounts()[0]
+        let existante = repo.addTransaction(accountId: compte.id, tiersId: nil, categoryId: nil,
+                                            paymentTypeId: nil, information: "x", amount: -1,
+                                            date: date("2026-03-01"))!
+
+        // SQLite répond SQLITE_DONE à un DELETE qui ne touche aucune ligne :
+        // compter les instructions réussies surestimerait le total. Le cas se
+        // produit dès que deux appareils synchronisés suppriment en parallèle.
+        #expect(repo.deleteTransactions(ids: [existante, 999_998, 999_999]) == 1)
         #expect(db.count("transactions") == 0)
+
+        // Rejouer la même suppression ne compte plus rien.
+        #expect(repo.deleteTransactions(ids: [existante]) == 0)
+    }
+
+    @Test("Une sélection vide ne fait rien")
+    func suppressionSelectionVide() throws {
+        let (db, repo) = try fixture()
+        defer { db.destroy() }
+
+        #expect(repo.deleteTransactions(ids: []) == 0)
     }
 
     // MARK: - Intégrité référentielle

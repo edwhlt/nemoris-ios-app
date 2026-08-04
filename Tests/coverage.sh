@@ -19,12 +19,18 @@ if [[ -z "$SIM" ]]; then
 fi
 [[ -z "$SIM" ]] && { echo "Aucun simulateur iPhone disponible."; exit 1; }
 
+# DerivedData dédié : Xcode et la ligne de commande partagent sinon la même
+# build.db, et deux compilations simultanées la verrouillent — l'échec se
+# présente alors comme une erreur de compilation trompeuse dans un fichier en
+# cours d'édition. build/ est ignoré par git.
+DD="$PWD/build/cli-dd"
+
 echo "Simulateur : $SIM"
 xcodebuild test -project Nemoris.xcodeproj -scheme Nemoris \
-  -destination "id=$SIM" -enableCodeCoverage YES 2>&1 \
+  -destination "id=$SIM" -derivedDataPath "$DD" -enableCodeCoverage YES 2>&1 \
   | grep -E "^\*\* |error:" || true
 
-BUNDLE=$(ls -td "$HOME"/Library/Developer/Xcode/DerivedData/Nemoris-*/Logs/Test/*.xcresult | head -1)
+BUNDLE=$(ls -td "$DD"/Logs/Test/*.xcresult | head -1)
 
 xcrun xccov view --report --files-for-target Nemoris.app "$BUNDLE" 2>/dev/null \
 | python3 -c '

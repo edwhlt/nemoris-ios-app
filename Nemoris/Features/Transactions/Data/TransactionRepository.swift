@@ -577,8 +577,36 @@ struct TransactionRepository {
         }
     }
 
+    /// Supprime plusieurs transactions et renvoie le nombre de lignes
+    /// RÉELLEMENT supprimées.
+    ///
+    /// La nuance compte : SQLite répond `SQLITE_DONE` à un `DELETE` qui ne
+    /// touche aucune ligne — l'instruction s'est bien exécutée, elle n'a rien
+    /// trouvé. Compter les instructions réussies, comme le faisait la version
+    /// précédente, surestimait donc le total dès qu'un identifiant était périmé,
+    /// ce qui arrive dès que deux appareils synchronisés suppriment en parallèle.
+    /// `sqlite3_changes` donne le nombre de lignes effectivement touchées.
+    ///
+    /// Une seule connexion et un seul statement réutilisé, au lieu d'un cycle
+    /// ouverture/fermeture par identifiant.
     func deleteTransactions(ids: Set<Int>) -> Int {
-        ids.reduce(0) { deleteTransaction(id: $1) ? $0 + 1 : $0 }
+        guard !ids.isEmpty else { return 0 }
+        return store.write { db in
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "DELETE FROM transactions WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK,
+                  let stmt else { return 0 }
+            defer { sqlite3_finalize(stmt) }
+
+            var supprimees = 0
+            for id in ids {
+                sqlite3_reset(stmt)
+                sqlite3_bind_int(stmt, 1, Int32(id))
+                if sqlite3_step(stmt) == SQLITE_DONE {
+                    supprimees += Int(sqlite3_changes(db))
+                }
+            }
+            return supprimees
+        } ?? 0
     }
 
     /// Remboursement géré séparément par ReimbursementRepository.setReimbursement

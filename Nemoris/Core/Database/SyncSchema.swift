@@ -236,6 +236,24 @@ enum SyncSchema {
     }
 
     /// Triggers standard pour une table à PK `id`.
+    ///
+    /// ⚠️ La mise en file dans `sync_pending` se fait par DELETE puis INSERT, et
+    /// surtout PAS par `INSERT OR REPLACE`.
+    ///
+    /// SQLite documente que si l'instruction qui déclenche le trigger porte
+    /// elle-même une clause `ON CONFLICT`, la politique de résolution de cette
+    /// instruction externe REMPLACE celle écrite dans le corps du trigger. Un
+    /// `INSERT OR REPLACE` y perd donc son `OR REPLACE` et échoue sur la
+    /// contrainte d'unicité de `sync_pending`.
+    ///
+    /// Conséquence observée avant correctif : tout UPSERT sur une table
+    /// synchronisée échouait dès la deuxième écriture sur la même ligne, une
+    /// entrée `sync_pending` existant alors déjà. Concrètement, changer le
+    /// créancier d'un remboursement ne faisait rien — sans message, le booléen
+    /// de retour étant ignoré par les appelants.
+    ///
+    /// DELETE puis INSERT n'implique aucune résolution de conflit, donc rien
+    /// que l'instruction externe puisse écraser.
     private static func triggerStatements(table t: String) -> [String] {
         [
             "DROP TRIGGER IF EXISTS trg_sync_\(t)_insert;",
@@ -247,7 +265,10 @@ enum SyncSchema {
                    SET uuid       = COALESCE(uuid, lower(hex(randomblob(16)))),
                        updated_at = COALESCE(updated_at, \(nowSQL))
                  WHERE id = NEW.id;
-                INSERT OR REPLACE INTO sync_pending (table_name, row_uuid, queued_at)
+                DELETE FROM sync_pending
+                 WHERE table_name = '\(t)'
+                   AND row_uuid = (SELECT uuid FROM \(t) WHERE id = NEW.id);
+                INSERT INTO sync_pending (table_name, row_uuid, queued_at)
                 SELECT '\(t)', uuid, \(nowSQL) FROM \(t) WHERE id = NEW.id;
             END;
             """,
@@ -258,7 +279,9 @@ enum SyncSchema {
             WHEN \(guardSQL)
             BEGIN
                 UPDATE \(t) SET updated_at = \(nowSQL) WHERE id = NEW.id;
-                INSERT OR REPLACE INTO sync_pending (table_name, row_uuid, queued_at)
+                DELETE FROM sync_pending
+                 WHERE table_name = '\(t)' AND row_uuid = NEW.uuid;
+                INSERT INTO sync_pending (table_name, row_uuid, queued_at)
                 SELECT '\(t)', NEW.uuid, \(nowSQL) WHERE NEW.uuid IS NOT NULL;
             END;
             """,

@@ -76,8 +76,7 @@ struct ReimbursementRepositoryTests {
     /// Prochaine étape : `SQLiteStore.writeSingle` ne renvoie qu'un booléen et
     /// masque le code d'erreur SQLite. Remonter `sqlite3_errmsg` devrait trancher
     /// immédiatement — ici comme sur les cas suivants.
-    @Test("Une transaction ne porte qu'un seul remboursement",
-          .disabled("Cause non établie : passe isolé, échoue en suite. Voir le commentaire."))
+    @Test("Une transaction ne porte qu'un seul remboursement")
     func cardinaliteUnAUn() throws {
         let (db, repo, rembours) = try fixture()
         defer { db.destroy() }
