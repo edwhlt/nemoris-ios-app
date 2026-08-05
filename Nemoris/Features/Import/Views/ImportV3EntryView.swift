@@ -383,19 +383,19 @@ struct ImportV3EntryView: View {
                 #if os(macOS)
                 if !isEmbedded, paneHostContext != .inspector {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Annuler") { dismiss() }
+                        Button("Annuler") { cancelFunnel() }
                     }
                 }
                 #else
                 if !isEmbedded {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Annuler") { dismiss() }
+                        Button("Annuler") { cancelFunnel() }
                     }
                 }
                 #endif
             }
             #if os(macOS)
-            .modifier(ImportEntryInspectorChrome(isEmbedded: isEmbedded, dismiss: dismiss))
+            .modifier(ImportEntryInspectorChrome(isEmbedded: isEmbedded, dismiss: cancelFunnel))
             #endif
             .fileImporter(
                 isPresented: $showFilePicker,
@@ -443,7 +443,7 @@ struct ImportV3EntryView: View {
                         existingActiveSession = nil
                     }
                 }
-                Button("Fermer", role: .cancel) { dismiss() }
+                Button("Fermer", role: .cancel) { cancelFunnel() }
             } message: { _ in
                 Text("Vous devez d'abord la terminer ou l'annuler avant d'en démarrer une nouvelle.")
             }
@@ -612,7 +612,12 @@ struct ImportV3EntryView: View {
                 coordinator.beginJob(destination: activeDestination,
                                      accountId: account,
                                      sourceLabel: sessionLabel())
-                startBackgroundAnalysis(readout: readout)
+                // Aucun mapping possible côté investissements : rien à attendre
+                // de l'utilisateur, le résultat est relisible dès qu'il est prêt.
+                coordinator.setAwaitingUserMapping(false)
+                coordinator.startAnalysis(readout: readout)
+                step = nil
+                Task { @MainActor in dismiss() }
             }
             return
         }
@@ -637,6 +642,19 @@ struct ImportV3EntryView: View {
                                      accountId: account,
                                      sourceLabel: sessionLabel())
             }
+            // ⚠️ L'analyse des documents part MAINTENANT, en même temps que le
+            // premier écran de mapping. Le mapping d'un CSV ne bloque donc plus
+            // les PDF du même lot — sur un import mixte, l'utilisateur mappe
+            // pendant que les documents sont analysés, au lieu d'attendre après.
+            //
+            // Le verrou `awaitingUserMapping` empêche le bandeau de proposer
+            // « Continuer » avant la fin des mappings : le résultat serait
+            // incomplet, et ouvrirait une seconde feuille par-dessus l'écran de
+            // mapping.
+            coordinator.setAwaitingUserMapping(!readout.pendingGrids.isEmpty)
+            if !readout.units.isEmpty {
+                coordinator.startAnalysis(readout: ImportPipeline.Readout(units: readout.units))
+            }
             advance()
         }
     }
@@ -649,37 +667,46 @@ struct ImportV3EntryView: View {
     /// Étape suivante : documents d'abord (ils ont un écran de revue), puis les
     /// mappings de colonnes un par un, puis création de la session.
     private func advance() {
-        // Les mappings de colonnes d'abord : ils demandent l'utilisateur, donc
-        // ils doivent être faits pendant qu'il est là.
+        // Les mappings de colonnes d'abord : ce sont les SEULES étapes qui
+        // demandent l'utilisateur. L'analyse des documents, elle, tourne déjà
+        // en fond depuis `classify`.
         if mappingIndex < pendingMappings.count {
             step = .mapping(index: mappingIndex)
             return
         }
-        // Puis l'analyse des documents, qui part en ARRIÈRE-PLAN : elle peut
-        // durer des dizaines de secondes (IA par page) et n'a besoin de
-        // personne. L'utilisateur récupère la main tout de suite, le bandeau
-        // affiche l'avancement et rouvre la revue quand c'est prêt.
+        // Plus rien à mapper : on libère le verrou, ce qui rend le résultat
+        // d'analyse disponible dans le bandeau dès qu'il est prêt (il peut déjà
+        // l'être — c'est justement le but de l'avoir lancé en parallèle).
+        coordinator.setAwaitingUserMapping(false)
+
+        // Des documents sont en cours ou déjà analysés : on rend la main, le
+        // bandeau prend le relais et rouvrira la revue.
         if !pendingReadout.units.isEmpty {
-            startBackgroundAnalysis(readout: pendingReadout)
+            step = nil
+            // Fermeture au cycle suivant : dépiler, fermer et laisser le
+            // bandeau apparaître dans le même cycle de rendu fait crasher
+            // SwiftUI.
+            Task { @MainActor in dismiss() }
             return
         }
-        // Fin du parcours. On dépile D'ABORD, et la création de session (qui
-        // ferme cette feuille et en présente une autre) attend le cycle de
-        // rendu suivant : dépiler, fermer et présenter dans le même cycle fait
-        // crasher SwiftUI.
+        // Aucun document : toutes les sources étaient des tables, la session
+        // peut être créée tout de suite. On dépile D'ABORD, et la création
+        // (qui ferme cette feuille et en présente une autre) attend le cycle
+        // suivant, pour la même raison.
         step = nil
         Task { @MainActor in finalize() }
     }
 
-    /// Confie l'analyse au coordinateur et rend la main immédiatement.
-    /// Les lignes des tables déjà mappées sont déjà chez lui (`addRows`) :
-    /// elles seront fusionnées avec le résultat de l'analyse.
-    private func startBackgroundAnalysis(readout: ImportPipeline.Readout) {
-        coordinator.startAnalysis(readout: readout)
-        step = nil
-        // Fermeture au cycle suivant : dépiler, fermer et laisser le bandeau
-        // apparaître dans le même cycle de rendu fait crasher SwiftUI.
-        Task { @MainActor in dismiss() }
+    /// Abandon du parcours par l'utilisateur (bouton « Annuler »).
+    ///
+    /// ⚠️ Annule AUSSI le job : depuis que l'analyse démarre en parallèle des
+    /// mappings, fermer l'entonnoir laisserait tourner une analyse dont les
+    /// tables ne seront jamais mappées — donc un import amputé d'une partie de
+    /// ses fichiers, présenté comme complet. « Annuler » sur l'écran d'import
+    /// veut dire que l'import n'a pas lieu.
+    private func cancelFunnel() {
+        if coordinator.isActive { coordinator.cancel() }
+        dismiss()
     }
 
     /// Aucun document à analyser : toutes les sources sont des CSV déjà mappés,

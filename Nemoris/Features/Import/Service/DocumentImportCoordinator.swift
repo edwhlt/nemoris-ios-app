@@ -48,11 +48,33 @@ final class DocumentImportCoordinator {
     /// feuilles de classeur), à fusionner avec celles extraites des documents.
     private(set) var seedRows: [ImportSessionRow] = []
 
+    /// Vrai tant que l'utilisateur a encore des tables à mapper dans l'entonnoir.
+    ///
+    /// ⚠️ L'analyse des documents démarre MAINTENANT, pendant que l'utilisateur
+    /// mappe ses colonnes — c'est tout l'intérêt : sur un lot de 2 CSV et 3 PDF,
+    /// les PDF n'attendent plus la fin des mappings. Mais le résultat ne doit
+    /// pas être proposé à la relecture pour autant :
+    ///   • l'import serait INCOMPLET (les lignes des tables non encore mappées
+    ///     n'y sont pas) ;
+    ///   • et présenter la revue par-dessus l'écran de mapping, c'est présenter
+    ///     une seconde feuille alors que la première est à l'écran — le motif
+    ///     de crash/perte de présentation documenté en §N.1 et AXE V.
+    private(set) var awaitingUserMapping = false
+
     private var job: Task<Void, Never>?
 
     var isRunning: Bool { if case .analyzing = phase { return true }; return false }
-    var isReady: Bool { if case .ready = phase { return true }; return false }
+    /// Prêt à être relu — donc terminé ET plus rien à attendre de l'utilisateur.
+    var isReady: Bool {
+        if case .ready = phase { return !awaitingUserMapping }
+        return false
+    }
     var isActive: Bool { phase != .idle }
+
+    /// L'entonnoir signale qu'il détient (ou libère) des tables à mapper.
+    func setAwaitingUserMapping(_ value: Bool) {
+        awaitingUserMapping = value
+    }
 
     /// Toutes les lignes de transactions prêtes à devenir une session.
     var transactionRows: [ImportSessionRow] {
@@ -95,6 +117,7 @@ final class DocumentImportCoordinator {
         seedRows = []
         batch = ImportBatchResult()
         persistedSessionId = nil
+        awaitingUserMapping = false
         phase = .idle
     }
 
@@ -215,6 +238,7 @@ final class DocumentImportCoordinator {
             ImportNotificationService.cancelReminder(forSessionId: id)
         }
         persistedSessionId = nil
+        awaitingUserMapping = false
     }
 
     // MARK: - Présentation
@@ -240,6 +264,10 @@ final class DocumentImportCoordinator {
             // Un compteur « 0 / 1 » puis « 1 / 1 » n'apprend rien : on ne
             // l'affiche que quand il y a réellement plusieurs unités.
             return total > 1 ? "\(done) / \(total)" : "Lecture en cours…"
+        case .ready where awaitingUserMapping:
+            // L'analyse a fini avant l'utilisateur : le dire, plutôt que
+            // d'afficher un « prêt » sur lequel il ne peut rien faire.
+            return "Terminée — finis le mapping des colonnes"
         case .ready:
             return "Toucher pour relire et importer"
         case .failed(let message):
