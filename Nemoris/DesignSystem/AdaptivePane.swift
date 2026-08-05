@@ -182,11 +182,17 @@ final class InspectorPaneCenter {
 
 // MARK: - Métriques du panneau (macOS)
 
-/// Source unique de la largeur du panneau : utilisée par le layout
-/// (`MainTabView`) ET par l'écart de la barre d'outils, qui aligne les actions
-/// du panneau au-dessus de lui. Les deux ne peuvent donc pas diverger.
+/// Largeurs du panneau, passées à `.inspectorColumnWidth(min:ideal:max:)`.
+/// L'utilisateur redimensionne en tirant le séparateur ; macOS mémorise la
+/// largeur choisie par fenêtre, on n'a donc rien à persister nous-mêmes.
+///
+/// `min` doit rester assez large pour que les `Form` du panneau (label + champ
+/// sur une ligne) ne se cassent pas, `max` assez borné pour que la colonne du
+/// module reste utilisable sur un écran de portable.
 enum InspectorPaneMetrics {
-    static let width: CGFloat = 440
+    static let minWidth: CGFloat = 320
+    static let idealWidth: CGFloat = 440
+    static let maxWidth: CGFloat = 760
 }
 
 // MARK: - Chrome du panneau → barre système (macOS)

@@ -58,6 +58,16 @@ struct SyncPayloadStore: Sendable {
         "categories": [
             "parent_id": "categories",
         ],
+        // — Métadonnées de transaction (v46)
+        // ⚠️ Les DEUX FK sont NOT NULL : une valeur orpheline n'aurait aucun
+        // sens. Un record arrivé avant sa transaction ou sa clé est donc mis de
+        // côté puis rejoué par `sync_deferred_rows` (v43), au lieu d'échouer
+        // à l'INSERT et d'être perdu — CloudKit ne re-livre pas un record
+        // fetché non appliqué.
+        "transaction_metadata_values": [
+            "transaction_id": "transactions",
+            "key_id": "transaction_metadata_keys",
+        ],
         // — Budget (L.3)
         "recurring_patterns": [
             "category_id": "categories",
@@ -547,6 +557,11 @@ struct SyncPayloadStore: Sendable {
     static let uniqueAdoptionKeys: [String: String] = [
         "tags": "name",                      // UNIQUE COLLATE NOCASE
         "investment_orders": "external_id",  // UNIQUE partiel (L.3)
+        // ⚠️ Deux appareils qui créent « Projet » chacun de leur côté
+        // produisent deux uuids pour la MÊME clé, et l'index UNIQUE sur `name`
+        // fait échouer l'apply. L'adoption d'identité (min(uuid) gagne) les
+        // fusionne au lieu de laisser un record en échec permanent.
+        "transaction_metadata_keys": "name",  // UNIQUE COLLATE NOCASE (v46)
     ]
 
     /// Tables de référence où une collision par `name` (COLLATE NOCASE)

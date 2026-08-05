@@ -471,6 +471,13 @@ struct TransactionImportFailure: Identifiable, Hashable {
 struct TransactionImportResult {
     let insertedCount: Int
     let failures: [TransactionImportFailure]
+    /// Identifiant créé pour chaque ligne source (n° de ligne → id transaction).
+    ///
+    /// Nécessaire pour rattacher des données APRÈS l'insert — les métadonnées
+    /// libres (v46) en particulier, qui référencent `transactions(id)`. Défaut
+    /// vide pour que les sites d'appel qui n'en ont pas besoin restent
+    /// inchangés.
+    var insertedIds: [Int: Int] = [:]
 }
 
 struct TiersBulkImportResult {

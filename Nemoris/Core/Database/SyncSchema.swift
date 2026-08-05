@@ -84,6 +84,10 @@ enum SyncSchema {
         "tricount_shares",
         // — Remboursement unifié (v44, AXE R) — remplace tricount_reimbursements
         "reimbursements",
+        // — Métadonnées de transaction libres (v46) — remplacent payment_type_id
+        // ⚠️ Les clés AVANT les valeurs : ces dernières les référencent.
+        "transaction_metadata_keys",
+        "transaction_metadata_values",
     ]
 
     /// Tables ajoutées par la migration v42 (L.3) — NE JAMAIS MODIFIER après

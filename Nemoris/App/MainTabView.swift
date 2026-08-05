@@ -325,13 +325,31 @@ struct MainTabView: View {
 
     /// Colonne détail = contenu du module + (macOS) panneau latéral à droite.
     ///
-    /// ⚠️ La `HStack` est TOUJOURS présente, même sans panneau ouvert (le panneau
-    /// est une branche `if` À L'INTÉRIEUR). Une version antérieure basculait entre
-    /// `detailView` seul et `HStack { detailView; panneau }` : SwiftUI y voyait
-    /// deux structures différentes, DÉTRUISAIT la vue du module à l'ouverture du
-    /// panneau et la recréait — donc tout son `@State` était réinitialisé (l'onglet
-    /// courant de « Données » retombait sur Comptes, les filtres se vidaient…).
-    /// Structure stable = identité stable = état préservé.
+    /// Le panneau est un **`.inspector` natif** : c'est lui qui donne le
+    /// comportement des apps système (Mail, Notes) que le HStack custom
+    /// antérieur ne savait pas reproduire —
+    /// **séparateur déplaçable** (l'utilisateur choisit sa largeur, macOS la
+    /// mémorise par fenêtre) et **barre d'outils scindée** : les actions du
+    /// module s'arrêtent au séparateur, celles du panneau commencent après, via
+    /// le séparateur de suivi (`NSTrackingSeparatorToolbarItem`) que SwiftUI
+    /// insère de lui-même. Chaque groupe se lit ainsi au-dessus de la colonne à
+    /// laquelle il appartient, sans étiquette.
+    ///
+    /// > Historique : ce panneau a d'abord été un `.inspector`, abandonné car il
+    /// > crashait à la présentation sur les premières betas de macOS 27
+    /// > (ré-entrance AutoLayout pendant la MoveTransition du slide-in avec du
+    /// > contenu AppKit-backed — NavigationStack/Form), puis réécrit en `HStack`
+    /// > custom à largeur figée. Le crash ne se reproduit plus (vérifié sur
+    /// > 27.0 build 26A5388g, présentation + re-présentation + changement de
+    /// > module inspecteur ouvert) ; on revient donc à l'API native, qui apporte
+    /// > en prime les deux comportements ci-dessus.
+    ///
+    /// ⚠️ Le `.inspector` est attaché INCONDITIONNELLEMENT (c'est `isPresented`
+    /// qui l'ouvre), jamais dans une branche `if`. Une structure de vue qui
+    /// change selon qu'un panneau est ouvert ferait voir à SwiftUI deux arbres
+    /// différents : il DÉTRUIRAIT la vue du module à l'ouverture et la
+    /// recréerait, réinitialisant tout son `@State` (l'onglet courant de
+    /// « Données » retombait sur Comptes, les filtres se vidaient…).
     ///
     /// Le panneau ne reçoit AUCUN chrome d'ici : son contenu déclare lui-même sa
     /// `.toolbar` (cf. `publishesInspectorChrome`), donc les actions sont toujours
@@ -339,25 +357,46 @@ struct MainTabView: View {
     @ViewBuilder
     private func detailColumn(for selection: String) -> some View {
         #if os(macOS)
-        HStack(spacing: 0) {
-            detailView(for: selection)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if let pane = paneCenter.pane {
-                Divider()
-                // `.id(pane.id)` : un pane re-présenté repart avec un @State frais
-                // → cliquer une autre donnée change le détail sans passer par
-                // « Fermer ».
-                pane.content
-                    .id(pane.id)
-                    .frame(width: InspectorPaneMetrics.width)
-                    .frame(maxHeight: .infinity)
-                    .background(AppTheme.Colors.background)
+        detailView(for: selection)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .inspector(isPresented: inspectorPresented) {
+                // `.id(pane.id)` : un pane re-présenté repart avec un @State
+                // frais → cliquer une autre donnée change le détail sans passer
+                // par « Fermer ».
+                Group {
+                    if let pane = paneCenter.pane {
+                        pane.content.id(pane.id)
+                    }
+                }
+                .inspectorColumnWidth(
+                    min: InspectorPaneMetrics.minWidth,
+                    ideal: InspectorPaneMetrics.idealWidth,
+                    max: InspectorPaneMetrics.maxWidth
+                )
             }
-        }
         #else
         detailView(for: selection)
         #endif
     }
+
+    #if os(macOS)
+    /// Pont entre le slot `InspectorPaneCenter` (source de vérité, un pane ou
+    /// rien) et le `Bool` qu'attend `.inspector`.
+    ///
+    /// ⚠️ La fermeture passe OBLIGATOIREMENT par `dismissCurrent()`, jamais par
+    /// un simple vidage du slot : c'est lui qui rejoue le `onDismiss` du call
+    /// site (remise à `false`/`nil` de SON binding). Sans ça, fermer par la
+    /// poignée native de l'inspecteur laisserait le binding d'origine à `true`,
+    /// et le panneau refuserait de se rouvrir au clic suivant.
+    private var inspectorPresented: Binding<Bool> {
+        Binding(
+            get: { paneCenter.pane != nil },
+            set: { isPresented in
+                if !isPresented { paneCenter.dismissCurrent() }
+            }
+        )
+    }
+    #endif
 
     @ViewBuilder
     private var sidebarList: some View {

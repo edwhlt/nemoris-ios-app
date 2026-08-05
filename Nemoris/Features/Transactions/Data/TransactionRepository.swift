@@ -486,6 +486,7 @@ struct TransactionRepository {
 
         var inserted = 0
         var failures: [TransactionImportFailure] = []
+        var insertedIds: [Int: Int] = [:]
 
         for tx in transactions {
             sqlite3_reset(stmt)
@@ -510,6 +511,7 @@ struct TransactionRepository {
 
             if sqlite3_step(stmt) == SQLITE_DONE {
                 inserted += 1
+                insertedIds[tx.sourceRowNumber] = Int(sqlite3_last_insert_rowid(db))
             } else {
                 let dbReason = String(cString: sqlite3_errmsg(db))
                 let reason = dbReason.isEmpty ? "Erreur SQLite inconnue." : dbReason
@@ -526,7 +528,7 @@ struct TransactionRepository {
                     failures: transactions.map { makeFailure($0, reason: "Commit échoué: \(reason)") }
                 )
             }
-            return TransactionImportResult(insertedCount: inserted, failures: [])
+            return TransactionImportResult(insertedCount: inserted, failures: [], insertedIds: insertedIds)
         }
 
         _ = sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)

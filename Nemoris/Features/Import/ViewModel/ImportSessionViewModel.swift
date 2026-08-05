@@ -688,6 +688,24 @@ final class ImportSessionViewModel {
         let result = txRepo.insertTransactionsDetailed(pendingInserts)
         summary.rowsConfirmed = result.insertedCount
 
+        // ⚠️ L'indice de moyen de paiement déduit du libellé (CB, VIREMENT…)
+        // n'alimente plus `payment_type_id` mais la métadonnée qui porte le rôle
+        // correspondant — et SEULEMENT si l'utilisateur en a créé une.
+        //
+        // Sans clé portant ce rôle, l'indice est simplement ignoré : on ne crée
+        // pas une métadonnée dans le dos de l'utilisateur. C'est ce qui permet à
+        // une base neuve de n'avoir aucune métadonnée tant qu'il n'en veut pas,
+        // tout en préservant le comportement des bases migrées (où la clé
+        // « Mode de paiement » a été recréée à partir des données existantes).
+        let metadataRepo = TransactionMetadataRepository()
+        if let paymentKeyId = metadataRepo.key(withRole: .paymentMethod)?.id {
+            for row in session.rows {
+                guard let hint = row.paymentTypeHint,
+                      let transactionId = result.insertedIds[row.sourceRowNumber] else { continue }
+                metadataRepo.setValue(hint, keyId: paymentKeyId, transactionId: transactionId)
+            }
+        }
+
         // Compte les skipped
         summary.rowsSkipped = session.rows.filter { $0.userAction == .skipped }.count
 

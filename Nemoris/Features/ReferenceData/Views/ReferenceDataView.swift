@@ -9,7 +9,16 @@ struct ReferenceDataView: View {
         case comptes        = "Comptes"
         case categories     = "Catégories"
         case tiers          = "Tiers"
-        case moyensPaiement = "Paiement"
+        // ⚠️ « Moyens de paiement » a été RETIRÉ (migration v46). Ce n'est plus
+        // un concept de premier ordre : il est devenu une métadonnée libre
+        // parmi d'autres, gérée depuis la fiche transaction. Le laisser ici
+        // aurait donné deux endroits où éditer la même information — la
+        // coexistence explicitement écartée.
+        //
+        // La table `payment_types` reste en base, dépréciée et non lue
+        // (doctrine AXE H : on ne supprime qu'une fois certain que plus rien
+        // ne la référence), ce qui rend la bascule réversible.
+        case metadata       = "Métadonnées"
         case tags           = "Tags"
         var id: String { rawValue }
     }
@@ -286,30 +295,10 @@ struct ReferenceDataView: View {
                                 .onAppear { tiersDisplayLimit += tiersPageSize }
                             }
                         }
-                    case .moyensPaiement:
-                        if filteredPaymentTypes.isEmpty { emptyRow } else {
-                            ForEach(filteredPaymentTypes) { p in
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(p.name)
-                                        if let r = p.regex, !r.isEmpty {
-                                            Text(r).font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
-                                        }
-                                    }
-                                    Spacer()
-                                    EntityIdCountBadge(id: p.id, count: paymentTypeCounts[p.id] ?? 0)
-                                }
-                                .contentShape(Rectangle())
-                                .macDetailTap { detailTarget = .paymentType(p) }
-                                .rowActions(
-                                    leading: [editAction { startEdit(id: p.id, name: p.name, regex: p.regex ?? "") }],
-                                    trailing: [deleteAction(DeleteTarget(tab: .moyensPaiement, entityId: p.id, name: p.name,
-                                                                         count: paymentTypeCounts[p.id] ?? 0, childIds: [], blocked: false))],
-                                    leadingFullSwipe: false,
-                                    trailingFullSwipe: false
-                                )
-                            }
-                        }
+                    case .metadata:
+                        // ⚠️ Contenu extrait dans sa propre vue : ce `switch`
+                        // atteignait la limite de type-check du compilateur.
+                        MetadataKeysTabContent(searchText: searchText)
                     case .tags:
                         if filteredTags.isEmpty { emptyRow } else {
                             ForEach(filteredTags) { tag in
@@ -523,7 +512,7 @@ struct ReferenceDataView: View {
                 Section {
                     TextField("Nom", text: $editDraftName)
                         .autocorrectionDisabled()
-                    if selectedTab == .tiers || selectedTab == .moyensPaiement {
+                    if selectedTab == .tiers {
                         TextField("Regex (optionnel)", text: $editDraftRegex)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
@@ -740,9 +729,12 @@ struct ReferenceDataView: View {
         case .tiers:
             if let id = editItemId { repository.updateTiers(id: id, name: name, regex: regex, categoryId: editDraftCategoryId, linkedCompteId: editDraftLinkedCompteId) }
             else { repository.addTiers(name: name, regex: regex, categoryId: editDraftCategoryId, linkedCompteId: editDraftLinkedCompteId) }
-        case .moyensPaiement:
-            if let id = editItemId { repository.updatePaymentType(id: id, name: name, regex: regex) }
-            else { repository.addPaymentType(name: name, regex: regex) }
+        case .metadata:
+            // Création et suppression se font dans `MetadataKeyManagerView`,
+            // atteignable depuis la fiche transaction ET depuis cet onglet :
+            // une clé se crée au moment où on en a besoin, pas dans un
+            // référentiel qu'on visite exprès.
+            break
         case .tags:
             break  // Les tags ne sont pas éditables ici
         }
@@ -780,7 +772,7 @@ struct ReferenceDataView: View {
         case .comptes:        repository.deleteAccount(id: target.entityId)
         case .categories:     repository.deleteCategory(id: target.entityId, includingChildren: target.childIds)
         case .tiers:          repository.deleteTiers(ids: [target.entityId])
-        case .moyensPaiement: repository.deletePaymentType(id: target.entityId)
+        case .metadata:       TransactionMetadataRepository().deleteKey(id: target.entityId)
         case .tags:           repository.deleteTag(id: target.entityId)
         }
         loadReferenceData()
@@ -853,7 +845,7 @@ struct ReferenceDataView: View {
         case .category(let c):
             return deleteTargetForCategory(c)
         case .paymentType(let p):
-            return DeleteTarget(tab: .moyensPaiement, entityId: p.id, name: p.name,
+            return DeleteTarget(tab: .metadata, entityId: p.id, name: p.name,
                                 count: paymentTypeCounts[p.id] ?? 0, childIds: [], blocked: false)
         case .tag(let t):
             return DeleteTarget(tab: .tags, entityId: t.id, name: t.name,

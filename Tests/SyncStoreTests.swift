@@ -43,6 +43,7 @@ struct SyncStoreTests {
         t12_dedupReferenceDuplicates(storeB, urlB)
         t13_deferredNotNullFK(storeA, urlA, storeB, urlB)
         t14_reimbursementXorDeferral(storeA, urlA, storeB, urlB)
+        t15_metadataDoubleNotNullFK(storeA, urlA, storeB, urlB)
 
         if failures == 0 {
             print("\n✅ SyncStoreTests : tous les tests passent")
@@ -109,6 +110,14 @@ struct SyncStoreTests {
             """,
             "CREATE UNIQUE INDEX idx_reimbursements_transaction ON reimbursements(transaction_id) WHERE transaction_id IS NOT NULL;",
             "CREATE UNIQUE INDEX idx_reimbursements_tricount ON reimbursements(tricount_entry_id, payee_id) WHERE tricount_entry_id IS NOT NULL;",
+            // — Métadonnées de transaction libres (v46).
+            // ⚠️ Les DEUX FK sont NOT NULL : c'est le cas qui avait fait PERDRE
+            // des records en L.7 (un INSERT rejeté n'est jamais re-livré par
+            // CloudKit). Le report par `sync_deferred_rows` doit les rattraper.
+            "CREATE TABLE transaction_metadata_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, icon TEXT, sort_order INTEGER NOT NULL DEFAULT 0, role TEXT, created_at TEXT NOT NULL DEFAULT '');",
+            "CREATE UNIQUE INDEX idx_tmk_name ON transaction_metadata_keys(name COLLATE NOCASE);",
+            "CREATE TABLE transaction_metadata_values (id INTEGER PRIMARY KEY AUTOINCREMENT, transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE, key_id INTEGER NOT NULL REFERENCES transaction_metadata_keys(id) ON DELETE CASCADE, value TEXT NOT NULL);",
+            "CREATE UNIQUE INDEX idx_tmv_pair ON transaction_metadata_values(transaction_id, key_id);",
             "CREATE TABLE investment_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, opened_at TEXT NOT NULL DEFAULT '');",
             "CREATE TABLE investment_positions (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL REFERENCES investment_accounts(id) ON DELETE CASCADE, asset_name TEXT NOT NULL DEFAULT '', ticker TEXT NOT NULL DEFAULT '', quantity REAL NOT NULL DEFAULT 0, purchase_date TEXT NOT NULL DEFAULT '');",
             "CREATE TABLE investment_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, position_id INTEGER NOT NULL REFERENCES investment_positions(id) ON DELETE CASCADE, order_type TEXT NOT NULL DEFAULT 'BUY', quantity REAL NOT NULL DEFAULT 0, unit_price REAL NOT NULL DEFAULT 0, executed_at TEXT NOT NULL DEFAULT '', external_id TEXT);",
@@ -182,6 +191,78 @@ struct SyncStoreTests {
                   query(db, "SELECT COUNT(*) FROM sync_deferred_rows;") == "0", "")
             check("T13 system fields promus en record_meta",
                   query(db, "SELECT COUNT(*) FROM sync_record_meta WHERE row_uuid='\(ordUuid)';") == "1", "")
+        }
+    }
+
+    /// v46 : une valeur de métadonnée a DEUX FK NOT NULL (transaction + clé).
+    ///
+    /// ⚠️ C'est la configuration qui avait fait PERDRE 683 ordres en L.7 : un
+    /// record dont la FK NOT NULL n'est pas encore résolue voit son INSERT
+    /// rejeté, et CloudKit ne re-livre JAMAIS un record fetché non appliqué.
+    /// Le report (`sync_deferred_rows`, v43) doit donc le rattraper — et ici il
+    /// faut que les DEUX cibles arrivent avant qu'il ne passe.
+    static func t15_metadataDoubleNotNullFK(_ storeA: SyncPayloadStore, _ urlA: URL,
+                                            _ storeB: SyncPayloadStore, _ urlB: URL) {
+        var keyUuid = "", txUuid = "", valueUuid = ""
+        withDB(urlA) { db in
+            exec(db, "INSERT INTO transaction_metadata_keys (name, created_at) VALUES ('Projet-T15', '');")
+            exec(db, "INSERT INTO transactions (amount, information) VALUES (-15, 'Achat T15');")
+            exec(db, """
+                INSERT INTO transaction_metadata_values (transaction_id, key_id, value)
+                VALUES ((SELECT id FROM transactions WHERE information='Achat T15'),
+                        (SELECT id FROM transaction_metadata_keys WHERE name='Projet-T15'),
+                        'Cuisine');
+                """)
+            keyUuid = query(db, "SELECT uuid FROM transaction_metadata_keys WHERE name='Projet-T15';")
+            txUuid = query(db, "SELECT uuid FROM transactions WHERE information='Achat T15';")
+            valueUuid = query(db, "SELECT uuid FROM transaction_metadata_values WHERE value='Cuisine';")
+        }
+        guard let keyP = storeA.payloadJSON(table: "transaction_metadata_keys", uuid: keyUuid),
+              let txP = storeA.payloadJSON(table: "transactions", uuid: txUuid),
+              let valueP = storeA.payloadJSON(table: "transaction_metadata_values", uuid: valueUuid) else {
+            check("T15 payloads générés", false, "payloadJSON nil"); return
+        }
+
+        // Batch 1 : la valeur SEULE — ni sa transaction ni sa clé n'existent sur B.
+        storeB.applyRemoteBatch(
+            modifications: [.init(table: "transaction_metadata_values", uuid: valueUuid,
+                                  payloadData: valueP, systemFields: Data([7]))],
+            deletions: [])
+        withDB(urlB) { db in
+            check("T15 valeur PAS insérée (2 FK NOT NULL absentes)",
+                  query(db, "SELECT COUNT(*) FROM transaction_metadata_values WHERE uuid='\(valueUuid)';") == "0", "")
+            check("T15 valeur DIFFÉRÉE (pas perdue)",
+                  query(db, "SELECT COUNT(*) FROM sync_deferred_rows WHERE row_uuid='\(valueUuid)';") == "1", "")
+        }
+
+        // Batch 2 : la clé seule — une seule des deux cibles, donc TOUJOURS bloqué.
+        storeB.applyRemoteBatch(
+            modifications: [.init(table: "transaction_metadata_keys", uuid: keyUuid,
+                                  payloadData: keyP, systemFields: Data([6]))],
+            deletions: [])
+        withDB(urlB) { db in
+            check("T15 toujours différée avec UNE seule cible résolue",
+                  query(db, "SELECT COUNT(*) FROM transaction_metadata_values WHERE uuid='\(valueUuid)';") == "0", "")
+        }
+
+        // Batch 3 : la transaction arrive — les deux cibles sont là, le rejeu
+        // de fin de batch débloque la valeur.
+        storeB.applyRemoteBatch(
+            modifications: [.init(table: "transactions", uuid: txUuid, payloadData: txP, systemFields: Data([5]))],
+            deletions: [])
+        withDB(urlB) { db in
+            check("T15 valeur rejouée une fois les 2 cibles présentes",
+                  query(db, "SELECT COUNT(*) FROM transaction_metadata_values WHERE uuid='\(valueUuid)';") == "1", "")
+            check("T15 valeur correcte",
+                  query(db, "SELECT value FROM transaction_metadata_values WHERE uuid='\(valueUuid)';") == "Cuisine", "")
+            check("T15 FK clé correctement résolue",
+                  query(db, """
+                      SELECT k.name FROM transaction_metadata_values v
+                      JOIN transaction_metadata_keys k ON k.id = v.key_id
+                      WHERE v.uuid='\(valueUuid)';
+                      """) == "Projet-T15", "")
+            check("T15 file des différés soldée",
+                  query(db, "SELECT COUNT(*) FROM sync_deferred_rows WHERE row_uuid='\(valueUuid)';") == "0", "")
         }
     }
 

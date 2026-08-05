@@ -140,13 +140,18 @@ final class DatabaseManager: @unchecked Sendable {
             "INSERT OR IGNORE INTO categories (id, name, parent_id, icon) VALUES (21, 'Abonnements',          5, 'repeat');",
             "INSERT OR IGNORE INTO categories (id, name, parent_id, icon) VALUES (22, 'Salaire',              8, 'banknote.fill');",
             "INSERT OR IGNORE INTO categories (id, name, parent_id, icon) VALUES (23, 'Remboursements reçus', 8, 'arrow.uturn.left.circle.fill');",
-            // Moyens de paiement
-            "INSERT OR IGNORE INTO payment_types (id, name) VALUES (1, 'Carte bancaire');",
-            "INSERT OR IGNORE INTO payment_types (id, name) VALUES (2, 'Virement');",
-            "INSERT OR IGNORE INTO payment_types (id, name) VALUES (3, 'Prélèvement');",
-            "INSERT OR IGNORE INTO payment_types (id, name) VALUES (4, 'Espèces');",
-            "INSERT OR IGNORE INTO payment_types (id, name) VALUES (5, 'Chèque');",
-            "INSERT OR IGNORE INTO payment_types (id, name) VALUES (9, 'AUTRE');",
+            // ⚠️ Les moyens de paiement NE SONT PLUS SEMÉS (migration v46).
+            //
+            // « Mode de paiement » n'est plus un concept de premier ordre : il
+            // est devenu une métadonnée libre parmi d'autres. Une base NEUVE
+            // n'en a donc aucune trace — l'utilisateur crée les clés dont il a
+            // l'usage (« Mode de paiement », « Projet », « Pro / Perso »…), ou
+            // aucune.
+            //
+            // Seules les bases EXISTANTES gardent la clé « Mode de paiement »,
+            // recréée à l'identique par la migration à partir de leurs données.
+            // La table `payment_types` reste créée (dépréciée, pas supprimée —
+            // doctrine AXE H), simplement vide.
         ]
 
         for sql in seeds {
@@ -1309,6 +1314,112 @@ final class DatabaseManager: @unchecked Sendable {
         // le perdre.
         Migration(version: 45, statements: [
             "ALTER TABLE import_sessions ADD COLUMN destination TEXT NOT NULL DEFAULT 'transactions';",
+        ]),
+
+        // v46 — SMART-IMPORT §3 : métadonnées de transaction LIBRES.
+        //
+        // `transactions.payment_type_id` était le seul attribut libre qu'un
+        // utilisateur pouvait poser hors tiers/catégorie/tags — et il imposait
+        // une sémantique (« mode de paiement ») à tout le monde, y compris à qui
+        // voulait suivre autre chose (compte joint/perso, pro/perso, projet…).
+        //
+        // Il devient une métadonnée parmi d'autres, définies par l'utilisateur.
+        //
+        // ⚠️ BASCULE COMPLÈTE, pas coexistence : l'UI ne lit plus que les
+        // métadonnées. Faire vivre les deux en parallèle donnerait deux endroits
+        // où éditer la même information — le motif de divergence que ce dépôt
+        // combat partout ailleurs (cf. AXE Q, les quatre calculs d'enveloppes).
+        //
+        // ⚠️ `payment_types` et `transactions.payment_type_id` sont DÉPRÉCIÉS,
+        // pas supprimés : doctrine AXE H (on ne retire une colonne qu'une fois
+        // confirmé que plus rien ne la référence). Les données y restent
+        // intactes, ce qui rend la migration réversible.
+        //
+        // ⚠️ La clé « Mode de paiement » n'est créée QUE si la base contient
+        // vraiment des modes de paiement utilisés. Une base neuve n'en a aucun —
+        // c'est voulu : le nouvel utilisateur ne verra jamais ce concept, il
+        // crée les clés dont il a l'usage.
+        Migration(version: 46, statements: [
+            """
+            CREATE TABLE IF NOT EXISTS transaction_metadata_keys (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL,
+                icon       TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                -- Rôle fonctionnel optionnel. Seule valeur connue :
+                -- 'payment_method', qui désigne la clé que l'import remplit
+                -- automatiquement depuis ce qu'il déduit du libellé (CB,
+                -- VIREMENT, PRELEVEMENT…). Sans elle, l'indice d'import est
+                -- simplement ignoré — pas de clé fantôme créée dans le dos de
+                -- l'utilisateur.
+                role       TEXT,
+                created_at TEXT NOT NULL,
+                uuid       TEXT,
+                updated_at TEXT
+            );
+            """,
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tmk_name ON transaction_metadata_keys(name COLLATE NOCASE);",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tmk_uuid ON transaction_metadata_keys(uuid);",
+            // Une seule clé peut porter un rôle donné, sinon l'import ne saurait
+            // pas laquelle remplir.
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tmk_role ON transaction_metadata_keys(role) WHERE role IS NOT NULL;",
+
+            """
+            CREATE TABLE IF NOT EXISTS transaction_metadata_values (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+                key_id         INTEGER NOT NULL REFERENCES transaction_metadata_keys(id) ON DELETE CASCADE,
+                value          TEXT NOT NULL,
+                uuid           TEXT,
+                updated_at     TEXT
+            );
+            """,
+            // Une valeur par clé et par transaction. Une transaction porte donc
+            // PLUSIEURS métadonnées (contrairement à payment_type_id, 0..1).
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tmv_pair ON transaction_metadata_values(transaction_id, key_id);",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tmv_uuid ON transaction_metadata_values(uuid);",
+            "CREATE INDEX IF NOT EXISTS idx_tmv_key ON transaction_metadata_values(key_id);",
+
+            // Reprise des données existantes — conditionnelle.
+            """
+            INSERT INTO transaction_metadata_keys (name, icon, sort_order, role, created_at, uuid, updated_at)
+            SELECT 'Mode de paiement', 'creditcard', 0, 'payment_method',
+                   strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+                   lower(hex(randomblob(16))), strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            WHERE EXISTS (
+                SELECT 1 FROM transactions t
+                JOIN payment_types p ON p.id = t.payment_type_id
+                WHERE t.payment_type_id IS NOT NULL
+            );
+            """,
+            """
+            INSERT INTO transaction_metadata_values (transaction_id, key_id, value, uuid, updated_at)
+            SELECT t.id,
+                   (SELECT id FROM transaction_metadata_keys WHERE role = 'payment_method'),
+                   p.name,
+                   lower(hex(randomblob(16))), strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            FROM transactions t
+            JOIN payment_types p ON p.id = t.payment_type_id
+            WHERE t.payment_type_id IS NOT NULL
+              AND EXISTS (SELECT 1 FROM transaction_metadata_keys WHERE role = 'payment_method');
+            """,
+            // Mise en file de sync, comme v42/v44 : uniquement si la sync est
+            // DÉJÀ active sur cet appareil (le scan initial d'`enable()` ne
+            // repassera pas dessus).
+            """
+            INSERT OR REPLACE INTO sync_pending (table_name, row_uuid, queued_at)
+            SELECT 'transaction_metadata_keys', uuid, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            FROM transaction_metadata_keys
+            WHERE uuid IS NOT NULL
+              AND COALESCE((SELECT value FROM sync_meta WHERE key = 'sync_enabled'), '0') = '1';
+            """,
+            """
+            INSERT OR REPLACE INTO sync_pending (table_name, row_uuid, queued_at)
+            SELECT 'transaction_metadata_values', uuid, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            FROM transaction_metadata_values
+            WHERE uuid IS NOT NULL
+              AND COALESCE((SELECT value FROM sync_meta WHERE key = 'sync_enabled'), '0') = '1';
+            """,
         ]),
     ]
 
