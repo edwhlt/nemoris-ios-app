@@ -60,30 +60,70 @@ struct AISettingsView: View {
 
     // MARK: - Fonctionnalités
 
+    /// ⚠️ Sélecteur INLINE, pas un écran poussé par fonctionnalité.
+    ///
+    /// Deux raisons : cinq allers-retours pour régler cinq lignes est pénible,
+    /// et surtout empiler un écran depuis les Réglages est le motif à risque
+    /// documenté sur macOS (§N.1 : panneau peint sous le contenu poussé, gels
+    /// AutoLayout). Tout tient donc dans la ligne, y compris ce qui justifie le
+    /// choix.
     private var featuresSection: some View {
         Section {
             ForEach(AIFeature.allCases) { feature in
-                NavigationLink {
-                    featureDetail(feature)
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: feature.icon)
-                            .foregroundStyle(AppTheme.Colors.accent)
-                            .frame(width: 24)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(LocalizedStringKey(feature.displayName))
-                            Text(LocalizedStringKey(effectiveLabel(for: feature)))
-                                .font(.caption)
-                                .foregroundStyle(effectiveColor(for: feature))
+                VStack(alignment: .leading, spacing: 4) {
+                    Picker(selection: Binding(
+                        get: { choices[feature] ?? .automatic },
+                        set: { newValue in
+                            choices[feature] = newValue
+                            AIFeatureSettings.setChoice(newValue, for: feature)
                         }
+                    )) {
+                        ForEach(AIBackendChoice.allChoices, id: \.self) { choice in
+                            Label(LocalizedStringKey(choice.displayName), systemImage: choice.icon)
+                                .tag(choice)
+                        }
+                    } label: {
+                        Label(LocalizedStringKey(feature.displayName), systemImage: feature.icon)
                     }
+                    .pickerStyle(.menu)
+
+                    // Ce qui sera RÉELLEMENT utilisé, plus l'avertissement s'il
+                    // y a lieu — l'information qui manquerait si le détail
+                    // vivait derrière un push.
+                    Text(LocalizedStringKey(statusLine(for: feature)))
+                        .font(.caption)
+                        .foregroundStyle(effectiveColor(for: feature))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(LocalizedStringKey(feature.explanation))
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(.vertical, 2)
             }
         } header: {
             Text("Par fonctionnalité")
         } footer: {
             Text("Chaque fonctionnalité choisit sa source. Utile quand Apple Intelligence sait faire l'une mais pas l'autre — la lecture d'images, par exemple, demande iOS 27.")
         }
+    }
+
+    /// La ligne d'état sous le sélecteur : d'abord le problème s'il y en a un,
+    /// sinon le backend effectif — et le rappel que les données sortent quand
+    /// c'est le cas.
+    private func statusLine(for feature: AIFeature) -> String {
+        if let reason = AIEnrichmentBackend.unavailabilityReason(for: feature) { return reason }
+        var line = effectiveLabel(for: feature)
+        if (choices[feature] ?? .automatic).leavesDevice {
+            line += " · ⚠️ les données quittent l'appareil"
+        }
+        if feature.benefitsFromImage, !AIEnrichmentBackend.supportsImageInput(for: feature) {
+            // Pas une erreur : l'import fonctionne, mais en océrisant la
+            // capture — donc en perdant la mise en page, qui porte du sens.
+            line += " · captures océrisées (pas de lecture d'image)"
+        }
+        return line
     }
 
     /// Ce qui sera RÉELLEMENT utilisé, pas seulement ce qui est demandé.
@@ -110,68 +150,6 @@ struct AISettingsView: View {
         // pas une erreur, c'est un choix qui mérite d'être visible en un coup
         // d'œil dans la liste.
         return resolved.leavesDevice ? AppTheme.Colors.warning : AppTheme.Colors.success
-    }
-
-    // MARK: - Détail d'une fonctionnalité
-
-    @ViewBuilder
-    private func featureDetail(_ feature: AIFeature) -> some View {
-        Form {
-            Section {
-                Text(LocalizedStringKey(feature.explanation))
-                    .font(.callout)
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Section {
-                Picker("Source", selection: Binding(
-                    get: { choices[feature] ?? .automatic },
-                    set: { newValue in
-                        choices[feature] = newValue
-                        AIFeatureSettings.setChoice(newValue, for: feature)
-                    }
-                )) {
-                    ForEach(AIBackendChoice.allChoices, id: \.self) { choice in
-                        Label(LocalizedStringKey(choice.displayName), systemImage: choice.icon)
-                            .tag(choice)
-                    }
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
-            } header: {
-                Text("Source")
-            } footer: {
-                if let reason = AIEnrichmentBackend.unavailabilityReason(for: feature) {
-                    Text(LocalizedStringKey(reason)).foregroundStyle(AppTheme.Colors.warning)
-                } else if (choices[feature] ?? .automatic).leavesDevice {
-                    // ⚠️ Le SEUL cas où les données sortent de l'appareil.
-                    // L'écrire noir sur blanc, à l'endroit du choix.
-                    Text("⚠️ Les données de cette fonctionnalité (libellés, relevés, captures) seront envoyées au fournisseur. C'est la seule option qui fait sortir tes données de l'appareil.")
-                        .foregroundStyle(AppTheme.Colors.warning)
-                }
-            }
-
-            if feature.benefitsFromImage {
-                let readsImages = AIEnrichmentBackend.supportsImageInput(for: feature)
-                Section {
-                    Label(readsImages
-                          ? "Lecture d'image disponible — les captures partent telles quelles au modèle."
-                          : "Lecture d'image indisponible — les captures seront océrisées avant analyse.",
-                          systemImage: readsImages ? "photo.badge.checkmark" : "text.viewfinder")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                } footer: {
-                    Text("La mise en page d'une capture porte du sens que l'OCR aplatit. Apple Intelligence ne lit les images qu'à partir d'iOS 27 ; un serveur local multimodal ou un fournisseur cloud le permet dès maintenant.")
-                }
-            }
-        }
-        .nemorisFormStyle()
-        .scrollContentBackground(.hidden)
-        .background(AppTheme.Colors.background.ignoresSafeArea())
-        .tint(AppTheme.Colors.accent)
-        .navigationTitle(LocalizedStringKey(feature.displayName))
-        .navigationBarTitleDisplayMode(.inline)
     }
 
     // MARK: - Apple Intelligence
