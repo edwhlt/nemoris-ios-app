@@ -7,7 +7,11 @@ import SwiftUI
 struct ColumnMappingView: View {
     @Environment(\.dismiss) private var dismiss
 
+    /// Résultat du parsing INITIAL (séparateur autodétecté).
     let parsed: CSVParserV3.Parsed
+    /// Texte brut, pour re-parser si l'utilisateur corrige le séparateur.
+    /// `nil` = séparateur non modifiable (appelant qui n'a pas le contenu).
+    var rawContent: String? = nil
     let accountId: Int
     let sourceFile: String?
     /// Chemin mono-fichier : cette vue crée la session elle-même.
@@ -29,7 +33,15 @@ struct ColumnMappingView: View {
 
     private let sessionRepo = ImportSessionRepository()
 
-    private var headers: [String] { parsed.headers }
+    /// Re-parsing après changement de séparateur. `nil` tant que l'utilisateur
+    /// n'y a pas touché : on affiche alors le parsing initial.
+    @State private var reparsed: CSVParserV3.Parsed?
+    @State private var separator: String = ""
+
+    /// Source de vérité de l'écran : le re-parsing s'il existe, sinon l'initial.
+    private var effective: CSVParserV3.Parsed { reparsed ?? parsed }
+
+    private var headers: [String] { effective.headers }
     private var signature: String { ColumnMappingSignature.compute(headers: headers) }
 
     private var canConfirm: Bool {
@@ -66,14 +78,36 @@ struct ColumnMappingView: View {
                         .font(.system(.body, design: .monospaced))
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
-                LabeledContent("Séparateur CSV") {
-                    Text(separatorLabel(parsed.separator))
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
+
+                if rawContent != nil {
+                    // Modifiable : l'autodétection se trompe sur certains
+                    // fichiers, et les colonnes deviennent alors inexploitables.
+                    Picker("Séparateur", selection: $separator) {
+                        Text("Point-virgule ( ; )").tag(";")
+                        Text("Virgule ( , )").tag(",")
+                        Text("Tabulation").tag("\t")
+                    }
+                    .onChange(of: separator) { _, newValue in
+                        reparse(with: newValue)
+                    }
+                } else if !effective.separator.isEmpty {
+                    LabeledContent("Séparateur CSV") {
+                        Text(separatorLabel(effective.separator))
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                }
+                // Un classeur n'a pas de séparateur : ses cellules sont
+                // délimitées par le format lui-même. Afficher un champ vide
+                // laisserait croire à une détection ratée.
+                if let sheet = effective.sheetName, !sheet.isEmpty {
+                    LabeledContent("Feuille") {
+                        Text(sheet).foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
                 }
             }
 
             Section("Aperçu (3 premières lignes)") {
-                ForEach(Array(parsed.rows.prefix(3).enumerated()), id: \.offset) { _, row in
+                ForEach(Array(effective.rows.prefix(3).enumerated()), id: \.offset) { _, row in
                     previewRow(row)
                 }
             }
@@ -83,7 +117,9 @@ struct ColumnMappingView: View {
             }
         }
         .nemorisFormStyle()
-        .navigationTitle("Mapping CSV")
+        // Le titre suit la source : « Mapping CSV » sur une feuille de classeur
+        // ferait douter l'utilisateur d'avoir choisi le bon fichier.
+        .navigationTitle(effective.sheetName == nil ? "Mapping CSV" : "Mapping du tableau")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -158,7 +194,22 @@ struct ColumnMappingView: View {
 
     // MARK: Logic
 
+    /// Re-parse le fichier avec le séparateur imposé par l'utilisateur, puis
+    /// ré-applique la détection : changer de séparateur change les en-têtes,
+    /// donc les index de colonnes précédents n'ont plus aucun sens.
+    private func reparse(with newSeparator: String) {
+        guard let rawContent, newSeparator != effective.separator else { return }
+        guard let result = CSVParserV3.parse(content: rawContent, forcedSeparator: newSeparator) else { return }
+        reparsed = result
+        dateColumn = nil
+        amountColumn = nil
+        labelColumn = nil
+        mappingFound = false
+        loadOrAutoDetect()
+    }
+
     private func loadOrAutoDetect() {
+        if separator.isEmpty { separator = effective.separator }
         if let existing = sessionRepo.findMapping(headerSignature: signature) {
             dateColumn = existing.dateColumnIndex
             amountColumn = existing.amountColumnIndex
@@ -176,7 +227,7 @@ struct ColumnMappingView: View {
 
         // Détection du format de date sur 5 premières lignes
         if let dCol = dateColumn {
-            let samples = parsed.rows.prefix(5).compactMap { row -> String? in
+            let samples = effective.rows.prefix(5).compactMap { row -> String? in
                 guard dCol < row.count else { return nil }
                 return row[dCol]
             }
@@ -193,7 +244,7 @@ struct ColumnMappingView: View {
             dateColumnIndex: dCol,
             amountColumnIndex: aCol,
             labelColumnIndex: lCol,
-            separator: parsed.separator,
+            separator: effective.separator,
             dateFormat: dateFormat,
             amountDecimal: amountDecimal
         )
@@ -201,7 +252,7 @@ struct ColumnMappingView: View {
 
         // 2. Construit les rows (logique partagée avec le chemin « format déjà
         //    connu », qui n'affiche jamais cet écran).
-        let (rows, _) = CSVParserV3.buildRows(parsed: parsed,
+        let (rows, _) = CSVParserV3.buildRows(parsed: effective,
                                               mapping: mapping,
                                               startingAt: startingRowNumber,
                                               sourceFile: sourceFile)

@@ -29,12 +29,8 @@ final class TransactionDocumentParser {
 
     static let shared = TransactionDocumentParser()
 
-    /// Un fichier à analyser, déjà chargé en mémoire. Le nom sert à tracer
-    /// l'origine de chaque ligne quand une session agrège plusieurs fichiers.
-    struct DocumentSource {
-        let data: Data
-        let displayName: String
-    }
+    /// Type de source partagé avec l'import d'investissements.
+    typealias DocumentSource = ImportDocumentSource
 
     /// Résultat de l'analyse d'une unité (page PDF, capture, bloc de texte).
     struct UnitResult: Identifiable {
@@ -43,11 +39,11 @@ final class TransactionDocumentParser {
         let sourceName: String
         let rawText: String
         var transactions: [ExtractedBankTransaction]
-        var diagnostic: PDFPageDiagnostic
+        var diagnostic: ImportUnitDiagnostic
         /// Type réel du document — l'enum est partagée avec le module
         /// Investissements (son préfixe est historique) : elle porte le
         /// vocabulaire d'affichage « pages / captures / blocs analysés ».
-        var kind: InvestmentDocumentKind
+        var kind: ImportSourceKind
         var usedDeterministicFallback: Bool
     }
 
@@ -57,107 +53,85 @@ final class TransactionDocumentParser {
     /// lignes exploitables.
     var isAIAvailable: Bool { AIEnrichmentBackend.isAvailable }
 
-    // MARK: - Point d'entrée
-
-    /// Analyse N fichiers et renvoie les unités dans l'ordre de lecture.
-    /// `onProgress(unitsDone, unitsTotal)` est appelé à chaque unité terminée ;
-    /// le total est réévalué au fil de l'eau (le nombre de pages d'un PDF n'est
-    /// connu qu'une fois ouvert).
-    func parse(sources: [DocumentSource],
-               onProgress: @escaping (Int, Int) -> Void) async -> [UnitResult] {
-        // Phase 1 — extraction du TEXTE de chaque unité (OCR, pages PDF,
-        // découpage en blocs), entièrement hors du main actor. Le nombre réel
-        // d'unités n'est connu qu'à la fin : un PDF n'annonce son nombre de
-        // pages qu'une fois ouvert, une image en vaut une.
-        var pending: [(text: String, kind: InvestmentDocumentKind, source: String)] = []
-        for source in sources {
-            for unit in await units(for: source) {
-                pending.append((unit.text, unit.kind, source.displayName))
-            }
-        }
-
-        // Phase 2 — analyse unité par unité, avec une progression EXACTE
-        // (l'ancienne version rapportait toujours `done / done`, soit 100 %
-        // en permanence, donc une barre qui ne voulait rien dire).
-        onProgress(0, pending.count)
-        var results: [UnitResult] = []
-        for (index, unit) in pending.enumerated() {
-            results.append(await parseUnit(text: unit.text,
-                                           unitNumber: index + 1,
-                                           sourceName: unit.source,
-                                           kind: unit.kind))
-            onProgress(index + 1, pending.count)
-        }
-        return results
-    }
-
-    /// Découpe un fichier en unités de texte analysables, selon son type RÉEL
-    /// (sniffé sur les octets, jamais déduit de l'extension — cf. la classe de
-    /// bug documentée dans `InvestmentPDFParser.detectKind`).
-    private func units(for source: DocumentSource) async -> [(text: String, kind: InvestmentDocumentKind)] {
-        let kind = InvestmentPDFParser.detectKind(data: source.data,
-                                                  fileExtension: (source.displayName as NSString).pathExtension)
-        switch kind {
-        case .pdf:
-            let data = source.data
-            // Lecture et rendu PDF hors du main actor : sur N fichiers, les
-            // faire sur le thread principal fige l'UI pendant tout l'import.
-            let pages: [String] = await Task.detached(priority: .userInitiated) {
-                guard let document = PDFDocument(data: data) else { return [] }
-                return (0..<document.pageCount).compactMap { index in
-                    guard let text = document.page(at: index)?.string,
-                          !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    else { return nil }
-                    return text
-                }
-            }.value
-            guard !pages.isEmpty else { return [("", .pdf)] }
-            return pages.map { ($0, .pdf) }
-
-        case .image:
-            // OCR Vision hors du main actor : synchrone et coûteux (1-5 s sur
-            // une capture plein écran), il fige sinon toute l'app et la barre
-            // de progression ne se peint jamais.
-            let data = source.data
-            let text = await Task.detached(priority: .userInitiated) {
-                InvestmentPDFParser.ocrText(from: data)
-            }.value ?? ""
-            return [(text, .image)]
-
-        case .text:
-            let text = Self.decodeText(source.data) ?? ""
-            guard !text.isEmpty else { return [("", .text)] }
-            // La fenêtre de contexte du modèle embarqué est étroite : un relevé
-            // entier envoyé d'un bloc la fait déborder et la page est perdue.
-            return InvestmentPDFParser.splitTextIntoChunks(text, maxChars: 4000).map { ($0, .text) }
-
-        case .unknown:
-            return [("", .unknown)]
-        }
-    }
-
-    /// Décodage texte tolérant, même ordre que l'import CSV.
-    ///
-    /// ⚠️ N'est appelé qu'après le sniffing : `isoLatin1` n'échoue JAMAIS
-    /// (toute suite d'octets en est valide), donc l'appeler sans vérifier au
-    /// préalable que le contenu EST du texte transforme un PNG en centaines de
-    /// milliers de caractères de binaire.
-    static func decodeText(_ data: Data) -> String? {
-        for encoding: String.Encoding in [.utf8, .utf16LittleEndian, .windowsCP1252, .isoLatin1] {
-            if let text = String(data: data, encoding: encoding),
-               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return text
-            }
-        }
-        return nil
-    }
-
     // MARK: - Analyse d'une unité
 
-    private func parseUnit(text: String, unitNumber: Int, sourceName: String,
-                           kind: InvestmentDocumentKind) async -> UnitResult {
+    /// Interprète UNE unité déjà lue.
+    ///
+    /// ⚠️ Ce parseur n'ouvre plus de fichiers et n'orchestre plus de batch :
+    /// la lecture (sniffing, pages PDF, OCR, découpage) appartient à
+    /// `ImportPipeline`, qui la mène en parallèle et la partage avec l'import
+    /// d'investissements. Ne rester QUE l'interprétation est ce qui empêche les
+    /// deux modules de redévelopper chacun leur découpage — ce qu'ils avaient
+    /// fait, avec deux détections de format divergentes.
+    func analyze(_ unit: ImportDocumentReader.Unit,
+                 unitNumber: Int, sourceName: String) async -> UnitResult {
+        let kind = unit.kind
+        let text: String
+
+        switch unit.content {
+        // ─── L'unité EST une image et un modèle sait la lire ────────────────
+        // On la lui passe telle quelle : la mise en page (colonnes, en-têtes de
+        // journée, sous-titres de catégorie) porte du sens que l'OCR aplatit et
+        // qu'aucune heuristique d'ordre de lignes ne reconstitue de façon
+        // générale — elle diffère d'une appli bancaire à l'autre, et on n'a
+        // aucune visibilité sur ce que les utilisateurs importeront.
+        case .image(let image):
+            let raw = await AIEnrichmentBackend.completeText(
+                system: Self.jsonInstructions,
+                user: "Extrais toutes les opérations visibles sur cette capture.",
+                image: image
+            )
+            guard let raw else {
+                return UnitResult(unitNumber: unitNumber, sourceName: sourceName, rawText: "",
+                                  transactions: [], diagnostic: .aiFailed("le modèle n'a pas pu lire l'image"),
+                                  kind: kind, usedDeterministicFallback: false)
+            }
+            let lines = Self.parseJSON(raw)
+            return UnitResult(
+                unitNumber: unitNumber, sourceName: sourceName,
+                // Le « texte lu » du diagnostic devient la réponse du modèle :
+                // c'est ce qui permet de comprendre une extraction ratée.
+                rawText: raw,
+                transactions: lines,
+                diagnostic: lines.isEmpty ? .nothingRecognized : .extracted,
+                kind: kind, usedDeterministicFallback: false
+            )
+
+        // ─── Format structuré : les champs sont NOMMÉS ──────────────────────
+        // Ni modèle, ni extraction déterministe — la donnée est exacte, la
+        // réinterpréter ne pourrait que la dégrader.
+        case .records(let payloads):
+            let lines: [ExtractedBankTransaction] = payloads.compactMap { payload in
+                if case .transaction(let tx) = payload { return tx }
+                return nil
+            }
+            return UnitResult(
+                unitNumber: unitNumber, sourceName: sourceName,
+                rawText: "", transactions: lines,
+                diagnostic: lines.isEmpty ? .nothingRecognized : .extracted,
+                kind: kind, usedDeterministicFallback: true
+            )
+
+        // ─── Table à mapper ─────────────────────────────────────────────────
+        // Ne devrait pas arriver ici : les tables passent par l'écran de
+        // mapping des colonnes, en amont. Signalé plutôt qu'ignoré en silence.
+        case .grid:
+            return UnitResult(unitNumber: unitNumber, sourceName: sourceName, rawText: "",
+                              transactions: [],
+                              diagnostic: .malformedStructure("table non mappée"),
+                              kind: kind, usedDeterministicFallback: false)
+
+        case .empty(let diagnostic):
+            return UnitResult(unitNumber: unitNumber, sourceName: sourceName, rawText: "",
+                              transactions: [], diagnostic: diagnostic, kind: kind,
+                              usedDeterministicFallback: false)
+
+        case .text(let value):
+            text = value
+        }
+
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            let diagnostic: PDFPageDiagnostic = kind == .unknown ? .notTextContent : .noTextExtracted
+            let diagnostic: ImportUnitDiagnostic = kind == .unknown ? .notTextContent : .noTextExtracted
             return UnitResult(unitNumber: unitNumber, sourceName: sourceName, rawText: "",
                               transactions: [], diagnostic: diagnostic, kind: kind,
                               usedDeterministicFallback: false)
@@ -245,7 +219,7 @@ final class TransactionDocumentParser {
 
     // MARK: - Étages IA
 
-    private func extractWithAI(text: String) async -> ([ExtractedBankTransaction], PDFPageDiagnostic) {
+    private func extractWithAI(text: String) async -> ([ExtractedBankTransaction], ImportUnitDiagnostic) {
         // La fenêtre de contexte du modèle embarqué est étroite : un dépassement
         // fait échouer l'unité ENTIÈRE, pas seulement la ligne fautive.
         let payload = String(text.prefix(4000))
@@ -315,12 +289,12 @@ final class TransactionDocumentParser {
     @available(iOS 26.0, macOS 26.0, *)
     static func convert(_ extraction: AITransactionExtraction) -> [ExtractedBankTransaction] {
         extraction.transactions.compactMap { line in
-            guard Self.isValidDate(line.date) else { return nil }
+            guard let date = BankStatementExtractor.normalizeDate(line.date) else { return nil }
             let label = line.label.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !label.isEmpty, line.amount != 0 else { return nil }
             let type = line.paymentType.trimmingCharacters(in: .whitespaces).uppercased()
             return ExtractedBankTransaction(
-                date: line.date,
+                date: date,
                 amount: line.isDebit ? -abs(line.amount) : abs(line.amount),
                 label: label,
                 paymentTypeHint: type.isEmpty ? nil : type,
@@ -351,7 +325,22 @@ final class TransactionDocumentParser {
     /// Ici le sens est porté par le SIGNE du montant : un booléen mal typé par
     /// un petit modèle (« "true" » en chaîne) est une source d'échec de plus,
     /// alors qu'un nombre négatif est sans ambiguïté.
-    static let jsonInstructions = """
+    /// ⚠️ La date du jour est INJECTÉE dans les instructions. Une capture
+    /// d'appli bancaire n'affiche presque jamais l'année : sans repère, le
+    /// modèle rend des formes comme « 22-07-00 » et toutes les lignes étaient
+    /// rejetées — « aucune opération reconnue » avec pourtant un JSON correct
+    /// sous les yeux. `BankStatementExtractor.normalizeDate` rattrape ce qui
+    /// passe malgré tout, mais autant donner au modèle de quoi bien répondre.
+    static var jsonInstructions: String {
+        let today = isoDateOnly.string(from: Date())
+        return baseJSONInstructions + """
+
+
+        Nous sommes le \(today). Si l'année n'apparaît pas dans le document, déduis-la : une date qui tomberait APRÈS aujourd'hui appartient à l'année précédente (un relevé est toujours historique). Ne rends jamais une année inventée comme 0000 ou 00.
+        """
+    }
+
+    private static let baseJSONInstructions = """
     Tu extrais les opérations d'un relevé de compte bancaire ou d'une capture d'écran d'application bancaire.
 
     Une opération = une date + un montant + un libellé. Ignore les en-têtes, les soldes (ancien solde, nouveau solde, report), les totaux et les coordonnées de l'agence.
@@ -363,6 +352,14 @@ final class TransactionDocumentParser {
 
     Règles : le montant est NÉGATIF quand l'argent sort du compte (achat, prélèvement, retrait) et POSITIF quand il entre (salaire, virement reçu, remboursement). Le séparateur décimal est le point. payment_type vaut CB, VIREMENT, PRELEVEMENT, RETRAIT, CHEQUE ou une chaîne vide.
     """
+
+    /// Formateur de date locale (yyyy-MM-dd) pour l'injection dans le prompt.
+    private static let isoDateOnly: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 
     static func buildPrompt(text: String) -> String {
         """
@@ -398,7 +395,8 @@ final class TransactionDocumentParser {
             return []
         }
         return (decoded.transactions ?? []).compactMap { line in
-            guard let date = line.date, isValidDate(date),
+            guard let raw = line.date,
+                  let date = BankStatementExtractor.normalizeDate(raw),
                   let amount = line.amount?.value, amount != 0 else { return nil }
             let label = (line.label ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !label.isEmpty else { return nil }
@@ -425,36 +423,4 @@ final class TransactionDocumentParser {
         return true
     }
 
-    // MARK: - Pont vers la session d'import
-
-    private static let rowDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
-    /// Convertit les unités analysées en lignes de session d'import.
-    /// `startingAt` permet de continuer une numérotation globale quand la
-    /// session agrège plusieurs fichiers — deux fichiers repartant à 1
-    /// produiraient des numéros de ligne en collision.
-    static func rows(from units: [UnitResult], startingAt startNumber: Int = 1) -> [ImportSessionRow] {
-        var number = startNumber
-        var rows: [ImportSessionRow] = []
-        for unit in units {
-            for tx in unit.transactions {
-                guard let date = rowDateFormatter.date(from: tx.date) else { continue }
-                rows.append(ImportSessionRow(
-                    sourceRowNumber: number,
-                    rawLabel: tx.label,
-                    date: date,
-                    amount: tx.amount,
-                    paymentTypeHint: tx.paymentTypeHint,
-                    sourceFile: unit.sourceName
-                ))
-                number += 1
-            }
-        }
-        return rows
-    }
 }

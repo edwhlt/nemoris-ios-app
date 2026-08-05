@@ -242,7 +242,7 @@ struct SettingsView: View {
                         isOn: $appState.showTricount,
                         feature: nil,
                         label: "Tricount",
-                        icon: "person.2.fill"
+                        icon: "person.2"
                     )
                     proToggle(
                         isOn: $appState.showInvestments,
@@ -254,7 +254,7 @@ struct SettingsView: View {
                         isOn: $appState.showBudget,
                         feature: .budget,
                         label: "Budget & Prévisions",
-                        icon: "chart.bar.fill"
+                        icon: "chart.bar"
                     )
                     // Patrimoine — pas paywallé pour l'instant (feature: nil),
                     // alignement avec Tricount. Promotion possible plus tard.
@@ -262,7 +262,7 @@ struct SettingsView: View {
                         isOn: $appState.showPatrimoine,
                         feature: nil,
                         label: "Patrimoine",
-                        icon: "house.lodge.fill"
+                        icon: "house.lodge"
                     )
                     proToggle(
                         isOn: $appState.showSQLConsole,
@@ -372,7 +372,7 @@ struct SettingsView: View {
                 // ── Import & Données ──────────────────────────────────────
                 Section("Import & Données") {
                     settingsLink(.importCSV) {
-                        Label("Importer un CSV…", systemImage: "square.and.arrow.down")
+                        Label("Importation…", systemImage: "square.and.arrow.down")
                     }
                     settingsLink(.companySources) {
                         Label("Sources entreprises", systemImage: "globe.europe.africa.fill")
@@ -965,7 +965,7 @@ enum SettingsSection: String, Identifiable, CaseIterable {
 
     var title: String {
         switch self {
-        case .importCSV:      return "Importer un CSV"
+        case .importCSV:      return "Importation"
         case .companySources: return "Sources entreprises"
         case .backup:         return "Sauvegarde locale & iCloud"
         case .cloudSync:      return "Synchronisation iCloud"

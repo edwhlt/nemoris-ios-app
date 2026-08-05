@@ -251,8 +251,10 @@ struct InvestmentsView: View {
                 .paneChrome("Importer un CSV", cancelLabel: "Fermer", onCancel: { showImportSheet = false })
         }
         .adaptivePane(isPresented: $showPDFImportSheet) {
-            // Repli sans Apple Intelligence → import CSV déterministe.
-            InvestmentPDFImportView(onFallbackToCSV: { showImportSheet = true })
+            // Entonnoir d'import UNIFIÉ, avec la destination pré-remplie sur
+            // « Investissements » puisqu'on vient de ce module. L'utilisateur
+            // peut la changer sans quitter l'écran.
+            ImportV3EntryView(initialDestination: .investments)
         }
         // Chantier D — import intelligent ouvert par un raccourci Siri (document
         // pré-rempli). Consomme aussi l'URL en attente si la vue vient d'être
@@ -279,10 +281,21 @@ struct InvestmentsView: View {
             guard case .success(let urls) = result, let url = urls.first else { return }
             let hasAccess = url.startAccessingSecurityScopedResource()
             defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
-            guard let rawContent = (try? String(contentsOf: url, encoding: .utf8))
-                ?? (try? String(contentsOf: url, encoding: .windowsCP1252))
-                ?? (try? String(contentsOf: url, encoding: .isoLatin1)) else {
+            guard let data = try? Data(contentsOf: url) else {
                 importResultMessage = "Impossible de lire le fichier CSV"
+                return
+            }
+            // ⚠️ On SNIFFE avant de décoder. L'ancienne chaîne
+            // `utf8 ?? windowsCP1252 ?? isoLatin1` ne pouvait pas échouer :
+            // `isoLatin1` accepte n'importe quelle suite d'octets, donc un PDF
+            // ou une capture déposés ici devenaient des centaines de milliers
+            // de caractères de binaire présentés comme un CSV — exactement la
+            // classe de bug documentée dans `ImportFormatSniffer`.
+            let kind = ImportFormatSniffer.detect(data: data, fileExtension: url.pathExtension)
+            guard kind == .text, let rawContent = ImportFormatSniffer.decodeText(data) else {
+                importResultMessage = kind == .unknown
+                    ? "Format de fichier non reconnu — attendu : un CSV."
+                    : "Ce fichier n'est pas un CSV. Utilise « Importer un relevé » pour un PDF ou une capture."
                 return
             }
             csvRawContent = rawContent

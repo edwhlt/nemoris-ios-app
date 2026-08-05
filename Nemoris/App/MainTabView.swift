@@ -16,6 +16,12 @@ struct MainTabView: View {
     @Environment(PurchaseManager.self) private var purchaseManager
     @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var showCancelImportConfirm = false
+    /// Analyse de document en arrière-plan : l'utilisateur garde la main
+    /// pendant que ça travaille, le bandeau sert de point de retour.
+    private var importCoordinator: DocumentImportCoordinator { .shared }
+    @State private var showAnalysisReview = false
+    @State private var showInvestmentReview = false
+    @State private var showCancelAnalysisConfirm = false
     /// AXE P — import V3 pré-rempli par un CSV partagé/raccourci.
     @State private var preloadedTransactionImport: PreloadedTransactionImport?
     #if os(macOS)
@@ -63,11 +69,35 @@ struct MainTabView: View {
             #endif
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: appState.activeImportSession?.id)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: importCoordinator.phase)
         .appToast($state.currentToast)
         .adaptivePane(isPresented: $state.showImportSessionSheet) {
             if let summary = appState.activeImportSession {
-                NavigationStack {
-                    ImportSessionView(sessionId: summary.id)
+                // ⚠️ La revue dépend de la DESTINATION : une session de
+                // transactions ouvre la résolution ligne à ligne (tiers,
+                // catégories), une session d'investissements ouvre le
+                // rattachement d'ordres à un compte-titres. Les deux répondent
+                // à des questions différentes et restent distinctes.
+                switch summary.destination {
+                case .transactions:
+                    NavigationStack {
+                        ImportSessionView(sessionId: summary.id)
+                    }
+                case .investments:
+                    InvestmentPDFImportView(
+                        preparsedBatch: importCoordinator.batch,
+                        accountId: summary.accountId ?? importCoordinator.accountId,
+                        onFinished: {
+                            state.showImportSessionSheet = false
+                            appState.activeImportSession = nil
+                            importCoordinator.clear()
+                        }
+                    )
+                    // Le rechargement depuis la base, quand l'app a redémarré,
+                    // est fait par `AppState.reloadActiveImportSession` — donc
+                    // AVANT cette construction, sans quoi le `@State` de la
+                    // revue serait déjà figé sur un résultat vide.
+                    .id(summary.id)
                 }
             }
         }
@@ -76,6 +106,34 @@ struct MainTabView: View {
         // session est déjà active, ImportV3EntryView affiche l'alerte de reprise.
         .adaptivePane(item: $preloadedTransactionImport) { item in
             ImportV3EntryView(preloadedFileURLs: item.urls)
+        }
+        // Relecture du résultat d'une analyse en arrière-plan.
+        .adaptivePane(isPresented: $showAnalysisReview) {
+            TransactionDocumentReviewView(
+                coordinator: importCoordinator,
+                onConfirm: { summary in
+                    importCoordinator.clear()
+                    appState.activeImportSession = summary
+                    // Passage à la revue complète sans clignotement
+                    // (cf. `ImportV3EntryView.handOver`).
+                    ImportV3EntryView.handOver(to: appState,
+                                               dismissSelf: { showAnalysisReview = false })
+                },
+                onCancel: {
+                    showAnalysisReview = false
+                    importCoordinator.clear()
+                }
+            )
+        }
+        .adaptivePane(isPresented: $showInvestmentReview) {
+            InvestmentPDFImportView(
+                preparsedBatch: importCoordinator.batch,
+                accountId: importCoordinator.accountId,
+                onFinished: {
+                    showInvestmentReview = false
+                    importCoordinator.clear()
+                }
+            )
         }
         .onChange(of: appState.pendingTransactionImportURLs) { _, urls in
             consumePendingTransactionImport(urls)
@@ -90,11 +148,33 @@ struct MainTabView: View {
                     ImportSessionRepository().deleteSession(id: id)
                     ImportNotificationService.cancelReminder(forSessionId: id)
                     appState.activeImportSession = nil
+                    // ⚠️ Fermer AUSSI le panneau : sans ça l'inspecteur macOS
+                    // restait ouvert sur une session supprimée — l'utilisateur
+                    // voyait un import « toujours en cours » qui n'existait plus.
+                    appState.showImportSessionSheet = false
                 }
             }
             Button("Continuer l'import", role: .cancel) {}
         } message: {
             Text("Les lignes non encore importées seront perdues.")
+        }
+        .confirmationDialog(
+            importCoordinator.isReady ? "Abandonner ce résultat d'analyse ?"
+                                      : "Interrompre l'analyse en cours ?",
+            isPresented: $showCancelAnalysisConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Abandonner", role: .destructive) {
+                importCoordinator.cancel()
+                // ⚠️ Refermer AUSSI la relecture éventuellement ouverte : sinon
+                // l'inspecteur macOS restait affiché sur un résultat qui
+                // n'existe plus (même classe de bug que la session annulée).
+                showAnalysisReview = false
+                showInvestmentReview = false
+            }
+            Button("Poursuivre", role: .cancel) {}
+        } message: {
+            Text("Le document analysé n'est pas conservé : il faudra le re-sélectionner.")
         }
         .onAppear {
             ensureValidSelection()
@@ -123,13 +203,22 @@ struct MainTabView: View {
         #endif
     }
 
-    /// AXE P — présente l'import V3 pré-rempli et libère l'URL en attente
-    /// (one-shot). No-op si nil ou si une sheet préchargée est déjà en cours.
-    /// Miroir de `consumePendingInvestmentImport` dans InvestmentsView.
     /// Bandeau « import en cours », glissant depuis le bord où il est ancré.
+    ///
+    /// Deux états possibles, jamais les deux à la fois : une analyse de document
+    /// en cours (ou prête à être relue), sinon une session d'import ouverte.
     @ViewBuilder
     private func importBanner(edge: Edge) -> some View {
-        if let summary = appState.activeImportSession {
+        if importCoordinator.isActive {
+            ImportAnalysisBanner(
+                coordinator: importCoordinator,
+                onOpen: { openAnalysisReview() },
+                // Confirmation comme pour une session d'import : le résultat
+                // d'analyse n'est PAS persisté, l'abandonner le perd pour de bon.
+                onCancel: { showCancelAnalysisConfirm = true }
+            )
+            .transition(.move(edge: edge).combined(with: .opacity))
+        } else if let summary = appState.activeImportSession {
             ImportSessionBanner(
                 summary: summary,
                 onTap: { appState.showImportSessionSheet = true },
@@ -139,6 +228,19 @@ struct MainTabView: View {
         }
     }
 
+    /// Ouvre la relecture du résultat d'analyse, selon la destination choisie.
+    private func openAnalysisReview() {
+        switch importCoordinator.destination {
+        case .transactions:
+            showAnalysisReview = true
+        case .investments:
+            showInvestmentReview = true
+        }
+    }
+
+    /// AXE P — présente l'import V3 pré-rempli et libère les URL en attente
+    /// (one-shot). No-op si vide ou si une sheet préchargée est déjà en cours.
+    /// Miroir de `consumePendingInvestmentImport` dans InvestmentsView.
     private func consumePendingTransactionImport(_ urls: [URL]) {
         guard !urls.isEmpty, preloadedTransactionImport == nil else { return }
         preloadedTransactionImport = PreloadedTransactionImport(urls: urls)
@@ -274,7 +376,7 @@ struct MainTabView: View {
                 }
             }
             Section("Outils") {
-                sidebarRow(title: "Importer un CSV", systemImage: "square.and.arrow.down", tag: sidebarImportTag)
+                sidebarRow(title: "Importation", systemImage: "square.and.arrow.down", tag: sidebarImportTag)
                 sidebarRow(title: "Réglages", systemImage: "gearshape", tag: sidebarSettingsTag)
             }
         }
@@ -292,7 +394,7 @@ struct MainTabView: View {
                 }
             }
             Section("Outils") {
-                sidebarLabel("Importer un CSV", systemImage: "square.and.arrow.down")
+                sidebarLabel("Importation", systemImage: "square.and.arrow.down")
                     .tag(sidebarImportTag)
                 sidebarLabel("Réglages", systemImage: "gearshape")
                     .tag(sidebarSettingsTag)
@@ -508,14 +610,14 @@ private struct MoreView: View {
     private var toolItems: [MoreItem] {
         var items = [
             MoreItem(
-                label: "Import CSV",
+                label: "Importation",
                 icon: "square.and.arrow.down",
                 color: AppTheme.Colors.success,
                 destination: { AnyView(ImportV3EntryView(isEmbedded: true)) }
             ),
             MoreItem(
                 label: "Paramètres",
-                icon: "gearshape.fill",
+                icon: "gearshape",
                 color: AppTheme.Colors.textSecondary,
                 destination: { AnyView(SettingsView(isEmbedded: true)) }
             )
@@ -618,7 +720,7 @@ private struct MoreView: View {
                 target: .tab(.transactions)
             ),
             FeatureEntry(
-                title: "Import CSV",
+                title: "Importation",
                 description: "Importez un relevé de compte bancaire au format CSV pour alimenter l'application.",
                 icon: "square.and.arrow.down",
                 color: AppTheme.Colors.success,
@@ -636,7 +738,7 @@ private struct MoreView: View {
             FeatureEntry(
                 title: "Paramètres",
                 description: "Configurez l'application : thème, langue, sauvegarde et base de données.",
-                icon: "gearshape.fill",
+                icon: "gearshape",
                 color: AppTheme.Colors.textSecondary,
                 keywords: ["réglages", "configuration", "thème", "langue", "sauvegarde", "exporter", "base de données", "couleur"],
                 target: .settings

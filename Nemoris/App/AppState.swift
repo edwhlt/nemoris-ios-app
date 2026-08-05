@@ -96,8 +96,19 @@ final class AppState {
 
     /// Rafraîchit `activeImportSession` depuis la DB. À appeler au lancement de l'app
     /// et après toute action qui peut changer l'état (création, commit, cancel).
+    /// `@MainActor` : recharge au passage le coordinateur d'import, qui l'est.
+    @MainActor
     func reloadActiveImportSession() {
-        activeImportSession = ImportSessionRepository().fetchActiveSummary()
+        let summary = ImportSessionRepository().fetchActiveSummary()
+        activeImportSession = summary
+        // ⚠️ Une session d'INVESTISSEMENTS doit être rechargée dans le
+        // coordinateur ICI, pas au moment d'ouvrir la revue : cette dernière
+        // capture le résultat dans un `@State` à son initialisation, donc une
+        // restauration faite après coup n'aurait plus aucun effet visible.
+        if let summary, summary.destination == .investments,
+           DocumentImportCoordinator.shared.batch.isEmpty {
+            DocumentImportCoordinator.shared.restore(sessionId: summary.id)
+        }
     }
 
     // Persisté : "system" | "light" | "dark"

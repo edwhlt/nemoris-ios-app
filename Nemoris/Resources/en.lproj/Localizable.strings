@@ -7,7 +7,7 @@
 /* MARK: - Navigation titles */
 "Données" = "Data";
 "Console SQL" = "SQL Console";
-"Import CSV" = "Import CSV";
+"Importation" = "Importation";
 "Choisir un MDP" = "Choose Payment Method";
 "Analyse filtrée" = "Filtered Analysis";
 "Filtres" = "Filters";

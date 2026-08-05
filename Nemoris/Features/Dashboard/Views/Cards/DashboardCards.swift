@@ -457,7 +457,7 @@ struct OnboardingImportCard: View {
                     .multilineTextAlignment(.center)
             }
             Button(action: action) {
-                Label("Importer un fichier CSV", systemImage: "square.and.arrow.down")
+                Label("Importation", systemImage: "square.and.arrow.down")
                     .font(AppTheme.Typography.labelLarge)
                     .foregroundStyle(.white)
                     .padding(.horizontal, AppTheme.Spacing.xl)

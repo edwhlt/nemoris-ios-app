@@ -85,6 +85,7 @@
 		E881B2132FAC2E0200B58D3C /* fr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = fr; path = Localizable.strings; sourceTree = "<group>"; };
 		E881B2162FAC2E1800B58D3C /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = Localizable.strings; sourceTree = "<group>"; };
 		E881B2452FB62AE600B58D3C /* AuthenticationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AuthenticationServices.framework; path = System/Library/Frameworks/AuthenticationServices.framework; sourceTree = SDKROOT; };
+		E8CD647D302369720032E42E /* SMORT-IMPORT.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "SMORT-IMPORT.md"; sourceTree = "<group>"; };
 		E8E71A842FA9D33600232023 /* GoToMarket.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = GoToMarket.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -298,6 +299,7 @@
 		E8E71A832FA9D31F00232023 /* Docs */ = {
 			isa = PBXGroup;
 			children = (
+				E8CD647D302369720032E42E /* SMORT-IMPORT.md */,
 				E8E71A842FA9D33600232023 /* GoToMarket.md */,
 			);
 			path = Docs;

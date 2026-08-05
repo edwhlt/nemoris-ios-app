@@ -7,7 +7,7 @@ struct DashboardChartTip: Tip {
     var message: Text? {
         Text("Ce graphique présente les recettes (vert) et dépenses (rouge) mois par mois sur l'année. Appuyez sur une barre pour sélectionner le mois et filtrer les catégories en dessous.")
     }
-    var image: Image? { Image(systemName: "chart.bar.fill") }
+    var image: Image? { Image(systemName: "chart.bar") }
 }
 
 struct FilteredChartTip: Tip {
@@ -117,7 +117,7 @@ struct SQLConsoleTip: Tip {
     var message: Text? {
         Text("Cet outil exécute des requêtes SQL directement sur votre base de données. Une requête UPDATE ou DELETE mal formée peut modifier des données de façon irréversible. Exportez une sauvegarde (Paramètres) avant toute modification.")
     }
-    var image: Image? { Image(systemName: "exclamationmark.triangle.fill") }
+    var image: Image? { Image(systemName: "exclamationmark.triangle") }
     var actions: [Action] {
         [Action(id: "understood", title: "Compris")]
     }

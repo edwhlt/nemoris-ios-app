@@ -32,10 +32,16 @@ import Foundation
 
 /// Une opération reconnue sans IA. Volontairement distincte de
 /// `PDFExtractedOrder` (qui porte de l'état d'UI) : ce moteur reste pur.
-struct ExtractedStatementOrder: Equatable {
+struct ExtractedStatementOrder: Equatable, Codable, Hashable, Sendable {
     var orderType: String        // "BUY" | "SELL" | "DIV"
     var assetName: String
     var isin: String
+    /// Symbole boursier court. Le SEUL champ que l'ancrage par ISIN ne cherche
+    /// pas (il n'a pas de forme normalisée) : il est rempli par la
+    /// réconciliation, depuis l'IA ou depuis un format structuré qui le nomme.
+    /// Valeur par défaut pour que les sites de construction du moteur
+    /// déterministe restent inchangés.
+    var ticker: String = ""
     var quantity: Double
     var unitPrice: Double
     var fees: Double

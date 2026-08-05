@@ -81,7 +81,12 @@ struct LocalLLMService: Sendable {
     /// `AIEnrichmentBackend.completeText` en fait le chemin serveur local de la
     /// complétion générique, utilisée par l'extraction de relevés
     /// (`TransactionDocumentParser`) en plus de l'identification de marchands.
-    func complete(systemPrompt: String, userPrompt: String) async throws -> String {
+    /// `imageDataURL` : capture encodée en data-URL base64, pour un modèle
+    /// multimodal. Le serveur reçoit alors un message à parties typées
+    /// (protocole OpenAI) au lieu d'une simple chaîne.
+    func complete(systemPrompt: String,
+                  userPrompt: String,
+                  imageDataURL: String? = nil) async throws -> String {
         guard let url = URL(string: Self.baseURL + "/v1/chat/completions") else {
             throw LocalLLMError.invalidURL
         }
@@ -97,8 +102,8 @@ struct LocalLLMService: Sendable {
         let body = ChatCompletionRequest(
             model: Self.model.isEmpty ? "local-model" : Self.model,
             messages: [
-                .init(role: "system", content: systemPrompt),
-                .init(role: "user", content: userPrompt)
+                .init(role: "system", text: systemPrompt),
+                .init(role: "user", text: userPrompt, imageDataURL: imageDataURL)
             ],
             temperature: 0.2,
             stream: false
@@ -143,7 +148,39 @@ struct LocalLLMService: Sendable {
 // par LM Studio, Ollama, et la quasi-totalité des serveurs d'inférence locaux)
 
 private struct ChatCompletionRequest: Encodable {
-    struct Message: Encodable { let role: String; let content: String }
+    /// Le champ `content` du protocole OpenAI accepte DEUX formes : une chaîne
+    /// simple, ou un tableau de parties typées quand le message porte une image.
+    /// Les serveurs locaux (LM Studio, Ollama…) suivent ce contrat pour les
+    /// modèles multimodaux.
+    struct Message: Encodable {
+        let role: String
+        let text: String
+        /// Image encodée en data-URL base64, `nil` pour un message texte.
+        var imageDataURL: String?
+
+        enum CodingKeys: String, CodingKey { case role, content }
+        private enum PartKeys: String, CodingKey { case type, text, image_url }
+        private enum ImageURLKeys: String, CodingKey { case url }
+
+        func encode(to encoder: Encoder) throws {
+            var root = encoder.container(keyedBy: CodingKeys.self)
+            try root.encode(role, forKey: .role)
+            guard let imageDataURL else {
+                // Forme scalaire : compatible avec tous les serveurs, y compris
+                // les modèles purement textuels.
+                try root.encode(text, forKey: .content)
+                return
+            }
+            var parts = root.nestedUnkeyedContainer(forKey: .content)
+            var textPart = parts.nestedContainer(keyedBy: PartKeys.self)
+            try textPart.encode("text", forKey: .type)
+            try textPart.encode(text, forKey: .text)
+            var imagePart = parts.nestedContainer(keyedBy: PartKeys.self)
+            try imagePart.encode("image_url", forKey: .type)
+            var urlBox = imagePart.nestedContainer(keyedBy: ImageURLKeys.self, forKey: .image_url)
+            try urlBox.encode(imageDataURL, forKey: .url)
+        }
+    }
     let model: String
     let messages: [Message]
     let temperature: Double

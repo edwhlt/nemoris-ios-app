@@ -157,18 +157,25 @@ final class InvestmentsViewModel {
         loadPositions()
     }
 
+    /// Charge un CSV de positions.
+    ///
+    /// ⚠️ Passe par `CSVParserV3`, le lecteur COMMUN. Ce module avait le sien
+    /// — troisième détection de séparateur et troisième découpage de cellules
+    /// de l'app — et il était strictement moins bon : son `inQuotes.toggle()`
+    /// à chaque guillemet cassait les guillemets échappés (`""` à l'intérieur
+    /// d'un champ), et sa détection de séparateur ne regardait que la première
+    /// ligne sans gérer les guillemets.
+    ///
+    /// Ce qui reste PROPRE à ce module est la sémantique des colonnes
+    /// (ISIN / quantité / PRU, et non date / montant / libellé) : c'est une
+    /// autre question posée à l'utilisateur, elle garde donc son écran.
     func loadCSV(content: String) {
-        let normalized = content
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-        let lines = normalized.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        guard let header = lines.first else {
-            csvErrors = ["Fichier CSV vide"]
+        guard let grid = CSVParserV3.parse(content: content), !grid.headers.isEmpty else {
+            csvErrors = ["Fichier CSV vide ou illisible"]
             return
         }
-        let separator = detectSeparator(header)
-        csvHeaders = parseCSVLine(header, separator: separator)
-        csvRows = lines.dropFirst().map { parseCSVLine($0, separator: separator) }
+        csvHeaders = grid.headers
+        csvRows = grid.rows
         csvErrors = []
         csvWarnings = []
         importFailures = []
@@ -181,10 +188,19 @@ final class InvestmentsViewModel {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
 
+        /// ⚠️ Passe par le parseur COMMUN. La version locale remplaçait
+        /// aveuglément toutes les virgules par des points : « 1,234.56 »
+        /// devenait « 1.234.56 », donc `nil`, et la ligne était rejetée comme
+        /// « quantité/prix invalides ». Elle ne gérait pas non plus l'espace
+        /// insécable des séparateurs de milliers ni les négatifs comptables
+        /// entre parenthèses.
         func parseAmount(_ raw: String) -> Double? {
-            var value = raw.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: " ", with: "")
-            value = value.replacingOccurrences(of: ",", with: ".")
-            return Double(value)
+            // Convention décimale déduite de la valeur : un point APRÈS la
+            // dernière virgule signe un format anglo-saxon.
+            let anglo = raw.lastIndex(of: ".").map { dot in
+                raw.lastIndex(of: ",").map { $0 < dot } ?? true
+            } ?? false
+            return CSVParserV3.parseAmount(raw, decimal: anglo ? "." : ",")
         }
 
         csvErrors = []
@@ -540,37 +556,6 @@ final class InvestmentsViewModel {
             marketHistory = repository.fetchPriceHistory(identifier: clean)
         }
         load()
-    }
-
-    private func detectSeparator(_ line: String) -> Character {
-        let candidates: [(Character, Int)] = [
-            (";", line.components(separatedBy: ";").count),
-            (",", line.components(separatedBy: ",").count),
-            ("\t", line.components(separatedBy: "\t").count)
-        ]
-        return candidates.max(by: { $0.1 < $1.1 })?.0 ?? ";"
-    }
-
-    private func parseCSVLine(_ line: String, separator: Character) -> [String] {
-        var fields: [String] = []
-        var current = ""
-        var inQuotes = false
-        var i = line.startIndex
-
-        while i < line.endIndex {
-            let c = line[i]
-            if c == "\"" {
-                inQuotes.toggle()
-            } else if c == separator && !inQuotes {
-                fields.append(current.trimmingCharacters(in: .whitespaces))
-                current = ""
-            } else {
-                current.append(c)
-            }
-            i = line.index(after: i)
-        }
-        fields.append(current.trimmingCharacters(in: .whitespaces))
-        return fields
     }
 
     private func mapAssetType(from quoteType: String?) -> InvestmentAssetType {

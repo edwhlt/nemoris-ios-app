@@ -1,6 +1,7 @@
 import Foundation
 import PDFKit
 import Vision
+import ImageIO
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -32,40 +33,20 @@ final class InvestmentPDFParser: Sendable {
         return false
     }
 
-    // MARK: - Extraction texte
+    // MARK: - Primitives partagées (OCR, décodage image)
 
-    /// Extrait le texte brut de chaque page d'un PDF.
-    func extractPages(from url: URL) -> [(pageNumber: Int, text: String)] {
-        guard let document = PDFDocument(url: url) else {
-            print("[PDFParser] Impossible d'ouvrir le PDF: \(url.lastPathComponent)")
-            return []
-        }
-        var pages: [(Int, String)] = []
-        for i in 0..<document.pageCount {
-            guard let page = document.page(at: i),
-                  let text = page.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            else { continue }
-            pages.append((i + 1, text))
-        }
-        print("[PDFParser] \(pages.count) pages avec texte extraites sur \(document.pageCount) total")
-        return pages
-    }
-
-    // MARK: - Extraction image (OCR via Vision)
-
-    /// Extrait le texte d'une image via Vision OCR.
-    func extractTextFromImage(at url: URL) -> String? {
-        guard let data = try? Data(contentsOf: url) else {
-            print("[PDFParser] Impossible de charger l'image: \(url.lastPathComponent)")
-            return nil
-        }
-        return extractTextFromImageData(data)
-    }
-
-    /// Chantier C — OCR direct depuis des `Data` en mémoire (PhotosPicker :
-    /// `loadTransferable(type: Data.self)`, aucune écriture disque).
-    func extractTextFromImageData(_ data: Data) -> String? {
-        Self.ocrText(from: data)
+    /// Décode des octets en `CGImage`.
+    ///
+    /// ⚠️ Par ImageIO, JAMAIS par UIImage/NSImage. Sur macOS, `UIImage` est un
+    /// alias de `NSImage` et le shim `.cgImage` appelle
+    /// `NSImage.cgImage(forProposedRect:context:hints:)` — une API AppKit à
+    /// affinité thread principal. L'invoquer depuis une tâche détachée gelait
+    /// l'app entière (symptôme macOS uniquement : sur iOS, `UIImage` n'a pas
+    /// cette contrainte). `CGImageSource` est thread-safe et identique sur les
+    /// deux plateformes.
+    nonisolated static func decodeImage(from data: Data) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
     /// OCR d'une image en mémoire, appelable HORS du main actor.
@@ -73,30 +54,13 @@ final class InvestmentPDFParser: Sendable {
     /// ⚠️ Vision est SYNCHRONE et gourmand (1 à 5 s sur une capture plein
     /// écran). Appelé depuis un contexte `@MainActor`, il bloque le thread
     /// principal : l'app paraît figée et la barre de progression ne se peint
-    /// jamais — le symptôme « ça charge indéfiniment » à l'import d'une image.
-    /// Les appelants doivent l'exécuter dans un `Task.detached`.
+    /// jamais. Les appelants doivent l'exécuter dans un `Task.detached`.
     nonisolated static func ocrText(from data: Data) -> String? {
-        guard let image = UIImage(data: data), let cgImage = image.cgImage else {
+        guard let cgImage = decodeImage(from: data) else {
             print("[PDFParser] Data image illisible")
             return nil
         }
         return recognizeText(in: cgImage)
-    }
-
-    /// Chantier C — pipeline complet pour une image en mémoire (PhotosPicker).
-    /// OCR → parsing IA bi-mode (ordres OU capture de portefeuille).
-    @MainActor func parseImageData(_ data: Data) async -> [PDFPageResult] {
-        let recognized = await Task.detached(priority: .userInitiated) {
-            Self.ocrText(from: data)
-        }.value
-        guard let text = recognized,
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return [PDFPageResult(pageNumber: 1, rawText: "", orders: [],
-                                  detectedMode: .unknown,
-                                  parsingNote: PDFPageDiagnostic.noTextExtracted.userMessage,
-                                  diagnostic: .noTextExtracted, kind: .image)]
-        }
-        return [await parseUnit(text: text, unitNumber: 1, kind: .image)]
     }
 
     /// Reconnaissance de texte via Vision.
@@ -119,17 +83,6 @@ final class InvestmentPDFParser: Sendable {
         return result
     }
 
-    // MARK: - Extraction texte brut (CSV / TXT)
-
-    /// Lit un fichier texte brut (CSV, TXT, etc.)
-    func extractTextFromFile(at url: URL) -> String? {
-        if let text = try? String(contentsOf: url, encoding: .utf8), !text.isEmpty { return text }
-        if let text = try? String(contentsOf: url, encoding: .windowsCP1252), !text.isEmpty { return text }
-        if let text = try? String(contentsOf: url, encoding: .isoLatin1), !text.isEmpty { return text }
-        print("[PDFParser] Impossible de lire le fichier texte: \(url.lastPathComponent)")
-        return nil
-    }
-
     // MARK: - Parse universel (détecte le type de fichier)
 
     /// Chantier C — résultat d'un parsing de page/bloc : ordres OU positions
@@ -143,148 +96,101 @@ final class InvestmentPDFParser: Sendable {
 
     // MARK: - Détection du format par le CONTENU
 
-    /// Identifie la nature réelle d'un fichier par ses octets d'en-tête.
-    ///
-    /// ⚠️ Ne JAMAIS se fier à l'extension seule. Bug constaté en production :
-    /// une capture d'écran partagée via la share sheet arrive nommée
-    /// `<uuid>.dat` (le type abstrait `public.image` n'a pas de
-    /// `preferredFilenameExtension`), tombait dans la branche « texte brut »,
-    /// et `String(contentsOf:encoding:.isoLatin1)` — qui n'échoue JAMAIS,
-    /// n'importe quelle suite d'octets étant du Latin-1 valide — produisait
-    /// 670 000 caractères de binaire envoyés au modèle comme s'il s'agissait
-    /// d'un relevé. D'où « 1 page analysée · Rien à importer ».
-    static func detectKind(data: Data, fileExtension: String = "") -> InvestmentDocumentKind {
-        let magic = [UInt8](data.prefix(12))
-        func starts(_ bytes: [UInt8]) -> Bool {
-            guard magic.count >= bytes.count else { return false }
-            return Array(magic.prefix(bytes.count)) == bytes
-        }
-
-        if starts([0x25, 0x50, 0x44, 0x46]) { return .pdf }                     // %PDF
-        if starts([0x89, 0x50, 0x4E, 0x47]) { return .image }                   // PNG
-        if starts([0xFF, 0xD8, 0xFF])       { return .image }                   // JPEG
-        if starts([0x47, 0x49, 0x46, 0x38]) { return .image }                   // GIF8
-        if starts([0x42, 0x4D])             { return .image }                   // BM (BMP)
-        if starts([0x49, 0x49, 0x2A, 0x00]) || starts([0x4D, 0x4D, 0x00, 0x2A]) { return .image } // TIFF
-        if magic.count >= 12 {
-            let brand = String(decoding: magic[4..<12], as: UTF8.self)
-            if brand.hasPrefix("ftyp") {                                        // HEIC / HEIF / AVIF
-                return .image
-            }
-            if starts([0x52, 0x49, 0x46, 0x46]),                                 // RIFF….WEBP
-               String(decoding: magic[8..<12], as: UTF8.self) == "WEBP" { return .image }
-        }
-
-        if looksLikeText(data) { return .text }
-
-        // Dernier recours : l'extension, quand les octets ne disent rien
-        // (fichier vide, format exotique).
-        switch fileExtension.lowercased() {
-        case "pdf":                                  return .pdf
-        case "jpg", "jpeg", "png", "heic", "heif",
-             "tiff", "tif", "bmp", "webp", "gif":    return .image
-        case "csv", "txt", "tsv":                    return .text
-        default:                                     return .unknown
-        }
+    /// Délègue au sniffer partagé du pipeline. Conservé comme façade parce que
+    /// le nom est utilisé un peu partout, mais la LOGIQUE n'existe plus qu'à un
+    /// seul endroit — elle était dupliquée ici et dans les deux extensions de
+    /// partage, avec le risque que les copies divergent.
+    static func detectKind(data: Data, fileExtension: String = "") -> ImportSourceKind {
+        ImportFormatSniffer.detect(data: data, fileExtension: fileExtension)
     }
 
-    /// Extension de fichier déduite des octets, ou nil si le format n'est pas
-    /// reconnu. Utilisée par la boîte de réception (partage, Raccourcis) pour
-    /// nommer correctement le fichier déposé.
     static func sniffFileExtension(data: Data) -> String? {
-        let magic = [UInt8](data.prefix(12))
-        func starts(_ bytes: [UInt8]) -> Bool {
-            guard magic.count >= bytes.count else { return false }
-            return Array(magic.prefix(bytes.count)) == bytes
-        }
-        if starts([0x25, 0x50, 0x44, 0x46]) { return "pdf" }
-        if starts([0x89, 0x50, 0x4E, 0x47]) { return "png" }
-        if starts([0xFF, 0xD8, 0xFF])       { return "jpg" }
-        if starts([0x47, 0x49, 0x46, 0x38]) { return "gif" }
-        if starts([0x42, 0x4D])             { return "bmp" }
-        if starts([0x49, 0x49, 0x2A, 0x00]) || starts([0x4D, 0x4D, 0x00, 0x2A]) { return "tiff" }
-        if magic.count >= 12 {
-            if String(decoding: magic[4..<12], as: UTF8.self).hasPrefix("ftyp") { return "heic" }
-            if starts([0x52, 0x49, 0x46, 0x46]),
-               String(decoding: magic[8..<12], as: UTF8.self) == "WEBP" { return "webp" }
-        }
-        return looksLikeText(data) ? "txt" : nil
+        ImportFormatSniffer.fileExtension(for: data)
     }
 
-    /// Vrai si les octets ressemblent à du texte exploitable.
-    ///
-    /// Test sur un échantillon : présence d'octets NUL (jamais dans du texte)
-    /// et proportion de caractères de contrôle. Indispensable parce qu'aucun
-    /// décodage Latin-1 n'échoue jamais.
     static func looksLikeText(_ data: Data) -> Bool {
-        let sample = data.prefix(2048)
-        guard !sample.isEmpty else { return false }
-        if sample.contains(0x00) { return false }
-        let control = sample.filter { byte in
-            byte < 0x09 || (byte > 0x0D && byte < 0x20) || byte == 0x7F
-        }.count
-        return Double(control) / Double(sample.count) < 0.02
+        ImportFormatSniffer.looksLikeText(data)
     }
 
-    /// Point d'entrée universel — détecte le type RÉEL du fichier et dispatch.
-    @MainActor func parseFile(
-        from url: URL,
-        onPageParsed: @escaping (Int, Int) -> Void
-    ) async -> [PDFPageResult] {
-        let data = (try? Data(contentsOf: url)) ?? Data()
-        let kind = Self.detectKind(data: data, fileExtension: url.pathExtension)
+    /// Interprète UNE unité déjà lue, image comprise.
+    ///
+    /// ⚠️ Ce parseur n'ouvre plus de fichiers et n'orchestre plus de batch : la
+    /// lecture appartient à `ImportPipeline`. C'est ce qui répare au passage
+    /// une asymétrie réelle — l'ancienne boucle appelait `textUnits`, qui JETAIT
+    /// l'image, donc l'import d'investissements faisait systématiquement un OCR
+    /// même avec un backend multimodal disponible. La décision AXE V « l'image
+    /// passe au modèle, pas son OCR » n'avait été câblée que côté transactions,
+    /// alors que la mise en page d'une capture de courtier (colonnes, PRU
+    /// aligné à droite) porte exactement le même genre de sens.
+    @MainActor func analyze(_ unit: ImportDocumentReader.Unit,
+                            unitNumber: Int) async -> PDFPageResult {
+        func failed(_ diagnostic: ImportUnitDiagnostic, kind: ImportSourceKind) -> PDFPageResult {
+            PDFPageResult(pageNumber: unitNumber, rawText: "", orders: [],
+                          detectedMode: .unknown, parsingNote: diagnostic.userMessage,
+                          diagnostic: diagnostic, kind: kind)
+        }
 
-        switch kind {
-        case .pdf:
-            return await parseAllPages(from: url, onPageParsed: onPageParsed)
-
-        case .image:
-            onPageParsed(0, 1)
-            // OCR hors du main actor (cf. `ocrText`) : sur le thread principal
-            // il fige l'UI pendant toute la reconnaissance.
-            let text = await Task.detached(priority: .userInitiated) {
-                Self.ocrText(from: data)
-            }.value
-            onPageParsed(1, 1)
-            guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return [PDFPageResult(pageNumber: 1, rawText: "", orders: [],
-                                      detectedMode: .unknown,
-                                      parsingNote: PDFPageDiagnostic.noTextExtracted.userMessage,
-                                      diagnostic: .noTextExtracted, kind: .image)]
+        switch unit.content {
+        // ─── L'unité EST une image et un modèle sait la lire ────────────────
+        case .image(let image):
+            let raw = await AIEnrichmentBackend.completeText(
+                system: Self.systemInstructions,
+                user: "Extrais toutes les opérations et lignes de portefeuille visibles sur cette capture.",
+                image: image
+            )
+            guard let raw else {
+                return failed(.aiFailed("le modèle n'a pas pu lire l'image"), kind: .image)
             }
-            return [await parseUnit(text: text, unitNumber: 1, kind: .image)]
+            let parsed = Self.parsePageResponse(raw, pageNumber: unitNumber)
+            return PDFPageResult(
+                pageNumber: unitNumber,
+                // Le « texte lu » du diagnostic devient la réponse du modèle :
+                // sur ce chemin aucun texte n'est extrait, et c'est la seule
+                // chose qui reste exploitable pour comprendre un échec.
+                rawText: raw,
+                orders: parsed.orders, positions: parsed.positions,
+                detectedMode: parsed.mode,
+                parsingNote: parsed.isEmpty ? ImportUnitDiagnostic.nothingRecognized.userMessage : nil,
+                diagnostic: parsed.isEmpty ? .nothingRecognized : .extracted,
+                kind: .image
+            )
 
-        case .text:
-            guard let text = extractTextFromFile(at: url) else {
-                onPageParsed(1, 1)
-                return [PDFPageResult(pageNumber: 1, rawText: "", orders: [],
-                                      detectedMode: .unknown,
-                                      parsingNote: PDFPageDiagnostic.noTextExtracted.userMessage,
-                                      diagnostic: .noTextExtracted, kind: .text)]
+        // ─── Format structuré (OFX de courtier) ─────────────────────────────
+        // Les champs sont nommés par le format : ni modèle, ni ancrage ISIN.
+        case .records(let payloads):
+            let orders = payloads.compactMap { payload -> PDFExtractedOrder? in
+                guard case .investmentOrder(let order) = payload else { return nil }
+                return Self.convert(order, pageNumber: unitNumber)
             }
-            // Découpage en blocs : le modèle embarqué a une fenêtre de contexte
-            // limitée, un gros CSV envoyé d'un bloc la fait déborder.
-            let chunks = Self.splitTextIntoChunks(text, maxChars: 4000)
-            var results: [PDFPageResult] = []
-            for (index, chunk) in chunks.enumerated() {
-                results.append(await parseUnit(text: chunk, unitNumber: index + 1, kind: .text))
-                onPageParsed(index + 1, chunks.count)
-            }
-            return results
+            return PDFPageResult(
+                pageNumber: unitNumber, rawText: "", orders: orders,
+                detectedMode: orders.isEmpty ? .unknown : .orders,
+                parsingNote: orders.isEmpty ? ImportUnitDiagnostic.nothingRecognized.userMessage : nil,
+                diagnostic: orders.isEmpty ? .nothingRecognized : .extracted,
+                kind: unit.kind, usedDeterministicFallback: true
+            )
 
-        case .unknown:
-            onPageParsed(1, 1)
-            return [PDFPageResult(pageNumber: 1, rawText: "", orders: [],
-                                  detectedMode: .unknown,
-                                  parsingNote: PDFPageDiagnostic.notTextContent.userMessage,
-                                  diagnostic: .notTextContent, kind: .unknown)]
+        // ─── Table (CSV / feuille de classeur) ──────────────────────────────
+        // Passe par l'écran de mapping des colonnes, en amont.
+        case .grid:
+            return failed(.malformedStructure("table non mappée"), kind: unit.kind)
+
+        case .empty(let diagnostic):
+            return failed(diagnostic, kind: unit.kind)
+
+        case .text(let text):
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return failed(unit.kind == .unknown ? .notTextContent : .noTextExtracted,
+                              kind: unit.kind)
+            }
+            return await parseUnit(text: text, unitNumber: unitNumber, kind: unit.kind)
         }
     }
 
-    /// Analyse d'une unité (page, capture, bloc) : IA guidée → IA JSON →
-    /// extraction déterministe. Chaque étage rattrape l'échec du précédent.
+    /// Analyse d'une unité TEXTE : IA guidée → IA JSON → extraction
+    /// déterministe. Chaque étage rattrape l'échec du précédent.
     @MainActor private func parseUnit(text: String, unitNumber: Int,
-                                      kind: InvestmentDocumentKind) async -> PDFPageResult {
+                                      kind: ImportSourceKind) async -> PDFPageResult {
         let (parsed, diagnostic) = await parsePage(text: text, pageNumber: unitNumber)
 
         // Extraction déterministe menée SYSTÉMATIQUEMENT, pas seulement en
@@ -315,7 +221,7 @@ final class InvestmentPDFParser: Sendable {
             )
         }
 
-        let finalDiagnostic: PDFPageDiagnostic = diagnostic.isFailure ? diagnostic : .nothingRecognized
+        let finalDiagnostic: ImportUnitDiagnostic = diagnostic.isFailure ? diagnostic : .nothingRecognized
         return PDFPageResult(
             pageNumber: unitNumber, rawText: text,
             orders: [], positions: [],
@@ -394,37 +300,11 @@ final class InvestmentPDFParser: Sendable {
 
     // MARK: - Parsing IA page par page
 
-    /// Parse toutes les pages d'un PDF via l'IA. Retourne les résultats page par page.
-    /// `onPageParsed` est appelé après chaque page pour le feedback progressif.
-    @MainActor func parseAllPages(
-        from url: URL,
-        onPageParsed: @escaping (Int, Int) -> Void
-    ) async -> [PDFPageResult] {
-        let pages = extractPages(from: url)
-        guard !pages.isEmpty else { return [] }
-
-        var results: [PDFPageResult] = []
-        for (index, (pageNumber, text)) in pages.enumerated() {
-            var result = await parseUnit(text: text, unitNumber: pageNumber, kind: .pdf)
-            // `parseUnit` numérote l'unité ; ici le numéro de page du PDF fait foi.
-            result = PDFPageResult(
-                pageNumber: pageNumber, rawText: result.rawText,
-                orders: result.orders, positions: result.positions,
-                detectedMode: result.detectedMode, parsingNote: result.parsingNote,
-                diagnostic: result.diagnostic, kind: .pdf,
-                usedDeterministicFallback: result.usedDeterministicFallback
-            )
-            results.append(result)
-            onPageParsed(index + 1, pages.count)
-        }
-        return results
-    }
-
     /// Parse une seule page via Foundation Models. Retourne ordres OU positions
     /// (mode snapshot) selon la classification faite par l'IA, PLUS un
     /// diagnostic — sans lui, un échec du modèle est indiscernable d'un
     /// document réellement vide côté UI.
-    @MainActor private func parsePage(text: String, pageNumber: Int) async -> (PageParse, PDFPageDiagnostic) {
+    @MainActor private func parsePage(text: String, pageNumber: Int) async -> (PageParse, ImportUnitDiagnostic) {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
             return await parsePageWithAI(text: text, pageNumber: pageNumber)
@@ -436,7 +316,7 @@ final class InvestmentPDFParser: Sendable {
 
     #if canImport(FoundationModels)
     @available(iOS 26.0, macOS 26.0, *)
-    private func parsePageWithAI(text: String, pageNumber: Int) async -> (PageParse, PDFPageDiagnostic) {
+    private func parsePageWithAI(text: String, pageNumber: Int) async -> (PageParse, ImportUnitDiagnostic) {
         guard SystemLanguageModel.default.isAvailable else { return (PageParse(), .aiUnavailable) }
 
         // Le texte envoyé est borné : la fenêtre de contexte du modèle embarqué
@@ -868,11 +748,6 @@ final class InvestmentPDFParser: Sendable {
         return PageParse(orders: orders, positions: positions, mode: mode)
     }
 
-    /// Compat : ancienne signature (ordres seuls) — conservée si un appelant l'utilise.
-    static func parseOrdersFromJSON(_ raw: String, pageNumber: Int) -> [PDFExtractedOrder] {
-        parsePageResponse(raw, pageNumber: pageNumber).orders
-    }
-
     /// Normalise les types d'ordre retournés par l'IA vers BUY/SELL/DIV.
     /// L'IA peut retourner des variantes FR, EN, ou longues.
     static func normalizeOrderType(_ raw: String) -> String? {
@@ -918,21 +793,26 @@ final class InvestmentPDFParser: Sendable {
 
     // MARK: - Agrégation par position
 
-    /// Regroupe les ordres sélectionnés par ISIN (prioritaire) ou ticker.
+    /// Clé de regroupement commune : ISIN (prioritaire), sinon ticker, sinon nom.
+    /// Partagée par les deux agrégations ET par l'UI, qui doit pouvoir cocher /
+    /// décocher TOUS les éléments bruts d'un même groupe affiché.
+    static func groupKey(isin: String, ticker: String, assetName: String) -> String {
+        if !isin.isEmpty { return isin.uppercased() }
+        if !ticker.isEmpty { return ticker.uppercased() }
+        return assetName.uppercased()
+    }
+
+    /// Regroupe les ordres par ISIN (prioritaire) ou ticker.
+    ///
+    /// ⚠️ NE FILTRE PAS sur `isSelected` : c'est à l'appelant de le faire avant
+    /// l'import. Filtrer ici faisait DISPARAÎTRE une ligne de l'aperçu dès
+    /// qu'on la décochait (l'aperçu est construit depuis cette agrégation) —
+    /// impossible de la re-cocher ensuite.
     static func aggregateByPosition(_ orders: [PDFExtractedOrder]) -> [PDFPositionGroup] {
-        let selected = orders.filter { $0.isSelected }
         var groups: [String: PDFPositionGroup] = [:]
 
-        for order in selected {
-            // Clé de regroupement : ISIN si disponible, sinon ticker
-            let key: String
-            if !order.isin.isEmpty {
-                key = order.isin.uppercased()
-            } else if !order.ticker.isEmpty {
-                key = order.ticker.uppercased()
-            } else {
-                key = order.assetName.uppercased()
-            }
+        for order in orders {
+            let key = groupKey(isin: order.isin, ticker: order.ticker, assetName: order.assetName)
 
             if var existing = groups[key] {
                 existing.orders.append(order)
@@ -955,16 +835,15 @@ final class InvestmentPDFParser: Sendable {
     /// par ISIN > ticker > nom. Additionne les quantités si la même ligne apparaît
     /// sur plusieurs chunks/pages ; garde le PRU et la valeur de la 1re occurrence
     /// (une capture n'affiche qu'une valeur par ligne).
+    ///
+    /// ⚠️ NE FILTRE PAS sur `isSelected` (même raison que `aggregateByPosition`).
     static func aggregatePositions(_ positions: [PDFExtractedPosition]) -> [PDFExtractedPosition] {
-        let selected = positions.filter { $0.isSelected }
         var groups: [String: PDFExtractedPosition] = [:]
         var order: [String] = []
 
-        for position in selected {
-            let key: String
-            if !position.isin.isEmpty { key = position.isin.uppercased() }
-            else if !position.ticker.isEmpty { key = position.ticker.uppercased() }
-            else { key = position.assetName.uppercased() }
+        for position in positions {
+            let key = groupKey(isin: position.isin, ticker: position.ticker,
+                               assetName: position.assetName)
 
             if var existing = groups[key] {
                 existing.quantity += position.quantity

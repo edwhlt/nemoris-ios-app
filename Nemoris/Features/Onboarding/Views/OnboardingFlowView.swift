@@ -399,7 +399,7 @@ struct OnboardingFlowView: View {
 
             // Tips éditoriaux pour orienter sans imposer un parcours rigide.
             VStack(spacing: AppTheme.Spacing.sm) {
-                tipRow(icon: "square.and.arrow.down", text: "Dashboard → menu → Importer un CSV")
+                tipRow(icon: "square.and.arrow.down", text: "Dashboard → menu → Importation")
                 tipRow(icon: "lock.shield.fill", text: "Réglages → Sécurité pour activer Face ID")
                 tipRow(icon: "icloud.and.arrow.up.fill", text: "Réglages → Sauvegarde locale & iCloud")
             }

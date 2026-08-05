@@ -1,4 +1,7 @@
 import Foundation
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 
 /// Backend IA choisi par l'utilisateur pour cet appareil. Réglage 100% local
 /// (`UserDefaults.standard`) — jamais synchronisé par CloudKit (cf. `SyncSchema`)
@@ -90,6 +93,55 @@ enum AIEnrichmentBackend {
     /// qu'un utilisateur en `.localServer` a l'IA partout où elle est proposée — le
     /// module d'import de documents parlait à Foundation Models sans intermédiaire,
     /// donc ne voyait aucun serveur local configuré.
+    /// Le backend actif sait-il lire une IMAGE ?
+    ///
+    /// Apple : `Attachment` image est `@available(iOS 27.0, macOS 27.0)`.
+    /// Serveur local : on tente — c'est le modèle chargé qui décide (les
+    /// multimodaux suivent le protocole OpenAI à parties typées). Un modèle
+    /// purement textuel répondra une erreur, et l'appelant retombe alors sur
+    /// l'OCR.
+    static var supportsImageInput: Bool {
+        switch AIBackendPreference.current {
+        case .automatic:   return EnrichmentLLMService.shared.supportsImageInput
+        case .localServer: return LocalLLMService.hasConfiguration
+        case .off:         return false
+        }
+    }
+
+    /// Complétion à partir d'une IMAGE — le modèle lit la capture lui-même,
+    /// mise en page comprise. `nil` si aucun backend ne sait le faire ou en cas
+    /// d'échec : l'appelant doit toujours avoir un chemin sans image.
+    static func completeText(system: String, user: String, image: CGImage) async -> String? {
+        switch AIBackendPreference.current {
+        case .automatic:
+            return await EnrichmentLLMService.shared.complete(system: system, user: user, image: image)
+        case .localServer:
+            guard LocalLLMService.hasConfiguration,
+                  let dataURL = Self.pngDataURL(from: image) else { return nil }
+            do {
+                return try await LocalLLMService.shared.complete(systemPrompt: system,
+                                                                 userPrompt: user,
+                                                                 imageDataURL: dataURL)
+            } catch {
+                print("[AIEnrichmentBackend] completeText(image) error: \(error)")
+                return nil
+            }
+        case .off:
+            return nil
+        }
+    }
+
+    /// Encodage PNG en data-URL, format attendu par le champ `image_url` du
+    /// protocole OpenAI.
+    private static func pngDataURL(from image: CGImage) -> String? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+                data, "public.png" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return "data:image/png;base64," + (data as Data).base64EncodedString()
+    }
+
     static func completeText(system: String, user: String) async -> String? {
         switch AIBackendPreference.current {
         case .automatic:

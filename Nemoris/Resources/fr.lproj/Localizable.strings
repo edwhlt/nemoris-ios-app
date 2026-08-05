@@ -9,7 +9,7 @@
 /* MARK: - Navigation titles */
 "Données" = "Données";
 "Console SQL" = "Console SQL";
-"Import CSV" = "Import CSV";
+"Importation" = "Importation";
 "Choisir un MDP" = "Choisir un MDP";
 "Analyse filtrée" = "Analyse filtrée";
 "Filtres" = "Filtres";

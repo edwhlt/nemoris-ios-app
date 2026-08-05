@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
@@ -68,6 +69,46 @@ final class EnrichmentLLMService {
                 return try await session.respond(to: user).content
             } catch {
                 print("[EnrichmentLLMService] complete error: \(error.localizedDescription)")
+                return nil
+            }
+        }
+        #endif
+        return nil
+    }
+
+    /// Vrai si le modèle Apple embarqué accepte une IMAGE en entrée.
+    ///
+    /// ⚠️ `FoundationModels.Attachment` / `ImageAttachmentContent` sont
+    /// `@available(iOS 27.0, macOS 27.0)` — un cran APRÈS le reste du framework
+    /// (iOS 26). Vérifié dans le SDK, pas déduit.
+    var supportsImageInput: Bool {
+        #if canImport(FoundationModels)
+        if #available(iOS 27.0, macOS 27.0, *) {
+            return SystemLanguageModel.default.isAvailable
+        }
+        #endif
+        return false
+    }
+
+    /// Complétion à partir d'une IMAGE : le modèle lit la capture lui-même.
+    ///
+    /// C'est la voie de loin la plus robuste — la mise en page (colonnes,
+    /// regroupements par date, sous-titres de catégorie) porte du sens que le
+    /// texte OCR aplati détruit, et qu'aucune heuristique d'ordre de lignes ne
+    /// reconstitue de façon générale.
+    func complete(system: String, user: String, image: CGImage) async -> String? {
+        #if canImport(FoundationModels)
+        if #available(iOS 27.0, macOS 27.0, *) {
+            guard SystemLanguageModel.default.isAvailable else { return nil }
+            let session = LanguageModelSession(instructions: system)
+            do {
+                let response = try await session.respond {
+                    user
+                    Attachment(image)
+                }
+                return response.content
+            } catch {
+                print("[EnrichmentLLMService] complete(image) error: \(error.localizedDescription)")
                 return nil
             }
         }

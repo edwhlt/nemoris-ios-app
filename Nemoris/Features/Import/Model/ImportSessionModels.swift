@@ -81,7 +81,16 @@ struct ImportSessionRow: Identifiable, Codable, Hashable {
     }
 }
 
-/// Représentation lourde d'une session : toutes les rows. Pour l'édition.
+/// Représentation lourde d'une session : tout son contenu. Pour l'édition.
+///
+/// ⚠️ Le contenu dépend de la DESTINATION (colonne `destination`, migration v45) :
+///   • `.transactions` → `rows`, qui portent l'état de résolution de chaque
+///     ligne (tier assigné, action utilisateur) ;
+///   • `.investments`  → `batch`, la sortie brute du pipeline.
+///
+/// Les deux ne fusionnent pas : une ligne de transaction traîne des décisions
+/// utilisateur qu'un `ImportElement` n'a pas vocation à porter — c'est la
+/// frontière entre l'ingestion (refondue) et la résolution (inchangée).
 struct ImportSession: Identifiable, Codable {
     let id: UUID
     let createdAt: Date
@@ -89,9 +98,29 @@ struct ImportSession: Identifiable, Codable {
     var status: ImportSessionStatus
     var sourceFile: String?
     var accountId: Int?
+    var destination: ImportDestination
     var rows: [ImportSessionRow]
+    /// Sortie du pipeline, pour une session d'investissements.
+    var batch: ImportBatchResult?
 
-    var totalRows: Int { rows.count }
+    init(id: UUID, createdAt: Date, updatedAt: Date, status: ImportSessionStatus,
+         sourceFile: String?, accountId: Int?,
+         destination: ImportDestination = .transactions,
+         rows: [ImportSessionRow] = [], batch: ImportBatchResult? = nil) {
+        self.id = id
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.status = status
+        self.sourceFile = sourceFile
+        self.accountId = accountId
+        self.destination = destination
+        self.rows = rows
+        self.batch = batch
+    }
+
+    var totalRows: Int {
+        destination == .transactions ? rows.count : (batch?.elements.count ?? 0)
+    }
     var pendingRows: Int { rows.filter { $0.userAction == .pending }.count }
     var readyRows: Int { rows.filter { [.confirmed, .manuallySet].contains($0.userAction) }.count }
     var skippedRows: Int { rows.filter { $0.userAction == .skipped }.count }
@@ -108,6 +137,8 @@ struct ImportSessionSummary: Identifiable, Hashable {
     let accountId: Int?
     let totalRows: Int
     let pendingRows: Int
+    /// Où va cette session — c'est ce qui décide quel écran de revue rouvrir.
+    var destination: ImportDestination = .transactions
 }
 
 // MARK: - ColumnMapping

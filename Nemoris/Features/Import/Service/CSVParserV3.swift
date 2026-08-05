@@ -4,12 +4,11 @@ import Foundation
 /// Autodétection séparateur + lecture des cellules en respectant les guillemets.
 enum CSVParserV3 {
 
-    struct Parsed {
-        var headers: [String]            // 1ère ligne si détectée comme header, sinon ["col0", "col1", ...]
-        var hasExplicitHeader: Bool
-        var rows: [[String]]             // sans le header
-        var separator: String
-    }
+    /// Le CSV n'a plus son propre modèle de sortie : il produit la table
+    /// COMMUNE aux sources tabulaires (`ImportGrid`), la même que le lecteur de
+    /// classeurs XLSX. C'est ce qui permet aux deux formats de partager
+    /// l'écran de mapping des colonnes au lieu d'en avoir chacun un.
+    typealias Parsed = ImportGrid
 
     static let separatorCandidates: [Character] = [";", "\t", ","]
 
@@ -20,14 +19,19 @@ enum CSVParserV3 {
 
     // MARK: - High level
 
-    static func parse(content: String) -> Parsed? {
+    /// `forcedSeparator` : imposé par l'utilisateur depuis l'écran de mapping.
+    /// L'autodétection se trompe sur les fichiers où un autre séparateur est
+    /// plus fréquent dans l'en-tête (libellés contenant des virgules, colonne
+    /// unique…), et le mapping devient alors inexploitable — il faut donc
+    /// pouvoir la corriger à la main.
+    static func parse(content: String, forcedSeparator: String? = nil) -> Parsed? {
         let lines = content
             .split(whereSeparator: { $0.isNewline })
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard let first = lines.first else { return nil }
 
-        let separator = detectSeparator(in: first)
+        let separator = forcedSeparator.flatMap(\.first) ?? detectSeparator(in: first)
         let firstCols = parseLine(first, separator: separator)
         let isHeader = looksLikeHeader(firstCols)
 

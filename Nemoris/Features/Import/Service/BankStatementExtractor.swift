@@ -32,7 +32,7 @@ import Foundation
 /// Une opération bancaire reconnue sans IA. Volontairement distincte
 /// d'`ImportSessionRow` (qui porte l'état de résolution et d'UI) : ce moteur
 /// reste pur et ne connaît ni la base ni le moteur d'identification.
-struct ExtractedBankTransaction: Equatable {
+struct ExtractedBankTransaction: Equatable, Codable, Hashable, Sendable {
     /// Date au format yyyy-MM-dd (chaîne : le moteur ne dépend pas de Calendar).
     var date: String
     /// Montant SIGNÉ, convention de l'app : négatif = dépense.
@@ -56,7 +56,13 @@ enum BankStatementExtractor {
     /// Extrait toutes les opérations reconnaissables d'un texte brut.
     /// Renvoie un tableau vide plutôt que d'inventer : un document sans date
     /// ni montant ne produit rien, jamais une ligne « au cas où ».
-    static func extractTransactions(from text: String) -> [ExtractedBankTransaction] {
+    ///
+    /// `referenceDate` sert à résoudre les dates SANS année (« 2 juil. »,
+    /// « Hier »), omniprésentes dans les captures d'applis bancaires. Paramètre
+    /// explicite plutôt que `Date()` en dur : le moteur reste déterministe et
+    /// testable.
+    static func extractTransactions(from text: String,
+                                    referenceDate: Date = Date()) -> [ExtractedBankTransaction] {
         let lines = text
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -70,10 +76,29 @@ enum BankStatementExtractor {
 
         for index in infos.indices {
             let info = infos[index]
-            guard let date = info.date, !info.isSummary else { continue }
+            guard let date = resolvedDate(info, reference: referenceDate), !info.isSummary else { continue }
             // Une ligne déjà absorbée comme montant ou continuation d'un bloc
             // précédent n'ouvre pas un nouveau bloc.
             guard index > lastConsumed else { continue }
+
+            // ─── Mise en page à EN-TÊTES DE DATE ────────────────────────────
+            // Les applis bancaires regroupent la journée sous un seul en-tête,
+            // puis enchaînent les opérations : « 22 juillet » / marchand /
+            // catégorie / montant / marchand / catégorie / montant…
+            // Le modèle « une date = une opération » n'en retenait donc qu'une
+            // par journée, et prenait pour libellé la ligne de texte la plus
+            // proche — c'est-à-dire la CATÉGORIE de l'opération précédente.
+            if info.isDateOnlyLine, info.amounts.isEmpty {
+                let consumedBefore = lastConsumed
+                let emitted = collectUnderDateHeader(infos: infos, headerIndex: index,
+                                                     date: date, lastConsumed: &lastConsumed)
+                if !emitted.isEmpty {
+                    results.append(contentsOf: emitted)
+                    continue
+                }
+                // Rien sous l'en-tête : on rejoue le chemin classique.
+                lastConsumed = consumedBefore
+            }
 
             var amounts = info.amounts
             var amountLine = index
@@ -87,7 +112,7 @@ enum BankStatementExtractor {
                 var cursor = index + 1
                 while cursor < infos.count, cursor <= index + 3 {
                     let next = infos[cursor]
-                    if next.date != nil { break }
+                    if next.hasDate { break }
                     if !next.amounts.isEmpty, !next.isSummary {
                         amounts = next.amounts
                         amountLine = cursor
@@ -108,7 +133,10 @@ enum BankStatementExtractor {
             // dernier ferait importer le solde du compte à la place.
             if amounts.count > 1 { confidence -= 0.15 }
 
-            var label = info.residual
+            // Une ligne de date pure n'a pas de libellé, même si le mot de la
+            // date y survit en résidu (« Hier », « 2 juil. ») — sinon le
+            // libellé de l'opération devient « Hier ».
+            var label = info.isDateOnlyLine ? "" : info.residual
             var labelFromBackward = false
             if fromColumnLayout {
                 // La ligne d'ancrage ne portait qu'une date : le libellé est
@@ -126,7 +154,7 @@ enum BankStatementExtractor {
                 var appended = 0
                 while cursor < infos.count, appended < 2 {
                     let next = infos[cursor]
-                    guard next.date == nil, next.amounts.isEmpty,
+                    guard !next.hasDate, next.amounts.isEmpty,
                           !next.isSummary, !next.residual.isEmpty else { break }
                     label = label.isEmpty ? next.residual : label + " " + next.residual
                     amountLine = cursor
@@ -164,6 +192,83 @@ enum BankStatementExtractor {
         return results
     }
 
+    /// Extrait TOUTES les opérations regroupées sous un en-tête de date, jusqu'à
+    /// l'en-tête suivant.
+    ///
+    /// ⚠️ Le libellé d'un bloc est sa PREMIÈRE ligne de texte (le marchand) : les
+    /// suivantes sont la catégorie ou un sous-titre de l'appli (« Grande
+    /// surface », « Café / jeux / tabac »). Prendre la plus proche du montant
+    /// donnait systématiquement la catégorie à la place du marchand.
+    private static func collectUnderDateHeader(infos: [LineInfo],
+                                               headerIndex: Int,
+                                               date: String,
+                                               lastConsumed: inout Int) -> [ExtractedBankTransaction] {
+        var results: [ExtractedBankTransaction] = []
+        var pendingLabel = ""
+        var cursor = headerIndex + 1
+        // ⚠️ On ne consomme QUE jusqu'au dernier montant émis. Les lignes de
+        // texte qui suivent appartiennent déjà au bloc suivant : les marquer
+        // consommées privait celui-ci de son libellé (fenêtre arrière bornée
+        // par `lastConsumed`) dans la mise en page où chaque opération porte sa
+        // propre date, et l'opération était alors perdue.
+        var consumedUpTo = headerIndex
+
+        while cursor < infos.count {
+            let line = infos[cursor]
+            // Une autre date ouvre la journée suivante.
+            if line.hasDate { break }
+            if line.isSummary { cursor += 1; continue }
+
+            if let token = line.amounts.first {
+                var label = pendingLabel
+                var fromBackward = false
+                if label.isEmpty {
+                    // Mise en page inverse (marchand AU-DESSUS de la date) :
+                    // c'est le cas des applis qui datent chaque opération.
+                    label = backwardLabel(infos: infos, before: headerIndex, notBefore: lastConsumed)
+                    fromBackward = !label.isEmpty
+                }
+                if let tx = makeTransaction(date: date, token: token,
+                                            multipleAmounts: line.amounts.count > 1,
+                                            label: label, labelFromBackward: fromBackward) {
+                    results.append(tx)
+                    consumedUpTo = cursor
+                }
+                pendingLabel = ""
+            } else if pendingLabel.isEmpty, !line.residual.isEmpty {
+                pendingLabel = line.residual
+            }
+            cursor += 1
+        }
+        if !results.isEmpty { lastConsumed = consumedUpTo }
+        return results
+    }
+
+    /// Fabrique commune aux deux mises en page (en-tête de date et tabulaire).
+    private static func makeTransaction(date: String,
+                                        token: AmountToken,
+                                        multipleAmounts: Bool,
+                                        label: String,
+                                        labelFromBackward: Bool) -> ExtractedBankTransaction? {
+        let cleaned = cleanLabel(label)
+        // Pas de libellé = ligne de synthèse déguisée : on préfère ne rien
+        // importer plutôt qu'une opération anonyme.
+        guard !cleaned.isEmpty else { return nil }
+        var confidence = 0.9
+        if multipleAmounts { confidence -= 0.15 }
+        if !token.isSignExplicit { confidence -= 0.15 }
+        if labelFromBackward { confidence -= 0.05 }
+        return ExtractedBankTransaction(
+            date: date,
+            amount: resolveSign(magnitude: token.value,
+                                explicit: token.isSignExplicit, label: cleaned),
+            label: cleaned,
+            paymentTypeHint: detectPaymentType(in: cleaned),
+            isSignExplicit: token.isSignExplicit,
+            confidence: max(0.3, confidence)
+        )
+    }
+
     // MARK: - Libellé
 
     /// Libellé cherché AU-DESSUS de l'ancre, sans jamais franchir le bloc
@@ -175,7 +280,7 @@ enum BankStatementExtractor {
         guard lower < index else { return "" }
         for cursor in stride(from: index - 1, through: lower, by: -1) {
             let candidate = infos[cursor]
-            guard candidate.date == nil, candidate.amounts.isEmpty, !candidate.isSummary else { continue }
+            guard !candidate.hasDate, candidate.amounts.isEmpty, !candidate.isSummary else { continue }
             if !candidate.residual.isEmpty { return candidate.residual }
         }
         return ""
@@ -236,16 +341,24 @@ enum BankStatementExtractor {
     // MARK: - Analyse d'une ligne
 
     private struct LineInfo {
-        let date: String?
+        let dateHit: DateHit?
         let amounts: [AmountToken]
         /// Ligne débarrassée de la date d'ancrage et des montants : la base
         /// du libellé.
         let residual: String
         let isSummary: Bool
+        /// La ligne ne porte QUE la date (aux caractères de ponctuation près).
+        /// C'est la condition pour accepter une date sans année comme ancre :
+        /// dans « CARTE 01/07 CARREFOUR », « 01/07 » est la date de l'opération
+        /// carte, pas celle du relevé — la vraie date est ailleurs.
+        let isDateOnlyLine: Bool
+
+        var hasDate: Bool { dateHit != nil }
 
         init(raw: String) {
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
-            self.date = InvestmentStatementExtractor.firstDate(in: trimmed)
+            let hit = BankStatementExtractor.detectDate(in: trimmed)
+            self.dateHit = hit
             // ⚠️ Les montants sont cherchés sur un texte SANS dates. Sinon
             // « 02.07.2026 » est lu comme le montant 2,07 : le motif de montant
             // accepte le point décimal, et une date à points en est une
@@ -261,7 +374,223 @@ enum BankStatementExtractor {
             }
             self.residual = BankStatementExtractor.cleanLabel(residual)
             self.isSummary = BankStatementExtractor.isSummaryLine(trimmed)
+            self.isDateOnlyLine = hit != nil && BankStatementExtractor.isDateOnly(trimmed)
         }
+    }
+
+    // MARK: - Dates : formes reconnues
+
+    /// Une date repérée sur une ligne.
+    enum DateHit {
+        /// Date complète (jour, mois ET année) : ancrable n'importe où dans la
+        /// ligne, y compris au milieu d'un libellé tabulaire.
+        case complete(String)             // yyyy-MM-dd
+        /// Jour + mois sans année (« 2 juil. », « 02/07 ») : l'année est
+        /// déduite, et la ligne doit être une ligne de date pure.
+        case dayMonth(day: Int, month: Int)
+        /// « Aujourd'hui » / « Hier » — omniprésents en tête de liste dans les
+        /// applis bancaires.
+        case relative(daysAgo: Int)
+    }
+
+    /// Résout la date d'une ligne en `yyyy-MM-dd`, ou `nil` si la ligne n'en
+    /// porte pas d'exploitable.
+    private static func resolvedDate(_ info: LineInfo, reference: Date) -> String? {
+        switch info.dateHit {
+        case .complete(let iso):
+            return iso
+        case .dayMonth(let day, let month):
+            guard info.isDateOnlyLine else { return nil }
+            return isoDate(day: day, month: month, reference: reference)
+        case .relative(let daysAgo):
+            guard info.isDateOnlyLine else { return nil }
+            guard let shifted = gregorian.date(byAdding: .day, value: -daysAgo, to: reference) else { return nil }
+            let c = gregorian.dateComponents([.year, .month, .day], from: shifted)
+            guard let y = c.year, let m = c.month, let d = c.day else { return nil }
+            return String(format: "%04d-%02d-%02d", y, m, d)
+        case nil:
+            return nil
+        }
+    }
+
+    private static let gregorian: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        return cal
+    }()
+
+    /// Année déduite pour un jour+mois nu : celle de la référence, sauf si la
+    /// date obtenue serait DANS LE FUTUR — un relevé est toujours historique,
+    /// donc « 28 décembre » lu un 3 janvier désigne l'année précédente.
+    private static func isoDate(day: Int, month: Int, reference: Date) -> String? {
+        let c = gregorian.dateComponents([.year, .month, .day], from: reference)
+        guard let refYear = c.year, let refMonth = c.month, let refDay = c.day else { return nil }
+        let year = (month, day) > (refMonth, refDay) ? refYear - 1 : refYear
+        return String(format: "%04d-%02d-%02d", year, month, day)
+    }
+
+    /// Détecte la date d'une ligne, de la forme la plus fiable à la moins
+    /// contrainte.
+    static func detectDate(in line: String) -> DateHit? {
+        // 1) Date numérique complète (dd/MM/yyyy, yyyy-MM-dd…) — la plus sûre.
+        if let iso = InvestmentStatementExtractor.firstDate(in: line) {
+            return .complete(iso)
+        }
+        // 2) Date en toutes lettres, avec ou sans année (« 12 juin 2026 »,
+        //    « 2 juil. », « Jul 2 »).
+        if let named = monthNameDate(in: line) {
+            if let year = named.year {
+                return .complete(String(format: "%04d-%02d-%02d", year, named.month, named.day))
+            }
+            return .dayMonth(day: named.day, month: named.month)
+        }
+        // 3) Mots-clés relatifs des applis bancaires.
+        //
+        // ⚠️ Comparaison par MOT ENTIER, jamais par sous-chaîne : « hier » est
+        // contenu dans « fichier », « cahier », « trésorier »…
+        let words = Set(tokens(of: line))
+        if !words.isDisjoint(with: ["aujourd", "today"]) { return .relative(daysAgo: 0) }
+        if !words.isDisjoint(with: ["hier", "yesterday"]) { return .relative(daysAgo: 1) }
+        // 4) Jour/mois numérique sans année (« 02/07 »).
+        if let dm = numericDayMonth(in: line) {
+            return .dayMonth(day: dm.day, month: dm.month)
+        }
+        return nil
+    }
+
+    /// Noms de mois FR et EN, formes longues et abrégées. Les clés sont
+    /// « pliées » (sans accent, minuscules) : un OCR rend souvent « aout » ou
+    /// « fevrier ».
+    private static let monthsByName: [String: Int] = {
+        let table: [(Int, [String])] = [
+            (1,  ["janvier", "janv", "jan", "january"]),
+            (2,  ["fevrier", "fevr", "fev", "february", "feb"]),
+            (3,  ["mars", "march", "mar"]),
+            (4,  ["avril", "avr", "april", "apr"]),
+            (5,  ["mai", "may"]),
+            (6,  ["juin", "june", "jun"]),
+            (7,  ["juillet", "juil", "july", "jul"]),
+            (8,  ["aout", "august", "aug"]),
+            (9,  ["septembre", "sept", "sep", "september"]),
+            (10, ["octobre", "oct", "october"]),
+            (11, ["novembre", "nov", "november"]),
+            (12, ["decembre", "dec", "december"])
+        ]
+        var out: [String: Int] = [:]
+        for (number, names) in table {
+            for name in names { out[name] = number }
+        }
+        return out
+    }()
+
+    /// « 2 juil. », « 12 juin 2026 », « Jul 2 », « July 2, 2026 ».
+    static func monthNameDate(in line: String) -> (day: Int, month: Int, year: Int?)? {
+        let folded = line
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
+        // Les mots sont isolés sur la ponctuation ET les espaces : « 2 juil. »
+        // comme « July 2, 2026 ».
+        let words = folded.components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        guard words.count >= 2 else { return nil }
+
+        for (index, word) in words.enumerated() {
+            guard let month = monthsByName[word] else { continue }
+            // Jour AVANT (FR : « 2 juil. ») ou APRÈS (EN : « Jul 2 »).
+            var day: Int?
+            if index > 0, let d = Int(words[index - 1]), (1...31).contains(d) { day = d }
+            if day == nil, index + 1 < words.count,
+               let d = Int(words[index + 1]), (1...31).contains(d) { day = d }
+            guard let day else { continue }
+
+            // Année : un nombre à 4 chiffres plausible n'importe où sur la ligne.
+            let year = words.compactMap(Int.init).first { (1900...2200).contains($0) }
+            return (day, month, year)
+        }
+        return nil
+    }
+
+    /// « 02/07 » ou « 02-07 » — jour/mois nu, convention FR (jour d'abord).
+    private static let numericDayMonthRegex = try? NSRegularExpression(
+        pattern: "\\b(\\d{1,2})[/-](\\d{1,2})\\b")
+
+    static func numericDayMonth(in line: String) -> (day: Int, month: Int)? {
+        guard let regex = numericDayMonthRegex else { return nil }
+        let range = NSRange(line.startIndex..., in: line)
+        guard let match = regex.firstMatch(in: line, range: range),
+              let dayRange = Range(match.range(at: 1), in: line),
+              let monthRange = Range(match.range(at: 2), in: line),
+              let day = Int(line[dayRange]), let month = Int(line[monthRange]),
+              (1...31).contains(day), (1...12).contains(month)
+        else { return nil }
+        return (day, month)
+    }
+
+    /// Normalise une date PRODUITE PAR UN MODÈLE en `yyyy-MM-dd`.
+    ///
+    /// ⚠️ Un modèle à qui l'on demande `yyyy-MM-dd` ne l'honore pas toujours :
+    /// sur une capture d'appli bancaire, l'année n'est écrite NULLE PART, et il
+    /// rend alors des formes comme « 22-07-00 » ou « 22/07 ». Rejeter ces
+    /// lignes revenait à jeter TOUTE l'extraction alors que le jour et le mois
+    /// étaient corrects — symptôme : « aucune opération reconnue » avec un JSON
+    /// pourtant juste sous les yeux.
+    ///
+    /// Convention FR (comme le reste du moteur) : jour d'abord quand l'ordre
+    /// est ambigu. L'année manquante ou implausible est déduite de
+    /// `referenceDate`, avec la même règle qu'ailleurs — une date qui tomberait
+    /// dans le futur appartient à l'année précédente.
+    static func normalizeDate(_ raw: String, referenceDate: Date = Date()) -> String? {
+        let parts = raw.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+        guard parts.count >= 2 else { return nil }
+
+        // Année explicite : le composant à 4 chiffres, où qu'il soit.
+        let explicitYear = parts.first { (1900...2200).contains($0) }
+        let rest = parts.filter { !(1900...2200).contains($0) }
+        guard rest.count >= 2 else { return nil }
+
+        let day: Int, month: Int
+        if rest[0] > 12, rest[1] <= 12 {
+            day = rest[0]; month = rest[1]          // 22-07 → jour-mois
+        } else if rest[0] <= 12, rest[1] > 12 {
+            day = rest[1]; month = rest[0]          // 07-22 → mois-jour (anglo)
+        } else {
+            day = rest[0]; month = rest[1]          // ambigu → convention FR
+        }
+        guard (1...31).contains(day), (1...12).contains(month) else { return nil }
+
+        if let year = explicitYear {
+            return String(format: "%04d-%02d-%02d", year, month, day)
+        }
+        return isoDate(day: day, month: month, reference: referenceDate)
+    }
+
+    /// Mots d'une ligne, sans accents ni casse, ponctuation retirée.
+    static func tokens(of line: String) -> [String] {
+        line.folding(options: [.diacriticInsensitive, .caseInsensitive],
+                     locale: Locale(identifier: "fr_FR"))
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+    }
+
+    private static let relativeKeywords: Set<String> = [
+        "aujourd", "hui", "hier", "today", "yesterday"
+    ]
+
+    /// Vrai si la ligne ne porte QU'UNE date, aux mots de date et à la
+    /// ponctuation près : « 2 juil. », « Hier », « 02/07 », « 12 juin 2026 ».
+    ///
+    /// C'est la condition qui autorise une date SANS année à servir d'ancre.
+    /// Sans elle, le « 01/07 » de « CARTE 01/07 CARREFOUR » (la date de
+    /// l'opération carte, pas celle du relevé) ouvrirait une fausse opération.
+    static func isDateOnly(_ line: String) -> Bool {
+        // Les dates numériques complètes ont déjà été retirées par `strippingDates`.
+        let remaining = tokens(of: strippingDates(line)).filter { token in
+            if monthsByName[token] != nil { return false }
+            if relativeKeywords.contains(token) { return false }
+            // Nombres appartenant à une date : le jour, ou l'année.
+            if let n = Int(token), (1...31).contains(n) || (1900...2200).contains(n) { return false }
+            return true
+        }
+        return remaining.isEmpty
     }
 
     /// Lignes de synthèse d'un relevé : elles portent une date ET un montant

@@ -235,6 +235,180 @@ do {
     }
 }
 
+// MARK: - t11 — Capture d'appli bancaire : dates sans année
+
+print("t11 · Dates d'appli bancaire (nom de mois, sans année, « Hier »)")
+do {
+    // Référence fixe : le moteur doit rester déterministe.
+    var comps = DateComponents()
+    comps.year = 2026; comps.month = 8; comps.day = 4
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(secondsFromGMT: 0)!
+    let reference = cal.date(from: comps)!
+
+    let ocr = """
+    Compte courant
+    Solde : 1 240,55 €
+    CARREFOUR MARKET GIF
+    2 juil.
+    -42,50 €
+    SNCF CONNECT
+    1 juil.
+    -89,00 €
+    VIREMENT DE MME MARTIN
+    30 juin
+    +150,00 €
+    NETFLIX
+    Hier
+    -15,99 €
+    """
+    let tx = BankStatementExtractor.extractTransactions(from: ocr, referenceDate: reference)
+    // Sans cette reconnaissance, le déterministe rendait 0 opération sur une
+    // capture d'appli : l'IA restait seule et les libellés dérivaient.
+    expect(tx.count == 4, "4 opérations extraites d'une capture d'appli", "\(tx.count)")
+    if tx.count == 4 {
+        expect(tx[0].label == "CARREFOUR MARKET GIF", "libellé, pas le mot de la date", tx[0].label)
+        expect(tx[0].date == "2026-07-02", "« 2 juil. » → année déduite", tx[0].date)
+        expect(tx[2].amount > 0, "crédit reconnu", "\(tx[2].amount)")
+        expect(tx[3].label == "NETFLIX", "« Hier » ne devient pas le libellé", tx[3].label)
+        expect(tx[3].date == "2026-08-03", "« Hier » résolu depuis la référence", tx[3].date)
+    }
+
+    // Année déduite : une date postérieure à la référence appartient à l'an passé.
+    let december = BankStatementExtractor.extractTransactions(
+        from: "SPOTIFY\n28 décembre\n-10,99 €", referenceDate: reference)
+    expect(december.first?.date == "2025-12-28",
+           "date future → année précédente (un relevé est historique)",
+           december.first?.date ?? "nil")
+
+    // Forme anglo-saxonne « mois jour ».
+    let english = BankStatementExtractor.extractTransactions(
+        from: "AMAZON\nJul 2\n-42.50", referenceDate: reference)
+    expect(english.first?.date == "2026-07-02", "« Jul 2 » (mois avant jour)", english.first?.date ?? "nil")
+}
+
+// MARK: - t12 — Une date sans année n'ancre QUE sur une ligne de date pure
+
+print("t12 · « CARTE 01/07 » reste un libellé, « 01/07 » seul est une date")
+do {
+    var comps = DateComponents()
+    comps.year = 2026; comps.month = 8; comps.day = 4
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(secondsFromGMT: 0)!
+    let reference = cal.date(from: comps)!
+
+    // Ligne tabulaire SANS date complète : « 01/07 » y est la date de
+    // l'opération carte, pas celle du relevé → aucune opération inventée.
+    let inline = BankStatementExtractor.extractTransactions(
+        from: "CARTE 01/07 BOULANGERIE DUPONT  -6,80", referenceDate: reference)
+    expect(inline.isEmpty, "date courte noyée dans un libellé → pas d'ancre", "\(inline.count)")
+
+    // Même date, seule sur sa ligne (mise en page colonne) → ancre valide.
+    let column = BankStatementExtractor.extractTransactions(
+        from: "BOULANGERIE DUPONT\n01/07\n-6,80 €", referenceDate: reference)
+    expect(column.count == 1, "date courte seule sur sa ligne → ancre", "\(column.count)")
+    expect(column.first?.date == "2026-07-01", "jour/mois FR", column.first?.date ?? "nil")
+
+    // Un mot contenant « hier » ne doit pas être pris pour la date d'hier.
+    let trap = BankStatementExtractor.extractTransactions(
+        from: "FICHIER COMPTABLE\n-12,00 €", referenceDate: reference)
+    expect(trap.isEmpty, "« FICHIER » n'est pas « hier »", "\(trap.count)")
+}
+
+// MARK: - t13 — Capture d'appli à EN-TÊTES DE DATE (plusieurs ops par journée)
+
+print("t13 · En-tête de date groupant plusieurs opérations (marchand + catégorie + montant)")
+do {
+    var comps = DateComponents()
+    comps.year = 2026; comps.month = 8; comps.day = 5
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(secondsFromGMT: 0)!
+    let reference = cal.date(from: comps)!
+
+    // Mise en page réelle : la journée est annoncée UNE fois, puis les
+    // opérations s'enchaînent, chacune sur trois lignes.
+    let ocr = """
+    11:05
+    Retour Compte Courant Jeune Actif
+    22 juillet
+    Carrefour City
+    Grande surface
+    - 3,98 €
+    Amshc
+    Hébergement / restauration
+    - 6,00 €
+    21 juillet
+    Carrefour City
+    Grande surface
+    - 6,98 €
+    Image Numer Mede
+    A catégoriser, divers
+    - 28,56 €
+    18 juillet
+    Lmw Billetweb
+    Sorties / restaurant
+    - 6,00 €
+    """
+    let tx = BankStatementExtractor.extractTransactions(from: ocr, referenceDate: reference)
+    // Le modèle « une date = une opération » n'en retenait qu'une par journée.
+    expect(tx.count == 5, "toutes les opérations de chaque journée", "\(tx.count)")
+
+    if tx.count == 5 {
+        // Le libellé est la PREMIÈRE ligne du bloc (le marchand), pas la plus
+        // proche du montant — qui est la catégorie.
+        expect(tx[0].label == "Carrefour City", "marchand, pas la catégorie", tx[0].label)
+        expect(tx[1].label == "Amshc", "2e opération de la même journée", tx[1].label)
+        expect(tx[0].date == tx[1].date, "les deux héritent de l'en-tête du 22", tx[1].date)
+        expect(abs(tx[1].amount + 6.00) < 0.001, "montant du 2e bloc", "\(tx[1].amount)")
+        expect(tx[3].label == "Image Numer Mede", "libellé non décalé d'un bloc", tx[3].label)
+        expect(tx[4].label == "Lmw Billetweb", "dernière journée", tx[4].label)
+    }
+    // Le titre de la barre de navigation précède le premier en-tête : il ne
+    // doit jamais devenir un libellé (la fenêtre arrière n'est utilisée que
+    // pour les mises en page où le marchand précède la date).
+    expect(!tx.contains { $0.label.contains("Retour Compte") },
+           "le titre de l'écran n'est pas importé")
+    expect(!tx.contains { $0.label.contains("/") && $0.label.contains("tabac") },
+           "aucune catégorie prise pour un marchand")
+}
+
+// MARK: - t14 — Dates rendues par un MODÈLE, souvent hors format
+
+print("t14 · Normalisation des dates produites par un modèle")
+do {
+    var comps = DateComponents()
+    comps.year = 2026; comps.month = 8; comps.day = 5
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(secondsFromGMT: 0)!
+    let ref = cal.date(from: comps)!
+
+    func norm(_ raw: String) -> String? {
+        BankStatementExtractor.normalizeDate(raw, referenceDate: ref)
+    }
+
+    // Cas RÉEL : une capture d'appli n'affiche pas l'année, le modèle met un
+    // remplissage. Rejeter la ligne jetait toute l'extraction alors que le
+    // jour et le mois étaient bons.
+    expect(norm("22-07-00") == "2026-07-22", "année bidon → déduite", norm("22-07-00") ?? "nil")
+    expect(norm("22/07") == "2026-07-22", "jour/mois nu → année déduite", norm("22/07") ?? "nil")
+    expect(norm("2026-07-22") == "2026-07-22", "format demandé respecté", norm("2026-07-22") ?? "nil")
+    expect(norm("22-07-2026") == "2026-07-22", "année en dernier", norm("22-07-2026") ?? "nil")
+    // Convention FR quand l'ordre est ambigu (les deux composants ≤ 12).
+    // Cas choisi dans le PASSÉ pour n'éprouver que la convention, sans
+    // superposer la règle d'année.
+    expect(norm("03-04") == "2026-04-03", "ambigu → jour d'abord (FR)", norm("03-04") ?? "nil")
+    // Et si l'ambiguïté tombe dans le futur, la règle d'année s'applique
+    // comme partout ailleurs : un relevé est historique.
+    expect(norm("07-08") == "2025-08-07", "ambigu + futur → année précédente", norm("07-08") ?? "nil")
+    // Anglo-saxon détectable : le second composant ne peut pas être un mois.
+    expect(norm("07-22-2026") == "2026-07-22", "mois-jour quand le 2e > 12", norm("07-22-2026") ?? "nil")
+    // Une date postérieure à la référence appartient à l'année précédente.
+    expect(norm("28-12") == "2025-12-28", "date future → année précédente", norm("28-12") ?? "nil")
+    // Non-invention : ce qui n'est pas une date reste rejeté.
+    expect(norm("2026-13-45") == nil, "mois/jour impossibles → rejet")
+    expect(norm("Carrefour") == nil, "texte → rejet")
+}
+
 // MARK: - Bilan
 
 print("")

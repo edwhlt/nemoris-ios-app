@@ -23,10 +23,14 @@ struct InvestmentPDFImportView: View {
 
     // Parsing
     @State private var pageResults: [PDFPageResult] = []
+    /// Sortie brute du pipeline, conservée pour le détail par source et son
+    /// inspection JSON. `pageResults` en est une projection : on garde
+    /// l'original plutôt que de tenter de reconstruire l'origine des éléments
+    /// à partir de la projection.
+    @State private var batch = ImportBatchResult()
     @State private var allOrders: [PDFExtractedOrder] = []
     /// Chantier C — positions extraites en mode capture de portefeuille.
     @State private var allPositions: [PDFExtractedPosition] = []
-    @State private var parsingProgress: Double = 0
     @State private var parsingTotal: Int = 0
     @State private var parsingCurrent: Int = 0
     @State private var parsingError: String?
@@ -41,6 +45,8 @@ struct InvestmentPDFImportView: View {
     // Chantier C — captures depuis la photothèque (screenshots de PEA/CTO).
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var pickedImages: [Data] = []
+    /// Documents fournis par l'entonnoir unifié (déjà chargés en mémoire).
+    @State private var preloadedSources: [ImportDocumentSource] = []
 
     private let repository = InvestmentRepository()
     private let parser = InvestmentPDFParser.shared
@@ -53,6 +59,7 @@ struct InvestmentPDFImportView: View {
     /// Init standard (ouverture depuis le menu ⋯).
     init(onFallbackToCSV: (() -> Void)? = nil) {
         self.onFallbackToCSV = onFallbackToCSV
+        self.onFinished = nil
     }
 
     /// Chantier D — init pré-rempli avec les fichiers déposés par un raccourci
@@ -61,7 +68,44 @@ struct InvestmentPDFImportView: View {
     init(preloadedFileURLs urls: [URL], onFallbackToCSV: (() -> Void)? = nil) {
         _pdfURLs = State(initialValue: urls)
         self.onFallbackToCSV = onFallbackToCSV
+        self.onFinished = nil
     }
+
+    /// Entrée depuis l'entonnoir d'import unifié (`ImportV3EntryView`) : la
+    /// destination, le compte cible et les documents sont DÉJÀ choisis, on
+    /// démarre donc directement sur l'analyse. `onFinished` ferme tout
+    /// l'entonnoir — sans lui, « Terminer » ne dépilerait que cet écran et
+    /// ramènerait sur la sélection de fichiers.
+    init(preloadedSources sources: [ImportDocumentSource],
+         accountId: Int,
+         onFinished: @escaping () -> Void) {
+        _preloadedSources = State(initialValue: sources)
+        _selectedAccountId = State(initialValue: accountId)
+        _step = State(initialValue: .parsing)
+        self.onFallbackToCSV = nil
+        self.onFinished = onFinished
+    }
+
+    /// Résultat d'une analyse déjà faite en ARRIÈRE-PLAN par
+    /// `DocumentImportCoordinator` : on ouvre directement la relecture. C'est
+    /// ce qui permet à l'utilisateur de fermer l'import pendant l'analyse et de
+    /// revenir dessus par le bandeau sans rien reperdre.
+    init(preparsedBatch: ImportBatchResult,
+         accountId: Int,
+         onFinished: @escaping () -> Void) {
+        let results = preparsedBatch.investmentPages()
+        _batch = State(initialValue: preparsedBatch)
+        _pageResults = State(initialValue: results)
+        _allOrders = State(initialValue: results.flatMap(\.orders))
+        _allPositions = State(initialValue: results.flatMap(\.positions))
+        _selectedAccountId = State(initialValue: accountId)
+        _step = State(initialValue: .preview)
+        self.onFallbackToCSV = nil
+        self.onFinished = onFinished
+    }
+
+    /// Fermeture de l'entonnoir parent, quand cette vue y est hébergée.
+    private var onFinished: (() -> Void)?
 
     enum ImportStep {
         case selectFile
@@ -90,6 +134,12 @@ struct InvestmentPDFImportView: View {
             }
             .paneChrome("Import intelligent", cancelLabel: "Fermer", onCancel: { dismiss() })
         .onAppear { loadAccounts() }
+        // Entrée par l'entonnoir unifié : documents et compte sont déjà
+        // choisis, l'analyse démarre seule (aucun bouton intermédiaire).
+        .task {
+            guard step == .parsing, pageResults.isEmpty, !preloadedSources.isEmpty else { return }
+            startParsing()
+        }
         .fileImporter(
             isPresented: $showFilePicker,
             allowedContentTypes: [
@@ -277,43 +327,27 @@ struct InvestmentPDFImportView: View {
 
     // MARK: - Step 2 : Parsing en cours
 
+    /// Même écran de traitement que l'import de transactions
+    /// (`DocumentAnalysisProgressSection`) : barre déterminée dès que le nombre
+    /// d'unités est connu, et vocabulaire neutre — « Page X / Y » n'avait aucun
+    /// sens pour une capture d'écran ou un CSV.
     private var parsingView: some View {
-        VStack(spacing: 24) {
-            Spacer()
-
-            Image(systemName: "sparkles")
-                .font(.system(size: 48))
-                .foregroundStyle(AppTheme.Colors.accent)
-                .symbolEffect(.variableColor.iterative)
-
-            Text("Analyse en cours…")
-                .font(.title3).fontWeight(.semibold)
-
-            Text("L'IA analyse le document pour identifier les ordres d'investissement.")
-                .font(.subheadline)
-                .foregroundStyle(AppTheme.Colors.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-
-            VStack(spacing: 8) {
-                ProgressView(value: parsingProgress)
-                    .tint(AppTheme.Colors.accent)
-                    .padding(.horizontal, 40)
-
-                Text("Page \(parsingCurrent) / \(parsingTotal)")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
+        Form {
+            Section {
+                DocumentAnalysisProgressSection(
+                    done: parsingCurrent, total: parsingTotal,
+                    subtitle: "Lecture des opérations et des lignes détenues (titre, quantité, cours)."
+                )
             }
-
             if let error = parsingError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.Colors.danger)
-                    .padding(.horizontal, 32)
+                Section {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.danger)
+                }
             }
-
-            Spacer()
         }
+        .nemorisFormStyle()
     }
 
     // MARK: - Step 3 : Preview des ordres
@@ -379,22 +413,14 @@ struct InvestmentPDFImportView: View {
                     .padding(.vertical, 24)
                 }
 
-                // Ce que l'app a réellement lu : permet à l'utilisateur de voir
-                // si le problème vient de la lecture (OCR illisible) ou de
-                // l'interprétation (texte correct mais non reconnu).
-                if let sample = extractedTextSample {
-                    Section {
-                        DisclosureGroup("Voir le texte lu (\(extractedTextLength) caractères)") {
-                            Text(sample)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(AppTheme.Colors.textSecondary)
-                                .textSelection(.enabled)
-                                .padding(.vertical, 4)
-                        }
-                    } header: {
-                        Text("Diagnostic")
-                    }
-                }
+                // Détail PAR UNITÉ (même bloc que l'import de transactions) :
+                // pourquoi chacune n'a rien donné, et le texte réellement lu.
+                ImportSourceBreakdownSection(
+                    summaries: batch.perSource(),
+                    noun: "ligne",
+                    debugJSON: { batch.debugJSON(sourceIndex: $0.sourceIndex) })
+                DocumentAnalysisDiagnosticsSection(
+                    units: pageResults.map { $0.analysisUnit(sourceName: $0.sourceName) })
             } else {
                 // Mode capture de portefeuille — positions détectées
                 if !allPositions.isEmpty {
@@ -454,6 +480,16 @@ struct InvestmentPDFImportView: View {
                     }
                 }
 
+                // Même quand des lignes ont été trouvées, les unités en échec
+                // restent listées : sur un PDF de plusieurs pages, certaines
+                // peuvent n'avoir rien donné sans que ce soit visible.
+                ImportSourceBreakdownSection(
+                    summaries: batch.perSource(),
+                    noun: "ligne",
+                    debugJSON: { batch.debugJSON(sourceIndex: $0.sourceIndex) })
+                DocumentAnalysisDiagnosticsSection(
+                    units: pageResults.map { $0.analysisUnit(sourceName: $0.sourceName) })
+
                 // Bouton importer
                 Section {
                     Button {
@@ -489,10 +525,26 @@ struct InvestmentPDFImportView: View {
     /// Row de preview d'une position détectée (mode snapshot) avec toggle sélection.
     @ViewBuilder
     private func positionRow(_ position: PDFExtractedPosition) -> some View {
+        // ⚠️ La row affichée est AGRÉGÉE : elle peut fusionner plusieurs lignes
+        // brutes venues de pages ou de captures différentes. Le toggle doit
+        // donc porter sur TOUT le groupe — matcher sur le seul `id` ne
+        // décochait que la première ligne brute, et les autres étaient
+        // importées quand même.
+        let key = InvestmentPDFParser.groupKey(isin: position.isin,
+                                               ticker: position.ticker,
+                                               assetName: position.assetName)
         let binding = Binding<Bool>(
-            get: { allPositions.first(where: { $0.id == position.id })?.isSelected ?? false },
+            get: {
+                allPositions.contains {
+                    InvestmentPDFParser.groupKey(isin: $0.isin, ticker: $0.ticker,
+                                                 assetName: $0.assetName) == key && $0.isSelected
+                }
+            },
             set: { newValue in
-                if let idx = allPositions.firstIndex(where: { $0.id == position.id }) {
+                for idx in allPositions.indices
+                where InvestmentPDFParser.groupKey(isin: allPositions[idx].isin,
+                                                   ticker: allPositions[idx].ticker,
+                                                   assetName: allPositions[idx].assetName) == key {
                     allPositions[idx].isSelected = newValue
                 }
             }
@@ -531,6 +583,8 @@ struct InvestmentPDFImportView: View {
             }
         }
         .padding(.vertical, 2)
+        // Décoché = grisé, jamais masqué : la ligne reste visible et re-cochable.
+        .opacity(binding.wrappedValue ? 1 : 0.45)
     }
 
     @ViewBuilder
@@ -594,6 +648,8 @@ struct InvestmentPDFImportView: View {
             }
         }
         .padding(.vertical, 2)
+        // Décoché = grisé, jamais masqué (cf. `positionRow`).
+        .opacity(binding.wrappedValue ? 1 : 0.45)
     }
 
     @ViewBuilder
@@ -669,7 +725,9 @@ struct InvestmentPDFImportView: View {
             Spacer()
 
             Button {
-                dismiss()
+                // Hébergée dans l'entonnoir unifié : `dismiss()` ne dépilerait
+                // que cet écran et ramènerait sur la sélection de fichiers.
+                if let onFinished { onFinished() } else { dismiss() }
             } label: {
                 Text("Fermer")
                     .fontWeight(.semibold)
@@ -728,7 +786,7 @@ struct InvestmentPDFImportView: View {
     // MARK: - Résumé & diagnostic
 
     /// Nature du document analysé (toutes les unités viennent du même fichier).
-    private var analyzedKind: InvestmentDocumentKind {
+    private var analyzedKind: ImportSourceKind {
         pageResults.first?.kind ?? .unknown
     }
 
@@ -738,10 +796,12 @@ struct InvestmentPDFImportView: View {
 
     private var analyzedUnitIcon: String {
         switch analyzedKind {
-        case .pdf:     return "doc.text"
-        case .image:   return "photo"
-        case .text:    return "tablecells"
-        case .unknown: return "questionmark.square.dashed"
+        case .pdf:         return "doc.text"
+        case .image:       return "photo"
+        case .text:        return "tablecells"
+        case .spreadsheet: return "tablecells.badge.ellipsis"
+        case .xml:         return "doc.badge.gearshape"
+        case .unknown:     return "questionmark.square.dashed"
         }
     }
 
@@ -760,26 +820,20 @@ struct InvestmentPDFImportView: View {
         }) {
             return hard.userMessage
         }
-        return PDFPageDiagnostic.nothingRecognized.userMessage
+        return ImportUnitDiagnostic.nothingRecognized.userMessage
     }
 
-    private var extractedTextLength: Int {
-        pageResults.reduce(0) { $0 + $1.rawText.count }
-    }
-
-    /// Extrait du texte lu, borné pour ne pas noyer l'écran.
-    private var extractedTextSample: String? {
-        let joined = pageResults.map(\.rawText).joined(separator: "\n---\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !joined.isEmpty else { return nil }
-        return joined.count > 1500 ? String(joined.prefix(1500)) + "\n…" : joined
-    }
+    // (Le texte lu est désormais affiché PAR UNITÉ par le bloc de diagnostic
+    // partagé, plutôt que concaténé et tronqué pour tout le document.)
 
     // MARK: - Actions
 
     private func loadAccounts() {
         accounts = repository.fetchAccounts()
-        if accounts.count == 1 { selectedAccountId = accounts.first?.id }
+        // Ne jamais écraser un compte déjà imposé (entonnoir unifié).
+        if selectedAccountId == nil, accounts.count == 1 {
+            selectedAccountId = accounts.first?.id
+        }
     }
 
     private func startParsing() {
@@ -787,67 +841,48 @@ struct InvestmentPDFImportView: View {
         parsingError = nil
         parsingCurrent = 0
         parsingTotal = 0
-        parsingProgress = 0
 
         let urls = pdfURLs
         let images = pickedImages
         Task {
-            var results: [PDFPageResult] = []
-
-            // Fichiers (PDF, image, CSV, texte) — le type réel est sniffé par
-            // `parseFile`, l'extension n'est qu'un dernier recours.
-            for url in urls {
-                let hasAccess = url.startAccessingSecurityScopedResource()
-                defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
-                let fileResults = await parser.parseFile(from: url) { current, total in
-                    Task { @MainActor in
-                        // Progression cumulée : le total d'un fichier n'est connu
-                        // qu'une fois ouvert (nombre de pages d'un PDF), on
-                        // l'agrège donc au fil de l'eau plutôt que de l'annoncer.
-                        parsingCurrent = results.count + current
-                        parsingTotal = max(parsingCurrent, results.count + total)
-                        parsingProgress = parsingTotal > 0
-                            ? Double(parsingCurrent) / Double(parsingTotal) : 0
-                    }
-                }
-                results.append(contentsOf: fileResults)
+            // Chargement en mémoire (hors main thread), fichiers ET captures :
+            // le parcours d'analyse est ensuite le même pour les deux.
+            var sources: [ImportDocumentSource] = preloadedSources
+            sources += urls.compactMap { url in
+                let granted = url.startAccessingSecurityScopedResource()
+                defer { if granted { url.stopAccessingSecurityScopedResource() } }
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return ImportDocumentSource(data: data, displayName: url.lastPathComponent)
+            }
+            for (index, data) in images.enumerated() {
+                sources.append(ImportDocumentSource(data: data, displayName: "Capture \(index + 1)"))
             }
 
-            // Captures de la photothèque (données en mémoire, OCR direct).
-            for data in images {
-                let imageResults = await parser.parseImageData(data)
-                results.append(contentsOf: imageResults)
-                await MainActor.run {
-                    parsingCurrent = results.count
-                    parsingTotal = max(parsingTotal, results.count)
-                    parsingProgress = parsingTotal > 0
-                        ? Double(parsingCurrent) / Double(parsingTotal) : 0
-                }
+            // Lecture (parallèle) puis analyse, par le pipeline unifié — le
+            // même que l'import de transactions. Ce module avait son propre
+            // orchestrateur, avec son propre découpage et sa propre détection
+            // de format : deux copies qui ont fini par diverger.
+            let readout = await ImportPipeline.read(sources: sources)
+            let batch = await ImportPipeline.analyze(readout, destination: .investments) { done, total in
+                parsingCurrent = done
+                parsingTotal = total
             }
-
-            // Renumérotation globale : chaque fichier repart à 1 côté parseur,
-            // deux unités porteraient sinon le même numéro dans la revue (et
-            // dans les notes « Import PDF — p.N » des ordres créés).
-            let renumbered = results.enumerated().map { index, unit -> PDFPageResult in
-                var copy = unit
-                copy.orders = unit.orders.map { order in
-                    var o = order
-                    o.pageNumber = index + 1
-                    return o
-                }
-                return copy
-            }
-            await MainActor.run { finishParsing(renumbered) }
+            // Les numéros d'unité sont déjà GLOBAUX (attribués par le pipeline
+            // sur l'ensemble des sources), et les ordres les portent déjà :
+            // c'est ce qui alimente leurs notes « Import PDF — p.N ».
+            await MainActor.run { finishParsing(batch) }
         }
     }
 
     @MainActor
-    private func finishParsing(_ results: [PDFPageResult]) {
+    private func finishParsing(_ result: ImportBatchResult) {
+        let results = result.investmentPages()
         if results.isEmpty {
             parsingError = "Impossible de lire le fichier ou aucun contenu exploitable."
             step = .selectFile
             return
         }
+        batch = result
         pageResults = results
         allOrders = results.flatMap(\.orders)
         allPositions = results.flatMap(\.positions)

@@ -72,3 +72,86 @@ struct ImportSessionBanner: View {
         return "\(summary.totalRows) ligne(s) prêtes à importer"
     }
 }
+
+/// Bandeau d'ANALYSE en arrière-plan : l'utilisateur a lancé un import de
+/// document et continue à se servir de l'app pendant que ça travaille.
+///
+/// Même gabarit que le bandeau de session pour rester lisible au même endroit,
+/// avec une barre de progression tant que l'analyse tourne et un bouton
+/// « Continuer » dès que le résultat est relisible.
+struct ImportAnalysisBanner: View {
+    let coordinator: DocumentImportCoordinator
+    let onOpen: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: coordinator.isReady ? "checkmark.circle.fill" : "wand.and.stars")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(coordinator.isReady
+                                          ? AppTheme.Colors.success : AppTheme.Colors.accent))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(coordinator.bannerTitle)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(AppTheme.Colors.textPrimary)
+                    .lineLimit(1)
+                Text(coordinator.bannerSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+                    .lineLimit(1)
+                if coordinator.isRunning {
+                    // Déterminée seulement quand elle a quelque chose à
+                    // raconter (cf. `progressFraction`) ; sinon barre
+                    // indéterminée, qui au moins montre que ça travaille.
+                    if let fraction = coordinator.progressFraction {
+                        ProgressView(value: fraction)
+                            .tint(AppTheme.Colors.accent)
+                            .frame(maxWidth: 220)
+                    } else {
+                        ProgressView()
+                            .progressViewStyle(.linear)
+                            .tint(AppTheme.Colors.accent)
+                            .frame(maxWidth: 220)
+                    }
+                }
+            }
+
+            Spacer()
+
+            if coordinator.isReady {
+                Button(action: onOpen) {
+                    HStack(spacing: 4) {
+                        Text("Continuer")
+                        Image(systemName: "arrow.right")
+                    }
+                    .font(.caption.bold())
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(AppTheme.Colors.success, in: Capsule())
+                    .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button(action: onCancel) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .padding(.top, 4)
+        .background(AppTheme.Colors.surface)
+        .overlay(
+            Rectangle()
+                .fill(AppTheme.Colors.surfaceSecondary)
+                .frame(height: 1),
+            alignment: .bottom
+        )
+    }
+}

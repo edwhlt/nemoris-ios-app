@@ -1290,6 +1290,26 @@ final class DatabaseManager: @unchecked Sendable {
             "DROP TABLE tricount_reimbursements;",
             "ALTER TABLE transactions DROP COLUMN reimbursement_payee_id;",
         ]),
+
+        // v45 — SMART-IMPORT : la session d'import couvre les DEUX destinations.
+        //
+        // Le cache de session (reprise après fermeture, rappel 12 h, survie au
+        // redémarrage) n'existait que pour les transactions. Côté
+        // investissements, un résultat d'analyse vivait uniquement en mémoire
+        // dans `DocumentImportCoordinator` : relancer l'app le perdait, alors
+        // qu'une analyse de relevé se compte en dizaines de secondes.
+        //
+        // `destination` discrimine le contenu de `rows_json` :
+        //   • 'transactions'  → [ImportSessionRow]   (inchangé)
+        //   • 'investments'   → ImportBatchResult
+        //
+        // ⚠️ DEFAULT 'transactions' : les sessions déjà persistées se relisent
+        // à l'octet près, sans réécriture de leur JSON. C'est ce qui permet à
+        // un utilisateur ayant un import en cours de mettre à jour l'app sans
+        // le perdre.
+        Migration(version: 45, statements: [
+            "ALTER TABLE import_sessions ADD COLUMN destination TEXT NOT NULL DEFAULT 'transactions';",
+        ]),
     ]
 
     // MARK: - Helpers privés

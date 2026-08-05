@@ -31,9 +31,9 @@ struct ImportSessionRepository {
 
         let sql: String
         if status != nil {
-            sql = "SELECT id, created_at, updated_at, status, source_file, account_id, total_rows, rows_json FROM import_sessions WHERE status = ? ORDER BY updated_at DESC;"
+            sql = "SELECT id, created_at, updated_at, status, source_file, account_id, total_rows, rows_json, destination FROM import_sessions WHERE status = ? ORDER BY updated_at DESC;"
         } else {
-            sql = "SELECT id, created_at, updated_at, status, source_file, account_id, total_rows, rows_json FROM import_sessions ORDER BY updated_at DESC;"
+            sql = "SELECT id, created_at, updated_at, status, source_file, account_id, total_rows, rows_json, destination FROM import_sessions ORDER BY updated_at DESC;"
         }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return [] }
@@ -62,12 +62,18 @@ struct ImportSessionRepository {
             // mais c'est le seul moyen sans table séparée. Le coût reste raisonnable car on a
             // 1 seule session active en pratique.
             let jsonRaw = String(cString: sqlite3_column_text(stmt, 7))
-            let pending = Self.countPending(jsonRaw: jsonRaw)
+            let destination = ImportDestination(
+                rawValue: String(cString: sqlite3_column_text(stmt, 8))) ?? .transactions
+            // Une session d'investissements n'a pas d'état par ligne : tout ce
+            // qu'elle contient reste à relire, donc tout est « en attente ».
+            let pending = destination == .transactions
+                ? Self.countPending(jsonRaw: jsonRaw)
+                : total
 
             out.append(ImportSessionSummary(
                 id: id, createdAt: createdAt, updatedAt: updatedAt, status: st,
                 sourceFile: sourceFile, accountId: accountId,
-                totalRows: total, pendingRows: pending
+                totalRows: total, pendingRows: pending, destination: destination
             ))
         }
         return out
@@ -88,7 +94,7 @@ struct ImportSessionRepository {
         }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
-        let sql = "SELECT id, created_at, updated_at, status, source_file, account_id, rows_json FROM import_sessions WHERE id = ?;"
+        let sql = "SELECT id, created_at, updated_at, status, source_file, account_id, rows_json, destination FROM import_sessions WHERE id = ?;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
         defer { sqlite3_finalize(stmt) }
@@ -106,12 +112,29 @@ struct ImportSessionRepository {
         let sourceFile = sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, 4))
         let accountId = sqlite3_column_type(stmt, 5) == SQLITE_NULL ? nil : Int(sqlite3_column_int(stmt, 5))
         let jsonRaw = String(cString: sqlite3_column_text(stmt, 6))
+        let destination = ImportDestination(
+            rawValue: String(cString: sqlite3_column_text(stmt, 7))) ?? .transactions
 
-        let rows = (try? Self.jsonDecoder.decode([ImportSessionRow].self, from: Data(jsonRaw.utf8))) ?? []
-        return ImportSession(
-            id: uuid, createdAt: createdAt, updatedAt: updatedAt, status: st,
-            sourceFile: sourceFile, accountId: accountId, rows: rows
-        )
+        // ⚠️ Le contenu de `rows_json` dépend de la destination (migration v45).
+        // Les sessions écrites avant cette migration n'ont pas de colonne
+        // `destination` renseignée : le DEFAULT 'transactions' les fait tomber
+        // dans la première branche, donc elles se relisent inchangées.
+        switch destination {
+        case .transactions:
+            let rows = (try? Self.jsonDecoder.decode([ImportSessionRow].self,
+                                                     from: Data(jsonRaw.utf8))) ?? []
+            return ImportSession(
+                id: uuid, createdAt: createdAt, updatedAt: updatedAt, status: st,
+                sourceFile: sourceFile, accountId: accountId,
+                destination: .transactions, rows: rows)
+        case .investments:
+            let batch = try? Self.jsonDecoder.decode(ImportBatchResult.self,
+                                                     from: Data(jsonRaw.utf8))
+            return ImportSession(
+                id: uuid, createdAt: createdAt, updatedAt: updatedAt, status: st,
+                sourceFile: sourceFile, accountId: accountId,
+                destination: .investments, batch: batch)
+        }
     }
 
     /// Insère une nouvelle session (INSERT). Renvoie true si OK.
@@ -156,6 +179,44 @@ struct ImportSessionRepository {
         )
     }
 
+    /// Fabrique de session pour les INVESTISSEMENTS.
+    ///
+    /// Même fin de course que la version transactions (insert + rappel 12 h +
+    /// résumé), avec un contenu différent. Elle existe parce que le résultat
+    /// d'une analyse d'investissements ne vivait qu'en mémoire : relancer l'app
+    /// le perdait, alors qu'une analyse de relevé se compte en dizaines de
+    /// secondes — l'asymétrie était documentée et assumée, elle ne l'est plus.
+    func createSession(batch: ImportBatchResult,
+                       accountId: Int,
+                       sourceFile: String?) -> ImportSessionSummary? {
+        guard !batch.elements.isEmpty else { return nil }
+        let session = ImportSession(
+            id: UUID(),
+            createdAt: Date(),
+            updatedAt: Date(),
+            status: .active,
+            sourceFile: sourceFile,
+            accountId: accountId,
+            destination: .investments,
+            batch: batch
+        )
+        guard insertSession(session) else { return nil }
+
+        Task { await ImportNotificationService.scheduleReminder(forSessionId: session.id,
+                                                               pendingRows: batch.elements.count) }
+        return ImportSessionSummary(
+            id: session.id,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+            status: .active,
+            sourceFile: session.sourceFile,
+            accountId: session.accountId,
+            totalRows: batch.elements.count,
+            pendingRows: batch.elements.count,
+            destination: .investments
+        )
+    }
+
     /// Met à jour le payload complet d'une session existante (UPDATE).
     /// Atomique : un seul UPDATE. Met aussi à jour `updated_at`.
     @discardableResult
@@ -191,8 +252,17 @@ struct ImportSessionRepository {
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
 
-        let rowsData = (try? Self.jsonEncoder.encode(session.rows)) ?? Data("[]".utf8)
-        let rowsJSON = String(data: rowsData, encoding: .utf8) ?? "[]"
+        // Le contenu sérialisé dépend de la destination (cf. migration v45).
+        let payloadData: Data
+        switch session.destination {
+        case .transactions:
+            payloadData = (try? Self.jsonEncoder.encode(session.rows)) ?? Data("[]".utf8)
+        case .investments:
+            payloadData = (try? Self.jsonEncoder.encode(session.batch ?? ImportBatchResult()))
+                ?? Data("{}".utf8)
+        }
+        let rowsJSON = String(data: payloadData, encoding: .utf8) ?? "[]"
+        let totalRows = session.totalRows
         let now = Self.isoFormatter.string(from: Date())
         let createdAt = Self.isoFormatter.string(from: session.createdAt)
 
@@ -200,14 +270,14 @@ struct ImportSessionRepository {
         if isInsert {
             sql = """
                 INSERT INTO import_sessions
-                (id, created_at, updated_at, status, source_file, account_id, total_rows, rows_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                (id, created_at, updated_at, status, source_file, account_id, total_rows, rows_json, destination)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """
         } else {
             sql = """
                 UPDATE import_sessions
                 SET updated_at = ?, status = ?, source_file = ?, account_id = ?,
-                    total_rows = ?, rows_json = ?
+                    total_rows = ?, rows_json = ?, destination = ?
                 WHERE id = ?;
                 """
         }
@@ -223,16 +293,18 @@ struct ImportSessionRepository {
             sqlite3_bind_text(stmt, 4, session.status.rawValue, -1, SQLITE_TRANSIENT)
             bindOptText(stmt: stmt, idx: 5, value: session.sourceFile)
             bindOptInt(stmt: stmt, idx: 6, value: session.accountId)
-            sqlite3_bind_int(stmt, 7, Int32(session.rows.count))
+            sqlite3_bind_int(stmt, 7, Int32(totalRows))
             sqlite3_bind_text(stmt, 8, rowsJSON, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 9, session.destination.rawValue, -1, SQLITE_TRANSIENT)
         } else {
             sqlite3_bind_text(stmt, 1, now, -1, SQLITE_TRANSIENT)
             sqlite3_bind_text(stmt, 2, session.status.rawValue, -1, SQLITE_TRANSIENT)
             bindOptText(stmt: stmt, idx: 3, value: session.sourceFile)
             bindOptInt(stmt: stmt, idx: 4, value: session.accountId)
-            sqlite3_bind_int(stmt, 5, Int32(session.rows.count))
+            sqlite3_bind_int(stmt, 5, Int32(totalRows))
             sqlite3_bind_text(stmt, 6, rowsJSON, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(stmt, 7, session.id.uuidString, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 7, session.destination.rawValue, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 8, session.id.uuidString, -1, SQLITE_TRANSIENT)
         }
         return sqlite3_step(stmt) == SQLITE_DONE
     }
