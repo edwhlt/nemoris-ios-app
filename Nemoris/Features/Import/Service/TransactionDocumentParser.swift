@@ -51,7 +51,7 @@ final class TransactionDocumentParser {
     /// contrairement à l'import d'investissements, aucun bouton ne doit être
     /// grisé sur cette base : le moteur déterministe suffit à produire des
     /// lignes exploitables.
-    var isAIAvailable: Bool { AIEnrichmentBackend.isAvailable }
+    var isAIAvailable: Bool { AIEnrichmentBackend.isAvailable(for: .transactionImport) }
 
     // MARK: - Analyse d'une unité
 
@@ -77,6 +77,7 @@ final class TransactionDocumentParser {
         // aucune visibilité sur ce que les utilisateurs importeront.
         case .image(let image):
             let raw = await AIEnrichmentBackend.completeText(
+                feature: .transactionImport,
                 system: Self.jsonInstructions,
                 user: "Extrais toutes les opérations visibles sur cette capture.",
                 image: image
@@ -226,11 +227,11 @@ final class TransactionDocumentParser {
 
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *),
-           // ⚠️ Gate sur la préférence, pas seulement sur la disponibilité :
-           // appeler Foundation Models en direct ferait ignorer un « serveur
-           // local » ou un « désactivé » choisis dans les Réglages — la classe
-           // de bug que le point de dispatch unique (AXE T) a servi à éteindre.
-           AIBackendPreference.current == .automatic,
+           // ⚠️ Gate par le point de dispatch, PAS par un test direct de
+           // disponibilité : appeler Foundation Models sans cela ferait ignorer
+           // un « serveur local », un « cloud » ou un « désactivée » choisis
+           // pour CETTE fonctionnalité dans les Réglages.
+           AIEnrichmentBackend.usesGuidedGeneration(for: .transactionImport),
            SystemLanguageModel.default.isAvailable {
             let session = LanguageModelSession(instructions: Self.guidedInstructions)
             do {
@@ -248,8 +249,11 @@ final class TransactionDocumentParser {
 
         // 2e étage : JSON via le point de dispatch — couvre Foundation Models
         // en génération libre ET un serveur local compatible OpenAI.
-        guard AIEnrichmentBackend.isAvailable else { return ([], .aiUnavailable) }
+        guard AIEnrichmentBackend.isAvailable(for: .transactionImport) else {
+            return ([], .aiUnavailable)
+        }
         guard let raw = await AIEnrichmentBackend.completeText(
+            feature: .transactionImport,
             system: Self.jsonInstructions,
             user: Self.buildPrompt(text: payload)
         ) else {

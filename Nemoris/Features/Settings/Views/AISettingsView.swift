@@ -3,318 +3,397 @@ import SwiftUI
 import FoundationModels
 #endif
 
-/// Panneau Settings dédié à l'IA Apple Foundation Models.
-/// Explique au user dans quel cas l'IA est utilisée, quel est l'état actuel
-/// (disponible / iOS trop ancien / hardware non éligible), et rassure sur le
-/// fallback (Sirene + MapKit + Companies House continuent même sans IA).
+/// Réglages IA : une ligne PAR FONCTIONNALITÉ, plus la configuration des
+/// backends qu'elles se partagent.
 ///
-/// AXE H — clarifier l'UX autour de la pré-requis iOS 26 + Apple Intelligence.
+/// ⚠️ Un backend se configure UNE fois (adresse du serveur local, clé API d'un
+/// fournisseur) et sert ensuite à autant de fonctionnalités qu'on veut. C'est ce
+/// qui rend le réglage par fonctionnalité praticable : sans ça, il faudrait
+/// ressaisir la même clé cinq fois.
+///
+/// ⚠️ **Piège de localisation** (déjà payé en AXE P et AXE T) :
+/// `Text(uneVariable)` / `Label(String, ...)` ne consultent JAMAIS
+/// `Localizable.strings` — seuls `Text("littéral")` et
+/// `Label(LocalizedStringKey, ...)` le font. Tous les libellés dynamiques de cet
+/// écran (noms de backends, de fonctionnalités) doivent donc être enveloppés
+/// dans `LocalizedStringKey(...)`, sinon ils restent en français sur un appareil
+/// en anglais.
 struct AISettingsView: View {
 
-    /// État détaillé de l'IA pour cet appareil.
-    enum AIStatus {
-        case available                  // iOS 26 + hw Apple Intelligence OK
-        case iosTooOld                  // iOS < 26
-        case hardwareNotEligible        // iOS 26 mais hw non Apple Intelligence
-        case appleIntelligenceDisabled  // iOS 26 + hw OK mais user a désactivé AI dans Settings
+    @State private var choices: [AIFeature: AIBackendChoice] = [:]
+    @State private var appleStatus: AppleIntelligenceStatus = .iosTooOld
 
-        var title: String {
-            switch self {
-            case .available:                  return "Activée"
-            case .iosTooOld:                  return "iOS 26 requis"
-            case .hardwareNotEligible:        return "Appareil non compatible"
-            case .appleIntelligenceDisabled:  return "Apple Intelligence désactivée"
-            }
-        }
+    // Serveur local (AXE T)
+    @State private var localBaseURL = ""
+    @State private var localModel = ""
+    @State private var localAPIKey = ""
 
-        var color: Color {
-            switch self {
-            case .available: return AppTheme.Colors.success
-            default:         return AppTheme.Colors.warning
-            }
-        }
+    // Fournisseurs cloud
+    @State private var cloudKeys: [AICloudProvider: String] = [:]
+    @State private var cloudModels: [AICloudProvider: String] = [:]
 
-        var icon: String {
-            switch self {
-            case .available: return "checkmark.circle.fill"
-            default:         return "exclamationmark.circle.fill"
-            }
-        }
-
-        var detail: String {
-            switch self {
-            case .available:
-                return "L'IA Apple Foundation Models tourne directement sur cet appareil. Aucune donnée n'est envoyée à un serveur. Elle est utilisée pour identifier les marchands inconnus lors d'un import ou d'une recherche manuelle."
-            case .iosTooOld:
-                return "Cette fonctionnalité nécessite iOS 26 ou supérieur. Mettez à jour votre appareil dans Réglages → Général → Mise à jour logicielle pour en profiter."
-            case .hardwareNotEligible:
-                return "Apple Intelligence nécessite un iPhone 15 Pro ou plus récent (iPad M1+, Mac M1+). L'enrichissement continue de fonctionner via les annuaires d'entreprise (Sirene, Companies House, etc.) et MapKit."
-            case .appleIntelligenceDisabled:
-                return "Apple Intelligence est désactivée sur cet appareil. Activez-la dans Réglages iOS → Apple Intelligence & Siri pour utiliser l'IA dans Nemoris."
-            }
-        }
-    }
-
-    @State private var status: AIStatus = .iosTooOld
-
-    // ── Source de l'IA (réglage propre à CET appareil, cf. AXE T) ──────────
-    @State private var backendPreference: AIBackendPreference = .automatic
-    @State private var localServerURL: String = ""
-    @State private var localServerModel: String = ""
-    @State private var localServerAPIKey: String = ""
-    @State private var isTestingConnection = false
-    @State private var testFeedback: String? = nil
-    @State private var testFeedbackIsError = false
+    @State private var testSuccess: String?
+    @State private var testError: String?
+    @State private var isTesting = false
 
     var body: some View {
         // Form (pas List) : contenu statique de type réglages → rendu identique
         // sur iOS et boxes arrondies natives sur macOS via nemorisFormStyle().
         // Pas de ZStack+Color (hauteur infinie sur macOS) : fond via .background.
         Form {
-            // ── Source de l'IA ────────────────────────────────────────
-            Section {
-                Picker("Source", selection: $backendPreference) {
-                    ForEach(AIBackendPreference.allCases, id: \.self) { pref in
-                        // `pref.displayName` est un `String` dynamique, pas un littéral :
-                        // `Label(String, ...)` ne consulte JAMAIS Localizable.strings
-                        // (seul `Label(LocalizedStringKey, ...)`/`Text("littéral")` le
-                        // fait). Le wrap explicite force la résolution fr/en.
-                        Label(LocalizedStringKey(pref.displayName), systemImage: pref.icon).tag(pref)
-                    }
-                }
-                .onChange(of: backendPreference) { _, newValue in
-                    AIBackendPreference.current = newValue
-                    testFeedback = nil
-                }
-
-                if backendPreference == .localServer {
-                    TextField("Adresse du serveur", text: $localServerURL, prompt: Text("http://192.168.1.10:1234"))
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onChange(of: localServerURL) { _, newValue in
-                            LocalLLMService.baseURL = newValue
-                        }
-                    TextField("Nom du modèle", text: $localServerModel, prompt: Text("ex. llama-3.2-3b-instruct"))
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onChange(of: localServerModel) { _, newValue in
-                            LocalLLMService.model = newValue
-                        }
-                    SecureField("Clé API (optionnel)", text: $localServerAPIKey)
-                        .onChange(of: localServerAPIKey) { _, newValue in
-                            LocalLLMKeychain.save(newValue, for: LocalLLMKeychain.apiKeyID)
-                        }
-
-                    Button {
-                        Task { await testConnection() }
-                    } label: {
-                        if isTestingConnection {
-                            HStack { ProgressView().controlSize(.small); Text("Test en cours…") }
-                        } else {
-                            Label("Tester la connexion", systemImage: "bolt.horizontal")
-                        }
-                    }
-                    .disabled(isTestingConnection || localServerURL.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                    if let testFeedback {
-                        Label(testFeedback, systemImage: testFeedbackIsError ? "xmark.circle.fill" : "checkmark.circle.fill")
-                            .font(AppTheme.Typography.labelMedium)
-                            .foregroundStyle(testFeedbackIsError ? AppTheme.Colors.danger : AppTheme.Colors.success)
-                    }
-                }
-            } header: {
-                Text("Source de l'IA")
-            } footer: {
-                // Même remarque : `backendFooterText` est un `String` calculé, on force
-                // le passage par LocalizedStringKey pour que fr/en s'appliquent.
-                Text(LocalizedStringKey(backendFooterText))
-                    .font(.caption)
+            featuresSection
+            appleSection
+            localServerSection
+            ForEach(AICloudProvider.allCases, id: \.self) { provider in
+                cloudSection(provider)
             }
-            .listRowBackground(AppTheme.Colors.surface)
-
-            // ── Statut actuel ─────────────────────────────────────────
-            Section {
-                HStack(spacing: AppTheme.Spacing.md) {
-                    Image(systemName: status.icon)
-                        .font(.system(size: 32))
-                        .foregroundStyle(status.color)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(status.title)
-                            .font(AppTheme.Typography.titleMedium)
-                            .foregroundStyle(AppTheme.Colors.textPrimary)
-                        Text("Apple Foundation Models")
-                            .font(AppTheme.Typography.labelMedium)
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
-                    }
-                    Spacer()
-                }
-                .padding(.vertical, AppTheme.Spacing.xs)
-
-                Text(status.detail)
-                    .font(AppTheme.Typography.bodyMedium)
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } header: {
-                Text("État actuel")
-            }
-            .listRowBackground(AppTheme.Colors.surface)
-
-            // ── Comment c'est utilisé ─────────────────────────────────
-            Section {
-                AIUsageRow(
-                    icon: "terminal",
-                    title: "Lors de la création de requêtes SQL",
-                    text: "Vous pouvez créer votre requête SQL afin de questionner vos données bancaires et d'investissement dans une conversation avec l'IA"
-                )
-                AIUsageRow(
-                    icon: "doc.text.magnifyingglass",
-                    title: "Lors d'un import",
-                    text: "Quand le moteur ne reconnaît pas un libellé, l'IA propose un nom canonique, une ville et un pays."
-                )
-                AIUsageRow(
-                    icon: "magnifyingglass.circle",
-                    title: "Recherche manuelle",
-                    text: "Depuis la fiche d'un tier, vous pouvez relancer l'identification IA avec une requête personnalisée."
-                )
-            } header: {
-                Text("Comment Nemoris utilise l'IA")
-            } footer: {
-                Text(LocalizedStringKey(usageFooterText))
-                    .font(.caption)
-            }
-            .listRowBackground(AppTheme.Colors.surface)
-
-            // ── Sources de secours ────────────────────────────────────
-            Section {
-                AIUsageRow(
-                    icon: "building.columns",
-                    title: "Annuaires d'entreprise",
-                    text: "Sirene (FR), Companies House (UK), Zefix (CH) — configurables dans Réglages → Sources de données."
-                )
-                AIUsageRow(
-                    icon: "map",
-                    title: "MapKit",
-                    text: "Recherche de POI Apple. Disponible sans iOS 26 ni Apple Intelligence."
-                )
-                AIUsageRow(
-                    icon: "tray.full",
-                    title: "Moteur embarqué Nemoris",
-                    text: "Identification par embeddings BERT MiniLM sur ~200 marchands canoniques fréquents."
-                )
-            } header: {
-                Text("Sources d'enrichissement de secours")
-            } footer: {
-                Text("Ces sources fonctionnent indépendamment de l'IA. Si l'IA n'est pas disponible, l'enrichissement reste fonctionnel.")
-                    .font(.caption)
-            }
-            .listRowBackground(AppTheme.Colors.surface)
+            testSection
         }
         .scrollContentBackground(.hidden)
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
+        .tint(AppTheme.Colors.accent)
         .navigationTitle("Intelligence artificielle")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            status = Self.detectStatus()
-            backendPreference = AIBackendPreference.current
-            localServerURL = LocalLLMService.baseURL
-            localServerModel = LocalLLMService.model
-            localServerAPIKey = LocalLLMKeychain.load(id: LocalLLMKeychain.apiKeyID) ?? ""
+        .onAppear(perform: load)
+    }
+
+    // MARK: - Fonctionnalités
+
+    private var featuresSection: some View {
+        Section {
+            ForEach(AIFeature.allCases) { feature in
+                NavigationLink {
+                    featureDetail(feature)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: feature.icon)
+                            .foregroundStyle(AppTheme.Colors.accent)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(LocalizedStringKey(feature.displayName))
+                            Text(LocalizedStringKey(effectiveLabel(for: feature)))
+                                .font(.caption)
+                                .foregroundStyle(effectiveColor(for: feature))
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text("Par fonctionnalité")
+        } footer: {
+            Text("Chaque fonctionnalité choisit sa source. Utile quand Apple Intelligence sait faire l'une mais pas l'autre — la lecture d'images, par exemple, demande iOS 27.")
         }
     }
 
-    /// Texte du footer de la section "Source de l'IA" — explique le réglage choisi
-    /// et rappelle qu'il est propre à CET appareil (un Mac peut rester sur Foundation
-    /// Models pendant qu'un iPhone pointe vers un serveur local, par exemple).
-    private var backendFooterText: String {
-        // Chaque branche est une phrase complète et FIXE (pas de concaténation
-        // runtime) : c'est la clé exacte qu'il faut retrouver dans les deux
-        // Localizable.strings (fr/en), cf. `Text(LocalizedStringKey(...))` ci-dessus.
-        switch backendPreference {
-        case .automatic:
-            return "Utilise Apple Foundation Models si disponible sur cet appareil, sinon aucune IA. Ce réglage est propre à cet appareil — les autres appareils Nemoris peuvent utiliser une source différente."
-        case .localServer:
-            return "Nemoris envoie le libellé de la transaction à l'adresse configurée (LM Studio, Ollama, ou tout serveur compatible OpenAI). L'adresse et la clé restent sur cet appareil, rien n'est envoyé à un serveur Nemoris. Ce réglage est propre à cet appareil — les autres appareils Nemoris peuvent utiliser une source différente."
-        case .off:
-            return "Aucune source IA n'est appelée. L'enrichissement reste fonctionnel via Sirene, MapKit et le moteur embarqué. Ce réglage est propre à cet appareil — les autres appareils Nemoris peuvent utiliser une source différente."
+    /// Ce qui sera RÉELLEMENT utilisé, pas seulement ce qui est demandé.
+    ///
+    /// ⚠️ La distinction compte : « Automatique » sur un appareil où rien n'est
+    /// configuré veut dire « aucune IA », et l'utilisateur doit le voir ici
+    /// plutôt que de le découvrir devant un bouton grisé.
+    private func effectiveLabel(for feature: AIFeature) -> String {
+        let asked = choices[feature] ?? .automatic
+        guard let resolved = AIEnrichmentBackend.resolved(for: feature) else {
+            return asked == .off ? "Désactivée" : "\(asked.displayName) — indisponible"
+        }
+        if asked == .automatic { return "Automatique → \(resolved.displayName)" }
+        return resolved.displayName
+    }
+
+    private func effectiveColor(for feature: AIFeature) -> Color {
+        let asked = choices[feature] ?? .automatic
+        if asked == .off { return AppTheme.Colors.textSecondary }
+        guard let resolved = AIEnrichmentBackend.resolved(for: feature) else {
+            return AppTheme.Colors.warning
+        }
+        // Orange aussi quand ça marche mais que les données sortent : ce n'est
+        // pas une erreur, c'est un choix qui mérite d'être visible en un coup
+        // d'œil dans la liste.
+        return resolved.leavesDevice ? AppTheme.Colors.warning : AppTheme.Colors.success
+    }
+
+    // MARK: - Détail d'une fonctionnalité
+
+    @ViewBuilder
+    private func featureDetail(_ feature: AIFeature) -> some View {
+        Form {
+            Section {
+                Text(LocalizedStringKey(feature.explanation))
+                    .font(.callout)
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                Picker("Source", selection: Binding(
+                    get: { choices[feature] ?? .automatic },
+                    set: { newValue in
+                        choices[feature] = newValue
+                        AIFeatureSettings.setChoice(newValue, for: feature)
+                    }
+                )) {
+                    ForEach(AIBackendChoice.allChoices, id: \.self) { choice in
+                        Label(LocalizedStringKey(choice.displayName), systemImage: choice.icon)
+                            .tag(choice)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } header: {
+                Text("Source")
+            } footer: {
+                if let reason = AIEnrichmentBackend.unavailabilityReason(for: feature) {
+                    Text(LocalizedStringKey(reason)).foregroundStyle(AppTheme.Colors.warning)
+                } else if (choices[feature] ?? .automatic).leavesDevice {
+                    // ⚠️ Le SEUL cas où les données sortent de l'appareil.
+                    // L'écrire noir sur blanc, à l'endroit du choix.
+                    Text("⚠️ Les données de cette fonctionnalité (libellés, relevés, captures) seront envoyées au fournisseur. C'est la seule option qui fait sortir tes données de l'appareil.")
+                        .foregroundStyle(AppTheme.Colors.warning)
+                }
+            }
+
+            if feature.benefitsFromImage {
+                let readsImages = AIEnrichmentBackend.supportsImageInput(for: feature)
+                Section {
+                    Label(readsImages
+                          ? "Lecture d'image disponible — les captures partent telles quelles au modèle."
+                          : "Lecture d'image indisponible — les captures seront océrisées avant analyse.",
+                          systemImage: readsImages ? "photo.badge.checkmark" : "text.viewfinder")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                } footer: {
+                    Text("La mise en page d'une capture porte du sens que l'OCR aplatit. Apple Intelligence ne lit les images qu'à partir d'iOS 27 ; un serveur local multimodal ou un fournisseur cloud le permet dès maintenant.")
+                }
+            }
+        }
+        .nemorisFormStyle()
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.Colors.background.ignoresSafeArea())
+        .tint(AppTheme.Colors.accent)
+        .navigationTitle(LocalizedStringKey(feature.displayName))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Apple Intelligence
+
+    private var appleSection: some View {
+        Section {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: appleStatus.icon)
+                    .foregroundStyle(appleStatus.color)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(LocalizedStringKey(appleStatus.title))
+                        .font(.subheadline.weight(.semibold))
+                    Text(LocalizedStringKey(appleStatus.detail))
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        } header: {
+            Text("Apple Intelligence")
+        } footer: {
+            Text("100 % sur l'appareil, aucune donnée transmise. C'est la source retenue en priorité par le mode Automatique quand elle est disponible.")
         }
     }
 
-    /// Le footer "100% on-device" de la section usage n'est vrai que pour Foundation
-    /// Models (ou quand l'IA est désactivée, auquel cas la question ne se pose pas).
-    private var usageFooterText: String {
-        backendPreference == .localServer
-            ? "Avec un serveur local, le libellé de la transaction part vers l'adresse configurée ci-dessus — pas vers un serveur Nemoris."
-            : "100% on-device. Aucune donnée bancaire ne quitte l'appareil."
-    }
+    // MARK: - Serveur local
 
-    private func testConnection() async {
-        isTestingConnection = true
-        testFeedback = nil
-        defer { isTestingConnection = false }
-        do {
-            let message = try await LocalLLMService.shared.testConnection()
-            testFeedback = message
-            testFeedbackIsError = false
-        } catch {
-            testFeedback = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            testFeedbackIsError = true
+    private var localServerSection: some View {
+        Section {
+            TextField("Adresse du serveur", text: $localBaseURL,
+                      prompt: Text("http://192.168.1.10:1234"))
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .onChange(of: localBaseURL) { _, value in LocalLLMService.baseURL = value }
+
+            TextField("Modèle (optionnel)", text: $localModel)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .onChange(of: localModel) { _, value in LocalLLMService.model = value }
+
+            SecureField("Clé API (optionnelle)", text: $localAPIKey)
+                .onChange(of: localAPIKey) { _, value in
+                    LocalLLMKeychain.save(value, for: LocalLLMKeychain.apiKeyID)
+                }
+        } header: {
+            Text("Serveur local")
+        } footer: {
+            Text("Un serveur compatible OpenAI (LM Studio, Ollama…) sur ton Mac ou sur cet appareil. Les données restent sur ton réseau.")
         }
     }
 
-    /// Détecte l'état actuel de Foundation Models sur cet appareil.
-    /// On distingue plusieurs cas pour informer précisément le user.
-    private static func detectStatus() -> AIStatus {
+    // MARK: - Fournisseurs cloud
+
+    private func cloudSection(_ provider: AICloudProvider) -> some View {
+        Section {
+            SecureField("Clé API", text: Binding(
+                get: { cloudKeys[provider] ?? "" },
+                set: { value in
+                    cloudKeys[provider] = value
+                    CloudLLMKeychain.save(value, for: provider)
+                }
+            ))
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+
+            TextField("Modèle", text: Binding(
+                get: { cloudModels[provider] ?? "" },
+                set: { value in
+                    cloudModels[provider] = value
+                    CloudLLMService.setModel(value, for: provider)
+                }
+            ), prompt: Text(provider.defaultModel))
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+        } header: {
+            Text(LocalizedStringKey(provider.displayName))
+        } footer: {
+            Text("Ta clé reste dans le trousseau de cet appareil, jamais synchronisée. Laisse le modèle vide pour utiliser celui proposé. ⚠️ Les données envoyées à ce fournisseur quittent l'appareil.")
+        }
+    }
+
+    // MARK: - Test
+
+    private var testSection: some View {
+        Section {
+            Button {
+                Task { await runTest() }
+            } label: {
+                if isTesting {
+                    HStack { ProgressView().controlSize(.small); Text("Test en cours…") }
+                } else {
+                    Label("Tester les backends configurés", systemImage: "bolt.horizontal")
+                }
+            }
+            .disabled(isTesting)
+
+            if let testSuccess {
+                Label(LocalizedStringKey(testSuccess), systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.success)
+            }
+            if let testError {
+                Label(LocalizedStringKey(testError), systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.danger)
+            }
+        } footer: {
+            Text("Envoie un ping minimal à chaque backend configuré et rapporte sa réponse.")
+        }
+    }
+
+    /// Teste TOUS les backends configurés, pas seulement le dernier saisi :
+    /// avec un réglage par fonctionnalité, plusieurs peuvent servir en même
+    /// temps, et savoir lequel des deux est cassé est l'information utile.
+    private func runTest() async {
+        isTesting = true
+        testSuccess = nil
+        testError = nil
+        defer { isTesting = false }
+
+        var successes: [String] = []
+        var failures: [String] = []
+
+        if LocalLLMService.hasConfiguration {
+            do {
+                let message = try await LocalLLMService.shared.testConnection()
+                successes.append("Serveur local : \(message)")
+            } catch {
+                failures.append("Serveur local — \(error.localizedDescription)")
+            }
+        }
+        for provider in AICloudProvider.allCases where CloudLLMService.hasConfiguration(provider) {
+            do {
+                let message = try await CloudLLMService(provider: provider).testConnection()
+                successes.append("\(provider.displayName) : \(message)")
+            } catch {
+                failures.append("\(provider.displayName) — \(error.localizedDescription)")
+            }
+        }
+
+        if successes.isEmpty && failures.isEmpty {
+            testError = "Aucun backend configuré à tester."
+            return
+        }
+        testSuccess = successes.isEmpty ? nil : successes.joined(separator: "\n")
+        testError = failures.isEmpty ? nil : failures.joined(separator: "\n")
+    }
+
+    // MARK: - Chargement
+
+    private func load() {
+        for feature in AIFeature.allCases {
+            choices[feature] = AIFeatureSettings.choice(for: feature)
+        }
+        localBaseURL = LocalLLMService.baseURL
+        localModel = LocalLLMService.model
+        localAPIKey = LocalLLMKeychain.load(id: LocalLLMKeychain.apiKeyID) ?? ""
+        for provider in AICloudProvider.allCases {
+            cloudKeys[provider] = CloudLLMKeychain.load(provider) ?? ""
+            // Volontairement la valeur BRUTE (et non `CloudLLMService.model`,
+            // qui substitue le défaut) : le champ doit rester vide tant que
+            // l'utilisateur n'a rien saisi, pour que le prompt s'affiche.
+            cloudModels[provider] = UserDefaults.standard
+                .string(forKey: "ai.cloud.\(provider.rawValue).model") ?? ""
+        }
+        appleStatus = Self.detectAppleStatus()
+    }
+
+    // MARK: - Statut Apple Intelligence
+
+    enum AppleIntelligenceStatus {
+        case available
+        case iosTooOld
+        case hardwareNotEligible
+        case appleIntelligenceDisabled
+
+        var title: String {
+            switch self {
+            case .available:                 return "Disponible"
+            case .iosTooOld:                 return "iOS 26 requis"
+            case .hardwareNotEligible:       return "Appareil non compatible"
+            case .appleIntelligenceDisabled: return "Apple Intelligence désactivée"
+            }
+        }
+
+        var color: Color {
+            self == .available ? AppTheme.Colors.success : AppTheme.Colors.warning
+        }
+
+        var icon: String {
+            self == .available ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
+        }
+
+        var detail: String {
+            switch self {
+            case .available:
+                return "Le modèle d'Apple tourne directement sur cet appareil."
+            case .iosTooOld:
+                return "Nécessite iOS 26 ou supérieur. Sans lui, un serveur local ou un fournisseur cloud prend le relais."
+            case .hardwareNotEligible:
+                return "Nécessite un iPhone 15 Pro ou plus récent (iPad M1+, Mac M1+). Les autres sources restent disponibles."
+            case .appleIntelligenceDisabled:
+                return "À activer dans Réglages iOS → Apple Intelligence & Siri."
+            }
+        }
+    }
+
+    static func detectAppleStatus() -> AppleIntelligenceStatus {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
-            let model = SystemLanguageModel.default
-            if model.isAvailable {
-                return .available
-            }
-            // iOS 26 mais pas dispo : on essaie de discriminer hw vs réglages.
-            // L'API publique expose `availability` qui peut renvoyer plusieurs cas.
-            switch model.availability {
-            case .available:
-                return .available
-            case .unavailable(.appleIntelligenceNotEnabled):
-                return .appleIntelligenceDisabled
-            case .unavailable(.deviceNotEligible):
-                return .hardwareNotEligible
-            case .unavailable(.modelNotReady):
-                return .appleIntelligenceDisabled // En cours de DL → traité comme "non activé"
-            case .unavailable:
-                return .hardwareNotEligible
+            switch SystemLanguageModel.default.availability {
+            case .available: return .available
+            case .unavailable(let reason):
+                switch reason {
+                case .appleIntelligenceNotEnabled: return .appleIntelligenceDisabled
+                case .deviceNotEligible:           return .hardwareNotEligible
+                default:                           return .appleIntelligenceDisabled
+                }
             }
         }
         #endif
         return .iosTooOld
-    }
-}
-
-// MARK: - Row helper
-
-private struct AIUsageRow: View {
-    let icon: String
-    let title: String
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(AppTheme.Colors.accent)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(AppTheme.Typography.bodyMedium)
-                    .foregroundStyle(AppTheme.Colors.textPrimary)
-                Text(text)
-                    .font(AppTheme.Typography.labelMedium)
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.vertical, 2)
     }
 }

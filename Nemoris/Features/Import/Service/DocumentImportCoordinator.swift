@@ -203,7 +203,7 @@ final class DocumentImportCoordinator {
 
         job = Task { [weak self] in
             guard let self else { return }
-            let readout = await ImportPipeline.read(sources: sources)
+            let readout = await ImportPipeline.read(sources: sources, destination: destination)
             guard !Task.isCancelled else { return }
             let result = await ImportPipeline.analyze(readout, destination: destination) { done, total in
                 self.phase = .analyzing(done: done, total: total)

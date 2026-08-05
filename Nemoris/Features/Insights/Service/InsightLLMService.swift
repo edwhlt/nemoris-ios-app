@@ -29,24 +29,43 @@ actor InsightLLMService {
 
     private static let log = Logger(subsystem: "fr.hedwin.nemoris", category: "InsightLLM")
 
-    /// `true` si Foundation Models est utilisable sur cet appareil (iOS 26 +
-    /// hw Apple Intelligence + Intelligence activée par l'user).
+    /// `true` si l'utilisateur a laissé une IA active pour le coach ET que
+    /// Foundation Models est utilisable sur cet appareil.
+    ///
+    /// ⚠️ Le premier test manquait : ce service appelait Foundation Models en
+    /// DIRECT, donc un « Désactivée » (ou un serveur local) choisi dans les
+    /// Réglages n'avait aucun effet ici — l'IA continuait de reformuler les
+    /// insights alors que l'utilisateur croyait l'avoir coupée. C'est
+    /// exactement la classe de bug que le point de dispatch unique existe pour
+    /// éteindre.
+    ///
+    /// Le moteur reste Foundation Models pour l'instant : la reformulation
+    /// tourne sur chaque insight du tableau de bord, à chaque chargement — la
+    /// faire passer par un serveur ou un fournisseur cloud ajouterait une
+    /// latence réseau à un écran qui doit s'afficher tout de suite. Le choix
+    /// « Apple Intelligence » ou « Automatique » l'active, tout autre choix la
+    /// laisse éteinte, ce qui est le comportement attendu dans les deux cas.
     var isAvailable: Bool {
-        #if canImport(FoundationModels)
-        if #available(iOS 26.0, macOS 26.0, *) {
-            return SystemLanguageModel.default.availability == .available
+        get async {
+            guard await AIEnrichmentBackend.usesGuidedGeneration(for: .insights) else {
+                return false
+            }
+            #if canImport(FoundationModels)
+            if #available(iOS 26.0, macOS 26.0, *) {
+                return SystemLanguageModel.default.availability == .available
+            }
+            return false
+            #else
+            return false
+            #endif
         }
-        return false
-        #else
-        return false
-        #endif
     }
 
     /// Humanise une liste d'insights. Renvoie une nouvelle liste avec les
     /// `title` et `detail` éventuellement réécrits par le LLM. En cas d'échec
     /// (LLM indisponible, parse error, timeout), renvoie l'insight inchangé.
     func humanize(_ insights: [Insight]) async -> [Insight] {
-        guard isAvailable else { return insights }
+        guard await isAvailable else { return insights }
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
             var result: [Insight] = []

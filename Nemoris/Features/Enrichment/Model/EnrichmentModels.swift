@@ -33,6 +33,12 @@ enum MerchantEnrichmentSource: String, Codable, CaseIterable {
     case sirene
     case llm        // Apple Foundation Models
     case localLLM   // serveur HTTP compatible OpenAI configuré par l'utilisateur (LM Studio, Ollama…)
+    /// Fournisseur cloud avec la clé API de l'utilisateur (Claude, OpenAI).
+    /// ⚠️ Le SEUL cas où le libellé a quitté l'appareil — d'où un cas distinct
+    /// plutôt qu'un partage avec `.llm` : `enrichment_cache.source` doit rester
+    /// honnête sur la provenance, et le compilateur force la mise à jour de
+    /// tous les affichages.
+    case cloudLLM
     case mapkit
     case merged     // vote pondéré entre plusieurs sources
     case manual     // saisi par l'utilisateur

@@ -41,7 +41,7 @@ struct EnrichmentSheetView: View {
         // Priorité au RAW LABEL — le canonical du moteur perd souvent les indices
         // géographiques (ex. "VNPAY HUNG RES PSC VN P HA GIANG" → "vnpay" sans VN ni HA GIANG).
         _query = State(initialValue: row.rawLabel)
-        _useLLM = State(initialValue: AIEnrichmentBackend.isAvailable)
+        _useLLM = State(initialValue: AIEnrichmentBackend.isAvailable(for: .merchantEnrichment))
     }
 
     var body: some View {
@@ -131,7 +131,7 @@ struct EnrichmentSheetView: View {
             Toggle("Sources entreprises (registres)", isOn: $useSirene)
             Toggle("Apple Maps (POI)", isOn: $useMapKit)
             Toggle("Intelligence artificielle", isOn: $useLLM)
-                .disabled(!AIEnrichmentBackend.isAvailable)
+                .disabled(!AIEnrichmentBackend.isAvailable(for: .merchantEnrichment))
             Button {
                 Task { await runSearch() }
             } label: {
@@ -151,19 +151,14 @@ struct EnrichmentSheetView: View {
         }
     }
 
-    /// Explique pourquoi le toggle IA est grisé, selon le backend actuellement
-    /// sélectionné dans Réglages → Intelligence artificielle. `nil` quand l'IA est
+    /// Explique pourquoi le toggle IA est grisé. `nil` quand elle est
     /// disponible (rien à expliquer).
+    ///
+    /// Le motif vient du point de dispatch, qui est le seul à connaître le
+    /// backend effectif de cette fonctionnalité — le dupliquer ici le ferait
+    /// diverger dès l'ajout d'un backend (ce qui vient d'arriver avec le cloud).
     private static var aiUnavailableFooter: String? {
-        guard !AIEnrichmentBackend.isAvailable else { return nil }
-        switch AIBackendPreference.current {
-        case .automatic:
-            return "Foundation Models requiert iOS 26+. Sur cet appareil, IA on-device indisponible."
-        case .localServer:
-            return "Aucun serveur local configuré — Réglages → Intelligence artificielle."
-        case .off:
-            return "IA désactivée — Réglages → Intelligence artificielle."
-        }
+        AIEnrichmentBackend.unavailabilityReason(for: .merchantEnrichment)
     }
 
     // MARK: AXE S — plan de recherche et résultats du registre
@@ -412,6 +407,7 @@ struct EnrichmentSheetView: View {
         case .mapkit:   return ("MAPS",   "map.fill",        .green)
         case .llm:      return ("IA",     "sparkles",        .purple)
         case .localLLM: return ("LOCAL",  "server.rack",     .teal)
+        case .cloudLLM: return ("CLOUD", "cloud", .indigo)
         case .merged:   return ("FUSION", "circle.grid.cross.fill", AppTheme.Colors.accent)
         case .manual:   return ("MANUEL", "hand.point.up.fill", .orange)
         }
@@ -423,6 +419,7 @@ struct EnrichmentSheetView: View {
         case .mapkit:   return "mappin.circle.fill"
         case .llm:      return "sparkles"
         case .localLLM: return "server.rack"
+        case .cloudLLM: return "cloud"
         default:        return "mappin"
         }
     }

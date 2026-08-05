@@ -86,17 +86,27 @@ enum ImportDocumentReader {
     /// sur le main actor fige l'app et la barre de progression ne se peint
     /// jamais.
     ///
+    /// `feature` : la fonctionnalité au nom de laquelle on lit.
+    ///
+    /// ⚠️ Elle décide si une capture est passée TELLE QUELLE au modèle ou
+    /// océrisée : le backend est choisi par fonctionnalité, donc l'import de
+    /// relevés peut lire les images (serveur local multimodal) pendant que
+    /// l'import de portefeuille en est réduit à l'OCR, ou l'inverse. Poser la
+    /// question globalement donnerait la mauvaise réponse à l'un des deux.
+    ///
     /// `allowsImagePassthrough` : à `false`, une capture est toujours océrisée
     /// même si un modèle multimodal existe. Utile pour les formats dont on veut
     /// l'extraction déterministe (le moteur d'ancrage a besoin de texte).
     static func units(for source: ImportDocumentSource,
+                      feature: AIFeature,
                       allowsImagePassthrough: Bool = true) async -> [Unit] {
         let data = source.data
         let kind = ImportFormatSniffer.detect(data: data, fileExtension: source.fileExtension)
 
         switch kind {
         case .pdf:         return await pdfUnits(data)
-        case .image:       return await imageUnits(data, allowsPassthrough: allowsImagePassthrough)
+        case .image:       return await imageUnits(data, feature: feature,
+                                                   allowsPassthrough: allowsImagePassthrough)
         case .text:        return textUnits(data)
         case .spreadsheet: return await spreadsheetUnits(data)
         case .xml:         return await structuredUnits(data)
@@ -126,8 +136,9 @@ enum ImportDocumentReader {
 
     // MARK: - Image
 
-    private static func imageUnits(_ data: Data, allowsPassthrough: Bool) async -> [Unit] {
-        if allowsPassthrough, await AIEnrichmentBackend.supportsImageInput,
+    private static func imageUnits(_ data: Data, feature: AIFeature,
+                                   allowsPassthrough: Bool) async -> [Unit] {
+        if allowsPassthrough, await AIEnrichmentBackend.supportsImageInput(for: feature),
            let cgImage = await Task.detached(priority: .userInitiated, operation: {
                InvestmentPDFParser.decodeImage(from: data)
            }).value {

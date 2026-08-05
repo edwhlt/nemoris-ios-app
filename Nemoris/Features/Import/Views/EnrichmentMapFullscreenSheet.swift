@@ -235,6 +235,7 @@ struct EnrichmentMapFullscreenSheet: View {
         case .mapkit:   return "mappin.circle.fill"
         case .llm:      return "sparkles"
         case .localLLM: return "server.rack"
+        case .cloudLLM: return "cloud"
         default:        return "mappin"
         }
     }
@@ -255,6 +256,7 @@ struct EnrichmentMapFullscreenSheet: View {
         case .mapkit:   return "MAPS"
         case .llm:      return "IA"
         case .localLLM: return "LOCAL"
+        case .cloudLLM: return "cloud"
         case .merged:   return "FUSION"
         case .manual:   return "MANUEL"
         }

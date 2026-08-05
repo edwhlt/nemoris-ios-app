@@ -599,7 +599,7 @@ struct ImportV3EntryView: View {
     /// « ce fichier est un tableau / un document / un relevé structuré ».
     private func classify(_ files: [(data: Data, name: String)]) async {
         let sources = files.map { ImportDocumentSource(data: $0.data, displayName: $0.name) }
-        let readout = await ImportPipeline.read(sources: sources)
+        let readout = await ImportPipeline.read(sources: sources, destination: activeDestination)
 
         // Destination « investissements » : pas de mapping de colonnes ni de
         // session — tout part au parseur dont le prompt est calibré pour des

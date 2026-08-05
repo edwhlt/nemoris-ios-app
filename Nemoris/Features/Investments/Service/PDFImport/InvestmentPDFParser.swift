@@ -134,6 +134,7 @@ final class InvestmentPDFParser: Sendable {
         // ─── L'unité EST une image et un modèle sait la lire ────────────────
         case .image(let image):
             let raw = await AIEnrichmentBackend.completeText(
+                feature: .investmentImport,
                 system: Self.systemInstructions,
                 user: "Extrais toutes les opérations et lignes de portefeuille visibles sur cette capture.",
                 image: image

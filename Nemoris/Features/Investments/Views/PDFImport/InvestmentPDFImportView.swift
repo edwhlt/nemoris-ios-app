@@ -862,7 +862,7 @@ struct InvestmentPDFImportView: View {
             // même que l'import de transactions. Ce module avait son propre
             // orchestrateur, avec son propre découpage et sa propre détection
             // de format : deux copies qui ont fini par diverger.
-            let readout = await ImportPipeline.read(sources: sources)
+            let readout = await ImportPipeline.read(sources: sources, destination: .investments)
             let batch = await ImportPipeline.analyze(readout, destination: .investments) { done, total in
                 parsingCurrent = done
                 parsingTotal = total

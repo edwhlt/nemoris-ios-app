@@ -77,7 +77,13 @@ enum ImportPipeline {
     /// au pire une unité vide porteuse de son diagnostic. Un lot de dix
     /// relevés ne doit pas être perdu parce que le troisième est illisible.
     static func read(sources: [ImportDocumentSource],
+                     destination: ImportDestination,
                      allowsImagePassthrough: Bool = true) async -> Readout {
+        // La fonctionnalité IA au nom de laquelle on lit : c'est elle qui
+        // décide si une capture part telle quelle au modèle ou passe par l'OCR,
+        // puisque le backend se choisit par fonctionnalité.
+        let feature: AIFeature = destination == .transactions
+            ? .transactionImport : .investmentImport
         guard !sources.isEmpty else { return Readout() }
 
         // Indexé pour recoller dans l'ordre : un `TaskGroup` rend les résultats
@@ -99,7 +105,8 @@ enum ImportPipeline {
                 running += 1
                 group.addTask {
                     (index, await ImportDocumentReader.units(
-                        for: source, allowsImagePassthrough: allowsImagePassthrough))
+                        for: source, feature: feature,
+                        allowsImagePassthrough: allowsImagePassthrough))
                 }
             }
 

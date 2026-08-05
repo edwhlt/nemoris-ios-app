@@ -82,7 +82,7 @@ struct PayeeCreationFormSheet: View {
         _engineMerchantId = State(initialValue: cand.engineMerchantId)
         _categoryId       = State(initialValue: cand.categoryId)
         _searchQuery      = State(initialValue: row.rawLabel)
-        _useLLM           = State(initialValue: AIEnrichmentBackend.isAvailable)
+        _useLLM           = State(initialValue: AIEnrichmentBackend.isAvailable(for: .merchantEnrichment))
     }
 
     // MARK: - Init standalone (sans import)
@@ -105,7 +105,7 @@ struct PayeeCreationFormSheet: View {
         _engineMerchantId = State(initialValue: "")
         _categoryId       = State(initialValue: prefilledCategoryId)
         _searchQuery      = State(initialValue: prefilledName)
-        _useLLM           = State(initialValue: AIEnrichmentBackend.isAvailable)
+        _useLLM           = State(initialValue: AIEnrichmentBackend.isAvailable(for: .merchantEnrichment))
     }
 
     var body: some View {
@@ -327,7 +327,7 @@ struct PayeeCreationFormSheet: View {
         Toggle("Sources entreprises (Sirene, Companies House, …)", isOn: $useSirene)
         Toggle("Apple Maps", isOn: $useMapKit)
         Toggle("Intelligence artificielle", isOn: $useLLM)
-            .disabled(!AIEnrichmentBackend.isAvailable)
+            .disabled(!AIEnrichmentBackend.isAvailable(for: .merchantEnrichment))
         Button {
             Task { await runSearch() }
         } label: {
@@ -762,6 +762,7 @@ struct PayeeCreationFormSheet: View {
         case .mapkit:   return "Maps"
         case .llm:      return "IA"
         case .localLLM: return "LOCAL"
+        case .cloudLLM: return "cloud"
         default:        return ""
         }
     }
@@ -774,6 +775,7 @@ struct PayeeCreationFormSheet: View {
         case .mapkit:   return ("MAPS",   "map.fill",        .green)
         case .llm:      return ("IA",     "sparkles",        .purple)
         case .localLLM: return ("LOCAL",  "server.rack",     .teal)
+        case .cloudLLM: return ("CLOUD", "cloud", .indigo)
         case .merged:   return ("FUSION", "circle.grid.cross.fill", AppTheme.Colors.accent)
         case .manual:   return ("MANUEL", "hand.point.up.fill", .orange)
         }
@@ -785,6 +787,7 @@ struct PayeeCreationFormSheet: View {
         case .mapkit:   return "mappin.circle.fill"
         case .llm:      return "sparkles"
         case .localLLM: return "server.rack"
+        case .cloudLLM: return "cloud"
         default:        return "mappin"
         }
     }

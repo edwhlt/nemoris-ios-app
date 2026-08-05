@@ -56,6 +56,7 @@ struct CandidatePin: View {
         case .mapkit:   return .green
         case .llm:      return .purple
         case .localLLM: return .teal
+        case .cloudLLM: return .indigo
         case .merged:   return AppTheme.Colors.accent
         case .manual:   return .orange
         }
@@ -136,6 +137,7 @@ struct CandidatePin: View {
         case .mapkit:   return "mappin.circle.fill"
         case .llm:      return "sparkles"
         case .localLLM: return "server.rack"
+        case .cloudLLM: return "cloud"
         case .merged:   return "circle.grid.cross.fill"
         case .manual:   return "hand.point.up.fill"
         }

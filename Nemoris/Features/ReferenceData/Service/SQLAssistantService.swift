@@ -14,7 +14,18 @@ import FoundationModels
 @MainActor
 final class SQLAssistantService {
 
+    /// ⚠️ Respecte désormais le choix de l'utilisateur pour cette
+    /// fonctionnalité. Ce service appelait Foundation Models en DIRECT : un
+    /// « Désactivée » dans les Réglages ne le coupait pas.
+    ///
+    /// Le moteur reste Foundation Models, et c'est ici une contrainte
+    /// technique, pas un oubli : l'assistant est MULTI-TOURS et s'appuie sur
+    /// l'état conservé par `LanguageModelSession` d'une question à l'autre. Le
+    /// porter sur un backend HTTP demanderait de gérer l'historique de
+    /// conversation nous-mêmes — un chantier à part, d'où la capacité
+    /// `.multiTurn` déclarée par `AIFeature.sqlAssistant`.
     var isAvailable: Bool {
+        guard AIEnrichmentBackend.usesGuidedGeneration(for: .sqlAssistant) else { return false }
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
             return SystemLanguageModel.default.isAvailable
