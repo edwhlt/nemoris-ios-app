@@ -74,17 +74,94 @@ struct SQLiteStore: Sendable {
 
     /// Prépare, lie et exécute un unique statement. `true` si SQLite a répondu
     /// `SQLITE_DONE`.
+    ///
+    /// En cas d'échec, le détail est écrit sur la console. Le booléen seul ne
+    /// suffit pas à diagnostiquer : un contournement de trigger avait ainsi fait
+    /// échouer silencieusement toute réassignation de créancier, et il a fallu
+    /// une sonde de test dédiée pour obtenir le message qui donnait la cause en
+    /// une ligne. Utiliser `writeSingleReportingFailure` pour récupérer ce
+    /// détail dans le code plutôt que sur la console.
     @discardableResult
     func writeSingle(sql: String, bind: (OpaquePointer) -> Void) -> Bool {
-        write { db in
+        guard let failure = writeSingleReportingFailure(sql: sql, bind: bind) else { return true }
+        print("[SQLiteStore] \(failure)")
+        return false
+    }
+
+    /// Même chose, mais rend le détail de l'échec au lieu de le journaliser.
+    /// `nil` signifie que l'écriture a réussi.
+    func writeSingleReportingFailure(sql: String,
+                                     bind: (OpaquePointer) -> Void) -> SQLiteFailure? {
+        guard databaseExists else {
+            return SQLiteFailure(stage: .connexion, code: 0, extendedCode: 0,
+                                 message: "base absente : \(databaseURL.lastPathComponent)", sql: sql)
+        }
+        return write { db -> SQLiteFailure? in
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-                return false
+                defer { sqlite3_finalize(stmt) }
+                return SQLiteFailure(db: db, stage: .preparation, sql: sql)
             }
             defer { sqlite3_finalize(stmt) }
             bind(stmt)
-            return sqlite3_step(stmt) == SQLITE_DONE
-        } ?? false
+            guard sqlite3_step(stmt) == SQLITE_DONE else {
+                return SQLiteFailure(db: db, stage: .execution, sql: sql)
+            }
+            return nil
+        } ?? SQLiteFailure(stage: .connexion, code: 0, extendedCode: 0,
+                           message: "ouverture en écriture impossible", sql: sql)
+    }
+}
+
+// MARK: - Détail d'un échec
+
+/// Ce que SQLite a répondu quand une écriture a échoué.
+///
+/// Le code étendu est conservé : c'est lui qui distingue par exemple une
+/// violation d'unicité (`SQLITE_CONSTRAINT_UNIQUE`) d'une violation de clé
+/// étrangère, alors que le code de base vaut `SQLITE_CONSTRAINT` dans les deux
+/// cas.
+struct SQLiteFailure: Error, CustomStringConvertible, Sendable {
+
+    enum Stage: String, Sendable {
+        case connexion   = "connexion"
+        case preparation = "préparation"
+        case execution   = "exécution"
+    }
+
+    let stage: Stage
+    let code: Int32
+    let extendedCode: Int32
+    let message: String
+    /// Première ligne significative du SQL, pour situer sans noyer la console.
+    let sqlSummary: String
+
+    init(stage: Stage, code: Int32, extendedCode: Int32, message: String, sql: String) {
+        self.stage = stage
+        self.code = code
+        self.extendedCode = extendedCode
+        self.message = message
+        self.sqlSummary = Self.summarize(sql)
+    }
+
+    init(db: OpaquePointer, stage: Stage, sql: String) {
+        self.init(stage: stage,
+                  code: sqlite3_errcode(db),
+                  extendedCode: sqlite3_extended_errcode(db),
+                  message: String(cString: sqlite3_errmsg(db)),
+                  sql: sql)
+    }
+
+    private static func summarize(_ sql: String) -> String {
+        let ligne = sql
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty } ?? sql
+        return ligne.count > 90 ? String(ligne.prefix(90)) + "…" : ligne
+    }
+
+    var description: String {
+        "échec à la \(stage.rawValue) — code \(code)/\(extendedCode) : \(message) | \(sqlSummary)"
     }
 }
 
