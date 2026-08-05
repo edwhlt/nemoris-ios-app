@@ -124,10 +124,18 @@ final class BudgetRepository: @unchecked Sendable {
         sqlite3_step(stmt)
     }
 
+    /// ⚠️ `PRAGMA foreign_keys = ON` est indispensable ici.
+    ///
+    /// SQLite désactive les clés étrangères PAR CONNEXION et par défaut. Le
+    /// `ON DELETE CASCADE` déclaré sur `budget_previsions.recurring_pattern_id`
+    /// ne se déclenche donc pas tout seul : sans ce pragma, supprimer un
+    /// récurrent laissait ses prévisions orphelines, et elles continuaient
+    /// d'apparaître au calendrier sans récurrent pour les expliquer.
     func deletePattern(id: Int) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
+        sqlite3_exec(db, "PRAGMA foreign_keys = ON;", nil, nil, nil)
         var stmt: OpaquePointer?
         sqlite3_prepare_v2(db, "DELETE FROM recurring_patterns WHERE id=?;", -1, &stmt, nil)
         sqlite3_bind_int(stmt, 1, Int32(id))
