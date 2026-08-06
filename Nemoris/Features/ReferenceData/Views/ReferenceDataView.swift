@@ -364,8 +364,15 @@ struct ReferenceDataView: View {
                 // Icônes seules + tooltip natif `.help`, cohérent avec le reste.
                 #if os(macOS)
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    Button { startAdd() } label: { Image(systemName: "plus") }
-                        .help("Ajouter")
+                    // Binding custom : `startAdd()` réinitialise plusieurs champs
+                    // brouillon — doit rester déclenché à l'OUVERTURE, pas à
+                    // chaque bascule (la fermeture n'a rien à réinitialiser).
+                    PaneToggleButton(label: "Ajouter", systemImage: "plus", isOn: Binding(
+                        get: { showEditSheet },
+                        set: { newValue in
+                            if newValue { startAdd() } else { showEditSheet = false }
+                        }
+                    ))
                         .opacity(isSelectingTiers ? 0 : 1)
                         .disabled(isSelectingTiers)
                     Button {
@@ -379,7 +386,12 @@ struct ReferenceDataView: View {
                 }
                 #else
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { startAdd() } label: { Image(systemName: "plus") }
+                    PaneToggleButton(label: "Ajouter", systemImage: "plus", isOn: Binding(
+                        get: { showEditSheet },
+                        set: { newValue in
+                            if newValue { startAdd() } else { showEditSheet = false }
+                        }
+                    ))
                         .opacity(isSelectingTiers ? 0 : 1)
                         .disabled(isSelectingTiers)
                 }

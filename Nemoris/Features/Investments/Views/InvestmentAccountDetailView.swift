@@ -239,12 +239,7 @@ struct InvestmentAccountDetailView: View {
         // `ToolbarItemGroup` (groupement natif — `ControlGroup` rendait des
         // boutons isolés), cohérent avec les autres toolbars macOS de l'app.
         ToolbarItemGroup(placement: .topBarTrailing) {
-            Button {
-                showAddPositionForm = true
-            } label: {
-                Image(systemName: "plus")
-            }
-            .help("Ajouter une position")
+            PaneToggleButton(label: "Ajouter une position", systemImage: "plus", isOn: $showAddPositionForm)
             // Apparaît uniquement si le compte contient des cryptos —
             // utile pour réparer des valeurs corrompues par d'anciens
             // sync Yahoo (FET → action FET cotée €53, ETH → Ethernity, etc.)
@@ -256,12 +251,7 @@ struct InvestmentAccountDetailView: View {
                 }
                 .help("Réparer les valeurs crypto")
             }
-            Button {
-                showAccountEditForm = true
-            } label: {
-                Image(systemName: "pencil")
-            }
-            .help("Modifier le compte")
+            PaneToggleButton(label: "Modifier le compte", systemImage: "pencil", isOn: $showAccountEditForm)
             Button(role: .destructive) {
                 showDeleteAccountConfirm = true
             } label: {

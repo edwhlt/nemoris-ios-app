@@ -697,11 +697,7 @@ struct SQLFilesListView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 ToolbarPaywallGate(feature: .sqlConsole) {
-                    Button {
-                        showSchema = true
-                    } label: {
-                        Label("Schéma", systemImage: "tablecells")
-                    }
+                    PaneToggleButton(label: "Schéma", systemImage: "tablecells", isOn: $showSchema)
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -1028,18 +1024,11 @@ struct SQLEditorView: View {
             #endif
             ToolbarItem(placement: .topBarLeading) {
                 ToolbarPaywallGate(feature: .sqlConsole) {
-                    Button {
-                        showSchema = true
-                    } label: {
-                        Label("Schéma", systemImage: "tablecells")
-                    }
+                    PaneToggleButton(label: "Schéma", systemImage: "tablecells", isOn: $showSchema)
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showAssistant = true } label: {
-                    Image(systemName: "sparkles")
-                }
-                .accessibilityLabel("Assistant IA")
+                PaneToggleButton(label: "Assistant IA", systemImage: "sparkles", isOn: $showAssistant)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { runAndGoToResults() } label: { Label("Exécuter", systemImage: "play.fill") }

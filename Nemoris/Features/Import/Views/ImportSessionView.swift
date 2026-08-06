@@ -190,11 +190,13 @@ struct ImportSessionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Fermer") {
+                Button {
                     viewModel.saveNow()
                     appState.showImportSessionSheet = false
                     refreshAppState()
                     dismiss()
+                } label: {
+                    Label("Fermer", systemImage: "xmark")
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -812,7 +814,9 @@ struct ImportActionsHelpSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Compris") { dismiss() }
+                    Button { dismiss() } label: {
+                        Label("Compris", systemImage: "checkmark")
+                    }
                 }
             }
         }

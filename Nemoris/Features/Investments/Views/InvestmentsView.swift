@@ -40,7 +40,6 @@ struct InvestmentsView: View {
 
     // AXE J Phase 2 : import devient un sheet dédié, plus un onglet.
     @State private var showImportSheet = false
-    @State private var showPDFImportSheet = false
     @State private var showFilePicker = false
 
     /// Chantier D — import intelligent pré-rempli par un raccourci Siri.
@@ -162,18 +161,17 @@ struct InvestmentsView: View {
             // des boutons isolés).
             ToolbarItemGroup(placement: .topBarTrailing) {
                 ToolbarPaywallGate(feature: .investments) {
-                    Button {
-                        showAddAccountForm = true
-                    } label: {
-                        Image(systemName: "building.columns")
-                    }
-                    .help("Ajouter un compte")
+                    PaneToggleButton(label: "Ajouter un compte", systemImage: "building.columns", isOn: $showAddAccountForm)
                     // Entrée d'import UNIQUE : le parcours intelligent gère déjà
                     // PDF / capture d'écran / image / CSV (cf. branche iOS).
+                    // ⚠️ Redirige vers l'OUTIL d'importation, il ne l'ouvre pas
+                    // dans le volet latéral : l'import est un parcours à part
+                    // entière (choix des fichiers, mapping, revue), pas une
+                    // fiche de détail à afficher à côté du module.
                     Button {
-                        showPDFImportSheet = true
+                        appState.openImportTool(destination: .investments)
                     } label: {
-                        Image(systemName: "square.and.arrow.down")
+                        Label("Importer un relevé…", systemImage: "square.and.arrow.down")
                     }
                     .help("Importer un relevé…")
                 }
@@ -193,7 +191,7 @@ struct InvestmentsView: View {
                         // CSV déterministe (mapping de colonnes) — l'offline-first
                         // reste garanti sans IA.
                         Button {
-                            showPDFImportSheet = true
+                            appState.openImportTool(destination: .investments)
                         } label: {
                             Label("Importer un relevé…", systemImage: "square.and.arrow.down")
                         }
@@ -249,12 +247,6 @@ struct InvestmentsView: View {
         .adaptivePane(isPresented: $showImportSheet) {
             importTab
                 .paneChrome("Importer un CSV", cancelLabel: "Fermer", onCancel: { showImportSheet = false })
-        }
-        .adaptivePane(isPresented: $showPDFImportSheet) {
-            // Entonnoir d'import UNIFIÉ, avec la destination pré-remplie sur
-            // « Investissements » puisqu'on vient de ce module. L'utilisateur
-            // peut la changer sans quitter l'écran.
-            ImportV3EntryView(initialDestination: .investments)
         }
         // Chantier D — import intelligent ouvert par un raccourci Siri (document
         // pré-rempli). Consomme aussi l'URL en attente si la vue vient d'être

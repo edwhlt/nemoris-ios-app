@@ -238,6 +238,17 @@ struct SettingsView: View {
                 // Activation des modules optionnels. "Remboursements" est groupé
                 // ici car c'est aussi une fonctionnalité activable, pas un réglage de Tricount.
                 Section {
+                    // ⚠️ Transactions est le module CŒUR, activé par défaut —
+                    // mais activable/désactivable comme les autres : qui ne se
+                    // sert de Nemoris que pour son portefeuille n'a aucune
+                    // raison de garder une liste d'opérations vide. Le désactiver
+                    // retire aussi « Données », qui n'est que son référentiel.
+                    proToggle(
+                        isOn: $appState.showTransactions,
+                        feature: nil,
+                        label: "Transactions",
+                        icon: "list.bullet.rectangle"
+                    )
                     proToggle(
                         isOn: $appState.showTricount,
                         feature: nil,
@@ -369,11 +380,12 @@ struct SettingsView: View {
                 .environment(\.editMode, .constant(.active))
                 #endif
 
-                // ── Import & Données ──────────────────────────────────────
-                Section("Import & Données") {
-                    settingsLink(.importCSV) {
-                        Label("Importation…", systemImage: "square.and.arrow.down")
-                    }
+                // ── Données ───────────────────────────────────────────────
+                // ⚠️ L'entrée « Importation » a été RETIRÉE d'ici : elle
+                // existait aussi dans la navigation principale, et deux chemins
+                // vers le même écran laissaient croire à deux imports
+                // différents. Un seul accès, celui du menu.
+                Section("Données") {
                     settingsLink(.companySources) {
                         Label("Sources entreprises", systemImage: "globe.europe.africa.fill")
                     }

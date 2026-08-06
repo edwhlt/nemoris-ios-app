@@ -9,6 +9,13 @@ struct ColumnMappingView: View {
 
     /// Résultat du parsing INITIAL (séparateur autodétecté).
     let parsed: CSVParserV3.Parsed
+    /// Autres feuilles du même classeur, s'il y en a.
+    ///
+    /// ⚠️ Un classeur ne doit PAS produire une étape de mapping par feuille :
+    /// l'utilisateur devrait alors mapper « Notes » et tout onglet annexe avant
+    /// d'atteindre celui qui l'intéresse, sans jamais pouvoir en choisir un.
+    /// Ici il choisit, et seule la feuille retenue est importée.
+    var siblingSheets: [ImportGrid] = []
     /// Texte brut, pour re-parser si l'utilisateur corrige le séparateur.
     /// `nil` = séparateur non modifiable (appelant qui n'a pas le contenu).
     var rawContent: String? = nil
@@ -38,8 +45,15 @@ struct ColumnMappingView: View {
     @State private var reparsed: CSVParserV3.Parsed?
     @State private var separator: String = ""
 
-    /// Source de vérité de l'écran : le re-parsing s'il existe, sinon l'initial.
-    private var effective: CSVParserV3.Parsed { reparsed ?? parsed }
+    /// Feuille retenue quand la source est un classeur (`nil` = la première).
+    @State private var selectedSheet: ImportGrid?
+
+    /// Toutes les feuilles du classeur, dans l'ordre du fichier.
+    private var allSheets: [ImportGrid] { [parsed] + siblingSheets }
+
+    /// Source de vérité de l'écran : le re-parsing d'un CSV s'il existe, sinon
+    /// la feuille choisie, sinon la première.
+    private var effective: CSVParserV3.Parsed { reparsed ?? selectedSheet ?? parsed }
 
     private var headers: [String] { effective.headers }
     private var signature: String { ColumnMappingSignature.compute(headers: headers) }
@@ -99,7 +113,17 @@ struct ColumnMappingView: View {
                 // Un classeur n'a pas de séparateur : ses cellules sont
                 // délimitées par le format lui-même. Afficher un champ vide
                 // laisserait croire à une détection ratée.
-                if let sheet = effective.sheetName, !sheet.isEmpty {
+                if allSheets.count > 1 {
+                    Picker("Feuille", selection: Binding(
+                        get: { effective.sheetName ?? "" },
+                        set: { name in selectSheet(named: name) }
+                    )) {
+                        ForEach(allSheets, id: \.sheetName) { sheet in
+                            Text(sheet.sheetName ?? "Feuille")
+                                .tag(sheet.sheetName ?? "")
+                        }
+                    }
+                } else if let sheet = effective.sheetName, !sheet.isEmpty {
                     LabeledContent("Feuille") {
                         Text(sheet).foregroundStyle(AppTheme.Colors.textSecondary)
                     }
@@ -123,8 +147,10 @@ struct ColumnMappingView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Continuer") { createSession() }
-                    .disabled(!canConfirm)
+                Button { createSession() } label: {
+                    Label("Continuer", systemImage: "arrow.right")
+                }
+                .disabled(!canConfirm)
             }
         }
         .task { loadOrAutoDetect() }
@@ -201,6 +227,19 @@ struct ColumnMappingView: View {
         guard let rawContent, newSeparator != effective.separator else { return }
         guard let result = CSVParserV3.parse(content: rawContent, forcedSeparator: newSeparator) else { return }
         reparsed = result
+        dateColumn = nil
+        amountColumn = nil
+        labelColumn = nil
+        mappingFound = false
+        loadOrAutoDetect()
+    }
+
+    /// Bascule de feuille : les colonnes changent, donc la sélection précédente
+    /// n'a plus de sens — même raison que pour un changement de séparateur.
+    private func selectSheet(named name: String) {
+        guard let sheet = allSheets.first(where: { ($0.sheetName ?? "") == name }) else { return }
+        selectedSheet = sheet
+        reparsed = nil
         dateColumn = nil
         amountColumn = nil
         labelColumn = nil

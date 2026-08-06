@@ -235,12 +235,7 @@ struct DashboardView: View {
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 // Recherche globale cross-modules (cmd-K style)
-                Button {
-                    showSearch = true
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                }
+                PaneToggleButton(label: "Rechercher", systemImage: "magnifyingglass", isOn: $showSearch)
                 // Toggle rapide de masquage — discret mais toujours accessible
                 // depuis le hub principal de l'app. Animation snappy pour confirmer
                 // visuellement que le toggle a bien été pris en compte.

@@ -159,7 +159,9 @@ struct ImportV3EntryView: View {
             mappingView(index: index, accountId: accountId)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Retour") { step = nil }
+                        Button { step = nil } label: {
+                            Label("Retour", systemImage: "chevron.left")
+                        }
                     }
                 }
         } else {
@@ -179,6 +181,7 @@ struct ImportV3EntryView: View {
             parsed: pending.grid,
             // `nil` pour un classeur : ses cellules ne dépendent d'aucun
             // séparateur, l'écran masque donc le sélecteur.
+            siblingSheets: pending.siblingSheets,
             rawContent: pending.rawText,
             accountId: accountId,
             sourceFile: pending.displayName,
@@ -383,13 +386,17 @@ struct ImportV3EntryView: View {
                 #if os(macOS)
                 if !isEmbedded, paneHostContext != .inspector {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Annuler") { cancelFunnel() }
+                        Button { cancelFunnel() } label: {
+                            Label("Annuler", systemImage: "xmark")
+                        }
                     }
                 }
                 #else
                 if !isEmbedded {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Annuler") { cancelFunnel() }
+                        Button { cancelFunnel() } label: {
+                            Label("Annuler", systemImage: "xmark")
+                        }
                     }
                 }
                 #endif

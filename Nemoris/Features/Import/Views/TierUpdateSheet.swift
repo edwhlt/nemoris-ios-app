@@ -68,15 +68,22 @@ struct TierUpdateSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
+                    // ⚠️ Volontairement en texte, PAS d'icône : contrairement à un
+                    // vrai "Annuler", ce bouton APPLIQUE quand même la ligne
+                    // (`onApply(existingPayee)`) — juste sans les modifications
+                    // proposées. Un xmark serait lu comme "ne rien faire", alors
+                    // qu'un clic ici valide bel et bien l'import de la ligne.
                     Button("Sans modif") {
                         onApply(existingPayee)
                         dismiss()
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Enregistrer") {
+                    Button {
                         onApply(buildUpdatedPayee())
                         dismiss()
+                    } label: {
+                        Label("Enregistrer", systemImage: "checkmark")
                     }
                 }
             }

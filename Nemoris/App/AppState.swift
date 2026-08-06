@@ -116,6 +116,21 @@ final class AppState {
         didSet { UserDefaults.standard.set(colorSchemeRaw, forKey: "appColorScheme") }
     }
 
+    /// Module Transactions (liste des opérations + écran Données).
+    ///
+    /// ⚠️ ACTIVÉ par défaut, contrairement aux autres modules : c'est le cœur
+    /// historique de l'app, le désactiver d'office casserait toutes les
+    /// installations existantes. Mais il DOIT pouvoir l'être — quelqu'un qui ne
+    /// se sert de Nemoris que pour son portefeuille n'a aucune raison de voir
+    /// une liste de transactions vide.
+    ///
+    /// `featureTransactions` n'existe pas dans les bases installées, et
+    /// `UserDefaults.bool` rendrait `false` : la clé est donc semée à `true` au
+    /// premier lancement (cf. `seedDefaultFlagsIfNeeded`).
+    var showTransactions: Bool = UserDefaults.standard.bool(forKey: "featureTransactions") {
+        didSet { UserDefaults.standard.set(showTransactions, forKey: "featureTransactions") }
+    }
+
     /// Fonctionnalité Tricount activée (opt-in, désactivée par défaut).
     var showTricount: Bool = UserDefaults.standard.bool(forKey: "featureTricount") {
         didSet { UserDefaults.standard.set(showTricount, forKey: "featureTricount") }
@@ -223,6 +238,10 @@ final class AppState {
             case .budget:      return showBudget
             case .patrimoine:  return showPatrimoine
             case .sqlConsole:  return showSQLConsole
+            // « Données » est le référentiel DES transactions (tiers,
+            // catégories, métadonnées) : il suit le module, sinon on garderait
+            // un écran de gestion pour des données qu'on ne peut plus voir.
+            case .transactions, .referenceData: return showTransactions
             default:           return true
             }
         }
@@ -291,6 +310,20 @@ final class AppState {
         }
     }
 
+    /// Demande d'ouverture de l'outil d'importation, avec la destination
+    /// pré-remplie par le module qui l'a demandée.
+    ///
+    /// ⚠️ Un module ne présente PAS l'import lui-même : sur desktop, ça
+    /// l'ouvrait dans le volet latéral, à côté du module — alors que l'import
+    /// est un parcours à part entière, avec ses étapes, pas une fiche de détail.
+    /// Il pose une demande, et la navigation racine décide où l'afficher
+    /// (destination de sidebar sur desktop, feuille sur iPhone).
+    var importToolRequest: ImportDestination?
+
+    func openImportTool(destination: ImportDestination) {
+        importToolRequest = destination
+    }
+
     /// Onglet Console SQL en racine (opt-in Pro, désactivé par défaut).
     /// L'accès se fait uniquement via cet onglet — plus de raccourci dans Données.
     var showSQLConsole: Bool = UserDefaults.standard.bool(forKey: "featureSQLConsole") {
@@ -346,7 +379,28 @@ final class AppState {
     }
 
     init() {
+        Self.seedDefaultFlagsIfNeeded()
+        // Relu APRÈS le semis : la propriété a été initialisée avant, avec la
+        // valeur d'une clé qui n'existait peut-être pas encore.
+        showTransactions = UserDefaults.standard.bool(forKey: "featureTransactions")
         mainTabOrder = sanitizeTabOrder(mainTabOrder)
+    }
+
+    /// Sème les flags dont le défaut n'est PAS `false`.
+    ///
+    /// ⚠️ `UserDefaults.bool(forKey:)` rend `false` pour une clé absente. Un
+    /// module activé par défaut ne peut donc pas se contenter de lire sa clé :
+    /// à la première ouverture après mise à jour, `featureTransactions`
+    /// n'existe pas et le module cœur disparaîtrait de la navigation de tout le
+    /// monde. On l'écrit une fois, sous garde, ce qui laisse ensuite
+    /// l'utilisateur libre de le désactiver — un `false` explicite ne sera pas
+    /// réécrit.
+    private static func seedDefaultFlagsIfNeeded() {
+        let defaults = UserDefaults.standard
+        let seededKey = "featureFlags.seeded.v1"
+        guard !defaults.bool(forKey: seededKey) else { return }
+        defaults.set(true, forKey: seededKey)
+        defaults.set(true, forKey: "featureTransactions")
     }
 
     private func sanitizeTabOrder(_ input: [MainTabItem]) -> [MainTabItem] {

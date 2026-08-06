@@ -394,23 +394,19 @@ struct TransactionsView: View {
                         Button("Annuler") { cancelSelection() }
                         #endif
                         if !selectedIds.isEmpty {
-                            Button {
-                                showBulkCategoryPicker = true
-                            } label: {
-                                Label("Catégorie", systemImage: "folder")
-                            }
-                            Button {
-                                bulkTagInitialStates = computeBulkTagStates()
-                                showBulkTagPicker = true
-                            } label: {
-                                Label("Tags", systemImage: "tag")
-                            }
-                            if reimbursementsEnabled {
-                                Button {
-                                    showBulkRemboursementPicker = true
-                                } label: {
-                                    Label("Remboursement", systemImage: "arrow.uturn.left.circle")
+                            PaneToggleButton(label: "Catégorie", systemImage: "folder", isOn: $showBulkCategoryPicker)
+                            // Binding custom : le calcul des états initiaux doit
+                            // rester déclenché à l'OUVERTURE (comme avant), pas à
+                            // chaque bascule.
+                            PaneToggleButton(label: "Tags", systemImage: "tag", isOn: Binding(
+                                get: { showBulkTagPicker },
+                                set: { newValue in
+                                    if newValue { bulkTagInitialStates = computeBulkTagStates() }
+                                    showBulkTagPicker = newValue
                                 }
+                            ))
+                            if reimbursementsEnabled {
+                                PaneToggleButton(label: "Remboursement", systemImage: "arrow.uturn.left.circle", isOn: $showBulkRemboursementPicker)
                             }
                             Button {
                                 showDeleteConfirmation = true
@@ -421,32 +417,23 @@ struct TransactionsView: View {
                         }
                     } else {
                         // Ajout manuel
-                        Button { showAddTransaction = true } label: {
-                            Image(systemName: "plus")
-                        }
+                        PaneToggleButton(label: "Ajouter une transaction", systemImage: "plus", isOn: $showAddTransaction)
                         // Bouton filtre (badge si actif)
-                        Button { showFilters = true } label: {
-                            Image(systemName: activeFiltersCount > 0
-                                  ? "line.3.horizontal.decrease.circle.fill"
-                                  : "line.3.horizontal.decrease.circle")
-                        }
+                        PaneToggleButton(
+                            label: "Filtrer",
+                            systemImage: activeFiltersCount > 0
+                                ? "line.3.horizontal.decrease.circle.fill"
+                                : "line.3.horizontal.decrease.circle",
+                            isOn: $showFilters
+                        )
                         #if os(macOS)
                         // macOS : la fenêtre a la place — actions secondaires
                         // étalées en boutons icône seule + tooltip natif (.help),
                         // au lieu du menu "⋯" iOS.
-                        Button { showFilteredDashboard = true } label: {
-                            Image(systemName: "chart.bar.xaxis.ascending")
-                        }
-                        .help("Analyse filtrée")
-                        Button { showTagSummary = true } label: {
-                            Image(systemName: "tag.circle")
-                        }
-                        .help("Dépenses par tag")
+                        PaneToggleButton(label: "Analyse filtrée", systemImage: "chart.bar.xaxis.ascending", isOn: $showFilteredDashboard)
+                        PaneToggleButton(label: "Dépenses par tag", systemImage: "tag.circle", isOn: $showTagSummary)
                         if reimbursementsEnabled {
-                            Button { showReimbursements = true } label: {
-                                Image(systemName: "arrow.uturn.left.circle")
-                            }
-                            .help("Remboursements")
+                            PaneToggleButton(label: "Remboursements", systemImage: "arrow.uturn.left.circle", isOn: $showReimbursements)
                         }
                         Button { isSelecting = true } label: {
                             Image(systemName: "checkmark.circle")

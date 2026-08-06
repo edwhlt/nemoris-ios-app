@@ -291,20 +291,18 @@ struct TricountDetailView: View {
             if isSelectingEntries {
                 if !selectedEntryIds.isEmpty {
                     if reimbursementsEnabled {
-                        Button {
-                            showBulkEntryReimburse = true
-                        } label: {
-                            Image(systemName: "arrow.uturn.left.circle")
+                        PaneToggleButton(label: "Remboursement", systemImage: "arrow.uturn.left.circle", isOn: $showBulkEntryReimburse)
+                    }
+                    // Binding custom : le calcul des états initiaux doit rester
+                    // déclenché à l'OUVERTURE (comme avant), pas à chaque
+                    // bascule — un simple `$showBulkEntryTagPicker` le perdrait.
+                    PaneToggleButton(label: "Tags", systemImage: "tag", isOn: Binding(
+                        get: { showBulkEntryTagPicker },
+                        set: { newValue in
+                            if newValue { bulkEntryTagInitialStates = computeBulkEntryTagStates() }
+                            showBulkEntryTagPicker = newValue
                         }
-                        .help("Remboursement")
-                    }
-                    Button {
-                        bulkEntryTagInitialStates = computeBulkEntryTagStates()
-                        showBulkEntryTagPicker = true
-                    } label: {
-                        Image(systemName: "tag")
-                    }
-                    .help("Tags")
+                    ))
                 }
             } else {
                 Button {

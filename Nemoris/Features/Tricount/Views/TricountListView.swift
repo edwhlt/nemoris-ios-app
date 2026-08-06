@@ -87,7 +87,7 @@ struct TricountListView: View {
         .navigationTitle("Tricounts")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showLoadSheet = true } label: { Image(systemName: "plus") }
+                PaneToggleButton(label: "Charger un Tricount", systemImage: "plus", isOn: $showLoadSheet)
             }
         }
         // macOS : `selectedGroup` bascule le CONTENU du module (cf. `body`) —

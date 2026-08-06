@@ -60,7 +60,7 @@ struct RecurringManagementView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { showAddSheet = true } label: { Image(systemName: "plus") }
+                PaneToggleButton(label: "Ajouter", systemImage: "plus", isOn: $showAddSheet)
                     .tint(AppTheme.Colors.accent)
             }
         }

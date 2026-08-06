@@ -64,7 +64,9 @@ struct EnrichmentSheetView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
+                    Button { dismiss() } label: {
+                        Label("Fermer", systemImage: "xmark")
+                    }
                 }
             }
         }

@@ -180,6 +180,46 @@ do {
     expect(InvestmentStatementExtractor.parseNumber("-242,92") == -242.92, "négatif conservé")
 }
 
+// MARK: - Valorisation : une opération ne vaut jamais 0 quand le montant est écrit
+
+print("")
+print("Valorisation d'une opération")
+do {
+    typealias E = InvestmentStatementExtractor
+
+    // ⚠️ LE bug : un dividende n'a ni quantité ni cours d'exécution. Forcé dans
+    // le moule « quantité × prix », il ressortait à 0 € sur un avis d'opéré réel.
+    let coupon = E.valuation(orderType: "DIV", quantity: nil, unitPrice: nil, gross: 34.53)
+    expect(coupon.quantity * coupon.unitPrice == 34.53,
+           "dividende sans quantité ni cours vaut son montant",
+           "\(coupon.quantity) × \(coupon.unitPrice)")
+
+    // Quantité connue : le prix s'en déduit, le produit reste exact.
+    let perShare = E.valuation(orderType: "DIV", quantity: 100, unitPrice: nil, gross: 34.53)
+    expect(abs(perShare.quantity * perShare.unitPrice - 34.53) < 0.0001,
+           "coupon réparti sur 100 titres reste 34,53 €",
+           "\(perShare.quantity) × \(perShare.unitPrice)")
+    expect(perShare.quantity == 100, "la quantité lue est conservée")
+
+    // Achat dont le document ne nomme pas la quantité : même défaut, même
+    // correction — le total ne doit pas tomber à zéro.
+    let buy = E.valuation(orderType: "BUY", quantity: nil, unitPrice: nil, gross: -972.59)
+    expect(buy.quantity * buy.unitPrice == 972.59, "achat sans quantité garde son montant",
+           "\(buy.quantity) × \(buy.unitPrice)")
+
+    // Cas nominal : rien n'est touché.
+    let normal = E.valuation(orderType: "BUY", quantity: 2, unitPrice: 485.30, gross: -972.59)
+    expect(normal.quantity == 2 && normal.unitPrice == 485.30,
+           "quantité et cours lus sont conservés tels quels")
+    expect(normal.deduced == false, "aucune déduction signalée")
+
+    // ⚠️ Sans montant, on n'INVENTE pas : une opération sans valeur reste sans
+    // valeur, elle ne devient pas 1 × 0.
+    let empty = E.valuation(orderType: "DIV", quantity: nil, unitPrice: nil, gross: nil)
+    expect(empty.quantity == 0 && empty.unitPrice == 0,
+           "rien d'exploitable → aucun montant fabriqué")
+}
+
 // MARK: - Verdict
 
 print("\n\(checks - failures)/\(checks) assertions OK")

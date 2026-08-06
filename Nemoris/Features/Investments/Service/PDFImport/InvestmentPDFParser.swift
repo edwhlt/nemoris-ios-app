@@ -466,11 +466,16 @@ final class InvestmentPDFParser: Sendable {
         let orders: [PDFExtractedOrder] = extraction.orders.compactMap { raw in
             guard let executedAt = Self.parseDate(raw.executedAt, formatter: formatter),
                   let orderType = Self.normalizeOrderType(raw.orderType) else { return nil }
+            // Même valorisation que l'extraction déterministe : un dividende
+            // vaut son MONTANT, pas « quantité × cours » (qui donnerait 0 €).
+            let valued = InvestmentStatementExtractor.valuation(
+                orderType: orderType, quantity: raw.quantity,
+                unitPrice: raw.unitPrice, gross: raw.unitPrice * raw.quantity)
             return PDFExtractedOrder(
                 orderType: orderType,
                 assetName: raw.assetName.isEmpty ? "Inconnu" : raw.assetName,
                 ticker: raw.ticker, isin: raw.isin.uppercased(),
-                quantity: raw.quantity, unitPrice: raw.unitPrice, fees: raw.fees,
+                quantity: valued.quantity, unitPrice: valued.unitPrice, fees: raw.fees,
                 executedAt: executedAt,
                 currency: raw.currency.isEmpty ? "EUR" : raw.currency,
                 notes: nil, pageNumber: pageNumber, confidence: 0.9
@@ -704,13 +709,22 @@ final class InvestmentPDFParser: Sendable {
                 print("[PDFParser] Type d'ordre inconnu '\(raw.order_type ?? "nil")' — ordre ignoré")
                 return nil
             }
+            // ⚠️ Le modèle rend volontiers un dividende avec `quantity: 1` et
+            // `unit_price: 0` — soit un montant de 0 €. Le champ `total`, quand
+            // il existe, porte la vraie valeur : la valorisation partagée
+            // rétablit un produit exact.
+            let valued = InvestmentStatementExtractor.valuation(
+                orderType: orderType,
+                quantity: raw.quantity?.value,
+                unitPrice: raw.unit_price?.value,
+                gross: raw.total?.value ?? raw.amount?.value)
             return PDFExtractedOrder(
                 orderType: orderType,
                 assetName: raw.asset_name ?? "Inconnu",
                 ticker: raw.ticker ?? "",
                 isin: raw.isin ?? "",
-                quantity: raw.quantity?.value ?? 0,
-                unitPrice: raw.unit_price?.value ?? 0,
+                quantity: valued.quantity,
+                unitPrice: valued.unitPrice,
                 fees: raw.fees?.value ?? 0,
                 executedAt: executedAt,
                 currency: raw.currency ?? "EUR",
@@ -903,6 +917,10 @@ final class InvestmentPDFParser: Sendable {
         let isin: String?
         let quantity: LenientDouble?
         let unit_price: LenientDouble?
+        /// Montant total de l'opération. Seul champ renseigné sur une ligne de
+        /// dividende, qui n'a ni quantité ni cours.
+        let total: LenientDouble?
+        let amount: LenientDouble?
         let fees: LenientDouble?
         let executed_at: String?
         let currency: String?

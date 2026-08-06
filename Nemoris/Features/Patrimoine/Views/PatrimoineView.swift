@@ -120,30 +120,10 @@ struct PatrimoineView: View {
             // macOS : le menu "+" est étalé en boutons icône seule + tooltip
             // natif, groupés dans UNE pilule (ControlGroup).
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                Button {
-                    showCreateAsset = true
-                } label: {
-                    Image(systemName: "banknote.fill")
-                }
-                .help("Nouvel actif")
-                Button {
-                    showCreateRealEstate = true
-                } label: {
-                    Image(systemName: "house.fill")
-                }
-                .help("Nouveau bien")
-                Button {
-                    showCreateLoan = true
-                } label: {
-                    Image(systemName: "creditcard.fill")
-                }
-                .help("Nouveau prêt")
-                Button {
-                    showCreateGoal = true
-                } label: {
-                    Image(systemName: "target")
-                }
-                .help("Nouvel objectif")
+                PaneToggleButton(label: "Nouvel actif", systemImage: "banknote.fill", isOn: $showCreateAsset)
+                PaneToggleButton(label: "Nouveau bien", systemImage: "house.fill", isOn: $showCreateRealEstate)
+                PaneToggleButton(label: "Nouveau prêt", systemImage: "creditcard.fill", isOn: $showCreateLoan)
+                PaneToggleButton(label: "Nouvel objectif", systemImage: "target", isOn: $showCreateGoal)
             }
             #else
             ToolbarItem(placement: .navigationBarTrailing) {

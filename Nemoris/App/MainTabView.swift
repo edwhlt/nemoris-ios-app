@@ -11,6 +11,12 @@ struct PreloadedTransactionImport: Identifiable {
     let urls: [URL]
 }
 
+/// Ouverture de l'outil d'importation demandée par un module.
+struct RequestedImport: Identifiable {
+    let id = UUID()
+    let destination: ImportDestination
+}
+
 struct MainTabView: View {
     @Environment(AppState.self) private var appState
     @Environment(PurchaseManager.self) private var purchaseManager
@@ -24,6 +30,9 @@ struct MainTabView: View {
     @State private var showCancelAnalysisConfirm = false
     /// AXE P — import V3 pré-rempli par un CSV partagé/raccourci.
     @State private var preloadedTransactionImport: PreloadedTransactionImport?
+    /// iPhone : l'outil d'importation demandé par un module, présenté en feuille
+    /// faute de sidebar où l'envoyer.
+    @State private var requestedImport: RequestedImport?
     #if os(macOS)
     /// Slot unique de l'inspecteur global desktop : les `.adaptivePane` de
     /// niveau 1 routent leur contenu ici (cf. doc `AdaptivePane.swift`).
@@ -137,6 +146,24 @@ struct MainTabView: View {
         }
         .onChange(of: appState.pendingTransactionImportURLs) { _, urls in
             consumePendingTransactionImport(urls)
+        }
+        // Un module a demandé l'outil d'importation : c'est la navigation
+        // RACINE qui décide où l'afficher, pas le module.
+        .onChange(of: appState.importToolRequest) { _, request in
+            guard request != nil else { return }
+            if useSidebar {
+                // Desktop : une destination à part entière, pas le volet
+                // latéral collé au module qu'on vient de quitter.
+                state.selectedTab = sidebarImportTag
+            } else {
+                requestedImport = RequestedImport(destination: request ?? .transactions)
+            }
+            // La demande est consommée : elle a servi à choisir la destination,
+            // la laisser rouvrirait l'import au prochain changement d'onglet.
+            appState.importToolRequest = nil
+        }
+        .adaptivePane(item: $requestedImport) { item in
+            ImportV3EntryView(initialDestination: item.destination)
         }
         .confirmationDialog(
             "Annuler la session d'import ?",
@@ -430,8 +457,14 @@ struct MainTabView: View {
                     sidebarRow(title: tab.title, systemImage: tab.systemImage, tag: tab.rawValue)
                 }
             }
+            // ⚠️ Réglages n'est PAS un outil : c'est la configuration de l'app,
+            // pas une action qu'on mène sur ses données. Le ranger avec
+            // l'importation mettait sur le même plan « je traite un relevé » et
+            // « je change mes préférences ».
             Section("Outils") {
                 sidebarRow(title: "Importation", systemImage: "square.and.arrow.down", tag: sidebarImportTag)
+            }
+            Section {
                 sidebarRow(title: "Réglages", systemImage: "gearshape", tag: sidebarSettingsTag)
             }
         }
@@ -451,6 +484,9 @@ struct MainTabView: View {
             Section("Outils") {
                 sidebarLabel("Importation", systemImage: "square.and.arrow.down")
                     .tag(sidebarImportTag)
+            }
+            // Section propre : cf. commentaire de la branche macOS.
+            Section {
                 sidebarLabel("Réglages", systemImage: "gearshape")
                     .tag(sidebarSettingsTag)
             }
@@ -515,7 +551,10 @@ struct MainTabView: View {
         if selection == sidebarSettingsTag {
             NavigationStack { SettingsView(isEmbedded: true) }
         } else if selection == sidebarImportTag {
-            NavigationStack { ImportV3EntryView(isEmbedded: true) }
+            NavigationStack {
+                ImportV3EntryView(initialDestination: appState.importToolRequest ?? .transactions,
+                                  isEmbedded: true)
+            }
         } else if let tab = MainTabItem(rawValue: selection) {
             tabView(for: tab)
         } else {

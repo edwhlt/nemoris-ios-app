@@ -174,16 +174,16 @@ enum InvestmentStatementExtractor {
         let fees = firstNumber(in: joined, labels: feeLabels) ?? 0
         let gross = signedAmount(in: joined)
 
-        // Le prix unitaire peut être absent (lignes de dividende, formats
-        // condensés) : on le déduit du montant total quand c'est possible.
         var confidence = 0.85
-        var unitPrice = priceFromLabel ?? 0
-        if unitPrice == 0, let gross, let qty = quantity, qty > 0 {
-            unitPrice = abs(gross) / qty
-            confidence -= 0.1
-        }
         if priceFromLabel == nil { confidence -= 0.05 }
         if quantity == nil { confidence -= 0.15 }
+
+        let valuation = valuation(orderType: orderType,
+                                  quantity: quantity,
+                                  unitPrice: priceFromLabel,
+                                  gross: gross)
+        if valuation.deduced { confidence -= 0.1 }
+        let unitPrice = valuation.unitPrice
 
         let name = assetName(in: nameWindow, fallbackAfter: fields)
         if name.isEmpty { confidence -= 0.2 }
@@ -192,7 +192,7 @@ enum InvestmentStatementExtractor {
             orderType: orderType,
             assetName: name.isEmpty ? isin : name,
             isin: isin,
-            quantity: quantity ?? 0,
+            quantity: valuation.quantity,
             unitPrice: unitPrice,
             fees: fees,
             executedAt: date,
@@ -200,6 +200,53 @@ enum InvestmentStatementExtractor {
             notes: "Extraction automatique (sans IA)",
             confidence: max(0.2, min(1, confidence))
         )
+    }
+
+    // MARK: - Valorisation d'une opération
+
+    /// Quantité et prix unitaire cohérents, de sorte que
+    /// `quantité × prix` soit TOUJOURS le montant réel de l'opération.
+    ///
+    /// ⚠️ Un DIVIDENDE n'a ni quantité ni cours d'exécution : sa valeur EST le
+    /// montant crédité. Le forcer dans le moule « quantité × prix » donnait un
+    /// prix nul, donc un dividende à **0 €** — constaté sur un avis d'opéré
+    /// réel. Même défaut pour un achat dont le document ne nomme pas la
+    /// quantité : elle tombait à 0, et le total avec elle.
+    ///
+    /// Règle : quand le document donne un MONTANT, l'opération ne vaut jamais
+    /// zéro. À quantité inconnue, on retient 1 et le montant devient le prix
+    /// unitaire — la valeur est juste, et c'est ce qui compte pour le
+    /// portefeuille. Quand la quantité est connue (100 titres pour 34,53 € de
+    /// coupon), le prix unitaire s'en déduit et le produit reste exact.
+    ///
+    /// Moteur PUR, partagé avec le chemin IA (`InvestmentPDFParser.convert`) :
+    /// une extraction déterministe et une extraction par modèle ne doivent pas
+    /// valoriser différemment la même opération.
+    static func valuation(orderType: String,
+                          quantity: Double?,
+                          unitPrice: Double?,
+                          gross: Double?) -> (quantity: Double, unitPrice: Double, deduced: Bool) {
+        let amount = gross.map(abs) ?? 0
+        let knownQuantity = (quantity ?? 0) > 0 ? quantity! : nil
+        let knownPrice = (unitPrice ?? 0) > 0 ? unitPrice! : nil
+
+        // Cas nominal : les deux sont lus dans le document.
+        if let knownQuantity, let knownPrice {
+            return (knownQuantity, knownPrice, false)
+        }
+        // Prix absent mais montant connu : on le déduit.
+        if let knownQuantity, amount > 0 {
+            return (knownQuantity, amount / knownQuantity, true)
+        }
+        // Quantité absente : le montant devient le prix d'une « unité ».
+        if let knownPrice, knownQuantity == nil {
+            return (1, knownPrice, true)
+        }
+        if amount > 0 {
+            return (1, amount, true)
+        }
+        // Rien d'exploitable : on ne fabrique pas un montant.
+        return (knownQuantity ?? 0, knownPrice ?? 0, false)
     }
 
     // MARK: - Champs

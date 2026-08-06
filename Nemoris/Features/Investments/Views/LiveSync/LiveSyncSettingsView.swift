@@ -44,12 +44,8 @@ struct LiveSyncSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showAddSheet = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .tint(AppTheme.Colors.accent)
+                PaneToggleButton(label: "Ajouter une source", systemImage: "plus", isOn: $showAddSheet)
+                    .tint(AppTheme.Colors.accent)
             }
         }
         .adaptivePane(isPresented: $showAddSheet, onDismiss: load) {

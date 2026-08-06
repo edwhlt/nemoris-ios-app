@@ -320,6 +320,18 @@ private struct AdaptivePaneBoolModifier<PaneContent: View>: ViewModifier {
                     // programmée avant l'apparition).
                     if isPresented { presentPane(center) }
                 }
+                // ⚠️ Ferme le panneau quand CE call site disparaît de l'arbre —
+                // retour arrière (`selectedFile = nil`, `pushedSection = nil`…),
+                // changement de module (`.id(selectedTab)` démonte tout le sous-
+                // arbre), pop d'une NavigationStack. Sans ça le panneau reste
+                // affiché avec le contenu d'un écran qui n'existe plus : rien
+                // dans `InspectorPaneCenter` n'est informé qu'on a quitté la vue
+                // qui l'a ouvert, puisque c'est un objet à part, possédé par
+                // `MainTabView`, pas par cette vue. `dismissIfCurrent` (pas
+                // `dismissCurrent`) : le binding de cette vue est de toute façon
+                // sur le point d'être désalloué, pas besoin de le reset via
+                // `onDismiss` — seul le slot du center doit être vidé.
+                .onDisappear { center.dismissIfCurrent(paneId) }
         } else {
             content.sheet(isPresented: $isPresented, onDismiss: onDismiss) {
                 paneContent()
@@ -374,6 +386,9 @@ private struct AdaptivePaneItemModifier<Item: Identifiable, PaneContent: View>: 
                 .onAppear {
                     if let value = item { presentPane(center, value: value) }
                 }
+                // Cf. AdaptivePaneBoolModifier — ferme le panneau quand ce call
+                // site quitte l'arbre (retour arrière, changement de module).
+                .onDisappear { center.dismissIfCurrent(paneId) }
         } else {
             content.sheet(item: $item, onDismiss: onDismiss) { value in
                 paneContent(value)
@@ -668,6 +683,44 @@ extension View {
                 ? PaneBarButton(label: confirmLabel!, systemImage: confirmIcon, disabled: confirmDisabled, showsTitle: confirmIcon == nil, action: onConfirm!)
                 : nil
         ))
+    }
+}
+
+// MARK: - PaneToggleButton : bouton déclencheur toggle
+
+/// Bouton de barre d'outils qui OUVRE un `.adaptivePane`, avec sémantique de
+/// TOGGLE plutôt que de simple ouverture : re-cliquer PENDANT que son panneau
+/// est affiché le referme, exactement comme le "Fermer" du panneau lui-même.
+///
+/// Piloter le `Toggle` par la MÊME `Binding<Bool>` que celle passée à
+/// `.adaptivePane(isPresented:)` est ce qui donne tout le reste gratuitement :
+/// - **Fermeture par re-clic** : `Toggle` bascule sa binding à `false` au tap,
+///   ce que `AdaptivePaneBoolModifier.onChange(of: isPresented)` traite déjà
+///   comme n'importe quelle fermeture (dismiss du slot + `onDismiss`).
+/// - **Repasse à "off" si le panneau change de contenu sous lui** : quand un
+///   AUTRE `.adaptivePane` prend le slot (ex. l'utilisateur clique une row
+///   pendant que ce panneau-ci est ouvert), `InspectorPaneCenter.present`
+///   appelle l'`onDismiss` de l'ancien propriétaire — qui repasse SA binding
+///   à `false`. Le toggle, lié à cette même binding, se dépresse tout seul.
+/// - **Repasse à "off" au retour arrière** : `.onDisappear` (cf.
+///   `AdaptivePaneBoolModifier`) vide le slot quand la vue déclenchante
+///   disparaît ; rien à faire ici non plus.
+///
+/// Sur iOS (`.adaptivePane` → `.sheet`), `isOn` pilote directement
+/// `isPresented` de la sheet — re-taper l'icône pendant que la sheet est
+/// affichée la ferme aussi, cohérent avec le comportement macOS.
+struct PaneToggleButton: View {
+    let label: String
+    let systemImage: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            Label(label, systemImage: systemImage)
+        }
+        .toggleStyle(.button)
+        .help(label)
+        .accessibilityLabel(label)
     }
 }
 

@@ -36,6 +36,14 @@ enum ImportPipeline {
         /// `nil` pour un classeur, dont les cellules ne dépendent d'aucun
         /// séparateur.
         var rawText: String?
+        /// Les AUTRES feuilles du même classeur.
+        ///
+        /// ⚠️ Un classeur produit UNE étape de mapping, pas une par feuille.
+        /// La version initiale en faisait une chacune : l'utilisateur devait
+        /// mapper « Notes », « Récapitulatif » et tout onglet annexe avant
+        /// d'atteindre celui qui l'intéressait, sans jamais pouvoir en choisir
+        /// un. Ici il choisit, et une seule feuille est importée.
+        var siblingSheets: [ImportGrid] = []
 
         /// Nom affiché dans l'écran de mapping : le fichier, plus l'onglet
         /// quand un classeur en compte plusieurs.
@@ -136,16 +144,25 @@ enum ImportPipeline {
                 unitNumber += 1
 
                 if case .grid(let grid) = unit.content {
-                    readout.pendingGrids.append(PendingGrid(
-                        grid: grid,
-                        origin: origin,
-                        // ⚠️ Repris de l'unité, PAS redécodé ici : cette boucle
-                        // tourne sur le main actor, et redécoder un gros CSV en
-                        // String y provoquait un gel visible — pour un travail
-                        // déjà fait hors du main actor pendant la lecture.
-                        // `nil` pour un classeur, dont les cellules ne dépendent
-                        // d'aucun séparateur.
-                        rawText: unit.sourceText))
+                    // Feuilles suivantes d'un même classeur : elles rejoignent
+                    // l'étape déjà ouverte pour ce fichier au lieu d'en créer
+                    // une nouvelle (cf. `siblingSheets`).
+                    if let existing = readout.pendingGrids.lastIndex(where: {
+                        $0.origin.sourceIndex == index
+                    }) {
+                        readout.pendingGrids[existing].siblingSheets.append(grid)
+                    } else {
+                        readout.pendingGrids.append(PendingGrid(
+                            grid: grid,
+                            origin: origin,
+                            // ⚠️ Repris de l'unité, PAS redécodé ici : cette
+                            // boucle tourne sur le main actor, et redécoder un
+                            // gros CSV en String y provoquait un gel visible —
+                            // pour un travail déjà fait hors du main actor
+                            // pendant la lecture. `nil` pour un classeur, dont
+                            // les cellules ne dépendent d'aucun séparateur.
+                            rawText: unit.sourceText))
+                    }
                 } else {
                     readout.units.append(NumberedUnit(unit: unit, origin: origin))
                 }

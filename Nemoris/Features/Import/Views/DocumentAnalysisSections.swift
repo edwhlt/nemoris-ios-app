@@ -174,7 +174,9 @@ struct ImportDebugJSONView: View {
             .tint(AppTheme.Colors.accent)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Fermer") { dismiss() }
+                    Button { dismiss() } label: {
+                        Label("Fermer", systemImage: "xmark")
+                    }
                 }
             }
         }

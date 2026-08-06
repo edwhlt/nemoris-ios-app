@@ -123,12 +123,16 @@ struct PayeeCreationFormSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
+                    Button { dismiss() } label: {
+                        Label("Annuler", systemImage: "xmark")
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Créer") {
+                    Button {
                         onCreate(buildPayee())
                         dismiss()
+                    } label: {
+                        Label("Créer", systemImage: "plus")
                     }
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
