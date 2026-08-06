@@ -22,16 +22,37 @@ import SwiftUI
 //   infinie sur macOS, cf. CLAUDE.md AXE N.1) — `Form { … }.background(…)`.
 
 extension View {
-    /// Style standard des `Form` : grouped natif macOS (boxes arrondies) +
+    /// Style standard des `Form` : grouped natif macOS (boxes arrondies),
     /// remplissage du volet détail (sans quoi le Form macOS prend sa largeur
-    /// intrinsèque étroite). No-op sur iOS.
+    /// intrinsèque étroite), ET le fond de l'app.
+    ///
+    /// ⚠️ Le FOND EST INCLUS ICI, délibérément.
+    ///
+    /// Il était auparavant à la charge de chaque vue
+    /// (`.scrollContentBackground(.hidden)` + `.background(…)`, trois lignes à
+    /// recopier). Résultat : les écrans qui y pensaient affichaient le noir
+    /// profond de la palette, les autres le gris par défaut du système — d'où
+    /// des fonds unis différents d'un écran à l'autre, très visibles entre un
+    /// module et le volet latéral.
+    ///
+    /// Le porter dans le style rend la règle auto-appliquée : tout `Form` qui
+    /// reçoit `nemorisFormStyle()` est cohérent, sans que personne ait à y
+    /// penser. Poser en plus un `.background` sur la vue reste sans effet
+    /// néfaste (le dernier gagne, et c'est la même couleur).
+    ///
+    /// ⚠️ Ne jamais remplacer par `ZStack { Color.ignoresSafeArea(); Form }` :
+    /// hauteur infinie sur macOS (cf. AXE N.1).
     func nemorisFormStyle() -> some View {
         #if os(macOS)
         return self
             .formStyle(.grouped)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.Colors.background.ignoresSafeArea())
         #else
         return self
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.Colors.background.ignoresSafeArea())
         #endif
     }
 

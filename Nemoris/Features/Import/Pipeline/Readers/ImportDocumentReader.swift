@@ -66,6 +66,14 @@ enum ImportDocumentReader {
         /// Rang de l'unité dans son fichier (1-indexé) : n° de page, rang de
         /// feuille, index de bloc.
         var indexInSource: Int = 1
+        /// Texte source d'une table, conservé pour un éventuel re-parsing avec
+        /// un autre séparateur.
+        ///
+        /// ⚠️ Porté PAR L'UNITÉ parce qu'il est décodé ici, hors du main actor.
+        /// Le redécoder plus tard depuis `source.data` — ce que faisait
+        /// `ImportPipeline.read` — refaisait le travail une seconde fois, ET
+        /// sur le thread principal : sur un gros CSV, un gel visible.
+        var sourceText: String?
 
         /// Raccourci de lecture — vide pour les formes non textuelles.
         var text: String {
@@ -162,7 +170,7 @@ enum ImportDocumentReader {
         // Un texte réellement tabulaire part au mapping de colonnes ; le reste
         // (relevé en prose, export sans structure) part au parseur de documents.
         if let grid = CSVParserV3.parse(content: text), grid.isTabular {
-            return [Unit(content: .grid(grid), kind: .text)]
+            return [Unit(content: .grid(grid), kind: .text, sourceText: text)]
         }
         // La fenêtre de contexte du modèle embarqué est étroite : un relevé
         // entier envoyé d'un bloc la fait déborder et l'unité est perdue.

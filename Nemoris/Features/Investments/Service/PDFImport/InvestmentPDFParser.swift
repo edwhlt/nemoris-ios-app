@@ -656,27 +656,13 @@ final class InvestmentPDFParser: Sendable {
 
     /// Chantier C — parse la réponse IA bi-mode (ordres OU positions) en `PageParse`.
     static func parsePageResponse(_ raw: String, pageNumber: Int) -> PageParse {
-        var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Strip markdown code fences
-        if cleaned.hasPrefix("```") {
-            if let firstNewline = cleaned.firstIndex(of: "\n") {
-                cleaned = String(cleaned[cleaned.index(after: firstNewline)...])
-            }
-            if cleaned.hasSuffix("```") {
-                cleaned = String(cleaned.dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-        }
-
-        // Trouver le JSON
-        guard let start = cleaned.firstIndex(of: "{"),
-              let end = cleaned.lastIndex(of: "}")
-        else {
+        // Même réparation que côté transactions : isolement de l'objet ET
+        // recollage des chaînes coupées par la mise en forme du modèle.
+        let jsonStr = LenientJSON.extractObject(from: raw)
+        guard jsonStr.contains("{") else {
             print("[PDFParser] Pas de JSON trouvé dans la réponse IA page \(pageNumber)")
             return PageParse()
         }
-        let jsonStr = String(cleaned[start...end])
-
         guard let data = jsonStr.data(using: .utf8),
               let payload = try? JSONDecoder().decode(AIPageResponse.self, from: data)
         else {

@@ -28,6 +28,7 @@ xcrun swiftc \
   ../Nemoris/Features/Import/Pipeline/ImportGrid.swift \
   ../Nemoris/Features/Import/Pipeline/ImportElement.swift \
   ../Nemoris/Features/Import/Pipeline/ImportFormatSniffer.swift \
+  ../Nemoris/Features/Import/Pipeline/LenientJSON.swift \
   ../Nemoris/Features/Import/Pipeline/Readers/ZIPArchiveReader.swift \
   ../Nemoris/Features/Import/Pipeline/Readers/XLSXReader.swift \
   ../Nemoris/Features/Import/Pipeline/Readers/LedgerXMLReader.swift \

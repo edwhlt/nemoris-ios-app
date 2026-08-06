@@ -2,9 +2,11 @@ import SwiftUI
 
 /// Présentation adaptative selon la plateforme, déclarée UNE fois :
 /// - **iOS / iPadOS** : `.sheet` plein écran/detent natif (comportement historique).
-/// - **macOS, niveau 1** : le contenu s'ouvre dans **l'inspecteur global** à droite
-///   (panneau latéral desktop, un seul `.inspector` attaché dans `MainTabView`).
-/// - **macOS, niveau 2+** (pane demandé depuis un contenu déjà dans l'inspecteur ou
+/// - **macOS, niveau 1** : le contenu s'ouvre dans le **panneau latéral droit**,
+///   qui est la troisième colonne du `NavigationSplitView` de `MainTabView`
+///   (redimensionnable, barre d'outils scindée — cf. la doc de
+///   `MainTabView.sidebarSplitView`).
+/// - **macOS, niveau 2+** (pane demandé depuis un contenu déjà dans le panneau ou
 ///   dans une sheet) : `.sheet` bornée — les modals par-dessus un modal restent des
 ///   modals.
 ///
@@ -12,9 +14,10 @@ import SwiftUI
 /// > Abandonné : on ne peut PAS empiler plusieurs `.inspector` sur une même vue —
 /// > macOS rendait alors TOUTES les toolbars des panneaux dans la barre de fenêtre
 /// > en même temps (boutons Cancel/Save/Close fantômes) et élargissait la fenêtre.
-/// > La V2 (actuelle) corrige la cause racine : UN SEUL `.inspector` global dans
-/// > `MainTabView`, dont le contenu est switché par `InspectorPaneCenter`. Un seul
-/// > pane actif ⇒ un seul jeu de boutons ⇒ plus de fantômes.
+/// > La correction de fond, toujours en vigueur, est le **slot unique**
+/// > `InspectorPaneCenter` possédé par `MainTabView` : un seul pane actif ⇒ un seul
+/// > jeu de boutons ⇒ plus de fantômes. Seul le CONTENANT a changé depuis
+/// > (`.inspector` → `HStack` custom → colonne de split view).
 ///
 /// Un seul point de bascule ici → les call sites n'ont aucun `#if os`.
 ///
@@ -182,9 +185,10 @@ final class InspectorPaneCenter {
 
 // MARK: - Métriques du panneau (macOS)
 
-/// Largeurs du panneau, passées à `.inspectorColumnWidth(min:ideal:max:)`.
-/// L'utilisateur redimensionne en tirant le séparateur ; macOS mémorise la
-/// largeur choisie par fenêtre, on n'a donc rien à persister nous-mêmes.
+/// Largeurs de la colonne du panneau (`MainTabView.inspectorColumn`), passées à
+/// `.navigationSplitViewColumnWidth(min:ideal:max:)`. L'utilisateur
+/// redimensionne en tirant le séparateur ; AppKit mémorise la largeur choisie,
+/// on n'a donc rien à persister nous-mêmes.
 ///
 /// `min` doit rester assez large pour que les `Form` du panneau (label + champ
 /// sur une ligne) ne se cassent pas, `max` assez borné pour que la colonne du
@@ -192,7 +196,10 @@ final class InspectorPaneCenter {
 enum InspectorPaneMetrics {
     static let minWidth: CGFloat = 320
     static let idealWidth: CGFloat = 440
-    static let maxWidth: CGFloat = 760
+    /// Borné volontairement : au-delà, le panneau mangerait la fenêtre au lieu
+    /// de laisser la place au module (cf. le compromis documenté sur
+    /// `MainTabView.sidebarSplitView`).
+    static let maxWidth: CGFloat = 640
 }
 
 // MARK: - Chrome du panneau → barre système (macOS)
@@ -209,13 +216,17 @@ enum InspectorPaneMetrics {
 ///    donnait des boutons figés sur leur premier rendu (Fermer/Supprimer sans
 ///    effet, `disabled` jamais réévalué) : SwiftUI ne réévalue pas de façon
 ///    fiable un contenu de toolbar sur simple changement observable.
-/// 2. **Groupement et position** — les items du panneau sont un
-///    `ToolbarItemGroup` (le groupement natif ; `ControlGroup` rendait tantôt
-///    une pilule, tantôt des boutons isolés) précédé d'un **écart de la largeur
-///    du panneau**. Résultat : les actions du panneau s'alignent sur le bord
-///    droit du PANNEAU, celles du module sur le bord droit du MODULE — chaque
-///    groupe est physiquement au-dessus de la colonne à laquelle il appartient,
-///    l'appartenance se lit sans étiquette.
+/// 2. **Groupement** — les items du panneau sont un `ToolbarItemGroup` (le
+///    groupement natif ; `ControlGroup` rendait tantôt une pilule, tantôt des
+///    boutons isolés).
+///
+/// ⚠️ Ce qui sépare visuellement les actions du panneau de celles du module,
+/// c'est la STRUCTURE en colonnes du split view (macOS insère un séparateur de
+/// suivi entre les toolbars de deux colonnes), **pas** le `ToolbarSpacer`
+/// ci-dessous. Mesuré : tant que le panneau n'était pas une colonne, aucun
+/// espaceur ne dissociait les deux groupes — ni en placement `.automatic`, ni en
+/// `.primaryAction`, ils restaient entassés au bord droit de la fenêtre. Ne pas
+/// compter sur l'espaceur pour recréer cette séparation ailleurs.
 private struct InspectorChromeToolbar: ViewModifier {
     let make: () -> PaneChromeModel
 
@@ -228,10 +239,7 @@ private struct InspectorChromeToolbar: ViewModifier {
             // « fait main » (`Color.clear` dans un ToolbarItem) ne marche pas : il
             // est traité comme un item ordinaire et se peint en pilule vide,
             // collée aux boutons.
-            if #available(macOS 26.0, *) {
-                ToolbarSpacer(.flexible)
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .navigation) {
                 if let leading = chrome.leading {
                     barButton(leading)
                 }
@@ -324,6 +332,11 @@ private struct AdaptivePaneBoolModifier<PaneContent: View>: ViewModifier {
                 paneContent()
                     .environment(\.paneDismiss, { isPresented = false })
                     .environment(\.paneHostContext, .inspector)
+                    // ⚠️ Fond peint PAR L'HÔTE, pas laissé au contenu.
+                    // Chaque vue posait (ou oubliait) le sien : le volet
+                    // dépareillait avec le module d'à côté selon l'écran
+                    // présenté. Ici il est uniforme par construction.
+                    .background(AppTheme.Colors.background)
             ),
             onDismiss: { isPresented = false }
         )
@@ -373,6 +386,11 @@ private struct AdaptivePaneItemModifier<Item: Identifiable, PaneContent: View>: 
                 paneContent(value)
                     .environment(\.paneDismiss, { item = nil })
                     .environment(\.paneHostContext, .inspector)
+                    // ⚠️ Fond peint PAR L'HÔTE, pas laissé au contenu.
+                    // Chaque vue posait (ou oubliait) le sien : le volet
+                    // dépareillait avec le module d'à côté selon l'écran
+                    // présenté. Ici il est uniforme par construction.
+                    .background(AppTheme.Colors.background)
             ),
             onDismiss: { item = nil }
         )

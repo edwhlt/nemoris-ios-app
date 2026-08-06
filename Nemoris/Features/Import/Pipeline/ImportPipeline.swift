@@ -139,12 +139,13 @@ enum ImportPipeline {
                     readout.pendingGrids.append(PendingGrid(
                         grid: grid,
                         origin: origin,
-                        // Le texte n'est reconstitué que pour une source texte :
-                        // c'est la seule dont le découpage dépend d'un
-                        // séparateur que l'utilisateur peut vouloir corriger.
-                        rawText: unit.kind == .text
-                            ? ImportFormatSniffer.decodeText(source.data)
-                            : nil))
+                        // ⚠️ Repris de l'unité, PAS redécodé ici : cette boucle
+                        // tourne sur le main actor, et redécoder un gros CSV en
+                        // String y provoquait un gel visible — pour un travail
+                        // déjà fait hors du main actor pendant la lecture.
+                        // `nil` pour un classeur, dont les cellules ne dépendent
+                        // d'aucun séparateur.
+                        rawText: unit.sourceText))
                 } else {
                     readout.units.append(NumberedUnit(unit: unit, origin: origin))
                 }

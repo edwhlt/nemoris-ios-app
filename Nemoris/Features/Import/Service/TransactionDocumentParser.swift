@@ -351,6 +351,12 @@ final class TransactionDocumentParser {
     Quand une ligne porte plusieurs montants, celui de l'opération vient AVANT le solde courant.
     N'invente jamais une opération : n'extrais que ce qui est écrit.
 
+    LE LIBELLÉ EST LE NOM DU MARCHAND, ET RIEN D'AUTRE.
+    Une application bancaire affiche sous ce nom la CATÉGORIE qu'elle a devinée : « Grande surface », « Hébergement / restauration », « Café / jeux / tabac », « Sorties / restaurant », « À catégoriser », « Divers », « Alimentation », « Transport »… Ce texte n'appartient PAS au libellé.
+    Écris « Carrefour City », jamais « Carrefour City Grande surface ».
+    Écris « Terrys Cafe », jamais « Terrys Cafe Café / jeux / tabac ».
+    Une icône, un logo ou une pastille de couleur ne se décrivent pas : ignore-les.
+
     Réponds UNIQUEMENT par un objet JSON valide, sans texte autour et sans balises de code :
     {"transactions":[{"date":"yyyy-MM-dd","label":"libellé complet","amount":-42.50,"payment_type":"CB"}]}
 
@@ -389,11 +395,10 @@ final class TransactionDocumentParser {
 
     static func parseJSON(_ raw: String) -> [ExtractedBankTransaction] {
         // Les modèles ajoutent volontiers des balises de code markdown autour
-        // du JSON demandé.
-        var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let start = cleaned.firstIndex(of: "{"), let end = cleaned.lastIndex(of: "}") {
-            cleaned = String(cleaned[start...end])
-        }
+        // du JSON demandé, et coupent parfois une chaîne au milieu en mettant
+        // en forme — ce qui est du JSON INVALIDE et faisait perdre tout le
+        // document, donc toutes les opérations d'une capture.
+        let cleaned = LenientJSON.extractObject(from: raw)
         guard let data = cleaned.data(using: .utf8),
               let decoded = try? JSONDecoder().decode(AIResponse.self, from: data) else {
             return []

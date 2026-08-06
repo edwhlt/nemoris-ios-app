@@ -283,25 +283,123 @@ struct MainTabView: View {
 
     /// Layout desktop (AXE M) : sidebar avec TOUS les modules (pas de limite
     /// à 4, pas d'onglet Plus) + section Outils. Chaque module garde sa propre
-    /// NavigationStack dans le volet détail.
+    /// NavigationStack dans sa colonne.
     ///
-    /// Sur macOS, le panneau latéral droit (pane des `.adaptivePane` niveau 1)
-    /// est un **HStack custom** rendu DANS la colonne détail, PAS un `.inspector` :
-    /// sur macOS 27 beta, `.inspector` crashe à la présentation (ré-entrance
-    /// AutoLayout pendant la MoveTransition du slide-in avec du contenu
-    /// AppKit-backed — NavigationStack/Form).
-    ///
-    /// ⚠️ Le panneau est injecté DANS le `detail:` du `NavigationSplitView`, jamais
-    /// autour de lui. Une V1 wrappait tout le split view dans un HStack
-    /// (`HStack { NavigationSplitView; pane }`) → le split view, qui veut être
-    /// racine, négociait sa largeur en BOUCLE avec le HStack → la barre de fenêtre
-    /// (et le bouton retour des vues poussées, ex. Tricount) vibrait en permanence.
-    /// En gardant le split view racine et le pane comme simple contenu du détail,
-    /// la boucle disparaît.
+    /// ⚠️ Le split view doit rester la vue RACINE. Une V1 le wrappait dans un
+    /// HStack (`HStack { NavigationSplitView; panneau }`) → le split view, qui
+    /// veut être racine, négociait sa largeur en BOUCLE avec le HStack → la barre
+    /// de fenêtre (et le bouton retour des vues poussées, ex. Tricount) vibrait
+    /// en permanence. Le panneau est donc une COLONNE du split view, jamais un
+    /// voisin posé à côté.
     private var sidebarLayout: some View {
         sidebarSplitView
     }
 
+    /// ⚠️ `.id(selection)` sur la colonne du module est OBLIGATOIRE : sans elle,
+    /// `NavigationSplitView` sur macOS ne détruit PAS l'état de navigation
+    /// interne (push) de l'ancien module quand la sélection change — le contenu
+    /// poussé (détail Tricount, détail compte/position Investissements…) reste
+    /// affiché à l'écran, et seul un pop (bouton retour) force enfin le re-rendu
+    /// vers le nouveau module. `.id()` force une identité de vue liée à l'onglet :
+    /// au changement, SwiftUI démonte tout l'ancien sous-arbre (donc son
+    /// `NavigationStack`/push interne) au lieu de tenter de le réutiliser.
+    #if os(macOS)
+    /// macOS — **trois colonnes** : sidebar · module · panneau.
+    ///
+    /// Le panneau est une VRAIE colonne de `NavigationSplitView`, et pas un
+    /// `.inspector` ni un `HStack` custom, parce que c'est la seule construction
+    /// qui reproduit le comportement des apps système (Mail, Notes) :
+    ///
+    /// 1. **Séparateur déplaçable** — l'utilisateur choisit la largeur du
+    ///    panneau, AppKit la mémorise. L'ancien `HStack` la figeait à 440 pt.
+    /// 2. **Barre d'outils scindée** — chaque colonne déclare sa propre
+    ///    `.toolbar`, et macOS insère entre elles un séparateur de suivi
+    ///    (`NSTrackingSeparatorToolbarItem`) aligné sur le séparateur de
+    ///    colonnes. Les actions du module s'arrêtent donc au séparateur, celles
+    ///    du panneau commencent après : l'appartenance de chaque groupe se lit
+    ///    sans étiquette.
+    ///
+    /// > Mesuré : ni le `HStack` custom ni `.inspector` n'obtiennent le point 2.
+    /// > Avec eux, tous les boutons s'entassent au bord droit de la fenêtre,
+    /// > donc au-dessus du panneau — y compris ceux du module. Un
+    /// > `ToolbarSpacer(.flexible)` n'y change rien (testé aux deux placements) :
+    /// > le séparateur vient de la STRUCTURE en colonnes, pas de la barre.
+    ///
+    /// ⚠️ Répartition de la largeur — l'`ideal` du module est un COMPROMIS, pas
+    /// une préférence esthétique. Dans un split view à 3 colonnes, c'est la
+    /// colonne `detail` qui absorbe l'espace libre, et on redimensionne le
+    /// panneau en tirant le bord de la colonne du MODULE. Les deux extrêmes sont
+    /// donc mauvais, et ont été mesurés :
+    ///
+    /// - `ideal` du module très large (essai à 1 200) : le module veut toute la
+    ///   place, le séparateur module|panneau devient **impossible à tirer** (le
+    ///   séparateur sidebar|module, lui, répond toujours — c'est ce qui a permis
+    ///   d'isoler la cause) et le panneau reste collé à son `min`.
+    /// - Aucune contrainte sur le module : le panneau part à son `max` et
+    ///   s'élargit avec la fenêtre, alors que c'est la liste du module qui a
+    ///   besoin de la place.
+    ///
+    /// Valeurs retenues : le module a un `ideal` modéré (assez pour rester
+    /// dominant, assez souple pour que le séparateur bouge) et le panneau un
+    /// `max` qui l'empêche de manger la fenêtre.
+    private var sidebarSplitView: some View {
+        @Bindable var state = appState
+        return NavigationSplitView {
+            sidebarList
+                .navigationTitle("Nemoris")
+                .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 280)
+        } content: {
+            detailView(for: state.selectedTab)
+                .id(state.selectedTab)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .navigationSplitViewColumnWidth(min: 480, ideal: 760, max: 1_400)
+        } detail: {
+            inspectorColumn
+        }
+        .tint(AppTheme.Colors.accent)
+    }
+
+    /// Colonne du panneau. Sans pane ouvert elle se REPLIE à zéro (vérifié : la
+    /// colonne du module récupère alors toute la largeur) — un module comme le
+    /// Dashboard n'a donc aucune place perdue, contrairement au troisième volet
+    /// permanent d'un client mail.
+    ///
+    /// ⚠️ Seule la BRANCHE de cette colonne change quand un pane s'ouvre ; la
+    /// colonne du module, elle, garde la même identité de vue. C'est ce qui
+    /// préserve son `@State` (une version antérieure basculait entre
+    /// `detailView` seul et `HStack { detailView; panneau }` : SwiftUI y voyait
+    /// deux structures différentes, DÉTRUISAIT la vue du module à l'ouverture du
+    /// panneau et la recréait — l'onglet courant de « Données » retombait sur
+    /// Comptes, les filtres se vidaient…).
+    ///
+    /// Le panneau ne reçoit AUCUN chrome d'ici : son contenu déclare lui-même sa
+    /// `.toolbar` (cf. `publishesInspectorChrome`), donc les actions sont toujours
+    /// celles du rendu courant — jamais des closures périmées.
+    @ViewBuilder
+    private var inspectorColumn: some View {
+        if let pane = paneCenter.pane {
+            // `.id(pane.id)` : un pane re-présenté repart avec un @State frais
+            // → cliquer une autre donnée change le détail sans passer par
+            // « Fermer ».
+            pane.content
+                .id(pane.id)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(AppTheme.Colors.background)
+                .navigationSplitViewColumnWidth(
+                    min: InspectorPaneMetrics.minWidth,
+                    ideal: InspectorPaneMetrics.idealWidth,
+                    max: InspectorPaneMetrics.maxWidth
+                )
+        } else {
+            Color.clear
+                .frame(width: 0)
+                .navigationSplitViewColumnWidth(0)
+        }
+    }
+    #else
+    /// iOS / iPadOS — deux colonnes, comportement historique : les panes y sont
+    /// des `.sheet` (cf. `adaptivePane`), il n'y a donc pas de troisième colonne
+    /// à prévoir.
     private var sidebarSplitView: some View {
         @Bindable var state = appState
         return NavigationSplitView {
@@ -309,92 +407,10 @@ struct MainTabView: View {
                 .navigationTitle("Nemoris")
                 .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 280)
         } detail: {
-            // ⚠️ `.id(selection)` est OBLIGATOIRE ici : sans elle, `NavigationSplitView`
-            // sur macOS ne détruit PAS l'état de navigation interne (push) de l'ancien
-            // module quand la sélection change — le contenu poussé (détail Tricount,
-            // détail compte/position Investissements…) reste affiché à l'écran, et
-            // seul un pop (bouton retour) force enfin le re-rendu vers le nouveau
-            // module. `.id()` force une identité de vue liée à l'onglet : au
-            // changement, SwiftUI démonte tout l'ancien sous-arbre (donc son
-            // `NavigationStack`/push interne) au lieu de tenter de le réutiliser.
-            detailColumn(for: state.selectedTab)
+            detailView(for: state.selectedTab)
                 .id(state.selectedTab)
         }
         .tint(AppTheme.Colors.accent)
-    }
-
-    /// Colonne détail = contenu du module + (macOS) panneau latéral à droite.
-    ///
-    /// Le panneau est un **`.inspector` natif** : c'est lui qui donne le
-    /// comportement des apps système (Mail, Notes) que le HStack custom
-    /// antérieur ne savait pas reproduire —
-    /// **séparateur déplaçable** (l'utilisateur choisit sa largeur, macOS la
-    /// mémorise par fenêtre) et **barre d'outils scindée** : les actions du
-    /// module s'arrêtent au séparateur, celles du panneau commencent après, via
-    /// le séparateur de suivi (`NSTrackingSeparatorToolbarItem`) que SwiftUI
-    /// insère de lui-même. Chaque groupe se lit ainsi au-dessus de la colonne à
-    /// laquelle il appartient, sans étiquette.
-    ///
-    /// > Historique : ce panneau a d'abord été un `.inspector`, abandonné car il
-    /// > crashait à la présentation sur les premières betas de macOS 27
-    /// > (ré-entrance AutoLayout pendant la MoveTransition du slide-in avec du
-    /// > contenu AppKit-backed — NavigationStack/Form), puis réécrit en `HStack`
-    /// > custom à largeur figée. Le crash ne se reproduit plus (vérifié sur
-    /// > 27.0 build 26A5388g, présentation + re-présentation + changement de
-    /// > module inspecteur ouvert) ; on revient donc à l'API native, qui apporte
-    /// > en prime les deux comportements ci-dessus.
-    ///
-    /// ⚠️ Le `.inspector` est attaché INCONDITIONNELLEMENT (c'est `isPresented`
-    /// qui l'ouvre), jamais dans une branche `if`. Une structure de vue qui
-    /// change selon qu'un panneau est ouvert ferait voir à SwiftUI deux arbres
-    /// différents : il DÉTRUIRAIT la vue du module à l'ouverture et la
-    /// recréerait, réinitialisant tout son `@State` (l'onglet courant de
-    /// « Données » retombait sur Comptes, les filtres se vidaient…).
-    ///
-    /// Le panneau ne reçoit AUCUN chrome d'ici : son contenu déclare lui-même sa
-    /// `.toolbar` (cf. `publishesInspectorChrome`), donc les actions sont toujours
-    /// celles du rendu courant — jamais des closures périmées.
-    @ViewBuilder
-    private func detailColumn(for selection: String) -> some View {
-        #if os(macOS)
-        detailView(for: selection)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .inspector(isPresented: inspectorPresented) {
-                // `.id(pane.id)` : un pane re-présenté repart avec un @State
-                // frais → cliquer une autre donnée change le détail sans passer
-                // par « Fermer ».
-                Group {
-                    if let pane = paneCenter.pane {
-                        pane.content.id(pane.id)
-                    }
-                }
-                .inspectorColumnWidth(
-                    min: InspectorPaneMetrics.minWidth,
-                    ideal: InspectorPaneMetrics.idealWidth,
-                    max: InspectorPaneMetrics.maxWidth
-                )
-            }
-        #else
-        detailView(for: selection)
-        #endif
-    }
-
-    #if os(macOS)
-    /// Pont entre le slot `InspectorPaneCenter` (source de vérité, un pane ou
-    /// rien) et le `Bool` qu'attend `.inspector`.
-    ///
-    /// ⚠️ La fermeture passe OBLIGATOIREMENT par `dismissCurrent()`, jamais par
-    /// un simple vidage du slot : c'est lui qui rejoue le `onDismiss` du call
-    /// site (remise à `false`/`nil` de SON binding). Sans ça, fermer par la
-    /// poignée native de l'inspecteur laisserait le binding d'origine à `true`,
-    /// et le panneau refuserait de se rouvrir au clic suivant.
-    private var inspectorPresented: Binding<Bool> {
-        Binding(
-            get: { paneCenter.pane != nil },
-            set: { isPresented in
-                if !isPresented { paneCenter.dismissCurrent() }
-            }
-        )
     }
     #endif
 

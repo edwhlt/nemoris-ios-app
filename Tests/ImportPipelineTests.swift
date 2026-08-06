@@ -616,6 +616,129 @@ do {
            "des lignes ne se décodent pas comme un lot")
 }
 
+// MARK: - t10 — Encodage : le BOM prime sur toute heuristique
+
+print("")
+print("t10 · Décodage texte, UTF-16 compris")
+do {
+    let csv = "date;libelle;montant\n02/07/2026;CARREFOUR;-42,50"
+
+    func utf16Data(bigEndian: Bool, bom: Bool) -> Data {
+        var data = Data()
+        if bom { data.append(contentsOf: bigEndian ? [0xFE, 0xFF] : [0xFF, 0xFE]) }
+        for unit in csv.utf16 {
+            let high = UInt8(unit >> 8), low = UInt8(unit & 0xFF)
+            data.append(contentsOf: bigEndian ? [high, low] : [low, high])
+        }
+        return data
+    }
+
+    // ⚠️ LA régression : un CSV UTF-16 big-endian décodé en little-endian
+    // produit des idéogrammes CJK (« date » → 搀愀琀攀). Le fichier devenait
+    // illisible, donc plus tabulaire, donc envoyé à l'IA au lieu du parseur
+    // déterministe — d'où les caractères chinois ET la lenteur sur un CSV.
+    let beWithBOM = utf16Data(bigEndian: true, bom: true)
+    expect(ImportFormatSniffer.decodeText(beWithBOM)?.contains("CARREFOUR") == true,
+           "UTF-16 BE avec BOM décodé correctement",
+           ImportFormatSniffer.decodeText(beWithBOM).map { String($0.prefix(20)) } ?? "nil")
+    expect(ImportFormatSniffer.decodeText(beWithBOM)?.contains("\u{6400}") == false,
+           "aucun idéogramme parasite")
+
+    let leWithBOM = utf16Data(bigEndian: false, bom: true)
+    expect(ImportFormatSniffer.decodeText(leWithBOM)?.contains("CARREFOUR") == true,
+           "UTF-16 LE avec BOM décodé correctement")
+
+    // Sans BOM : la position des octets nuls donne le boutisme.
+    expect(ImportFormatSniffer.decodeText(utf16Data(bigEndian: true, bom: false))?
+            .contains("CARREFOUR") == true, "UTF-16 BE sans BOM deviné")
+    expect(ImportFormatSniffer.decodeText(utf16Data(bigEndian: false, bom: false))?
+            .contains("CARREFOUR") == true, "UTF-16 LE sans BOM deviné")
+
+    // Un BOM UTF-16 est une déclaration explicite : c'est du texte, malgré les
+    // octets nuls qui feraient échouer le test générique.
+    expect(ImportFormatSniffer.looksLikeText(beWithBOM), "BOM UTF-16 reconnu comme texte")
+    expect(ImportFormatSniffer.detect(data: beWithBOM) == .text, "UTF-16 sans extension → texte")
+
+    // Et le CSV redevient TABULAIRE, donc ne part plus à l'IA.
+    if let text = ImportFormatSniffer.decodeText(beWithBOM),
+       let grid = CSVParserV3.parse(content: text) {
+        expect(grid.isTabular, "CSV UTF-16 exploitable par le mapping (donc pas d'IA)")
+        expect(grid.headers.count == 3, "3 colonnes", "\(grid.headers.count)")
+    } else {
+        expect(false, "CSV UTF-16 exploitable par le mapping (donc pas d'IA)")
+    }
+
+    // Non-régression : l'UTF-8 ordinaire n'est pas pris pour de l'UTF-16.
+    expect(ImportFormatSniffer.decodeText(Data(csv.utf8))?.contains("CARREFOUR") == true,
+           "UTF-8 sans BOM inchangé")
+    let utf8BOM = Data([0xEF, 0xBB, 0xBF] + Array(csv.utf8))
+    expect(ImportFormatSniffer.decodeText(utf8BOM)?.hasPrefix("date") == true,
+           "BOM UTF-8 retiré")
+}
+
+// MARK: - t11 — JSON de modèle : réparation de mise en forme
+
+print("")
+print("t11 · Réparation d'un JSON coupé par la mise en forme")
+do {
+    // ⚠️ Cas RÉEL : le modèle a coupé le nom d'une clé sur deux lignes. C'est du
+    // JSON invalide (caractère de contrôle brut dans une chaîne), `JSONDecoder`
+    // lève, et TOUT le document est perdu — huit opérations correctement
+    // extraites donnaient « aucune transaction à importer ».
+    let broken = """
+    {
+      "transactions": [
+        {
+          "date": "2026-07-22",
+          "label": "Carrefour City",
+          "amount": -3.98,
+          "payment_
+            type": "CB"
+        }
+      ]
+    }
+    """
+    let repaired = LenientJSON.extractObject(from: broken)
+    expect(repaired.contains("\"payment_type\""), "clé recollée sans espace parasite",
+           repaired.contains("payment_ type") ? "espace inséré" : String(repaired.prefix(80)))
+
+    guard let data = repaired.data(using: .utf8),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let rows = object["transactions"] as? [[String: Any]] else {
+        expect(false, "JSON réparé décodable"); return
+    }
+    expect(rows.count == 1, "1 opération récupérée", "\(rows.count)")
+    expect(rows.first?["payment_type"] as? String == "CB", "valeur de la clé recollée")
+
+    // Une VALEUR coupée se recolle avec une espace : c'est un libellé dont les
+    // mots ont été séparés, pas un identifiant.
+    let wrappedValue = """
+    {"transactions":[{"label":"CARREFOUR
+        CITY PARIS","amount":-1.0,"date":"2026-07-22"}]}
+    """
+    let fixedValue = LenientJSON.repaired(wrappedValue)
+    expect(fixedValue.contains("CARREFOUR CITY PARIS"),
+           "libellé recollé avec une espace",
+           fixedValue.contains("CARREFOURCITY") ? "mots collés" : String(fixedValue.prefix(60)))
+
+    // Non-régression : un JSON valide traverse inchangé, échappements compris.
+    let valid = #"{"label":"dit \"bonjour\"","n":1}"#
+    expect(LenientJSON.repaired(valid) == valid, "JSON valide inchangé",
+           LenientJSON.repaired(valid))
+
+    // Les balises de code que les modèles ajoutent sont retirées.
+    let fenced = "```json\n" + #"{"a":1}"# + "\n```"
+    expect(LenientJSON.extractObject(from: fenced) == #"{"a":1}"#,
+           "balises de code retirées", LenientJSON.extractObject(from: fenced))
+
+    // ⚠️ On ne referme RIEN : une structure tronquée doit rester une erreur
+    // visible, pas une donnée devinée.
+    let truncated = #"{"transactions":[{"label":"X""#
+    expect((try? JSONSerialization.jsonObject(
+                with: Data(LenientJSON.repaired(truncated).utf8))) == nil,
+           "JSON tronqué reste invalide (rien n'est inventé)")
+}
+
 // MARK: - Bilan
 
 print("")

@@ -24,6 +24,8 @@ struct TransactionMetadataSection: View {
     @State private var values: [Int: String] = [:]        // keyId → valeur
     @State private var suggestions: [Int: [String]] = [:] // keyId → valeurs déjà vues
     @State private var showKeyManager = false
+    /// Écritures différées en cours, une par clé (cf. `commit`).
+    @State private var pendingWrites: [Int: Task<Void, Never>] = [:]
 
     private let repository = TransactionMetadataRepository()
 
@@ -56,6 +58,7 @@ struct TransactionMetadataSection: View {
             MetadataKeyManagerView(onChange: load)
         }
         .task { load() }
+        .onDisappear { flushPendingWrites() }
     }
 
     private var emptyState: some View {
@@ -133,14 +136,35 @@ struct TransactionMetadataSection: View {
             repository.fetchValues(transactionId: transactionId).map { ($0.keyId, $0.value) })
     }
 
-    /// Écriture IMMÉDIATE, sans bouton « enregistrer ».
+    /// Écriture sans bouton « enregistrer », mais DIFFÉRÉE.
     ///
     /// Cohérent avec les tags, qui s'appliquent aussi à la volée : une
     /// métadonnée est une étiquette, pas un champ du formulaire principal. Une
     /// valeur vidée retire la ligne (cf. `setValue`).
+    ///
+    /// ⚠️ Le délai n'est pas un confort. La version initiale écrivait en base à
+    /// CHAQUE FRAPPE : une ouverture de connexion SQLite et un UPSERT par
+    /// caractère, sur le main actor — saisie hachée garantie. On ne conserve que
+    /// la dernière frappe d'une rafale.
     private func commit(key: TransactionMetadataKey, value: String) {
         guard let transactionId else { return }
-        repository.setValue(value, keyId: key.id, transactionId: transactionId)
+        pendingWrites[key.id]?.cancel()
+        pendingWrites[key.id] = Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            repository.setValue(value, keyId: key.id, transactionId: transactionId)
+        }
+    }
+
+    /// Vide la file d'écriture : la dernière frappe ne doit pas être perdue
+    /// parce que l'utilisateur a fermé la fiche dans la foulée.
+    private func flushPendingWrites() {
+        guard let transactionId else { return }
+        for (keyId, task) in pendingWrites {
+            task.cancel()
+            repository.setValue(values[keyId] ?? "", keyId: keyId, transactionId: transactionId)
+        }
+        pendingWrites = [:]
     }
 }
 
@@ -159,6 +183,15 @@ struct MetadataKeyManagerView: View {
     @State private var fillsFromImport = false
     @State private var errorMessage: String?
 
+    // Édition en place d'une clé existante.
+    @State private var editingKeyId: Int?
+    @State private var editName = ""
+    @State private var editIcon = "tag"
+    @State private var editFillsFromImport = false
+    /// ⚠️ Confirmation avant suppression : le CASCADE efface TOUTES les valeurs
+    /// posées sur les transactions. Un tap malencontreux ne doit pas les perdre.
+    @State private var deleteTarget: TransactionMetadataKey?
+
     private let repository = TransactionMetadataRepository()
 
     /// Quelques symboles courants — saisir un nom de SF Symbol à la main n'a
@@ -170,27 +203,42 @@ struct MetadataKeyManagerView: View {
         Form {
             Section {
                 ForEach(keys) { key in
-                    HStack(spacing: 10) {
-                        Image(systemName: key.displayIcon)
-                            .foregroundStyle(AppTheme.Colors.accent)
-                            .frame(width: 22)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(key.name)
-                            if let role = key.role {
-                                Text(LocalizedStringKey(role.displayName))
-                                    .font(.caption2)
-                                    .foregroundStyle(AppTheme.Colors.textSecondary)
+                    // Une clé se MODIFIE : renommer, changer d'icône, déplacer
+                    // le rôle « renseignée par l'import ». La première version
+                    // ne savait que créer et supprimer, ce qui obligeait à
+                    // détruire toutes les valeurs pour corriger une faute de
+                    // frappe dans un nom.
+                    if editingKeyId == key.id {
+                        editor(for: key)
+                    } else {
+                        HStack(spacing: 10) {
+                            Image(systemName: key.displayIcon)
+                                .foregroundStyle(AppTheme.Colors.accent)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(key.name)
+                                if let role = key.role {
+                                    Text(LocalizedStringKey(role.displayName))
+                                        .font(.caption2)
+                                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                                }
                             }
+                            Spacer()
+                            Button {
+                                beginEditing(key)
+                            } label: {
+                                Image(systemName: "pencil")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(AppTheme.Colors.accent)
+                            Button(role: .destructive) {
+                                deleteTarget = key
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(AppTheme.Colors.danger)
                         }
-                        Spacer()
-                        Button(role: .destructive) {
-                            repository.deleteKey(id: key.id)
-                            reload()
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(AppTheme.Colors.danger)
                     }
                 }
                 if keys.isEmpty {
@@ -236,7 +284,69 @@ struct MetadataKeyManagerView: View {
         // Convention : toute vue présentée en panneau pose son propre tint.
         .tint(AppTheme.Colors.accent)
         .paneChrome("Métadonnées", cancelLabel: "Fermer", onCancel: { dismiss() })
+        .confirmationDialog("Supprimer « \(deleteTarget?.name ?? "") » ?",
+                            isPresented: Binding(get: { deleteTarget != nil },
+                                                 set: { if !$0 { deleteTarget = nil } }),
+                            titleVisibility: .visible) {
+            Button("Supprimer", role: .destructive) {
+                if let target = deleteTarget { repository.deleteKey(id: target.id) }
+                deleteTarget = nil
+                reload()
+            }
+            Button("Annuler", role: .cancel) { deleteTarget = nil }
+        } message: {
+            Text("Toutes les valeurs posées sur tes transactions pour cette métadonnée seront effacées.")
+        }
         .task { reload() }
+    }
+
+    /// Édition en place d'une clé, dans la ligne elle-même.
+    @ViewBuilder
+    private func editor(for key: TransactionMetadataKey) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Nom", text: $editName)
+            Picker("Icône", selection: $editIcon) {
+                ForEach(iconChoices, id: \.self) { icon in
+                    Label(icon, systemImage: icon).tag(icon)
+                }
+            }
+            Toggle("Renseignée par l'import", isOn: $editFillsFromImport)
+            HStack {
+                Button("Annuler") { editingKeyId = nil }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+                Spacer()
+                Button("Enregistrer") { saveEdit(key) }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(AppTheme.Colors.accent)
+                    .disabled(editName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .font(.callout)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func beginEditing(_ key: TransactionMetadataKey) {
+        editingKeyId = key.id
+        editName = key.name
+        editIcon = key.displayIcon
+        editFillsFromImport = key.role == .paymentMethod
+    }
+
+    private func saveEdit(_ key: TransactionMetadataKey) {
+        var updated = key
+        updated.name = editName.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.icon = editIcon
+        // Poser le rôle ici le RETIRE automatiquement à la clé qui le portait
+        // (index UNIQUE partiel géré par le repository) : il reste exclusif.
+        updated.role = editFillsFromImport ? .paymentMethod : nil
+        guard repository.updateKey(updated) else {
+            errorMessage = "Ce nom est déjà utilisé."
+            return
+        }
+        editingKeyId = nil
+        errorMessage = nil
+        reload()
     }
 
     private func create() {

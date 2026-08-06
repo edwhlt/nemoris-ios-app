@@ -135,6 +135,11 @@ enum ImportFormatSniffer {
     static func looksLikeText(_ data: Data) -> Bool {
         let sample = data.prefix(2048)
         guard !sample.isEmpty else { return false }
+        // ⚠️ L'UTF-16 est plein d'octets nuls, ce qui le ferait rejeter par le
+        // test ci-dessous. Un BOM UTF-16 est une déclaration explicite : c'est
+        // du texte, point. Sans ce cas, un CSV UTF-16 partagé sans extension
+        // ressortait en `.unknown` et n'était pas importable du tout.
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]) { return true }
         if sample.contains(0x00) { return false }
         let control = sample.filter { byte in
             byte < 0x09 || (byte > 0x0D && byte < 0x20) || byte == 0x7F
@@ -159,13 +164,62 @@ enum ImportFormatSniffer {
     /// contenu EST du texte transforme un PNG en centaines de milliers de
     /// caractères de binaire — le bug qui a motivé tout ce sniffing.
     static func decodeText(_ data: Data) -> String? {
-        if data.starts(with: [0xEF, 0xBB, 0xBF]),
-           let text = String(data: data.dropFirst(3), encoding: .utf8) { return text }
-        for encoding: String.Encoding in [.utf8, .utf16LittleEndian, .windowsCP1252, .isoLatin1] {
+        // ⚠️ LE BOM D'ABORD, ET LES DEUX BOUTISMES.
+        //
+        // Bug de production : un CSV UTF-16 **big-endian** tombait dans la
+        // boucle ci-dessous, où `.utf16LittleEndian` « réussit » toujours — en
+        // lisant les octets à l'envers. « date » (0x00 0x64 0x00 0x61…) devient
+        // 搀愀 : des idéogrammes CJK. Le fichier devenait illisible, donc plus
+        // tabulaire, donc routé vers l'IA au lieu du parseur déterministe —
+        // d'où À LA FOIS les caractères chinois dans le JSON et un import
+        // interminable sur un simple CSV.
+        //
+        // Un BOM est une déclaration explicite de l'encodage : il prime sur
+        // toute heuristique.
+        if data.starts(with: [0xEF, 0xBB, 0xBF]) {
+            return String(data: data.dropFirst(3), encoding: .utf8)
+        }
+        if data.starts(with: [0xFF, 0xFE]) {
+            return String(data: data.dropFirst(2), encoding: .utf16LittleEndian)
+        }
+        if data.starts(with: [0xFE, 0xFF]) {
+            return String(data: data.dropFirst(2), encoding: .utf16BigEndian)
+        }
+
+        // Sans BOM : l'UTF-16 se reconnaît à ses octets nuls en position
+        // régulière. Sur du texte occidental, un octet sur deux est nul —
+        // la position (paire ou impaire) donne le boutisme.
+        if let utf16 = decodeUTF16WithoutBOM(data) { return utf16 }
+
+        for encoding: String.Encoding in [.utf8, .windowsCP1252, .isoLatin1] {
             if let text = String(data: data, encoding: encoding),
                !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return text
             }
+        }
+        return nil
+    }
+
+    /// UTF-16 sans BOM, deviné par la position des octets nuls.
+    ///
+    /// ⚠️ N'est tenté QUE si le texte en est massivement constitué (> 30 % de
+    /// nuls) : un fichier UTF-8 ordinaire n'en contient aucun, donc aucun risque
+    /// de faux positif.
+    private static func decodeUTF16WithoutBOM(_ data: Data) -> String? {
+        let sample = Array(data.prefix(2048))
+        guard sample.count >= 4 else { return nil }
+        var evenZeros = 0, oddZeros = 0
+        for (index, byte) in sample.enumerated() where byte == 0 {
+            if index.isMultiple(of: 2) { evenZeros += 1 } else { oddZeros += 1 }
+        }
+        let total = Double(sample.count)
+        // Nuls en position PAIRE ⇒ big-endian (l'octet de poids fort vient en
+        // premier) ; en position impaire ⇒ little-endian.
+        if Double(evenZeros) / total > 0.3, oddZeros == 0 {
+            return String(data: data, encoding: .utf16BigEndian)
+        }
+        if Double(oddZeros) / total > 0.3, evenZeros == 0 {
+            return String(data: data, encoding: .utf16LittleEndian)
         }
         return nil
     }
