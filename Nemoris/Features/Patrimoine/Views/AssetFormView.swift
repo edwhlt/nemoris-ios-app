@@ -267,7 +267,7 @@ struct AssetFormView: View {
             }
             .paneChrome(existingAsset == nil ? "Nouvel actif" : "Modifier",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Enregistrer", confirmDisabled: !canSave,
+                        confirmLabel: "Enregistrer", confirmIcon: "checkmark", confirmDisabled: !canSave,
                         onConfirm: { save() })
     }
 

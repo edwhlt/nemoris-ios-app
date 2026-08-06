@@ -630,7 +630,7 @@ struct ReferenceDataView: View {
             }
             .paneChrome(editItemId == nil ? "Ajouter" : "Modifier",
                         cancelLabel: "Annuler", onCancel: { showEditSheet = false },
-                        confirmLabel: "Enregistrer",
+                        confirmLabel: "Enregistrer", confirmIcon: "checkmark",
                         confirmDisabled: editDraftName.trimmingCharacters(in: .whitespaces).isEmpty,
                         onConfirm: { saveEdit() })
     }

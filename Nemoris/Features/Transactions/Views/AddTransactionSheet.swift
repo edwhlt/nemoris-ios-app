@@ -179,7 +179,7 @@ struct AddTransactionSheet: View {
             }
             .paneChrome("Nouvelle transaction",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Ajouter",
+                        confirmLabel: "Ajouter", confirmIcon: "plus",
                         confirmDisabled: parsedAmount == nil || amountText.isEmpty,
                         onConfirm: { save() })
     }

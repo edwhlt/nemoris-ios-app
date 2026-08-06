@@ -125,6 +125,95 @@ enum LenientJSON {
         if let start = cleaned.firstIndex(of: "{"), let end = cleaned.lastIndex(of: "}") {
             cleaned = String(cleaned[start...end])
         }
-        return repaired(cleaned)
+        return repaired(repairSyntax(cleaned))
+    }
+
+    // MARK: - Réparations lexicales
+
+    /// Corrige les fautes de PONCTUATION les plus fréquentes des modèles.
+    ///
+    /// Chacune vient d'un cas réel :
+    ///   • `"amount": -6.98,\n}` — virgule finale, interdite en JSON ;
+    ///   • `, amount": -6.00` — guillemet ouvrant de clé oublié ;
+    ///   • `,,` — virgule dupliquée.
+    ///
+    /// ⚠️ Ponctuation UNIQUEMENT. On ne complète aucune valeur, on ne referme
+    /// aucune structure : une réponse tronquée doit rester une erreur visible.
+    static func repairSyntax(_ raw: String) -> String {
+        var text = raw
+
+        // Guillemet ouvrant manquant sur une clé : `, amount":` → `, "amount":`.
+        // Motif volontairement étroit (un identifiant nu suivi de `":`), pour ne
+        // pas toucher au contenu des chaînes.
+        text = replacing(text,
+                         pattern: #"([,{])(\s*)([A-Za-z_][A-Za-z0-9_]*)"(\s*):"#,
+                         template: "$1$2\"$3\"$4:")
+
+        // Virgules dupliquées, puis virgule finale avant une fermeture.
+        text = replacing(text, pattern: #",(\s*),"#, template: ",$1")
+        text = replacing(text, pattern: #",(\s*)([}\]])"#, template: "$1$2")
+        return text
+    }
+
+    private static func replacing(_ text: String, pattern: String, template: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: template)
+    }
+
+    // MARK: - Découpage objet par objet
+
+    /// Les objets JSON les plus INTERNES d'une réponse, chacun réparé
+    /// séparément.
+    ///
+    /// ─── Pourquoi décoder objet par objet ──────────────────────────────────
+    ///
+    /// Exiger que TOUT le document soit valide, c'est perdre huit opérations
+    /// parfaitement extraites parce que le modèle a laissé une virgule en trop
+    /// sur la troisième. Constaté deux fois de suite, avec deux fautes
+    /// différentes : réparer chaque nouvelle faute au cas par cas est une course
+    /// perdue d'avance.
+    ///
+    /// En décodant chaque objet indépendamment, une faute de syntaxe coûte UNE
+    /// ligne au lieu de la capture entière. C'est le comportement qu'on veut :
+    /// dégradation progressive, pas tout ou rien.
+    ///
+    /// « Les plus internes » = sans accolade imbriquée. Nos schémas d'opérations
+    /// et d'ordres sont plats, donc ce sont exactement les objets à décoder ; le
+    /// conteneur (`{"transactions": [...]}`) est ignoré, ce qui rend l'extraction
+    /// insensible à sa forme.
+    static func innermostObjects(in raw: String) -> [String] {
+        let text = repairSyntax(raw)
+        var objects: [String] = []
+        var start: String.Index?
+        var containsNested = false
+        var inString = false
+        var escaped = false
+
+        var index = text.startIndex
+        while index < text.endIndex {
+            let character = text[index]
+            defer { index = text.index(after: index) }
+
+            if escaped { escaped = false; continue }
+            if character == "\\" { escaped = true; continue }
+            if character == "\"" { inString.toggle(); continue }
+            guard !inString else { continue }
+
+            if character == "{" {
+                // Une nouvelle ouverture pendant qu'on capture : le bloc courant
+                // n'est pas le plus interne, on repart de celle-ci.
+                if start != nil { containsNested = true }
+                start = index
+                containsNested = false
+            } else if character == "}", let opened = start {
+                if !containsNested {
+                    objects.append(repaired(String(text[opened...index])))
+                }
+                start = nil
+                containsNested = false
+            }
+        }
+        return objects
     }
 }

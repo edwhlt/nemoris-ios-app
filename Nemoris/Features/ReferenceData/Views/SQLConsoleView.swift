@@ -988,6 +988,10 @@ struct SQLEditorView: View {
     @State private var variables: [String: String] = [:]
     @State private var currentPage: Int = 0   // 0 = results, 1 = editor
     @State private var showAssistant: Bool = false
+    /// Doc du schéma, accessible SANS quitter le fichier — avant cet ajout,
+    /// seule `SQLFilesListView` (l'écran de liste) l'exposait, obligeant un
+    /// aller-retour pour vérifier une colonne pendant qu'on écrit une requête.
+    @State private var showSchema: Bool = false
 
     private var fileName: String { fileURL.deletingPathExtension().lastPathComponent }
     private var hasUnfilledVars: Bool { detectedVarSpecs.contains { (variables[$0.name] ?? "").isEmpty } }
@@ -1022,6 +1026,15 @@ struct SQLEditorView: View {
                 .fixedSize()
             }
             #endif
+            ToolbarItem(placement: .topBarLeading) {
+                ToolbarPaywallGate(feature: .sqlConsole) {
+                    Button {
+                        showSchema = true
+                    } label: {
+                        Label("Schéma", systemImage: "tablecells")
+                    }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showAssistant = true } label: {
                     Image(systemName: "sparkles")
@@ -1046,6 +1059,11 @@ struct SQLEditorView: View {
                 refreshVariables(sqlText)
                 currentPage = 1  // bascule vers l'éditeur pour montrer l'insertion
             }
+        }
+        .adaptivePane(isPresented: $showSchema) {
+            DatabaseSchemaView()
+                .paneChrome("Schéma de la base",
+                            cancelLabel: "Fermer", onCancel: { showSchema = false })
         }
         .onAppear { loadFile() }
     }

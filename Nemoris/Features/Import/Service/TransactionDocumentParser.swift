@@ -381,10 +381,6 @@ final class TransactionDocumentParser {
 
     // MARK: - Décodage JSON (2e étage)
 
-    private struct AIResponse: Decodable {
-        let transactions: [AILine]?
-    }
-
     private struct AILine: Decodable {
         let date: String?
         let label: String?
@@ -393,32 +389,45 @@ final class TransactionDocumentParser {
         let payment_type: String?
     }
 
+    /// Décode les opérations d'une réponse de modèle, OBJET PAR OBJET.
+    ///
+    /// ⚠️ Volontairement PAS un décodage du document entier. Une seule faute de
+    /// syntaxe — virgule finale, guillemet de clé oublié — faisait lever
+    /// `JSONDecoder` et perdre TOUTES les opérations, y compris les sept
+    /// parfaitement formées. Constaté deux fois de suite avec deux fautes
+    /// différentes : réparer chaque nouvelle faute au cas par cas ne converge
+    /// pas.
+    ///
+    /// Ici une ligne cassée coûte une ligne. Le conteneur (`{"transactions":
+    /// [...]}`) n'a même plus besoin d'être valide, ni d'exister.
     static func parseJSON(_ raw: String) -> [ExtractedBankTransaction] {
-        // Les modèles ajoutent volontiers des balises de code markdown autour
-        // du JSON demandé, et coupent parfois une chaîne au milieu en mettant
-        // en forme — ce qui est du JSON INVALIDE et faisait perdre tout le
-        // document, donc toutes les opérations d'une capture.
-        let cleaned = LenientJSON.extractObject(from: raw)
-        guard let data = cleaned.data(using: .utf8),
-              let decoded = try? JSONDecoder().decode(AIResponse.self, from: data) else {
-            return []
+        let decoder = JSONDecoder()
+        return LenientJSON.innermostObjects(in: raw).compactMap { object in
+            guard let data = object.data(using: .utf8),
+                  let line = try? decoder.decode(AILine.self, from: data) else { return nil }
+            return convert(line)
         }
-        return (decoded.transactions ?? []).compactMap { line in
-            guard let raw = line.date,
-                  let date = BankStatementExtractor.normalizeDate(raw),
-                  let amount = line.amount?.value, amount != 0 else { return nil }
-            let label = (line.label ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !label.isEmpty else { return nil }
-            let type = (line.payment_type ?? "").trimmingCharacters(in: .whitespaces).uppercased()
-            return ExtractedBankTransaction(
-                date: date,
-                amount: amount,
-                label: label,
-                paymentTypeHint: type.isEmpty ? nil : type,
-                isSignExplicit: true,
-                confidence: 0.65
-            )
-        }
+    }
+
+    /// Une ligne décodée devient une opération, ou rien.
+    ///
+    /// Les garde-fous restent les mêmes : sans date exploitable, sans montant ou
+    /// sans libellé, on n'invente pas — on écarte.
+    private static func convert(_ line: AILine) -> ExtractedBankTransaction? {
+        guard let raw = line.date,
+              let date = BankStatementExtractor.normalizeDate(raw),
+              let amount = line.amount?.value, amount != 0 else { return nil }
+        let label = (line.label ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else { return nil }
+        let type = (line.payment_type ?? "").trimmingCharacters(in: .whitespaces).uppercased()
+        return ExtractedBankTransaction(
+            date: date,
+            amount: amount,
+            label: label,
+            paymentTypeHint: type.isEmpty ? nil : type,
+            isSignExplicit: true,
+            confidence: 0.65
+        )
     }
 
     /// Une date inventée par le modèle (« 2026-13-45 ») doit disqualifier la

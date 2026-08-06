@@ -192,7 +192,7 @@ struct RealEstateFormView: View {
             }
             .paneChrome(existingItem == nil ? "Nouveau bien" : "Modifier",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Enregistrer", confirmDisabled: !canSave,
+                        confirmLabel: "Enregistrer", confirmIcon: "checkmark", confirmDisabled: !canSave,
                         onConfirm: { save() })
     }
 

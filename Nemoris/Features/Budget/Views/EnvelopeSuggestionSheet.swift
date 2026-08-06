@@ -38,6 +38,7 @@ struct EnvelopeSuggestionSheet: View {
             .paneChrome("Suggestions",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
                         confirmLabel: isCreating ? "Création…" : "Créer (\(selected.count))",
+                        confirmIcon: "plus",
                         confirmDisabled: selected.isEmpty || isCreating) {
                 Task { await createSelected() }
             }

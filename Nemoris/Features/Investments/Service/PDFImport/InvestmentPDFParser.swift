@@ -663,12 +663,32 @@ final class InvestmentPDFParser: Sendable {
             print("[PDFParser] Pas de JSON trouvé dans la réponse IA page \(pageNumber)")
             return PageParse()
         }
-        guard let data = jsonStr.data(using: .utf8),
-              let payload = try? JSONDecoder().decode(AIPageResponse.self, from: data)
-        else {
-            print("[PDFParser] Décodage JSON échoué page \(pageNumber)")
-            return PageParse()
+        // Chemin rapide : le document entier est valide.
+        var payload = jsonStr.data(using: .utf8)
+            .flatMap { try? JSONDecoder().decode(AIPageResponse.self, from: $0) }
+
+        // ⚠️ Repli OBJET PAR OBJET quand il ne l'est pas. Une seule faute de
+        // ponctuation du modèle (virgule finale, guillemet de clé oublié) faisait
+        // sinon perdre TOUTES les opérations de la page, y compris celles
+        // parfaitement formées — constaté côté transactions, même moteur, même
+        // classe de réponse. Une ligne cassée ne doit coûter qu'une ligne.
+        if payload == nil {
+            let decoder = JSONDecoder()
+            let salvagedOrders = LenientJSON.innermostObjects(in: raw).compactMap { object in
+                object.data(using: .utf8).flatMap { try? decoder.decode(AIOrder.self, from: $0) }
+            }
+            let salvagedPositions = LenientJSON.innermostObjects(in: raw).compactMap { object in
+                object.data(using: .utf8).flatMap { try? decoder.decode(AIPosition.self, from: $0) }
+            }
+            guard !salvagedOrders.isEmpty || !salvagedPositions.isEmpty else {
+                print("[PDFParser] Décodage JSON échoué page \(pageNumber)")
+                return PageParse()
+            }
+            print("[PDFParser] JSON invalide page \(pageNumber) — récupération objet par objet")
+            payload = AIPageResponse(mode: nil, orders: salvagedOrders,
+                                     positions: salvagedPositions, page_note: nil)
         }
+        guard let payload else { return PageParse() }
 
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")

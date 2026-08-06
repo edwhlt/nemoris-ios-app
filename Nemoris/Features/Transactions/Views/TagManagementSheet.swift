@@ -73,7 +73,7 @@ struct TagManagementSheet: View {
             }
             .paneChrome("Tags",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Enregistrer") {
+                        confirmLabel: "Enregistrer", confirmIcon: "checkmark") {
                 onSave(selectedTagIds); dismiss()
             }
     }

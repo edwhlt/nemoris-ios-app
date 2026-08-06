@@ -45,7 +45,7 @@ struct EnvelopeEditSheet: View {
             }
             .paneChrome(envelope == nil ? "Nouvelle enveloppe" : "Modifier",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Enregistrer",
+                        confirmLabel: "Enregistrer", confirmIcon: "checkmark",
                         confirmDisabled: name.isEmpty || amount.isEmpty) {
                 save(); dismiss()
             }

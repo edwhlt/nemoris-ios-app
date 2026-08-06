@@ -130,7 +130,7 @@ struct PayeeDetailView: View {
             }
             .paneChrome("Tiers",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Enregistrer",
+                        confirmLabel: "Enregistrer", confirmIcon: "checkmark",
                         confirmDisabled: name.trimmingCharacters(in: .whitespaces).isEmpty,
                         onConfirm: { save() })
     }

@@ -71,7 +71,7 @@ struct TagQuickSheet: View {
             }
             .paneChrome("Tags",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Enregistrer", onConfirm: { save() })
+                        confirmLabel: "Enregistrer", confirmIcon: "checkmark", onConfirm: { save() })
     }
 
     private func toggle(_ tagId: Int) {

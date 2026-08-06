@@ -116,6 +116,7 @@ struct InvestmentOrderFormView: View {
             .paneChrome(isEditing ? "Modifier l'ordre" : "Nouvel ordre",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
                         confirmLabel: isEditing ? "Mettre à jour" : "Ajouter",
+                        confirmIcon: isEditing ? "checkmark" : "plus",
                         confirmDisabled: !canSave,
                         onConfirm: { save() })
     }

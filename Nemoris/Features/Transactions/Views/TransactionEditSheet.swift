@@ -205,7 +205,7 @@ struct TransactionEditSheet: View {
             }
             .paneChrome("Modifier la transaction",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Enregistrer", onConfirm: { save() })
+                        confirmLabel: "Enregistrer", confirmIcon: "checkmark", onConfirm: { save() })
     }
 
     private func save() {

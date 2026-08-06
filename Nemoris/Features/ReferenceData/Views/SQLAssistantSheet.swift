@@ -63,6 +63,7 @@ struct SQLAssistantSheet: View {
             .paneChrome("Assistant SQL",
                         cancelLabel: "Fermer", onCancel: { dismiss() },
                         confirmLabel: (service.availability == .ready && !messages.isEmpty) ? "Nouvelle conversation" : nil,
+                        confirmIcon: "square.and.pencil",
                         onConfirm: (service.availability == .ready && !messages.isEmpty) ? {
                             service.resetConversation()
                             messages = []

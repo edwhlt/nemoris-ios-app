@@ -222,24 +222,29 @@ enum InspectorPaneMetrics {
 ///
 /// ⚠️ Ce qui sépare visuellement les actions du panneau de celles du module,
 /// c'est la STRUCTURE en colonnes du split view (macOS insère un séparateur de
-/// suivi entre les toolbars de deux colonnes), **pas** le `ToolbarSpacer`
-/// ci-dessous. Mesuré : tant que le panneau n'était pas une colonne, aucun
-/// espaceur ne dissociait les deux groupes — ni en placement `.automatic`, ni en
-/// `.primaryAction`, ils restaient entassés au bord droit de la fenêtre. Ne pas
-/// compter sur l'espaceur pour recréer cette séparation ailleurs.
+/// suivi entre les toolbars de deux colonnes). Mesuré : tant que le panneau
+/// n'était pas une colonne, aucun `ToolbarSpacer` ne dissociait les deux
+/// groupes — ni en placement `.automatic`, ni en `.primaryAction` — ils
+/// restaient entassés au bord droit de la fenêtre. Retiré depuis : il n'a
+/// jamais eu d'effet mesurable une fois la colonne en place.
+///
+/// ⚠️ **Alignement à gauche du panneau : PAS ACHEVABLE nativement.** Testé
+/// `.primaryAction`, `.cancellationAction`+`.confirmationAction` séparés,
+/// `.navigation` : les trois premiers atterrissent tous à l'identique — bord
+/// TRAILING du segment du panneau (juste avant `.searchable`, s'il y en a un
+/// dans le module). `.navigation` casse le column-scoping et fait apparaître
+/// le groupe dans le segment du MODULE (à côté de son propre titre), pas dans
+/// celui du panneau. Il n'existe pas de placement SwiftUI qui rende un groupe
+/// LEADING dans le segment d'une colonne non-sidebar d'un `NavigationSplitView`
+/// — Mail obtient ce rendu via `NSToolbar` manuel (positionnement item par
+/// item), hors de portée de l'API déclarative `.toolbar`.
 private struct InspectorChromeToolbar: ViewModifier {
     let make: () -> PaneChromeModel
 
     func body(content: Content) -> some View {
         let chrome = make()
         return content.toolbar {
-            // `ToolbarSpacer` est l'API PRÉVUE pour séparer deux groupes de la
-            // barre : elle pousse le groupe suivant vers le bord droit ET rompt le
-            // fond de verre partagé, donc deux pilules distinctes. Un espaceur
-            // « fait main » (`Color.clear` dans un ToolbarItem) ne marche pas : il
-            // est traité comme un item ordinaire et se peint en pilule vide,
-            // collée aux boutons.
-            ToolbarItemGroup(placement: .navigation) {
+            ToolbarItemGroup(placement: .primaryAction) {
                 if let leading = chrome.leading {
                     barButton(leading)
                 }
@@ -459,7 +464,7 @@ private struct EntityDetailEditPane<Item, DetailContent: View, EditContent: View
                         onDelete(current)
                         paneDismiss()
                     },
-                    confirmLabel: "Modifier", onConfirm: { isEditing = true }
+                    confirmLabel: "Modifier", confirmIcon: "pencil", onConfirm: { isEditing = true }
                 )
         }
     }
@@ -545,6 +550,17 @@ extension View {
     /// `.toolbar` propres — ce modifier les fournit selon la plateforme/contexte.
     /// `destructiveLabel`/`onDestructive` : bouton Supprimer optionnel (écrans
     /// détail Fermer / Supprimer / Modifier).
+    ///
+    /// `confirmIcon` : icône SF Symbol pour le bouton de confirmation dans le
+    /// panneau macOS (l'annulation est TOUJOURS "xmark" — sans ambiguïté
+    /// possible, "Fermer"/"Annuler" ne veulent jamais dire autre chose que
+    /// quitter sans agir). Pas de défaut deviné à partir du libellé : sur iOS et
+    /// dans les sheets macOS le bouton reste de toute façon du texte natif
+    /// (`Button(confirm.label, …)`, cf. `navStack`), donc `confirmIcon` ne
+    /// change RIEN hors du panneau macOS — laisser `nil` y garde le texte
+    /// (cf. l'avertissement dans `InspectorChromeToolbar.barButton` : ne
+    /// jamais inventer une icône pour une action qui n'en déclare pas
+    /// explicitement une).
     func paneChrome(
         _ title: String,
         cancelLabel: String? = nil,
@@ -552,19 +568,20 @@ extension View {
         destructiveLabel: String? = nil,
         onDestructive: (() -> Void)? = nil,
         confirmLabel: String? = nil,
+        confirmIcon: String? = nil,
         confirmDisabled: Bool = false,
         onConfirm: (() -> Void)? = nil
     ) -> some View {
         modifier(PaneChromeModifier(
             title: title,
             cancel: (cancelLabel != nil && onCancel != nil)
-                ? PaneBarButton(label: cancelLabel!, action: onCancel!)
+                ? PaneBarButton(label: cancelLabel!, systemImage: "xmark", showsTitle: false, action: onCancel!)
                 : nil,
             destructive: (destructiveLabel != nil && onDestructive != nil)
                 ? PaneBarButton(label: destructiveLabel!, systemImage: "trash", role: .destructive, showsTitle: false, action: onDestructive!)
                 : nil,
             confirm: (confirmLabel != nil && onConfirm != nil)
-                ? PaneBarButton(label: confirmLabel!, disabled: confirmDisabled, action: onConfirm!)
+                ? PaneBarButton(label: confirmLabel!, systemImage: confirmIcon, disabled: confirmDisabled, showsTitle: confirmIcon == nil, action: onConfirm!)
                 : nil
         ))
     }
@@ -631,22 +648,24 @@ private struct PaneChromeInlineModifier: ViewModifier {
 
 extension View {
     /// Cf. `PaneChromeInlineModifier`. Appliquer DANS la `NavigationStack`
-    /// existante (sur son contenu), jamais à l'extérieur.
+    /// existante (sur son contenu), jamais à l'extérieur. `confirmIcon` : cf.
+    /// `paneChrome` — ne s'applique qu'au panneau macOS, `nil` garde le texte.
     func paneChromeInline(
         _ title: String,
         cancelLabel: String? = nil,
         onCancel: (() -> Void)? = nil,
         confirmLabel: String? = nil,
+        confirmIcon: String? = nil,
         confirmDisabled: Bool = false,
         onConfirm: (() -> Void)? = nil
     ) -> some View {
         modifier(PaneChromeInlineModifier(
             title: title,
             cancel: (cancelLabel != nil && onCancel != nil)
-                ? PaneBarButton(label: cancelLabel!, action: onCancel!)
+                ? PaneBarButton(label: cancelLabel!, systemImage: "xmark", showsTitle: false, action: onCancel!)
                 : nil,
             confirm: (confirmLabel != nil && onConfirm != nil)
-                ? PaneBarButton(label: confirmLabel!, disabled: confirmDisabled, action: onConfirm!)
+                ? PaneBarButton(label: confirmLabel!, systemImage: confirmIcon, disabled: confirmDisabled, showsTitle: confirmIcon == nil, action: onConfirm!)
                 : nil
         ))
     }

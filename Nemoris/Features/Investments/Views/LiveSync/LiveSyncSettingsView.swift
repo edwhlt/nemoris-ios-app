@@ -334,7 +334,7 @@ struct LiveSyncLinkFormView: View {
         .onAppear { populate() }
         .paneChrome(isEditing ? "Modifier la source" : providerType.displayName,
                     cancelLabel: "Annuler", onCancel: { dismiss() },
-                    confirmLabel: isEditing ? "Mettre à jour" : "Enregistrer",
+                    confirmLabel: isEditing ? "Mettre à jour" : "Enregistrer", confirmIcon: "checkmark",
                     confirmDisabled: !canSave,
                     onConfirm: { save() })
     }

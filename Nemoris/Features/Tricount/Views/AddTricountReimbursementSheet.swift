@@ -69,6 +69,7 @@ struct AddTricountReimbursementSheet: View {
             .paneChrome(existingReimbursement == nil ? "Nouveau remboursement" : "Modifier le remboursement",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
                         confirmLabel: existingReimbursement == nil ? "Ajouter" : "Enregistrer",
+                        confirmIcon: existingReimbursement == nil ? "plus" : "checkmark",
                         confirmDisabled: parsedAmount == nil || selectedTiersId == -1) {
                 guard let amount = parsedAmount, selectedTiersId != -1 else { return }
                 onAdd(selectedTiersId, amount, currency)

@@ -739,6 +739,83 @@ do {
            "JSON tronqué reste invalide (rien n'est inventé)")
 }
 
+// MARK: - t12 — Une faute de syntaxe ne coûte qu'UNE ligne
+
+print("")
+print("t12 · Décodage objet par objet d'une réponse fautive")
+do {
+    // ⚠️ JSON RÉEL renvoyé par un modèle sur une capture d'appli bancaire.
+    // Deux fautes de ponctuation : une virgule finale (3ᵉ objet) et un
+    // guillemet ouvrant de clé oublié précédé d'une virgule parasite (8ᵉ).
+    // Le décodage du DOCUMENT ENTIER échouait, donc les huit opérations
+    // étaient perdues — dont six parfaitement formées.
+    let response = """
+    {
+      "transactions": [
+        { "date": "2026-07-22", "label": "Carrefour City", "amount": -3.98, "payment_type": "CB" },
+        { "date": "2026-07-22", "label": "Amschc", "amount": -6.00, "payment_type": "CB" },
+        {
+          "date": "2026-07-21",
+          "label": "Carrefour City",
+          "amount": -6.98,
+        },
+        { "date": "2026-07-21", "label": "Carrefour City", "amount": -4.61, "payment_type": "CB" },
+        { "date": "2026-07-21", "label": "Image Numere", "amount": -28.56, "payment_type": "CB" },
+        { "date": "2026-07-20", "label": "Carrefour City", "amount": -10.62, "payment_type": "CB" },
+        { "date": "2026-07-20", "label": "Terrys Cafe", "amount": -68.80, "payment_type": "CB" },
+        {
+          "date": "2026-07-18",
+          "label": "Lmw.Billetweb",
+          , amount": -6.00,
+          "payment_type": "CB"
+        }
+      ]
+    }
+    """
+
+    // Le document entier reste invalide — on ne prétend pas le contraire.
+    expect((try? JSONSerialization.jsonObject(with: Data(response.utf8))) == nil,
+           "le document brut est bien invalide (précondition)")
+
+    let objects = LenientJSON.innermostObjects(in: response)
+    expect(objects.count == 8, "8 objets isolés malgré les fautes", "\(objects.count)")
+
+    let decoded = objects.compactMap { object -> [String: Any]? in
+        guard let data = object.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+    // Les DEUX fautes sont de la ponctuation réparable : on récupère tout.
+    expect(decoded.count == 8, "8 opérations décodées", "\(decoded.count)")
+    expect(decoded.compactMap { $0["label"] as? String }.contains("Terrys Cafe"),
+           "libellé conservé")
+    expect(decoded.compactMap { $0["amount"] as? Double }.contains(-6.98),
+           "l'objet à virgule finale est récupéré")
+    expect(decoded.compactMap { $0["amount"] as? Double }.contains(-6.00),
+           "l'objet à guillemet manquant est récupéré")
+
+    // Réparations prises une par une.
+    expect(LenientJSON.repairSyntax(#"{"a":1,}"#) == #"{"a":1}"#,
+           "virgule finale retirée", LenientJSON.repairSyntax(#"{"a":1,}"#))
+    expect(LenientJSON.repairSyntax(#"{"a":1,, "b":2}"#).contains(#""b":2"#),
+           "virgule dupliquée absorbée")
+    expect(LenientJSON.repairSyntax(#"{"a":1, b": 2}"#).contains(#""b": 2"#),
+           "guillemet ouvrant de clé restauré", LenientJSON.repairSyntax(#"{"a":1, b": 2}"#))
+
+    // ⚠️ Non-régression : le contenu d'une CHAÎNE ne doit pas être touché par
+    // les réparations de ponctuation.
+    let withComma = #"{"label":"CARREFOUR, PARIS","amount":-1}"#
+    expect(LenientJSON.repairSyntax(withComma) == withComma,
+           "virgule dans un libellé préservée", LenientJSON.repairSyntax(withComma))
+
+    // Un objet irrécupérable ne fait perdre QUE lui.
+    let partlyBroken = #"[{"date":"2026-07-01","label":"OK","amount":-1},{"date":BROKEN}]"#
+    let salvaged = LenientJSON.innermostObjects(in: partlyBroken).compactMap {
+        (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any]
+    }
+    expect(salvaged.count == 1, "l'objet valide survit à son voisin cassé", "\(salvaged.count)")
+    expect(salvaged.first?["label"] as? String == "OK", "et c'est le bon")
+}
+
 // MARK: - Bilan
 
 print("")

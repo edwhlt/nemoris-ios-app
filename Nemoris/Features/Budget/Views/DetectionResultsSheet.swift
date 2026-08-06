@@ -53,6 +53,11 @@ struct DetectionResultsSheet: View {
             }
             .scrollContentBackground(.hidden)
             .background(AppTheme.Colors.background)
+            // ⚠️ Volontairement PAS de confirmIcon : action de masse irréversible
+            // (crée N récurrents d'un coup). Une version antérieure du panneau
+            // repliait ce bouton sur un ✓ générique, lu comme « OK/fermer » — un
+            // clic a créé 157 récurrents par erreur (cf. `AdaptivePane.swift`,
+            // `InspectorChromeToolbar.barButton`). Le libellé reste explicite.
             .paneChrome("Récurrents détectés",
                         cancelLabel: "Fermer", onCancel: { dismiss() },
                         confirmLabel: "Tout accepter") {

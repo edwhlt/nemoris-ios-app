@@ -88,7 +88,7 @@ struct PatternEditSheet: View {
             }
             .paneChrome(pattern == nil ? "Nouveau récurrent" : "Modifier",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Enregistrer",
+                        confirmLabel: "Enregistrer", confirmIcon: "checkmark",
                         confirmDisabled: name.isEmpty || amount.isEmpty) {
                 save(); dismiss()
             }

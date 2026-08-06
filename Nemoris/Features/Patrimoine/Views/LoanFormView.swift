@@ -317,7 +317,7 @@ struct LoanFormView: View {
             }
             .paneChrome(existingLoan == nil ? "Nouveau prêt" : "Modifier",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Enregistrer", confirmDisabled: !canSave,
+                        confirmLabel: "Enregistrer", confirmIcon: "checkmark", confirmDisabled: !canSave,
                         onConfirm: { save() })
     }
 

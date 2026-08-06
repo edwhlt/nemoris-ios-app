@@ -356,7 +356,7 @@ struct InvestmentPositionDetailView: View {
                     cancelLabel: "Fermer", onCancel: { paneDismiss() },
                     destructiveLabel: "Supprimer la position",
                     onDestructive: { showDeletePositionConfirm = true },
-                    confirmLabel: "Modifier la position",
+                    confirmLabel: "Modifier la position", confirmIcon: "pencil",
                     onConfirm: { showEditForm = true })
         #else
         .navigationTitle(position.assetName.isEmpty ? position.ticker : position.assetName)

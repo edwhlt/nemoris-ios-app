@@ -998,7 +998,7 @@ struct InvestmentAccountFormView: View {
             // ce qui évite la stale state quand SwiftUI réutilise l'instance.
             .paneChrome(isNew ? "Nouveau compte" : "Modifier compte",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Enregistrer",
+                        confirmLabel: "Enregistrer", confirmIcon: "checkmark",
                         confirmDisabled: name.trimmingCharacters(in: .whitespaces).isEmpty) {
                 onSave(InvestmentAccount(
                     id: account?.id ?? 0,
@@ -1136,7 +1136,7 @@ struct InvestmentPositionFormView: View {
             // Pas de .onAppear — init() set tout au build time.
             .paneChrome(isNew ? "Nouvelle position" : "Modifier position",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Enregistrer",
+                        confirmLabel: "Enregistrer", confirmIcon: "checkmark",
                         // Bloque le save si ISIN saisi mais format invalide — évite
                         // de persister un ISIN bidon qui ferait planter la sync.
                         confirmDisabled: assetName.trimmingCharacters(in: .whitespaces).isEmpty

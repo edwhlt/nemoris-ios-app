@@ -57,7 +57,7 @@ struct BulkTagSheet: View {
             }
             .paneChrome("Tags — sélection multiple",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
-                        confirmLabel: "Appliquer") {
+                        confirmLabel: "Appliquer", confirmIcon: "checkmark") {
                 onSave(states); dismiss()
             }
     }

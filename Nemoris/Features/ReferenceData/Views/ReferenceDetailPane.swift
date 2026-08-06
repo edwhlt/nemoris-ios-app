@@ -38,7 +38,7 @@ struct ReferenceDetailPane: View {
             .paneChrome(navTitle,
                         cancelLabel: "Fermer", onCancel: { paneDismiss() },
                         destructiveLabel: "Supprimer", onDestructive: { onDelete(); paneDismiss() },
-                        confirmLabel: canEdit ? "Modifier" : nil,
+                        confirmLabel: canEdit ? "Modifier" : nil, confirmIcon: "pencil",
                         onConfirm: canEdit ? { onEdit() } : nil)
     }
 
