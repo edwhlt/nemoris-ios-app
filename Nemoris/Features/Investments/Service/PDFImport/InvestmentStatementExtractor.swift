@@ -68,30 +68,40 @@ enum InvestmentStatementExtractor {
 
         var results: [ExtractedStatementOrder] = []
         for (index, anchor) in anchors.enumerated() {
-            // ⚠️ Deux fenêtres DISTINCTES, et c'est ce qui rend l'extraction
-            // fiable sur les captures d'app :
+            // ⚠️ Deux fenêtres, bornées par les ancres VOISINES et jamais l'une
+            // par l'autre — c'est ce qui empêche un champ de remonter du bloc
+            // précédent ou suivant, sans pour autant l'enfermer dans un nombre
+            // de lignes arbitraire :
             //
-            //   • champs (date, quantité, cours, montant) → APRÈS l'ISIN,
-            //     jusqu'à l'ISIN suivant. Les prendre « autour » de l'ISIN
-            //     faisait remonter les champs de l'opération PRÉCÉDENTE (la
-            //     quantité du bloc 1 se retrouvait sur le bloc 2).
-            //   • nom du titre → AVANT l'ISIN, sans jamais franchir l'ISIN
-            //     précédent. Tous les formats observés (avis d'opéré PDF,
-            //     écran de courtier) placent le libellé au-dessus du code.
+            //   • APRÈS l'ISIN, jusqu'à l'ISIN suivant : le cas dominant pour
+            //     un avis d'opéré (« Quantité exécutée : 2,000 » vient après
+            //     le code).
+            //   • AVANT l'ISIN, depuis l'ISIN précédent : nécessaire pour un
+            //     vrai TABLEAU (pas un texte en colonne). Ici l'ISIN est la
+            //     2ᵉ sous-ligne de sa cellule (« Code ISIN : … » sous le nom
+            //     du titre), alors qu'une cellule voisine de la MÊME ligne
+            //     visuelle — la quantité, alignée avec la date — se retrouve
+            //     AVANT lui une fois le tableau aplati en texte par PDFKit.
+            //     Bug réel : « 4 » (quantité) invisible parce que la seule
+            //     fenêtre alors cherchée était celle d'APRÈS l'ISIN.
+            //
+            // Le libellé (« Quantité », « Cours », « Frais ») protège contre
+            // les faux positifs sur la fenêtre AVANT — un en-tête de banque ne
+            // contient jamais ces mots — donc l'élargir ne coûte rien en
+            // précision, contrairement à un nombre de lignes fixe qui peut
+            // couper le tableau au mauvais endroit selon sa mise en page.
             let fieldsUpper = index == anchors.count - 1
                 ? lines.count - 1
                 : min(lines.count - 1, anchors[index + 1].line - 1)
             guard anchor.line <= fieldsUpper else { continue }
             let fields = Array(lines[anchor.line...fieldsUpper])
 
-            let nameLower = index == 0
-                ? max(0, anchor.line - 5)
-                : max(anchors[index - 1].line + 1, anchor.line - 5)
-            let nameWindow = nameLower < anchor.line
-                ? Array(lines[nameLower..<anchor.line])
+            let beforeLower = index == 0 ? 0 : anchors[index - 1].line + 1
+            let beforeWindow = beforeLower < anchor.line
+                ? Array(lines[beforeLower..<anchor.line])
                 : []
 
-            if let order = parseBlock(fields: fields, nameWindow: nameWindow, isin: anchor.isin) {
+            if let order = parseBlock(fields: fields, nameWindow: beforeWindow, isin: anchor.isin) {
                 results.append(order)
             }
         }
@@ -169,10 +179,38 @@ enum InvestmentStatementExtractor {
         guard let orderType = detectOrderType(in: upper) ?? detectOrderType(in: fallback.uppercased()) else { return nil }
         guard let date = firstDate(in: joined) ?? firstDate(in: fallback) else { return nil }
 
+        // ⚠️ Repli AVANT l'ISIN pour chaque champ numérique — mais restreint au
+        // PRÉAMBULE de CE bloc, pas tout `nameWindow`.
+        //
+        // Sur un vrai tableau, l'en-tête de colonne (« Quantité ») et sa
+        // valeur (« 4 ») sont légitimement avant l'ISIN (bug réel corrigé
+        // ici). Mais sur une capture à plusieurs opérations consécutives,
+        // `nameWindow` contient AUSSI la fin des champs du bloc PRÉCÉDENT
+        // (sa propre quantité, son propre cours) — et un dividende sans cours
+        // affiché happait alors le cours du titre acheté juste avant lui.
+        //
+        // La ligne de nom la plus proche de l'ISIN (déjà calculée par
+        // `assetName` ci-dessous, ici anticipée) marque la frontière : tout ce
+        // qui la précède appartient structurellement au bloc d'AVANT.
+        let preambleStart = nameLineIndex(in: nameWindow) ?? 0
+        let preamble = preambleStart < nameWindow.count
+            ? Array(nameWindow[preambleStart...]).joined(separator: "\n")
+            : ""
+
+        // `firstNumberNearLabel`, pas `firstNumber`, sur ce repli : dans un
+        // tableau, l'EN-TÊTE de colonne et sa VALEUR sont sur deux lignes
+        // DIFFÉRENTES (ligne d'en-tête, puis ligne de données) — `firstNumber`
+        // exige la même ligne. La variante tolérante cherche sur les quelques
+        // lignes suivant le libellé, après avoir retiré les dates reconnues :
+        // sans ce retrait, le jour d'une date sur la ligne de données
+        // (« 13/01/2025 4 … ») serait pris pour la quantité qui le suit.
         let quantity = firstNumber(in: joined, labels: quantityLabels)
+            ?? firstNumberNearLabel(in: preamble, labels: quantityLabels)
         let priceFromLabel = firstNumber(in: joined, labels: priceLabels)
-        let fees = firstNumber(in: joined, labels: feeLabels) ?? 0
-        let gross = signedAmount(in: joined)
+            ?? firstNumberNearLabel(in: preamble, labels: priceLabels)
+        let fees = firstNumber(in: joined, labels: feeLabels)
+            ?? firstNumberNearLabel(in: preamble, labels: feeLabels) ?? 0
+        let gross = signedAmount(in: joined) ?? signedAmount(in: preamble)
 
         var confidence = 0.85
         if priceFromLabel == nil { confidence -= 0.05 }
@@ -282,42 +320,72 @@ enum InvestmentStatementExtractor {
         "QUANTITÉ EXÉCUTÉE", "QUANTITE EXECUTEE", "QUANTITÉ", "QUANTITE",
         "QTÉ", "QTE", "NOMBRE DE PARTS", "NOMBRE", "QUANTITY", "SHARES", "UNITS"
     ]
+    /// ⚠️ « Cours exécuté » PRIME sur « Cours demandé » : un ordre à cours
+    /// limité peut demander un prix et s'exécuter à un autre. Le label générique
+    /// « COURS » matcherait « Cours demandé », qui apparaît souvent AVANT
+    /// « Cours exécuté » dans un avis d'opéré — donc en premier sur une
+    /// recherche naïve — alors que c'est le prix RÉEL de la transaction qui
+    /// doit être retenu. Les labels les plus spécifiques passent donc devant
+    /// le générique.
     private static let priceLabels = [
-        "COURS D'EXÉCUTION", "COURS D'EXECUTION", "COURS", "PRIX UNITAIRE",
-        "PRIX DE REVIENT", "PRU", "PRIX", "UNIT PRICE", "PRICE"
+        "COURS EXÉCUTÉ", "COURS EXECUTE",
+        "COURS D'EXÉCUTION", "COURS D'EXECUTION", "COURS",
+        "PRIX D'EXÉCUTION", "PRIX D'EXECUTION", "PRIX UNITAIRE",
+        "PRIX DE REVIENT", "PRU", "PRIX",
+        "EXECUTION PRICE", "UNIT PRICE", "PRICE"
     ]
     private static let feeLabels = [
         "FRAIS", "COMMISSION", "COURTAGE", "FEES", "FEE"
     ]
 
+    /// Une ligne « plausible » pour être le nom d'un titre : ni une date, ni un
+    /// montant, ni un intitulé de champ, ni un ISIN, ni du bruit ponctuation.
+    /// Partagé par `assetName` (repli d'affichage) et `nameLineIndex`
+    /// (frontière de bloc, cf. `parseBlock`) — les deux posent la MÊME
+    /// question (« est-ce que cette ligne ressemble à un nom de titre ? »),
+    /// diverger les ferait désigner deux frontières différentes pour le même
+    /// bloc.
+    private static func isPlausibleNameLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 3, trimmed.count <= 80 else { return false }
+        let upper = trimmed.uppercased()
+        if firstDate(in: trimmed) != nil { return false }
+        if isValidISIN(upper.replacingOccurrences(of: " ", with: "")) { return false }
+        if upper.hasPrefix("QUANTIT") || upper.hasPrefix("COURS") || upper.hasPrefix("PRIX")
+            || upper.hasPrefix("MONTANT") || upper.hasPrefix("FRAIS") { return false }
+        // Une ligne composée uniquement de chiffres/ponctuation n'est pas un nom.
+        let letters = trimmed.filter { $0.isLetter }
+        return letters.count >= 3
+    }
+
     /// Nom du titre : première ligne « plausible » au-dessus de l'ISIN. On
     /// remonte car tous les formats observés (avis d'opéré PDF, écran de
     /// courtier) placent le libellé avant le code.
     private static func assetName(in nameWindow: [String], fallbackAfter fields: [String]) -> String {
-        func isPlausible(_ line: String) -> Bool {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.count >= 3, trimmed.count <= 80 else { return false }
-            let upper = trimmed.uppercased()
-            // Ni une date, ni un montant, ni un intitulé de champ, ni un ISIN.
-            if firstDate(in: trimmed) != nil { return false }
-            if isValidISIN(upper.replacingOccurrences(of: " ", with: "")) { return false }
-            if upper.hasPrefix("QUANTIT") || upper.hasPrefix("COURS") || upper.hasPrefix("PRIX")
-                || upper.hasPrefix("MONTANT") || upper.hasPrefix("FRAIS") { return false }
-            // Une ligne composée uniquement de chiffres/ponctuation n'est pas un nom.
-            let letters = trimmed.filter { $0.isLetter }
-            return letters.count >= 3
-        }
-
         // La ligne LA PLUS PROCHE de l'ISIN gagne : au-dessus se trouvent aussi
         // les en-têtes de l'écran (« Mes mouvements », « Type d'opération »).
-        for line in nameWindow.reversed() where isPlausible(line) {
+        for line in nameWindow.reversed() where isPlausibleNameLine(line) {
             return line.trimmingCharacters(in: .whitespaces)
         }
         // Certains formats mettent le nom APRÈS le code : on tente en aval.
-        for line in fields.dropFirst() where isPlausible(line) {
+        for line in fields.dropFirst() where isPlausibleNameLine(line) {
             return line.trimmingCharacters(in: .whitespaces)
         }
         return ""
+    }
+
+    /// Index (dans `nameWindow`) de la ligne de nom la plus proche de l'ISIN —
+    /// c'est la frontière entre CE bloc et le bloc PRÉCÉDENT. Utilisé pour
+    /// borner le repli des champs numériques (cf. `parseBlock`) : sans cette
+    /// frontière, une capture à opérations consécutives laisse les champs du
+    /// bloc d'avant (son propre cours, sa propre quantité) contaminer le
+    /// repli d'un bloc qui n'affiche légitimement pas ce champ (un dividende
+    /// sans cours, par exemple).
+    private static func nameLineIndex(in nameWindow: [String]) -> Int? {
+        for index in nameWindow.indices.reversed() where isPlausibleNameLine(nameWindow[index]) {
+            return index
+        }
+        return nil
     }
 
     // MARK: - Dates
@@ -349,6 +417,67 @@ enum InvestmentStatementExtractor {
     }
 
     // MARK: - Nombres
+
+    /// Variante TOLÉRANTE de `firstNumber(in:labels:)` : le libellé et sa
+    /// valeur peuvent être sur des lignes DIFFÉRENTES, pas seulement la même.
+    ///
+    /// ─── Pourquoi elle existe, en plus de la version stricte ───────────────
+    ///
+    /// Un avis d'opéré écrit « Quantité exécutée : 2,000 » — libellé et valeur
+    /// sur une ligne, la version stricte suffit. Un vrai TABLEAU écrit
+    /// l'en-tête de colonne (« Quantité ») sur une ligne et la valeur de la
+    /// cellule (« 4 ») sur la ligne de données suivante — deux lignes
+    /// distinctes, où la version stricte ne trouve rien. Bug réel : sans cette
+    /// variante, la quantité restait introuvable sur ce format.
+    ///
+    /// ⚠️ Les dates sont RETIRÉES avant la recherche du nombre : sur la ligne
+    /// de données d'un tableau, la date de l'opération précède souvent la
+    /// quantité (« 13/01/2025 4 ISHS… ») — sans ce retrait, le jour de la
+    /// date serait pris pour la quantité qui le suit.
+    ///
+    /// `lineSpan` borne la recherche à quelques lignes après le libellé : au
+    /// même titre que le label lui-même, cette proximité limite le risque de
+    /// faux positif sur un nombre sans rapport, plus loin dans le document.
+    static func firstNumberNearLabel(in text: String, labels: [String], lineSpan: Int = 2) -> Double? {
+        let lines = stripDates(from: text).components(separatedBy: "\n")
+        let upperLines = lines.map { $0.uppercased() }
+
+        for label in labels {
+            guard let labelLine = upperLines.firstIndex(where: { $0.contains(label) }) else { continue }
+
+            // D'abord la ligne du libellé elle-même — cas « Quantité : 4 »
+            // niché dans un tableau par ailleurs, sans qu'une variante stricte
+            // n'ait déjà tenté cette ligne précise (labels différents, etc.).
+            if let labelRange = upperLines[labelLine].range(of: label) {
+                let sameLine = String(upperLines[labelLine][labelRange.upperBound...])
+                if let value = firstNumber(in: sameLine) { return value }
+            }
+            // Puis les lignes suivantes, dans la limite de `lineSpan`.
+            var offset = 1
+            while offset <= lineSpan, labelLine + offset < lines.count {
+                if let value = firstNumber(in: lines[labelLine + offset]) { return value }
+                offset += 1
+            }
+        }
+        return nil
+    }
+
+    /// Retire toute date reconnue (cf. `datePatterns`) d'un texte.
+    ///
+    /// ⚠️ Sert UNIQUEMENT à `firstNumberNearLabel` : la recherche stricte
+    /// (`firstNumber(in:labels:)`) doit rester intacte pour ne pas modifier le
+    /// comportement déjà éprouvé sur le format « libellé : valeur » ligne à
+    /// ligne — seule la variante tolérante, plus permissive par construction,
+    /// a besoin de cette protection contre les dates.
+    private static func stripDates(from text: String) -> String {
+        var result = text
+        for (regex, _) in datePatterns {
+            guard let regex else { continue }
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
+        }
+        return result
+    }
 
     /// Valeur numérique suivant l'un des libellés donnés (« Quantité: 7 »,
     /// « Cours 34,53 € », « PRU : 112.76 »).

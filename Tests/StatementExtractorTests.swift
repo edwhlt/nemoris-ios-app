@@ -110,6 +110,52 @@ do {
     }
 }
 
+// MARK: - t2bis — Vrai TABLEAU : la quantité arrive AVANT l'ISIN
+
+print("\nt2bis · Avis d'opéré en tableau (quantité alignée avec la date, avant l'ISIN)")
+do {
+    // ⚠️ Reproduction du texte tel que PDFKit l'aplatit pour un VRAI tableau
+    // (pas un format « libellé : valeur » ligne par ligne comme t2). Le nom du
+    // titre et l'ISIN occupent DEUX sous-lignes de leur cellule, alors que la
+    // quantité — dans la cellule voisine, alignée avec la première sous-ligne
+    // (la date) — se retrouve donc AVANT l'ISIN dans le texte linéaire, avec
+    // d'autres lignes de document entre les deux. Bug réel : sans repli sur la
+    // fenêtre d'AVANT pour les champs numériques (pas seulement la date), la
+    // quantité restait introuvable — remplacée par 1, ce qui faussait aussi le
+    // montant total (50 € au lieu de 200 €).
+    let pdf = """
+    Références de votre compte titres
+    40618 80314 00088441579 Compte PEA
+    Résident Français
+    ACHAT COMPTANT ETR
+    ACTION
+    Date et heure
+    locale d'exécution Quantité Informations sur la valeur Informations sur l'exécution
+    13/01/2025 4 ISHS CO.EURO STOX50 UC.ETF EUR Référence : 170187650594
+    12:11:59 Code ISIN : IE0008471009 Type d'ordre : à cours limité
+    Cours demandé : 50,0000 EUR
+    Cours exécuté : 50,00 EUR
+    Lieu d'exécution : EURONEXT AMSTERDAM
+    Montant transaction brut Intérêts Montant transaction total brut Courtages Montant transaction net
+    200,00 EUR 0,00 EUR 200,00 EUR 0,00 EUR 0,00 EUR
+    Montant net au débit de votre compte
+    200,00 EUR
+    """
+    let orders = InvestmentStatementExtractor.extractOrders(from: pdf)
+    expect(orders.count == 1, "1 opération extraite", "\(orders.count)")
+    if let o = orders.first {
+        expect(o.orderType == "BUY", "achat comptant reconnu")
+        expect(o.isin == "IE0008471009", "ISIN correct", o.isin)
+        expect(o.quantity == 4, "quantité lue AVANT l'ISIN (bug réel)", "\(o.quantity)")
+        expect(abs(o.unitPrice - 50.0) < 0.001, "cours exécuté (pas le cours demandé)",
+               "\(o.unitPrice)")
+        expect(o.executedAt == "2025-01-13", "date lue", o.executedAt)
+        expect(abs(o.quantity * o.unitPrice - 200.0) < 0.001,
+               "montant total cohérent avec le débit réel (200 €)",
+               "\(o.quantity * o.unitPrice)")
+    }
+}
+
 // MARK: - t3 — Vente et formats anglo-saxons
 
 print("\nt3 · Vente, format US (point décimal, virgule de milliers)")

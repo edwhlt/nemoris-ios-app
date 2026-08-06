@@ -564,16 +564,13 @@ struct MainTabView: View {
         }
     }
 
-    private var availableTabs: [MainTabItem] {
-        appState.mainTabOrder.filter { tab in
-            if tab == .tricount    { return appState.showTricount }
-            if tab == .investments { return appState.showInvestments }
-            if tab == .budget      { return appState.showBudget }
-            if tab == .patrimoine  { return appState.showPatrimoine }
-            if tab == .sqlConsole  { return appState.showSQLConsole }
-            return true
-        }
-    }
+    // ⚠️ Délègue à `AppState.availableTabsResolved` — ne PAS dupliquer le
+    // switch ici. Une copie locale existait avant et n'avait jamais été mise
+    // à jour quand `.transactions`/`.referenceData` ont rejoint le filtre
+    // (elle retombait sur `return true`, donc le toggle Transactions des
+    // Réglages n'avait strictement aucun effet). Un seul filtre, une seule
+    // fois — même doctrine que les calculs d'enveloppes budgétaires (AXE Q).
+    private var availableTabs: [MainTabItem] { appState.availableTabsResolved }
 
     /// Max 4 onglets visibles avant le bouton "Plus" (iOS tab bar tolère 5 slots
     /// total = 4 visibles + Plus). Le mode icon-only se déclenche dès qu'on dépasse
