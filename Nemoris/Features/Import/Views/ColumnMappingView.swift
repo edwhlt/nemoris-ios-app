@@ -8,7 +8,7 @@ struct ColumnMappingView: View {
     @Environment(\.dismiss) private var dismiss
 
     /// Résultat du parsing INITIAL (séparateur autodétecté).
-    let parsed: CSVParserV3.Parsed
+    let parsed: CSVParser.Parsed
     /// Autres feuilles du même classeur, s'il y en a.
     ///
     /// ⚠️ Un classeur ne doit PAS produire une étape de mapping par feuille :
@@ -42,7 +42,7 @@ struct ColumnMappingView: View {
 
     /// Re-parsing après changement de séparateur. `nil` tant que l'utilisateur
     /// n'y a pas touché : on affiche alors le parsing initial.
-    @State private var reparsed: CSVParserV3.Parsed?
+    @State private var reparsed: CSVParser.Parsed?
     @State private var separator: String = ""
 
     /// Feuille retenue quand la source est un classeur (`nil` = la première).
@@ -53,7 +53,7 @@ struct ColumnMappingView: View {
 
     /// Source de vérité de l'écran : le re-parsing d'un CSV s'il existe, sinon
     /// la feuille choisie, sinon la première.
-    private var effective: CSVParserV3.Parsed { reparsed ?? selectedSheet ?? parsed }
+    private var effective: CSVParser.Parsed { reparsed ?? selectedSheet ?? parsed }
 
     private var headers: [String] { effective.headers }
     private var signature: String { ColumnMappingSignature.compute(headers: headers) }
@@ -178,12 +178,12 @@ struct ColumnMappingView: View {
             preview("Libellé", value: cell(row, labelColumn), monospaced: true)
             // Tentative de parsing live
             if let dateRaw = cell(row, dateColumn),
-               let parsedDate = CSVParserV3.parseDate(dateRaw, hintFormat: dateFormat) {
+               let parsedDate = CSVParser.parseDate(dateRaw, hintFormat: dateFormat) {
                 Text("→ \(parsedDate.formatted(date: .abbreviated, time: .omitted))")
                     .font(.caption2).foregroundStyle(AppTheme.Colors.success)
             }
             if let amountRaw = cell(row, amountColumn),
-               let parsedAmount = CSVParserV3.parseAmount(amountRaw, decimal: amountDecimal) {
+               let parsedAmount = CSVParser.parseAmount(amountRaw, decimal: amountDecimal) {
                 Text("→ \(parsedAmount.formatted(.currency(code: "EUR")))")
                     .font(.caption2).foregroundStyle(parsedAmount >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
             }
@@ -225,7 +225,7 @@ struct ColumnMappingView: View {
     /// donc les index de colonnes précédents n'ont plus aucun sens.
     private func reparse(with newSeparator: String) {
         guard let rawContent, newSeparator != effective.separator else { return }
-        guard let result = CSVParserV3.parse(content: rawContent, forcedSeparator: newSeparator) else { return }
+        guard let result = CSVParser.parse(content: rawContent, forcedSeparator: newSeparator) else { return }
         reparsed = result
         dateColumn = nil
         amountColumn = nil
@@ -270,7 +270,7 @@ struct ColumnMappingView: View {
                 guard dCol < row.count else { return nil }
                 return row[dCol]
             }
-            dateFormat = CSVParserV3.detectDateFormat(samples: samples)
+            dateFormat = CSVParser.detectDateFormat(samples: samples)
         }
     }
 
@@ -291,7 +291,7 @@ struct ColumnMappingView: View {
 
         // 2. Construit les rows (logique partagée avec le chemin « format déjà
         //    connu », qui n'affiche jamais cet écran).
-        let (rows, _) = CSVParserV3.buildRows(parsed: effective,
+        let (rows, _) = CSVParser.buildRows(parsed: effective,
                                               mapping: mapping,
                                               startingAt: startingRowNumber,
                                               sourceFile: sourceFile)

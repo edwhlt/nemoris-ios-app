@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 
 /// Dépose un relevé bancaire CSV dans Nemoris via Siri, un raccourci ou la share
 /// extension. AUCUN import silencieux : le fichier part dans `PendingImportInbox`
-/// (kind `.transactions`) et l'app s'ouvre sur `ImportV3EntryView` pré-rempli —
+/// (kind `.transactions`) et l'app s'ouvre sur `ImportEntryView` pré-rempli —
 /// l'utilisateur confirme le compte cible puis passe par le mapping habituel.
 struct ImportFileIntent: AppIntent {
     static let title: LocalizedStringResource = "Importer des transactions (CSV)"

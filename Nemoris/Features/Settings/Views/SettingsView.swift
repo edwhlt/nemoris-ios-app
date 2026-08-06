@@ -273,7 +273,7 @@ struct SettingsView: View {
                         isOn: $appState.showPatrimoine,
                         feature: nil,
                         label: "Patrimoine",
-                        icon: "house.lodge"
+                        icon: "house"
                     )
                     proToggle(
                         isOn: $appState.showSQLConsole,
@@ -991,7 +991,7 @@ enum SettingsSection: String, Identifiable, CaseIterable {
 
     @ViewBuilder var destination: some View {
         switch self {
-        case .importCSV:      ImportV3EntryView(isEmbedded: true)
+        case .importCSV:      ImportEntryView(isEmbedded: true)
         case .companySources: CompanyDataSourcesSettingsView()
         case .backup:         BackupSettingsView()
         case .cloudSync:      CloudSyncSettingsView()

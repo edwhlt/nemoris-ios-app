@@ -17,7 +17,7 @@ import PhotosUI
 /// nommé `<uuid>.dat`, et un décodage Latin-1 d'un PNG « réussit » toujours en
 /// produisant des centaines de milliers de caractères de binaire (classe de bug
 /// documentée dans `InvestmentPDFParser.detectKind`).
-struct ImportV3EntryView: View {
+struct ImportEntryView: View {
     // Vue présentée dans des contextes MIXTES : pushée (sidebar macOS, MoreView,
     // Settings) OU pane adaptatif (Dashboard, import préchargé AXE P). La
     // fermeture appelle les DEUX mécanismes — chacun est no-op hors de son

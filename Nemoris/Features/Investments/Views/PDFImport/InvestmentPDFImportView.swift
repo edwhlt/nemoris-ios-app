@@ -71,7 +71,7 @@ struct InvestmentPDFImportView: View {
         self.onFinished = nil
     }
 
-    /// Entrée depuis l'entonnoir d'import unifié (`ImportV3EntryView`) : la
+    /// Entrée depuis l'entonnoir d'import unifié (`ImportEntryView`) : la
     /// destination, le compte cible et les documents sont DÉJÀ choisis, on
     /// démarre donc directement sur l'analyse. `onFinished` ferme tout
     /// l'entonnoir — sans lui, « Terminer » ne dépilerait que cet écran et

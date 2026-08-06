@@ -72,7 +72,7 @@ struct TransactionDocumentReviewView: View {
             }
         }
         .nemorisFormStyle()
-        // Tint posé par vue (cf. convention notée dans `ImportV3EntryView`).
+        // Tint posé par vue (cf. convention notée dans `ImportEntryView`).
         .tint(AppTheme.Colors.accent)
         .paneChrome("Résultat de l'analyse", cancelLabel: "Annuler", onCancel: onCancel)
     }

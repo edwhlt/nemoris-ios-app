@@ -41,7 +41,7 @@ struct NemorisApp: App {
             .displayFrequency(.immediate)
         ])
         // Boot NemorisEngine en arrière-plan : ~300 ms (modèle ONNX MiniLM + index merchants).
-        // On précharge ici pour qu'il soit chaud quand l'utilisateur ouvre l'import (ImportV3).
+        // On précharge ici pour qu'il soit chaud quand l'utilisateur ouvre l'import (import).
         Task { @MainActor in
             EngineBootstrap.shared.bootIfNeeded(withEmbeddings: true)
         }
@@ -125,7 +125,7 @@ struct NemorisApp: App {
                             }
                             // AXE P — relevés déposés par le raccourci "Importer des
                             // transactions" ou la share extension Transactions :
-                            // MainTabView présente ImportV3EntryView pré-rempli.
+                            // MainTabView présente ImportEntryView pré-rempli.
                             let pendingTx = PendingImportInbox.consumePendingTransactionImports()
                             if !pendingTx.isEmpty {
                                 appState.pendingTransactionImportURLs = pendingTx

@@ -95,7 +95,7 @@ enum XLSXReader {
         let body = Array(rows[startIndex...])
         guard let first = body.first else { return nil }
 
-        let isHeader = CSVParserV3.looksLikeHeader(first)
+        let isHeader = CSVParser.looksLikeHeader(first)
         let headers = isHeader ? first : (0..<first.count).map { "Colonne \($0 + 1)" }
         let dataRows = isHeader ? Array(body.dropFirst()) : body
 

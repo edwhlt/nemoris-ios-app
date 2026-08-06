@@ -32,7 +32,7 @@ xcrun swiftc \
   ../Nemoris/Features/Import/Pipeline/Readers/ZIPArchiveReader.swift \
   ../Nemoris/Features/Import/Pipeline/Readers/XLSXReader.swift \
   ../Nemoris/Features/Import/Pipeline/Readers/LedgerXMLReader.swift \
-  ../Nemoris/Features/Import/Service/CSVParserV3.swift \
+  ../Nemoris/Features/Import/Service/CSVParser.swift \
   ImportPipelineTests.swift \
   -o "$BUILD/import_pipeline_tests"
 

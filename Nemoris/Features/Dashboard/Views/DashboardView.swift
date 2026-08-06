@@ -291,7 +291,7 @@ struct DashboardView: View {
         }
         #endif
         .adaptivePane(isPresented: $showImport) {
-            ImportV3EntryView().environment(appState)
+            ImportEntryView().environment(appState)
         }
         .adaptivePane(isPresented: $showSearch) {
             SearchView().environment(appState)

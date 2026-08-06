@@ -112,9 +112,9 @@ struct MainTabView: View {
         }
         // AXE P — CSV déposé par le raccourci "Importer des transactions (CSV)"
         // ou la share extension Transactions : import V3 pré-rempli. Si une
-        // session est déjà active, ImportV3EntryView affiche l'alerte de reprise.
+        // session est déjà active, ImportEntryView affiche l'alerte de reprise.
         .adaptivePane(item: $preloadedTransactionImport) { item in
-            ImportV3EntryView(preloadedFileURLs: item.urls)
+            ImportEntryView(preloadedFileURLs: item.urls)
         }
         // Relecture du résultat d'une analyse en arrière-plan.
         .adaptivePane(isPresented: $showAnalysisReview) {
@@ -124,8 +124,8 @@ struct MainTabView: View {
                     importCoordinator.clear()
                     appState.activeImportSession = summary
                     // Passage à la revue complète sans clignotement
-                    // (cf. `ImportV3EntryView.handOver`).
-                    ImportV3EntryView.handOver(to: appState,
+                    // (cf. `ImportEntryView.handOver`).
+                    ImportEntryView.handOver(to: appState,
                                                dismissSelf: { showAnalysisReview = false })
                 },
                 onCancel: {
@@ -163,7 +163,7 @@ struct MainTabView: View {
             appState.importToolRequest = nil
         }
         .adaptivePane(item: $requestedImport) { item in
-            ImportV3EntryView(initialDestination: item.destination)
+            ImportEntryView(initialDestination: item.destination)
         }
         .confirmationDialog(
             "Annuler la session d'import ?",
@@ -552,7 +552,7 @@ struct MainTabView: View {
             NavigationStack { SettingsView(isEmbedded: true) }
         } else if selection == sidebarImportTag {
             NavigationStack {
-                ImportV3EntryView(initialDestination: appState.importToolRequest ?? .transactions,
+                ImportEntryView(initialDestination: appState.importToolRequest ?? .transactions,
                                   isEmbedded: true)
             }
         } else if let tab = MainTabItem(rawValue: selection) {
@@ -704,7 +704,7 @@ private struct MoreView: View {
                 label: "Importation",
                 icon: "square.and.arrow.down",
                 color: AppTheme.Colors.success,
-                destination: { AnyView(ImportV3EntryView(isEmbedded: true)) }
+                destination: { AnyView(ImportEntryView(isEmbedded: true)) }
             ),
             MoreItem(
                 label: "Paramètres",
@@ -941,7 +941,7 @@ private struct MoreView: View {
             }
             .buttonStyle(.plain)
         case .importCSV:
-            NavigationLink(destination: ImportV3EntryView(isEmbedded: true)) {
+            NavigationLink(destination: ImportEntryView(isEmbedded: true)) {
                 featureRowLabel(entry)
             }
             .buttonStyle(.plain)

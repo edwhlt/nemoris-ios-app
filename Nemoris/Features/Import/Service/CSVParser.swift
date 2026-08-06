@@ -2,7 +2,7 @@ import Foundation
 
 /// Parseur CSV minimal pour le nouveau parcours d'import (AXE D).
 /// Autodétection séparateur + lecture des cellules en respectant les guillemets.
-enum CSVParserV3 {
+enum CSVParser {
 
     /// Le CSV n'a plus son propre modèle de sortie : il produit la table
     /// COMMUNE aux sources tabulaires (`ImportGrid`), la même que le lecteur de

@@ -24,7 +24,7 @@ enum PendingImportInbox {
     enum Kind {
         /// Relevé/capture de portefeuille → `InvestmentPDFImportView` pré-rempli.
         case investment
-        /// Relevé bancaire CSV → `ImportV3EntryView` pré-rempli.
+        /// Relevé bancaire CSV → `ImportEntryView` pré-rempli.
         case transactions
 
         var pendingPathKey: String {

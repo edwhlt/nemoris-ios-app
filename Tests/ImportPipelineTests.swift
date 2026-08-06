@@ -508,7 +508,7 @@ do {
     02/07/2026;CARREFOUR MARKET;-42,50
     03/07/2026;VIR SEPA SALAIRE;2350,00
     """
-    guard let grid = CSVParserV3.parse(content: csv) else {
+    guard let grid = CSVParser.parse(content: csv) else {
         expect(false, "CSV parsé"); return
     }
     expect(grid.headers == ["Date", "Libelle", "Montant"], "en-têtes CSV", "\(grid.headers)")
@@ -519,13 +519,13 @@ do {
     // Une source à UNE colonne n'est pas un tableau : l'envoyer au mapping
     // demanderait de désigner des colonnes inexistantes.
     let prose = "RELEVE DE COMPTE\nLe 2 juillet, achat CARREFOUR de 42,50 EUR\n"
-    let proseGrid = CSVParserV3.parse(content: prose)
+    let proseGrid = CSVParser.parse(content: prose)
     expect(proseGrid?.isTabular != true, "texte en prose non traité comme une table")
 
     // Séparateur imposé par l'utilisateur : l'autodétection se trompe sur les
     // fichiers dont les libellés contiennent des virgules.
     let ambiguous = "Date,Libelle,Montant\n02/07/2026,\"CARREFOUR, PARIS\",-42.50"
-    let forced = CSVParserV3.parse(content: ambiguous, forcedSeparator: ",")
+    let forced = CSVParser.parse(content: ambiguous, forcedSeparator: ",")
     expect(forced?.rows.first?.count == 3, "guillemets respectés avec séparateur imposé",
            "\(forced?.rows.first?.count ?? -1)")
     expect(forced?.rows.first?[1] == "CARREFOUR, PARIS", "virgule protégée par les guillemets",
@@ -534,18 +534,18 @@ do {
     // Guillemets ÉCHAPPÉS (`""` dans un champ). L'import d'investissements
     // avait son propre découpage, qui basculait `inQuotes` à chaque guillemet
     // et cassait donc sur ce cas — il passe désormais par ce parseur.
-    let escaped = CSVParserV3.parse(content: "libelle;montant\n\"dit \"\"bonjour\"\"\";2")
+    let escaped = CSVParser.parse(content: "libelle;montant\n\"dit \"\"bonjour\"\"\";2")
     expect(escaped?.rows.first?[0] == "dit \"bonjour\"", "guillemet échappé préservé",
            escaped?.rows.first?[0] ?? "nil")
 
     // Montants : les pièges qui faisaient rejeter des lignes valides.
-    expect(CSVParserV3.parseAmount("1 234,56", decimal: ",") == 1234.56,
+    expect(CSVParser.parseAmount("1 234,56", decimal: ",") == 1234.56,
            "séparateur de milliers (espace)")
-    expect(CSVParserV3.parseAmount("1\u{00A0}234,56", decimal: ",") == 1234.56,
+    expect(CSVParser.parseAmount("1\u{00A0}234,56", decimal: ",") == 1234.56,
            "espace INSÉCABLE des milliers")
-    expect(CSVParserV3.parseAmount("1,234.56", decimal: ".") == 1234.56,
+    expect(CSVParser.parseAmount("1,234.56", decimal: ".") == 1234.56,
            "convention anglo-saxonne")
-    expect(CSVParserV3.parseAmount("(42,50)", decimal: ",") == -42.50,
+    expect(CSVParser.parseAmount("(42,50)", decimal: ",") == -42.50,
            "négatif comptable entre parenthèses")
 }
 
@@ -661,7 +661,7 @@ do {
 
     // Et le CSV redevient TABULAIRE, donc ne part plus à l'IA.
     if let text = ImportFormatSniffer.decodeText(beWithBOM),
-       let grid = CSVParserV3.parse(content: text) {
+       let grid = CSVParser.parse(content: text) {
         expect(grid.isTabular, "CSV UTF-16 exploitable par le mapping (donc pas d'IA)")
         expect(grid.headers.count == 3, "3 colonnes", "\(grid.headers.count)")
     } else {

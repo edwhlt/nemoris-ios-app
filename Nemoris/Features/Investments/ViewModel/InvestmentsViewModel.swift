@@ -159,7 +159,7 @@ final class InvestmentsViewModel {
 
     /// Charge un CSV de positions.
     ///
-    /// ⚠️ Passe par `CSVParserV3`, le lecteur COMMUN. Ce module avait le sien
+    /// ⚠️ Passe par `CSVParser`, le lecteur COMMUN. Ce module avait le sien
     /// — troisième détection de séparateur et troisième découpage de cellules
     /// de l'app — et il était strictement moins bon : son `inQuotes.toggle()`
     /// à chaque guillemet cassait les guillemets échappés (`""` à l'intérieur
@@ -170,7 +170,7 @@ final class InvestmentsViewModel {
     /// (ISIN / quantité / PRU, et non date / montant / libellé) : c'est une
     /// autre question posée à l'utilisateur, elle garde donc son écran.
     func loadCSV(content: String) {
-        guard let grid = CSVParserV3.parse(content: content), !grid.headers.isEmpty else {
+        guard let grid = CSVParser.parse(content: content), !grid.headers.isEmpty else {
             csvErrors = ["Fichier CSV vide ou illisible"]
             return
         }
@@ -200,7 +200,7 @@ final class InvestmentsViewModel {
             let anglo = raw.lastIndex(of: ".").map { dot in
                 raw.lastIndex(of: ",").map { $0 < dot } ?? true
             } ?? false
-            return CSVParserV3.parseAmount(raw, decimal: anglo ? "." : ",")
+            return CSVParser.parseAmount(raw, decimal: anglo ? "." : ",")
         }
 
         csvErrors = []

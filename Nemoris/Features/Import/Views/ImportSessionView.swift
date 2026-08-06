@@ -8,7 +8,7 @@ import NemorisEngine
 /// puis commit final dans la table `transactions`.
 ///
 /// Accessible :
-///   - depuis l'entrée import (`ImportV3EntryView` → `ColumnMappingView` → ici)
+///   - depuis l'entrée import (`ImportEntryView` → `ColumnMappingView` → ici)
 ///   - depuis le bandeau "Import en cours" dans `MainTabView` pour reprendre.
 struct ImportSessionView: View {
     let sessionId: UUID

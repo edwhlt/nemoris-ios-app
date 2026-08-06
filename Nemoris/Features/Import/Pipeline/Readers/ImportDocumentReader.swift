@@ -169,7 +169,7 @@ enum ImportDocumentReader {
         }
         // Un texte réellement tabulaire part au mapping de colonnes ; le reste
         // (relevé en prose, export sans structure) part au parseur de documents.
-        if let grid = CSVParserV3.parse(content: text), grid.isTabular {
+        if let grid = CSVParser.parse(content: text), grid.isTabular {
             return [Unit(content: .grid(grid), kind: .text, sourceText: text)]
         }
         // La fenêtre de contexte du modèle embarqué est étroite : un relevé
