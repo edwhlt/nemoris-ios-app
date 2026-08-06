@@ -75,6 +75,18 @@ enum ImportDocumentReader {
         /// sur le thread principal : sur un gros CSV, un gel visible.
         var sourceText: String?
 
+        /// PDF source + index de PAGE ORIGINAL (0-based, avant filtrage des
+        /// pages vides) — porté UNIQUEMENT par les unités PDF, pour un rendu
+        /// image À LA DEMANDE (cf. `InvestmentPDFParser.renderPageImage`) si
+        /// le texte aplati par PDFKit s'avère insuffisant sur un tableau mal
+        /// linéarisé. Ne PAS rendre l'image ICI : la plupart des pages n'en
+        /// ont jamais besoin (le déterministe suffit), et rendre à l'aveugle
+        /// coûterait du temps CPU pour rien sur un relevé de plusieurs
+        /// dizaines de pages. `Data` est copy-on-write : la porter sur chaque
+        /// unité d'un même PDF ne duplique pas les octets.
+        var pdfSourceData: Data?
+        var pdfPageIndex: Int?
+
         /// Raccourci de lecture — vide pour les formes non textuelles.
         var text: String {
             if case .text(let value) = content { return value }
@@ -125,20 +137,25 @@ enum ImportDocumentReader {
     // MARK: - PDF
 
     private static func pdfUnits(_ data: Data) async -> [Unit] {
-        let pages: [String] = await Task.detached(priority: .userInitiated) {
+        // ⚠️ L'index de PAGE ORIGINAL (0-based, avant filtrage) est conservé à
+        // côté du texte — le filtrage des pages vides qui suit décale les
+        // positions dans le tableau résultat, mais `renderPageImage` a besoin
+        // de l'index RÉEL dans le PDF, pas du rang parmi les pages non vides.
+        let pages: [(index: Int, text: String)] = await Task.detached(priority: .userInitiated) {
             guard let document = PDFDocument(data: data) else { return [] }
             return (0..<document.pageCount).compactMap { index in
                 guard let text = document.page(at: index)?.string,
                       !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 else { return nil }
-                return text
+                return (index, text)
             }
         }.value
         guard !pages.isEmpty else {
             return [Unit(content: .empty(.noTextExtracted), kind: .pdf)]
         }
-        return pages.enumerated().map { index, text in
-            Unit(content: .text(text), kind: .pdf, indexInSource: index + 1)
+        return pages.enumerated().map { position, page in
+            Unit(content: .text(page.text), kind: .pdf, indexInSource: position + 1,
+                 pdfSourceData: data, pdfPageIndex: page.index)
         }
     }
 
