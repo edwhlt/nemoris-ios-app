@@ -144,6 +144,19 @@ final class DocumentImportCoordinator {
         job = Task { [weak self] in
             guard let self else { return }
             let result = await ImportPipeline.analyze(readout, destination: destination) { done, total in
+                // ⚠️ La progression d'une unité déjà EN VOL au moment du
+                // `cancel()` continue d'arriver — l'annulation Swift est
+                // coopérative, elle ne stoppe rien en cours de route.
+                // `ImportPipeline.analyze` s'arrête bien entre deux unités,
+                // mais celle DÉJÀ lancée finit son tour et appelle CE
+                // callback une dernière fois. Sans ce garde, il réarmait
+                // `.analyzing(...)` juste après que `cancel()` avait remis
+                // `phase` à `.idle` — et comme le `guard !Task.isCancelled`
+                // plus bas se contente de sortir SANS jamais repasser par
+                // `.idle`, le bandeau restait bloqué en « Analyse… » pour de
+                // bon. D'où le symptôme *parfois* : ça ne se produit que si
+                // le cancel tombe pile pendant qu'une unité est en vol.
+                guard !Task.isCancelled else { return }
                 self.phase = .analyzing(done: done, total: total)
             }
             guard !Task.isCancelled else { return }
@@ -206,6 +219,11 @@ final class DocumentImportCoordinator {
             let readout = await ImportPipeline.read(sources: sources, destination: destination)
             guard !Task.isCancelled else { return }
             let result = await ImportPipeline.analyze(readout, destination: destination) { done, total in
+                // Même garde qu'au-dessus, même raison : une unité déjà en
+                // vol au moment du cancel appelle encore ce callback une
+                // fois — sans le garde, ça réarme le bandeau juste après
+                // que `cancel()` l'a éteint.
+                guard !Task.isCancelled else { return }
                 self.phase = .analyzing(done: done, total: total)
             }
             guard !Task.isCancelled else { return }

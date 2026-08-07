@@ -816,6 +816,52 @@ do {
     expect(salvaged.first?["label"] as? String == "OK", "et c'est le bon")
 }
 
+// MARK: - t13 — Virgule FR comme séparateur décimal dans un nombre
+
+print("\nt13 · Virgule décimale FR dans un nombre JSON (\"amount\":-19,50)")
+do {
+    expect(LenientJSON.repairSyntax(#"{"amount":-19,50}"#) == #"{"amount":-19.50}"#,
+           "négatif corrigé", LenientJSON.repairSyntax(#"{"amount":-19,50}"#))
+    expect(LenientJSON.repairSyntax(#"{"amount":19,50}"#) == #"{"amount":19.50}"#,
+           "positif corrigé", LenientJSON.repairSyntax(#"{"amount":19,50}"#))
+    // Le vrai séparateur de champ suivant reste intact : la virgule qui
+    // introduit "payment_type" n'a pas de chiffre juste après, le motif ne
+    // la touche donc jamais.
+    let field = #"{"amount":-19,50,"payment_type":null}"#
+    expect(LenientJSON.repairSyntax(field) == #"{"amount":-19.50,"payment_type":null}"#,
+           "séparateur de champ suivant intact", LenientJSON.repairSyntax(field))
+    // Un entier suivi d'un champ qui COMMENCE par un chiffre n'est pas une
+    // fausse décimale (ex. deux champs numériques consécutifs) : ancré
+    // juste après ":", jamais après une autre valeur.
+    expect(LenientJSON.repairSyntax(#"{"quantity":4,"amount":-19,50}"#)
+               == #"{"quantity":4,"amount":-19.50}"#,
+           "un entier voisin n'est pas confondu avec une décimale")
+
+    // Réplique du cas réel : 9 opérations, décimales FR sur 4 d'entre elles,
+    // aucune n'est perdue une fois réparées.
+    let real = #"""
+    [
+      {"date":"2026-07-31","label":"Carrefour City","amount":-19,50,"payment_type":null},
+      {"date":"2026-07-31","label":"Sunday Melt Camb","amount":-17,49,"payment_type":"Divers"},
+      {"date":"2026-07-31","label":"Sumup Midnight","amount":-13,00,"payment_type":"Divers"},
+      {"date":"2026-07-31","label":"Wanderlust","amount":-9,00,"payment_type":"Divers"},
+      {"date":"2026-07-31","label":"Carrefour City","amount":-14,08,"payment_type":null},
+      {"date":"2026-07-29","label":"Uber Eats Pe","amount":-20,03,"payment_type":"CB"},
+      {"date":"2026-07-29","label":"Soundcloud","amount":-5,99,"payment_type":"VIREMENT"},
+      {"date":"2026-07-29","label":"Carrefour City","amount":-9,38,"payment_type":null},
+      {"date":"2026-07-29","label":"Dac Carrefour Ma","amount":-20,01,"payment_type":"PRELEVEMENT"}
+    ]
+    """#
+    let recovered = LenientJSON.innermostObjects(in: real).compactMap {
+        (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any]
+    }
+    expect(recovered.count == 9, "les 9 opérations sont récupérées", "\(recovered.count)")
+    let amounts = recovered.compactMap { $0["amount"] as? Double }
+    expect(amounts.count == 9, "les 9 montants décodent en Double", "\(amounts.count)")
+    expect(amounts.contains(-19.50), "premier montant correct")
+    expect(amounts.contains(-20.01), "dernier montant correct")
+}
+
 // MARK: - Bilan
 
 print("")

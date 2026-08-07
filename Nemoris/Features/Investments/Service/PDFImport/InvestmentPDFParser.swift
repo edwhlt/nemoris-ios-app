@@ -437,18 +437,59 @@ final class InvestmentPDFParser: Sendable {
 
     // MARK: - Parsing IA page par page
 
-    /// Parse une seule page via Foundation Models. Retourne ordres OU positions
-    /// (mode snapshot) selon la classification faite par l'IA, PLUS un
-    /// diagnostic — sans lui, un échec du modèle est indiscernable d'un
-    /// document réellement vide côté UI.
+    /// Parse une seule page. Retourne ordres OU positions (mode snapshot)
+    /// selon la classification faite par l'IA, PLUS un diagnostic — sans lui,
+    /// un échec du modèle est indiscernable d'un document réellement vide
+    /// côté UI.
+    ///
+    /// ⚠️ CORRECTIF (2026-08-07) : cette fonction n'appelait QUE Foundation
+    /// Models, en dur — jamais `AIEnrichmentBackend`, le point de dispatch
+    /// par fonctionnalité livré en AXE X. Un utilisateur ayant configuré un
+    /// serveur local ou une clé cloud pour « Import de portefeuille »
+    /// n'avait donc JAMAIS d'IA sur le texte d'une page PDF : sans Apple
+    /// Intelligence disponible, `parsePageWithAI` n'était jamais atteinte, et
+    /// tout retombait sur le seul moteur déterministe — exactement le
+    /// symptôme rapporté (« aucune IA utilisée sur le PDF », quantité jamais
+    /// détectée sur un format que le déterministe ne couvre pas). Seul le
+    /// repli image ciblé (`reinforceWithPageImage`, ajouté la session
+    /// précédente) passait déjà par `AIEnrichmentBackend` — mais il ne se
+    /// déclenche QUE si le déterministe a d'abord trouvé l'ISIN avec une
+    /// confiance basse ; un utilisateur sans Apple Intelligence n'avait donc
+    /// ni l'IA texte NI, pour beaucoup de pages, le repli image.
+    ///
+    /// `usesGuidedGeneration` reflète le backend RÉSOLU pour cette
+    /// fonctionnalité (préférence utilisateur + disponibilité réelle) — pas
+    /// un simple test de plateforme : un iPhone iOS 26+ dont l'utilisateur a
+    /// choisi « Serveur local » doit passer par le chemin générique lui
+    /// aussi, pas par Foundation Models envers et contre son réglage.
     @MainActor private func parsePage(text: String, pageNumber: Int) async -> (PageParse, ImportUnitDiagnostic) {
         #if canImport(FoundationModels)
-        if #available(iOS 26.0, macOS 26.0, *) {
+        if #available(iOS 26.0, macOS 26.0, *), AIEnrichmentBackend.usesGuidedGeneration(for: .investmentImport) {
             return await parsePageWithAI(text: text, pageNumber: pageNumber)
         }
         #endif
-        print("[PDFParser] Foundation Models non disponible — repli déterministe")
-        return (PageParse(), .aiUnavailable)
+        return await parsePageWithGenericBackend(text: text, pageNumber: pageNumber)
+    }
+
+    /// Chemin non-Apple (serveur local, Claude, OpenAI) : pas de génération
+    /// guidée possible (`@Generable` est propre à Foundation Models, AXE X),
+    /// donc JSON en texte libre — le même `parsePageResponse`/`systemInstructions`
+    /// que le repli image, pour ne jamais avoir deux prompts ou deux parseurs
+    /// à faire diverger.
+    @MainActor private func parsePageWithGenericBackend(text: String, pageNumber: Int) async -> (PageParse, ImportUnitDiagnostic) {
+        let payload = String(text.prefix(8000))
+        let raw = await AIEnrichmentBackend.completeText(
+            feature: .investmentImport,
+            system: Self.systemInstructions,
+            user: Self.buildPagePrompt(pageText: payload, pageNumber: pageNumber)
+        )
+        guard let raw else {
+            print("[PDFParser] Unité \(pageNumber) : aucun backend IA disponible pour l'import de portefeuille")
+            return (PageParse(), .aiUnavailable)
+        }
+        let parsed = Self.parsePageResponse(raw, pageNumber: pageNumber)
+        print("[PDFParser] Unité \(pageNumber) [backend générique/\(parsed.mode.rawValue)] : \(parsed.orders.count) ordres, \(parsed.positions.count) positions")
+        return (parsed, parsed.isEmpty ? .nothingRecognized : .extracted)
     }
 
     #if canImport(FoundationModels)

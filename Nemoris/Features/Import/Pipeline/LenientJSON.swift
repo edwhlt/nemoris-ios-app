@@ -149,6 +149,19 @@ enum LenientJSON {
                          pattern: #"([,{])(\s*)([A-Za-z_][A-Za-z0-9_]*)"(\s*):"#,
                          template: "$1$2\"$3\"$4:")
 
+        // Virgule FR comme séparateur décimal dans un nombre : `"amount":-19,50`
+        // n'est pas du JSON valide (`,` y sépare deux champs, jamais deux
+        // moitiés d'un nombre) — un modèle habitué à écrire en français
+        // l'échappe malgré la consigne « point décimal ». Motif ancré
+        // JUSTE APRÈS `:` (jamais après une apostrophe/guillemet), ce qui
+        // exclut par construction tout ce qui est à l'intérieur d'une chaîne
+        // — une valeur texte commence toujours par `"`, jamais par un
+        // chiffre. Le lookahead sur `,`/`}`/`]` garantit qu'on s'arrête au
+        // VRAI séparateur de champ suivant plutôt que de le consommer.
+        text = replacing(text,
+                         pattern: #"(:\s*-?\d+),(\d+)(?=\s*[,}\]])"#,
+                         template: "$1.$2")
+
         // Virgules dupliquées, puis virgule finale avant une fermeture.
         text = replacing(text, pattern: #",(\s*),"#, template: ",$1")
         text = replacing(text, pattern: #",(\s*)([}\]])"#, template: "$1$2")
