@@ -69,7 +69,10 @@ final class LiveSyncRepository: @unchecked Sendable {
                    enabled, last_sync_at, last_sync_status, last_sync_message,
                    show_tokens_without_price, created_at
             FROM investment_live_sync
-            ORDER BY created_at DESC;
+            -- `created_at` est horodaté à la seconde : deux liens créés dans la
+            -- même seconde auraient un ordre indéfini. L'identifiant, croissant
+            -- avec l'insertion, tranche l'égalité dans le bon sens.
+            ORDER BY created_at DESC, id DESC;
             """
         executeQuery(sql) { stmt in
             while sqlite3_step(stmt) == SQLITE_ROW {
