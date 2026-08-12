@@ -36,7 +36,13 @@ final class InvestmentsViewModel {
     /// `load()` depuis le PriceHistoryCache (RAM) — coût négligeable.
     var accountSparklines: [Int: [PortfolioEvolutionPoint]] = [:]
 
-    private let repository = InvestmentRepository()
+    private let repository: InvestmentRepository
+
+    /// La valeur par défaut vise la base de l'application : aucun site d'appel
+    /// ne change. Les tests injectent une base temporaire.
+    init(store: SQLiteStore = SQLiteStore()) {
+        repository = InvestmentRepository(store: store)
+    }
     private let marketDataService = InvestmentMarketDataService()
 
     var selectedAccount: InvestmentAccount? {
@@ -68,7 +74,9 @@ final class InvestmentsViewModel {
         let evolution = accounts
             .map { account in
                 let val = positionsByAccount[account.id]?.reduce(0) { $0 + $1.currentValue } ?? 0
-                return InvestmentAllocationItem(name: account.openedAt.formatted(date: .abbreviated, time: .omitted), value: val)
+                // Locale forcée fr_FR : le ViewModel n'a pas accès à l'environnement
+                // SwiftUI ici — cf. commentaire équivalent dans InsightEngine.swift.
+                return InvestmentAllocationItem(name: account.openedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Locale(identifier: "fr_FR"))), value: val)
             }
             .sorted { $0.name < $1.name }
 

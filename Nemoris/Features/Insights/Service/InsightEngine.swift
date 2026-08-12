@@ -10,6 +10,11 @@ import Foundation
 // **Philosophie** : on préfère 3 insights solides et actionnables à 20
 // insights vagues. Les seuils sont calibrés pour ne déclencher que sur des
 // signaux statistiquement robustes.
+//
+// **Locale forcée en dur (fr_FR) sur les montants des `title`/`detail`** : ce
+// moteur est pur (pas d'accès à l'environnement SwiftUI), donc `.formatted()`
+// retomberait sinon sur la locale RÉELLE de l'appareil au lieu du français
+// forcé par l'app — même précédent que `PatrimoineView.swift`.
 
 enum InsightEngine {
 
@@ -19,10 +24,14 @@ enum InsightEngine {
 
     /// Génère tous les insights pertinents, triés par `compositeScore` décroissant.
     /// Cap à 8 insights max — au-delà ça devient du bruit pour l'user.
-    static func compute() -> [Insight] {
-        let txRepo = TransactionRepository()
+    /// - Parameters:
+    ///   - txRepo: repository, à valeur par défaut sur la base de
+    ///     l'application. Les tests l'injectent sur une base temporaire.
+    ///   - now: date d'évaluation, pour que la fenêtre d'analyse soit
+    ///     reproductible au lieu de dépendre du jour d'exécution.
+    static func compute(txRepo: TransactionRepository = TransactionRepository(),
+                        now: Date = Date()) -> [Insight] {
         let cal = Calendar(identifier: .gregorian)
-        let now = Date()
         guard let from = cal.date(byAdding: .day, value: -analysisDays, to: now) else { return [] }
 
         let txs = txRepo.fetchTransactionsAllAccounts(from: from, to: now, limit: 10000, offset: 0)
@@ -87,7 +96,7 @@ enum InsightEngine {
                 id: "dormant_\(payeeId)",
                 kind: .dormantSubscription,
                 title: "\(payeeName) — non utilisé depuis \(daysSinceLast) jours",
-                detail: "Vous payez \(monthlyEquivalent(pattern).formatted(.currency(code: "EUR").presentation(.narrow)))/mois pour \(payeeName) mais aucune transaction associée n'apparaît depuis \(daysSinceLast) jours. Envisagez de résilier — \(annualCost.formatted(.currency(code: "EUR").presentation(.narrow))) économisés par an.",
+                detail: "Vous payez \(monthlyEquivalent(pattern).formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR"))))/mois pour \(payeeName) mais aucune transaction associée n'apparaît depuis \(daysSinceLast) jours. Envisagez de résilier — \(annualCost.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))) économisés par an.",
                 annualImpact: annualCost,
                 actionability: 5,  // Désabonnement = 1 clic dans Réglages → Abonnements iOS
                 confidence: min(1.0, Double(daysSinceLast) / 180.0)  // Plus dormant longtemps → plus confiant
@@ -133,8 +142,8 @@ enum InsightEngine {
             result.append(Insight(
                 id: "habit_\(tierId)",
                 kind: .smallFrequentHabit,
-                title: "\(payeeName) — \(count) achats en 90 j à ~\(unitAvg.formatted(.currency(code: "EUR").presentation(.narrow)))",
-                detail: "Cumulé sur l'année : \(annualCost.formatted(.currency(code: "EUR").presentation(.narrow))). Réduire la fréquence de moitié → \(potentialSaving.formatted(.currency(code: "EUR").presentation(.narrow))) économisés/an.",
+                title: "\(payeeName) — \(count) achats en 90 j à ~\(unitAvg.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR"))))",
+                detail: "Cumulé sur l'année : \(annualCost.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))). Réduire la fréquence de moitié → \(potentialSaving.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))) économisés/an.",
                 annualImpact: potentialSaving,
                 actionability: 3,  // Changement d'habitude — pas trivial mais réalisable
                 confidence: min(1.0, Double(count) / 30.0)  // Plus de tx → plus de confiance
@@ -169,7 +178,7 @@ enum InsightEngine {
                 id: "dup_\(cid)",
                 kind: .duplicateSubscriptions,
                 title: "\(group.count) abonnements actifs en \(catName)",
-                detail: "Vous payez actuellement \(names) — total \(monthlyTotal.formatted(.currency(code: "EUR").presentation(.narrow)))/mois (\((monthlyTotal*12).formatted(.currency(code: "EUR").presentation(.narrow)))/an). Vérifiez si tous sont vraiment utilisés.",
+                detail: "Vous payez actuellement \(names) — total \(monthlyTotal.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR"))))/mois (\((monthlyTotal*12).formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR"))))/an). Vérifiez si tous sont vraiment utilisés.",
                 annualImpact: monthlyTotal * 12 * 0.3,  // Hypothèse : 30 % réduction possible
                 actionability: 4,
                 confidence: 0.7
@@ -218,7 +227,7 @@ enum InsightEngine {
                 id: "drift_\(cid)",
                 kind: .categoryDrift,
                 title: "\(catName) : +\(Int(increasePct)) % vs vos 3 mois précédents",
-                detail: "Ce mois-ci : \(lastMonthSpent.formatted(.currency(code: "EUR").presentation(.narrow))). Moyenne des 3 mois précédents : \(baselineMonthly.formatted(.currency(code: "EUR").presentation(.narrow))). Soit \(increase.formatted(.currency(code: "EUR").presentation(.narrow))) de plus. Pic ponctuel ou nouvelle tendance ?",
+                detail: "Ce mois-ci : \(lastMonthSpent.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))). Moyenne des 3 mois précédents : \(baselineMonthly.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))). Soit \(increase.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))) de plus. Pic ponctuel ou nouvelle tendance ?",
                 annualImpact: increase * 12,  // Si la dérive persiste 1 an
                 actionability: 2,  // Identifier la cause demande de l'analyse user
                 confidence: min(1.0, baselineMonthly / 200.0)
@@ -252,7 +261,7 @@ enum InsightEngine {
             id: "top_\(topCid)",
             kind: .topCategoryConcentration,
             title: "\(catName) = \(Int(share * 100)) % de vos dépenses",
-            detail: "Sur les 6 derniers mois, vous avez dépensé \(topAmount.formatted(.currency(code: "EUR").presentation(.narrow))) en \(catName) — \(Int(share * 100)) % de votre total. C'est votre principal poste : un ajustement même modeste ici a un impact disproportionné.",
+            detail: "Sur les 6 derniers mois, vous avez dépensé \(topAmount.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))) en \(catName) — \(Int(share * 100)) % de votre total. C'est votre principal poste : un ajustement même modeste ici a un impact disproportionné.",
             annualImpact: 0,  // Informatif, pas d'action chiffrée
             actionability: 1,
             confidence: 0.8

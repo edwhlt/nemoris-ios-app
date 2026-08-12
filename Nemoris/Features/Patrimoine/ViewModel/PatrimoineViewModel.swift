@@ -60,10 +60,19 @@ final class PatrimoineViewModel {
 
     // MARK: - Repositories
 
-    private let patrimoineRepo = PatrimoineRepository()
-    private let transactionRepo = TransactionRepository()
-    private let investmentRepo = InvestmentRepository()
-    private let goalRepo = GoalRepository()
+    private let patrimoineRepo: PatrimoineRepository
+    private let transactionRepo: TransactionRepository
+    private let investmentRepo: InvestmentRepository
+    private let goalRepo: GoalRepository
+
+    /// La valeur par défaut vise la base de l'application : aucun site d'appel
+    /// ne change. Les tests injectent une base temporaire.
+    init(store: SQLiteStore = SQLiteStore()) {
+        patrimoineRepo = PatrimoineRepository(store: store)
+        transactionRepo = TransactionRepository(store: store)
+        investmentRepo = InvestmentRepository(store: store)
+        goalRepo = GoalRepository(store: store)
+    }
 
     // MARK: - Computed (agrégats)
 

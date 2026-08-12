@@ -84,7 +84,7 @@ enum SearchCategory: String, CaseIterable, Identifiable {
         case .accounts:     return "building.columns"
         case .categories:   return "tag.fill"
         case .tags:         return "number"
-        case .patrimoine:   return "house.lodge.fill"
+        case .patrimoine:   return "house.fill"
         case .goals:        return "target"
         }
     }
@@ -99,9 +99,17 @@ struct SearchService: Sendable {
 
     static let shared = SearchService()
 
-    private let txRepo = TransactionRepository()
-    private let patrimoineRepo = PatrimoineRepository()
-    private let goalRepo = GoalRepository()
+    private let txRepo: TransactionRepository
+    private let patrimoineRepo: PatrimoineRepository
+    private let goalRepo: GoalRepository
+
+    /// `shared` reste le point d'accès de l'application ; la valeur par défaut
+    /// vise sa base. Les tests instancient sur une base temporaire.
+    init(store: SQLiteStore = SQLiteStore()) {
+        txRepo = TransactionRepository(store: store)
+        patrimoineRepo = PatrimoineRepository(store: store)
+        goalRepo = GoalRepository(store: store)
+    }
 
     /// Limite de résultats par catégorie. 8 est un bon compromis : assez pour ne
     /// pas frustrer, pas trop pour ne pas saturer le sheet sur petits écrans.

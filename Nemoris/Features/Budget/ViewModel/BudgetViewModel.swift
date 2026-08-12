@@ -27,8 +27,15 @@ final class BudgetViewModel {
 
     // MARK: - Private
 
-    private let repo = BudgetRepository.shared
-    private let txRepo = TransactionRepository()
+    private let repo: BudgetRepository
+    private let txRepo: TransactionRepository
+
+    /// La valeur par défaut vise la base de l'application : aucun site d'appel
+    /// ne change. Les tests injectent une base temporaire.
+    init(store: SQLiteStore = SQLiteStore()) {
+        repo = BudgetRepository(store: store)
+        txRepo = TransactionRepository(store: store)
+    }
 
     /// Cache des prévisions par mois (clé "yyyy-MM"). Permet à `navigateMonth(by:)`
     /// de basculer `previsions` de façon SYNCHRONE quand le mois cible a déjà été
@@ -54,17 +61,17 @@ final class BudgetViewModel {
         defer { isLoading = false }
 
         let patternsResult = await Task.detached(priority: .userInitiated) {
-            BudgetRepository.shared.fetchPatterns()
+            self.repo.fetchPatterns()
         }.value
         let envelopesResult = await Task.detached(priority: .userInitiated) {
-            BudgetRepository.shared.fetchEnvelopes()
+            self.repo.fetchEnvelopes()
         }.value
         let (start, end) = monthRange(displayedMonth)
         let prevResult = await Task.detached(priority: .userInitiated) {
-            BudgetRepository.shared.fetchPrevisions(from: start, to: end)
+            self.repo.fetchPrevisions(from: start, to: end)
         }.value
         let catResult = await Task.detached(priority: .userInitiated) {
-            TransactionRepository().fetchCategories()
+            self.txRepo.fetchCategories()
         }.value
 
         self.patterns = patternsResult
@@ -117,7 +124,7 @@ final class BudgetViewModel {
     private func reloadPrevisions() async {
         let (start, end) = monthRange(displayedMonth)
         let result = await Task.detached(priority: .userInitiated) {
-            BudgetRepository.shared.fetchPrevisions(from: start, to: end)
+            self.repo.fetchPrevisions(from: start, to: end)
         }.value
         previsionsCache[monthKey(displayedMonth)] = result
         self.previsions = result
@@ -135,7 +142,7 @@ final class BudgetViewModel {
             guard previsionsCache[key] == nil else { continue }
             let (s, e) = monthRange(adjMonth)
             let result = await Task.detached(priority: .utility) {
-                BudgetRepository.shared.fetchPrevisions(from: s, to: e)
+                self.repo.fetchPrevisions(from: s, to: e)
             }.value
             previsionsCache[key] = result
         }
@@ -153,7 +160,7 @@ final class BudgetViewModel {
             let end = Date()
             let start = Calendar.current.date(byAdding: .month, value: -24, to: end) ?? end
             let txs = await Task.detached(priority: .userInitiated) {
-                TransactionRepository().fetchAllAccountsTransactions(from: start, to: end)
+                self.txRepo.fetchAllAccountsTransactions(from: start, to: end)
             }.value
 
             let candidates = RecurringDetector.detect(from: txs)
@@ -187,7 +194,7 @@ final class BudgetViewModel {
             startDate: firstOccurrence,
             endDate: nil
         )
-        if let newId = repo.insertPattern(pattern) {
+        if let newId = self.repo.insertPattern(pattern) {
             let withId = RecurringPattern(
                 id: newId, name: pattern.name, amountAvg: pattern.amountAvg,
                 amountTolerance: pattern.amountTolerance, categoryId: pattern.categoryId,
@@ -196,7 +203,7 @@ final class BudgetViewModel {
                 lastDetectedAt: pattern.lastDetectedAt,
                 startDate: pattern.startDate, endDate: nil
             )
-            repo.regeneratePrevisions(for: withId)
+            self.repo.regeneratePrevisions(for: withId)
         }
         refresh()
     }
@@ -204,7 +211,7 @@ final class BudgetViewModel {
     // MARK: - Pattern CRUD
 
     func addManualPattern(_ pattern: RecurringPattern) {
-        if let newId = repo.insertPattern(pattern) {
+        if let newId = self.repo.insertPattern(pattern) {
             let withId = RecurringPattern(
                 id: newId, name: pattern.name, amountAvg: pattern.amountAvg,
                 amountTolerance: pattern.amountTolerance, categoryId: pattern.categoryId,
@@ -212,24 +219,24 @@ final class BudgetViewModel {
                 isActive: pattern.isActive, isManual: true, createdAt: pattern.createdAt,
                 lastDetectedAt: nil, startDate: pattern.startDate, endDate: pattern.endDate
             )
-            repo.regeneratePrevisions(for: withId)
+            self.repo.regeneratePrevisions(for: withId)
             scheduleNotificationsForPattern(withId)
         }
         refresh()
     }
 
     func updatePattern(_ pattern: RecurringPattern) {
-        repo.updatePattern(pattern)
-        repo.regeneratePrevisions(for: pattern)
+        self.repo.updatePattern(pattern)
+        self.repo.regeneratePrevisions(for: pattern)
         scheduleNotificationsForPattern(pattern)
         refresh()
     }
 
     func deletePattern(id: Int) {
         // Cancel les notifs avant de supprimer (les previsions seront cascade-deleted)
-        let toCancel = repo.fetchPrevisions(forPatternId: id)
+        let toCancel = self.repo.fetchPrevisions(forPatternId: id)
         BudgetNotificationService.cancelAll(forPatternId: id, previsions: toCancel)
-        repo.deletePattern(id: id)
+        self.repo.deletePattern(id: id)
         refresh()
     }
 
@@ -242,13 +249,13 @@ final class BudgetViewModel {
             createdAt: pattern.createdAt, lastDetectedAt: pattern.lastDetectedAt,
             startDate: pattern.startDate, endDate: pattern.endDate
         )
-        repo.updatePattern(updated)
+        self.repo.updatePattern(updated)
         if updated.isActive {
-            repo.regeneratePrevisions(for: updated)
+            self.repo.regeneratePrevisions(for: updated)
             scheduleNotificationsForPattern(updated)
         } else {
             // Pattern désactivé → cancel toutes ses notifs
-            let toCancel = repo.fetchPrevisions(forPatternId: updated.id)
+            let toCancel = self.repo.fetchPrevisions(forPatternId: updated.id)
             BudgetNotificationService.cancelAll(forPatternId: updated.id, previsions: toCancel)
         }
         refresh()
@@ -258,7 +265,7 @@ final class BudgetViewModel {
     /// Appelé après regeneratePrevisions pour rafraîchir les notifs sans dupliquer.
     private func scheduleNotificationsForPattern(_ pattern: RecurringPattern) {
         guard pattern.isActive else { return }
-        let previsions = repo.fetchPrevisions(forPatternId: pattern.id)
+        let previsions = self.repo.fetchPrevisions(forPatternId: pattern.id)
         Task {
             await BudgetNotificationService.rescheduleForPattern(
                 patternId: pattern.id,
@@ -271,31 +278,31 @@ final class BudgetViewModel {
     // MARK: - Envelope CRUD
 
     func addEnvelope(_ envelope: BudgetEnvelope) {
-        repo.insertEnvelope(envelope)
+        self.repo.insertEnvelope(envelope)
         refresh()
     }
 
     func updateEnvelope(_ envelope: BudgetEnvelope) {
-        repo.updateEnvelope(envelope)
+        self.repo.updateEnvelope(envelope)
         refresh()
     }
 
     func deleteEnvelope(id: Int) {
-        repo.deleteEnvelope(id: id)
+        self.repo.deleteEnvelope(id: id)
         refresh()
     }
 
     // MARK: - Prevision Actions
 
     func skipPrevision(_ prevision: BudgetPrevision) {
-        repo.updatePrevisionStatus(id: prevision.id, status: .skipped, transactionId: nil)
+        self.repo.updatePrevisionStatus(id: prevision.id, status: .skipped, transactionId: nil)
         // Skip → cancel la notif j-3 (sinon on rappelle une échéance que l'user a ignorée)
         BudgetNotificationService.cancel(forPrevisionId: prevision.id)
         refresh()
     }
 
     func matchPrevision(_ prevision: BudgetPrevision, to transactionId: Int) {
-        repo.updatePrevisionStatus(id: prevision.id, status: .matched, transactionId: transactionId)
+        self.repo.updatePrevisionStatus(id: prevision.id, status: .matched, transactionId: transactionId)
         // Matched → cancel la notif (échéance honorée, rappel inutile)
         BudgetNotificationService.cancel(forPrevisionId: prevision.id)
         refresh()
@@ -344,7 +351,7 @@ final class BudgetViewModel {
     func monthlySummary() async -> MonthlyBudgetSummary {
         let (start, end) = monthRange(displayedMonth)
         let txs = await Task.detached(priority: .userInitiated) {
-            TransactionRepository().fetchAllAccountsTransactions(from: start, to: end)
+            self.txRepo.fetchAllAccountsTransactions(from: start, to: end)
         }.value
         return monthlySummary(transactions: txs)
     }
@@ -462,7 +469,7 @@ final class BudgetViewModel {
         )
         guard !matches.isEmpty else { return }
         for m in matches {
-            repo.updatePrevisionStatus(id: m.previsionId, status: .matched, transactionId: m.transactionId)
+            self.repo.updatePrevisionStatus(id: m.previsionId, status: .matched, transactionId: m.transactionId)
             // Auto-match → cancel la notif j-3 (échéance honorée)
             BudgetNotificationService.cancel(forPrevisionId: m.previsionId)
         }

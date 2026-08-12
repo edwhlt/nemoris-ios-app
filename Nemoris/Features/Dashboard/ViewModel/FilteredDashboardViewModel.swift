@@ -35,7 +35,13 @@ final class FilteredDashboardViewModel {
     // MARK: - Private storage
 
     private var allTransactions: [FinanceTransaction] = []
-    private let repository = TransactionRepository()
+    private let repository: TransactionRepository
+
+    /// La valeur par défaut vise la base de l'application : aucun site d'appel
+    /// ne change. Les tests injectent une base temporaire.
+    init(store: SQLiteStore = SQLiteStore()) {
+        repository = TransactionRepository(store: store)
+    }
 
     // MARK: - Computed: données agrégées par granularité (réactif)
 

@@ -35,11 +35,14 @@ enum DashboardSnapshotBuilder {
 
     /// Calcule les agrégats demandés. Les dépendances entre agrégats sont supposées
     /// déjà résolues par `DashboardAggregate.expanded(_:)` côté appelant.
-    nonisolated static func build(units: Set<DashboardAggregate>, period: DashboardPeriod) -> DashboardSnapshot {
+    /// `store` a une valeur par défaut visant la base de l'application :
+    /// aucun site d'appel ne change. Les tests injectent une base temporaire.
+    nonisolated static func build(units: Set<DashboardAggregate>, period: DashboardPeriod,
+                                  store: SQLiteStore = SQLiteStore()) -> DashboardSnapshot {
         guard !units.isEmpty else { return DashboardSnapshot() }
 
         let needed = units.reduce(into: Set<DashboardSource>()) { $0.formUnion($1.sources) }
-        let sources = fetchSources(needed, period: period)
+        let sources = fetchSources(needed, period: period, store: store)
 
         var snapshot = DashboardSnapshot()
         for unit in DashboardAggregate.evaluationOrder where units.contains(unit) {
@@ -50,9 +53,10 @@ enum DashboardSnapshotBuilder {
 
     // MARK: - Lecture
 
-    private nonisolated static func fetchSources(_ needed: Set<DashboardSource>, period: DashboardPeriod) -> Sources {
+    private nonisolated static func fetchSources(_ needed: Set<DashboardSource>, period: DashboardPeriod,
+                                                 store: SQLiteStore) -> Sources {
         var s = Sources()
-        let transactions = TransactionRepository()
+        let transactions = TransactionRepository(store: store)
 
         if needed.contains(.yearMonthlyTotals) {
             s.yearMonthly = transactions.fetchMonthlyTotals(from: period.yearFrom, to: period.yearTo)
@@ -83,13 +87,13 @@ enum DashboardSnapshotBuilder {
         }
 
         if needed.contains(.investmentAccounts) {
-            s.investmentAccounts = InvestmentRepository().fetchAccounts()
+            s.investmentAccounts = InvestmentRepository(store: store).fetchAccounts()
         }
         if needed.contains(.bankAccounts) {
             s.bankAccounts = transactions.fetchAccounts()
         }
 
-        let patrimoine = PatrimoineRepository()
+        let patrimoine = PatrimoineRepository(store: store)
         if needed.contains(.patrimoineAssets)     { s.assets = patrimoine.fetchAssets() }
         if needed.contains(.patrimoineRealEstate) { s.realEstates = patrimoine.fetchRealEstate() }
         if needed.contains(.patrimoineLoans)      { s.loans = patrimoine.fetchLoans() }
@@ -105,7 +109,7 @@ enum DashboardSnapshotBuilder {
         }
 
         if needed.contains(.goals) {
-            s.goals = GoalRepository().fetchGoals()
+            s.goals = GoalRepository(store: store).fetchGoals()
         }
         return s
     }

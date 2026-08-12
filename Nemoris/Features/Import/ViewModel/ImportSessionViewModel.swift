@@ -30,12 +30,16 @@ final class ImportSessionViewModel {
 
     var sortMode: ImportSortMode = .byStatus
 
-    private let sessionRepo = ImportSessionRepository()
-    private let txRepo = TransactionRepository()
+    private let sessionRepo: ImportSessionRepository
+    private let txRepo: TransactionRepository
     private var saveTask: Task<Void, Never>? = nil
 
-    init(session: ImportSession) {
+    /// `store` a une valeur par défaut visant la base de l'application :
+    /// aucun site d'appel ne change. Les tests injectent une base temporaire.
+    init(session: ImportSession, store: SQLiteStore = SQLiteStore()) {
         self.session = session
+        self.sessionRepo = ImportSessionRepository(store: store)
+        self.txRepo = TransactionRepository(store: store)
     }
 
     // MARK: - Lifecycle
