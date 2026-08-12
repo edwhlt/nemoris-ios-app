@@ -112,7 +112,13 @@ struct PropertyIncomeSummary {
 enum TaxReportEngine {
 
     /// Génère le rapport fiscal pour une année donnée.
-    static func generate(year: Int) -> TaxReportYear {
+    /// - Parameters:
+    ///   - invRepo, txRepo: repositories, à valeur par défaut sur la base de
+    ///     l'application. Les tests les injectent sur une base temporaire — le
+    ///     calcul FIFO d'une plus-value ne se vérifie pas autrement.
+    static func generate(year: Int,
+                         invRepo: InvestmentRepository = InvestmentRepository(),
+                         txRepo: TransactionRepository = TransactionRepository()) -> TaxReportYear {
         let cal = Calendar(identifier: .gregorian)
         guard let yearStart = cal.date(from: DateComponents(year: year, month: 1, day: 1)),
               let yearEnd   = cal.date(from: DateComponents(year: year, month: 12, day: 31, hour: 23, minute: 59, second: 59))
@@ -120,9 +126,9 @@ enum TaxReportEngine {
             return TaxReportYear(year: year, ctoGains: [], peaSnapshots: [], propertyIncome: .init(year: year, totalAmount: 0, entriesCount: 0), generatedAt: Date())
         }
 
-        let ctoGains = computeCTOGains(year: year, yearStart: yearStart, yearEnd: yearEnd)
-        let peaSnapshots = computePEASnapshots()
-        let propertyIncome = computePropertyIncome(year: year, yearStart: yearStart, yearEnd: yearEnd)
+        let ctoGains = computeCTOGains(year: year, yearStart: yearStart, yearEnd: yearEnd, invRepo: invRepo)
+        let peaSnapshots = computePEASnapshots(invRepo: invRepo)
+        let propertyIncome = computePropertyIncome(year: year, yearStart: yearStart, yearEnd: yearEnd, txRepo: txRepo)
 
         return TaxReportYear(
             year: year,
@@ -138,8 +144,8 @@ enum TaxReportEngine {
     /// Pour chaque compte CTO, on prend les positions, leurs orders triés
     /// chronologiquement, et on applique FIFO : chaque SELL consomme les BUY
     /// les plus anciens jusqu'à épuiser sa quantité.
-    private static func computeCTOGains(year: Int, yearStart: Date, yearEnd: Date) -> [CTOGainEntry] {
-        let invRepo = InvestmentRepository()
+    private static func computeCTOGains(year: Int, yearStart: Date, yearEnd: Date,
+                                        invRepo: InvestmentRepository) -> [CTOGainEntry] {
         let accounts = invRepo.fetchAccounts().filter { $0.accountType == "CTO" }
         var result: [CTOGainEntry] = []
 
@@ -200,8 +206,7 @@ enum TaxReportEngine {
 
     // MARK: - 2. Snapshot PEA
 
-    private static func computePEASnapshots() -> [PEASnapshotEntry] {
-        let invRepo = InvestmentRepository()
+    private static func computePEASnapshots(invRepo: InvestmentRepository) -> [PEASnapshotEntry] {
         let peas = invRepo.fetchAccounts().filter { $0.accountType == "PEA" }
         return peas.map { acc in
             PEASnapshotEntry(
@@ -219,8 +224,8 @@ enum TaxReportEngine {
     /// Heuristique : on prend les transactions de revenus (amount > 0) de
     /// l'année dont le libellé OU la catégorie OU le tiers contient "loyer"
     /// (case-insensitive). Bonne approximation pour la plupart des bailleurs.
-    private static func computePropertyIncome(year: Int, yearStart: Date, yearEnd: Date) -> PropertyIncomeSummary {
-        let txRepo = TransactionRepository()
+    private static func computePropertyIncome(year: Int, yearStart: Date, yearEnd: Date,
+                                              txRepo: TransactionRepository) -> PropertyIncomeSummary {
         let txs = txRepo.fetchTransactionsAllAccounts(
             from: yearStart, to: yearEnd, limit: 10000, offset: 0
         )
