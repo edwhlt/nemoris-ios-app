@@ -45,13 +45,19 @@ enum EnvelopeSuggestionService {
 
     /// Calcule les suggestions à partir de l'historique courant. Les catégories
     /// déjà couvertes par une enveloppe existante sont exclues du résultat.
+    /// - Parameters:
+    ///   - txRepo: repository des transactions. La valeur par défaut vise la
+    ///     base de l'application ; les tests l'injectent sur une base
+    ///     temporaire, comme pour les repositories eux-mêmes.
+    ///   - now: date d'évaluation, pour que la fenêtre d'analyse de 90 jours
+    ///     soit reproductible au lieu de dépendre du jour d'exécution.
     static func computeSuggestions(
         existingEnvelopes: [BudgetEnvelope],
-        allCategories: [Category]
+        allCategories: [Category],
+        txRepo: TransactionRepository = TransactionRepository(),
+        now: Date = Date()
     ) -> [EnvelopeSuggestion] {
-        let txRepo = TransactionRepository()
         let cal = Calendar(identifier: .gregorian)
-        let now = Date()
         guard let from = cal.date(byAdding: .day, value: -analysisDays, to: now) else { return [] }
 
         // Fetch les tx sur la période — toutes catégories, dépenses uniquement
@@ -82,7 +88,12 @@ enum EnvelopeSuggestionService {
             // Arrondi à la dizaine supérieure + 10 % d'overhead — donne une cible
             // réaliste mais pas serrée au point que l'user soit en dépassement
             // dès le 1er mois.
-            let budgetRaw = avgMonthly * 1.10
+            // ⚠️ Arrondi au centime AVANT de monter à la dizaine. En virgule
+            // flottante, 100 × 1,10 vaut 110.00000000000001 : un ceil direct le
+            // pousse à 120, soit 20 % de marge au lieu des 10 % voulus. Le cas
+            // se produit pile sur les moyennes rondes — 100, 200 — c'est-à-dire
+            // les plus courantes.
+            let budgetRaw = (avgMonthly * 1.10 * 100).rounded() / 100
             let budgetRounded = ceil(budgetRaw / 10.0) * 10.0
 
             suggestions.append(EnvelopeSuggestion(
