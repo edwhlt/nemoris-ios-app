@@ -15,7 +15,7 @@ import os
 //   - User pose le téléphone face cachée (gravity.z passe de < 0.5 à > 0.8)
 //     → on TOGGLE `amountsHidden` (1ère fois → masque, 2e fois → réaffiche)
 //   - User relève le téléphone (gravity.z repasse < 0.5) → on NE FAIT RIEN
-//     (l'état choisi par le user est conservé jusqu'à ce qu'il refasse le geste)
+//     (l'état choisi par l'utilisateur est conservé jusqu'à ce qu'il refasse le geste)
 //
 // Cette sémantique est plus intuitive que le miroir continu :
 //   - Un collègue arrive → tu poses le téléphone face cachée pour cacher les
@@ -66,7 +66,7 @@ final class PrivacyMotionMonitor {
     /// On garde la valeur pour détecter les transitions (edges) et déclencher
     /// le toggle uniquement quand on PASSE de "visible" à "cachée".
     /// Initialisé à `false` (= face visible) — au pire on rate le tout 1er
-    /// événement si l'user démarre l'app face cachée, négligeable.
+    /// événement si l'utilisateur démarre l'app face cachée, négligeable.
     private var isCurrentlyFaceDown: Bool = false
 
     // MARK: - Public API
@@ -78,7 +78,7 @@ final class PrivacyMotionMonitor {
         syncWithSetting()
     }
 
-    /// À appeler quand l'user modifie le toggle `hideAmountsOnFaceDown` dans
+    /// À appeler quand l'utilisateur modifie le toggle `hideAmountsOnFaceDown` dans
     /// Settings — démarre ou arrête le CMMotionManager selon l'état actuel.
     func syncWithSetting() {
         guard let appState else { return }
@@ -87,7 +87,7 @@ final class PrivacyMotionMonitor {
         } else {
             stop()
             // Si on désactive le réglage, on ne touche PAS à l'état courant —
-            // l'user peut vouloir garder les montants masqués manuellement.
+            // l'utilisateur peut vouloir garder les montants masqués manuellement.
         }
     }
 
@@ -134,7 +134,7 @@ final class PrivacyMotionMonitor {
     ///
     /// **Action** : on TOGGLE `amountsHidden` uniquement à la transition
     /// "visible → cachée". Le retour à "visible" ne fait rien (l'état choisi
-    /// par l'user est conservé jusqu'au prochain geste).
+    /// par l'utilisateur est conservé jusqu'au prochain geste).
     private func handle(gravityZ: Double) {
         guard let appState else { return }
 
@@ -143,12 +143,12 @@ final class PrivacyMotionMonitor {
             isCurrentlyFaceDown = true
             appState.amountsHidden.toggle()
             // Tap haptique pour confirmer le geste — utile quand l'écran est
-            // posé face cachée et que l'user ne voit pas le changement.
+            // posé face cachée et que l'utilisateur ne voit pas le changement.
             HapticService.shared.toggle()
         } else if isCurrentlyFaceDown && gravityZ < revealThreshold {
             // Transition : cachée → visible. On NE FAIT RIEN — l'état choisi
-            // par l'user via le geste précédent reste actif. Pour le toggler,
-            // l'user doit reposer le téléphone face cachée.
+            // par l'utilisateur via le geste précédent reste actif. Pour le toggler,
+            // l'utilisateur doit reposer le téléphone face cachée.
             isCurrentlyFaceDown = false
         }
     }

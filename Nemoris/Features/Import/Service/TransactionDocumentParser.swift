@@ -18,7 +18,7 @@ import FoundationModels
 /// **Trois étages par unité**, chacun rattrapant l'échec du précédent :
 ///   1. génération guidée `@Generable` (Foundation Models, iOS/macOS 26+) ;
 ///   2. génération JSON via `AIEnrichmentBackend.completeText` — donc aussi
-///      un serveur local configuré (AXE T), pas seulement Apple ;
+///      un serveur local configuré, pas seulement Apple ;
 ///   3. `BankStatementExtractor`, déterministe, exécuté SYSTÉMATIQUEMENT.
 ///
 /// L'étage 3 n'est pas qu'un repli : il fait autorité sur la date et le

@@ -45,7 +45,7 @@ final class ContactsService {
 
     /// Demande la permission Contacts à iOS si pas encore décidée.
     /// Renvoie true si autorisé in fine, false si refusé.
-    /// **À appeler UNIQUEMENT au moment où l'user tente explicitement de lier un contact.**
+    /// **À appeler UNIQUEMENT au moment où l'utilisateur tente explicitement de lier un contact.**
     @discardableResult
     func requestAccess() async -> Bool {
         if isAuthorized { return true }

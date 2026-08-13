@@ -6,7 +6,7 @@ import Foundation
 ///
 /// Utilisé par `InvestmentPositionDetailView` pour afficher "Dernière sync :
 /// il y a X min · success/error · message" — au lieu d'un sync silencieux où
-/// l'user ne sait jamais ce qui s'est passé.
+/// l'utilisateur ne sait jamais ce qui s'est passé.
 enum InvestmentSyncTraceStore {
 
     enum Status: String, Codable {
@@ -21,7 +21,7 @@ enum InvestmentSyncTraceStore {
         let identifier: String
         let attemptedAt: Date
         let status: Status
-        let message: String         // Lisible par l'user
+        let message: String         // Lisible par l'utilisateur
         let symbolsTried: [String]  // Liste des symbols essayés sur Yahoo/Stooq
         let source: String?         // "yahoo" / "stooq" si success
         let pointsCount: Int        // Nb de points récupérés si success
@@ -30,7 +30,7 @@ enum InvestmentSyncTraceStore {
     private static let storageKey = "investment_sync_trace_v1"
 
     /// Enregistre une tentative pour un identifier donné. Remplace l'entrée
-    /// précédente (on ne garde que la plus récente — c'est ce qui intéresse l'user).
+    /// précédente (on ne garde que la plus récente — c'est ce qui intéresse l'utilisateur).
     static func record(_ entry: Entry) {
         var all = loadAll()
         // Clé case-insensitive : sync sur "FR0000121329" et "fr0000121329" partagent la même trace
@@ -60,7 +60,7 @@ enum InvestmentSyncTraceStore {
 
     /// Efface la trace pour un identifier précis. À appeler quand la position
     /// correspondante est supprimée, sinon la trace reste dans UserDefaults
-    /// et se réaffiche si l'user recrée une position avec le même ticker/ISIN.
+    /// et se réaffiche si l'utilisateur recrée une position avec le même ticker/ISIN.
     static func clear(identifiers: [String]) {
         var all = loadAll()
         for id in identifiers where !id.isEmpty {

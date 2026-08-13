@@ -209,9 +209,9 @@ struct Tiers: Identifiable, Hashable {
     var linkedCompteId: Int? = nil
     /// ID canonique côté NemorisEngine (ex: "carrefour"). Nil pour les tiers custom.
     var engineMerchantId: String? = nil
-    /// Domaine web utilisé pour récupérer le favicon (AXE A). Nullable — résolu dynamiquement via le seed engine si vide.
+    /// Domaine web utilisé pour récupérer le favicon. Nullable — résolu dynamiquement via le seed engine si vide.
     var domain: String? = nil
-    // AXE C : champs d'édition complète exposés au user.
+    // champs d'édition complète exposés à l'utilisateur.
     var address: String? = nil
     var city: String? = nil
     /// Code pays ISO 3166-1 alpha-2 (ex "FR").
@@ -224,7 +224,7 @@ struct Tiers: Identifiable, Hashable {
     /// Type du tier (commerce / contact / interne / organisation) — v25.
     var tierType: TierType = .merchant
     /// Identifiant local CNContact (carnet de contacts iOS) si tier de type .contact
-    /// et lié explicitement par l'user. Permet de récupérer la photo locale.
+    /// et lié explicitement par l'utilisateur. Permet de récupérer la photo locale.
     var contactIdentifier: String? = nil
 }
 
@@ -305,7 +305,7 @@ struct TransactionEditDraft: Identifiable {
     }
 }
 
-/// Statut d'un remboursement — v44 (AXE R).
+/// Statut d'un remboursement — v44.
 enum ReimbursementStatus: String, Codable, CaseIterable, Identifiable {
     case pending  = "PENDING"
     case received = "RECEIVED"
@@ -612,7 +612,7 @@ struct InvestmentAccount: Identifiable, Hashable {
     var openedAt: Date
     /// v34 — trésorerie disponible sur le compte (dividendes pas réinvestis,
     /// ventes en attente, dépôts récents). Persistée directement sur la row,
-    /// éditable par l'user dans le form compte.
+    /// éditable par l'utilisateur dans le form compte.
     var cashBalance: Double = 0
 
     /// Valorisation totale du compte = valeur des positions + trésorerie.
@@ -627,10 +627,10 @@ struct InvestmentPosition: Identifiable, Hashable {
     var assetName: String
     var ticker: String
     var isin: String = ""          // v31 : ISIN 12 chars (FR0000121329) — préféré pour sync via OpenFIGI
-    var quantity: Double           // AXE K : DÉRIVÉE des ordres (Σ BUY - Σ SELL)
-    var averageBuyPrice: Double    // AXE K : DÉRIVÉE des ordres (PRU pondéré des BUY)
+    var quantity: Double           // DÉRIVÉE des ordres (Σ BUY - Σ SELL)
+    var averageBuyPrice: Double    // DÉRIVÉE des ordres (PRU pondéré des BUY)
     var currentValue: Double
-    var purchaseDate: Date         // AXE K : date du PREMIER BUY chronologiquement
+    var purchaseDate: Date         // date du PREMIER BUY chronologiquement
 
     var investedAmount: Double { quantity * averageBuyPrice }
     var pnl: Double { currentValue - investedAmount }
@@ -688,9 +688,9 @@ struct InvestmentOrder: Identifiable, Hashable {
     var fees: Double            // Frais de courtage (0 si pas connus)
     var executedAt: Date
     var notes: String?
-    /// AXE I Couche 1.5 : ID externe stable retourné par le provider (Binance tradeId,
+    /// ID externe stable retourné par le provider (Binance tradeId,
     /// blockchain txHash). Permet la dédup entre syncs via UNIQUE INDEX SQL.
-    /// nil pour les ordres saisis manuellement par l'user.
+    /// nil pour les ordres saisis manuellement par l'utilisateur.
     var externalId: String? = nil
 
     /// Coût total brut (qty × prix + frais). Pour BUY = sortie cash, pour SELL = entrée cash.

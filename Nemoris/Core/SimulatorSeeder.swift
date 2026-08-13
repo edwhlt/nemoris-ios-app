@@ -31,7 +31,7 @@ enum SimulatorSeeder {
             return
         }
 
-        // Branche 2 : DB déjà peuplée par l'user (ou par un seed antérieur).
+        // Branche 2 : DB déjà peuplée par l'utilisateur (ou par un seed antérieur).
         // On ne touche à RIEN sauf au module Patrimoine si ses tables sont vides —
         // sinon les users existants ne verraient jamais de données de démo Patrimoine.
         // Garde-fou : on vérifie les 3 tables Patrimoine indépendamment.
@@ -42,7 +42,7 @@ enum SimulatorSeeder {
             exec(conn, "BEGIN;")
             // Variante standalone-only : tous les actifs en manuel, pas de linkage
             // hardcodé vers accounts/investment_accounts (dont les IDs sont
-            // inconnus dans une DB déjà peuplée par l'user).
+            // inconnus dans une DB déjà peuplée par l'utilisateur).
             seedPatrimoineStandalone(conn)
             exec(conn, "COMMIT;")
         }
@@ -396,7 +396,7 @@ enum SimulatorSeeder {
     // MARK: - Patrimoine
 
     /// Seed du module Patrimoine — démontre les 3 catégories (assets liés/manuels,
-    /// immobilier, prêts) ainsi que les 5 types de prêts pour que l'user voie
+    /// immobilier, prêts) ainsi que les 5 types de prêts pour que l'utilisateur voie
     /// immédiatement à quoi ressemble chaque cas.
     private static func seedPatrimoine(_ db: OpaquePointer) {
         let createdAt = "datetime('now')"
@@ -499,8 +499,8 @@ enum SimulatorSeeder {
 
     /// Variante de `seedPatrimoine` pour la branche "DB existante" : aucun lien
     /// hardcodé vers accounts/investment_accounts (leurs IDs sont inconnus dans
-    /// une DB déjà peuplée par l'user). Tous les actifs sont en mode standalone
-    /// (valeur manuelle). L'user peut ensuite les relier via le form si besoin.
+    /// une DB déjà peuplée par l'utilisateur). Tous les actifs sont en mode standalone
+    /// (valeur manuelle). l'utilisateur peut ensuite les relier via le form si besoin.
     private static func seedPatrimoineStandalone(_ db: OpaquePointer) {
         let createdAt = "datetime('now')"
 

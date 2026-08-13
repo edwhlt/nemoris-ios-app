@@ -136,7 +136,7 @@ enum ProjectionEngine {
             // 1) Cash flow + croissance des assets liquides.
             // PAS de bornage à 0 : on laisse `currentLiquid` aller en territoire
             // négatif si le cashFlow l'exige. C'est plus honnête — ça matérialise
-            // le découvert continu que l'user aurait si rien ne change. Pour la
+            // le découvert continu que l'utilisateur aurait si rien ne change. Pour la
             // croissance, on n'applique pas le facteur quand on est négatif
             // (un découvert ne "rend" pas — au contraire les agios coûtent, mais
             // on n'a pas la modélisation pour ça en MVP, on reste neutre).

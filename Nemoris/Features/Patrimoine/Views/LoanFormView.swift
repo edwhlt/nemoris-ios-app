@@ -60,7 +60,7 @@ struct LoanFormView: View {
         Double(principalText.replacingOccurrences(of: ",", with: ".")) ?? 0
     }
     private var annualRate: Double {
-        // L'user saisit en %, on stocke en décimal (0.034 = 3.4%).
+        // l'utilisateur saisit en %, on stocke en décimal (0.034 = 3.4%).
         (Double(annualRatePercentText.replacingOccurrences(of: ",", with: ".")) ?? 0) / 100
     }
     private var insuranceMonthly: Double {

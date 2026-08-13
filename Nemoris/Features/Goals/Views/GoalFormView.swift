@@ -6,7 +6,7 @@ import SwiftUI
 //
 // **Templates** : 4 starters proposés en haut du form pour les nouveaux goals,
 // pour accélérer la création la plus fréquente (fonds d'urgence, apport,
-// patrimoine, dette à zéro). Tap → pré-remplit name/kind/targetAmount, l'user
+// patrimoine, dette à zéro). Tap → pré-remplit name/kind/targetAmount, l'utilisateur
 // peut tout modifier.
 //
 // **Champs adaptatifs** :

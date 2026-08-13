@@ -7,7 +7,7 @@ import SwiftUI
 // pour laisser SwiftUI rendre le fond avant que iOS pose sa sheet biometry —
 // évite un flash blanc disgracieux.
 //
-// Si l'user annule ou échoue, il voit un écran "verrouillé" avec un bouton
+// Si l'utilisateur annule ou échoue, il voit un écran "verrouillé" avec un bouton
 // "Déverrouiller" qu'il peut retaper pour relancer.
 
 struct AppLockGate: View {

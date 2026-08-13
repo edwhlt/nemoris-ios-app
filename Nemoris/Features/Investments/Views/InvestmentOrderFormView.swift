@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - AXE K — Formulaire d'ajout/édition d'un ordre
+// MARK: - Formulaire d'ajout/édition d'un ordre
 //
 // Ouvert depuis InvestmentPositionDetailView en sheet. Permet de saisir/éditer
 // un BUY / SELL / DIV avec date, qty, prix unitaire, frais, notes.
@@ -29,7 +29,7 @@ struct InvestmentOrderFormView: View {
 
     private var isEditing: Bool { order != nil }
 
-    /// AXE M : init() set @State au build time depuis l'order passé. Évite
+    /// init() set @State au build time depuis l'order passé. Évite
     /// le bug de stale state où une édition d'order pouvait écraser les nouvelles
     /// valeurs avec celles d'un ordre précédemment édité.
     init(positionId: Int, currency: String, order: InvestmentOrder?, onSave: @escaping (InvestmentOrder, Bool) -> Void) {

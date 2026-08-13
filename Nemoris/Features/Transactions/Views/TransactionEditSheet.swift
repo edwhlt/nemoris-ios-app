@@ -121,7 +121,7 @@ struct TransactionEditSheet: View {
                 // sa sémantique à tout le monde ; il est devenu une métadonnée
                 // parmi d'autres (migration v46). `payment_type_id` reste écrit
                 // tel quel sur les transactions existantes mais n'est plus lu
-                // par l'UI — dépréciation, pas suppression (doctrine AXE H).
+                // par l'UI — dépréciation, pas suppression (doctrine du projet).
                 TransactionMetadataSection(transactionId: draft.id)
 
                 if reimbursementsEnabled {

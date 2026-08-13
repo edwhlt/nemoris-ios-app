@@ -6,7 +6,7 @@ import Foundation
 // Ils sont read-only : on lit l'état d'un compte externe sans jamais y écrire.
 //
 // Stratégie credentials :
-//   - les valeurs sont saisies par l'user dans un form généré dynamiquement depuis
+//   - les valeurs sont saisies par l'utilisateur dans un form généré dynamiquement depuis
 //     `credentialFields`
 //   - stockées chiffrées en Keychain iOS via `InvestmentCredentialStore`
 //   - JAMAIS transmises à un serveur Nemoris (pas de serveur Nemoris du tout)
@@ -132,7 +132,7 @@ protocol InvestmentLiveSyncProvider: Sendable {
     /// Utilisé comme clé dans `investment_live_sync.provider_id` et Keychain.
     static var id: String { get }
 
-    /// Libellé affiché à l'user (ex: "Binance", "Wallet EVM").
+    /// Libellé affiché à l'utilisateur (ex: "Binance", "Wallet EVM").
     static var displayName: String { get }
 
     /// SF Symbol représentant le provider (ex: "bitcoinsign.circle", "link").
@@ -141,11 +141,11 @@ protocol InvestmentLiveSyncProvider: Sendable {
     /// Description courte affichée dans le picker d'ajout.
     static var description: String { get }
 
-    /// Champs de credentials à demander à l'user (apiKey, address, etc.).
+    /// Champs de credentials à demander à l'utilisateur (apiKey, address, etc.).
     /// Le form Settings génère les TextField dynamiquement.
     static var credentialFields: [LiveSyncCredentialField] { get }
 
-    /// Si true, on demande aussi à l'user de choisir une chaîne (ex: EVM).
+    /// Si true, on demande aussi à l'utilisateur de choisir une chaîne (ex: EVM).
     /// Le form affiche un Picker des chaînes supportées dans ce cas.
     static var supportsChainSelection: Bool { get }
 

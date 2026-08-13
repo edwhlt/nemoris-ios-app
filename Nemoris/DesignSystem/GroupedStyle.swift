@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Style standard des conteneurs groupés (AXE N.1)
+// MARK: - Style standard des conteneurs groupés
 //
 // macOS n'a pas d'équivalent natif du `.insetGrouped` iOS pour `List` — d'où
 // des écrans "bruts" (rows bord-à-bord, sections plates) sur desktop alors que
@@ -19,7 +19,7 @@ import SwiftUI
 // ⚠️ Conventions :
 // - Tout nouveau `Form` doit recevoir `.nemorisFormStyle()`.
 // - Ne jamais combiner `ZStack { Color.ignoresSafeArea(); Form }` (hauteur
-//   infinie sur macOS, cf. CLAUDE.md AXE N.1) — `Form { … }.background(…)`.
+//   infinie sur macOS) — `Form { … }.background(…)`.
 
 extension View {
     /// Style standard des `Form` : grouped natif macOS (boxes arrondies),
@@ -41,7 +41,7 @@ extension View {
     /// néfaste (le dernier gagne, et c'est la même couleur).
     ///
     /// ⚠️ Ne jamais remplacer par `ZStack { Color.ignoresSafeArea(); Form }` :
-    /// hauteur infinie sur macOS (cf. AXE N.1).
+    /// hauteur infinie sur macOS ().
     func nemorisFormStyle() -> some View {
         #if os(macOS)
         return self

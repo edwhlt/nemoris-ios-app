@@ -3,7 +3,7 @@ import SQLite3
 
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-/// CRUD pour les sessions d'import (AXE E) et les mappings CSV (AXE D).
+/// CRUD pour les sessions d'import et les mappings CSV.
 /// Le contenu d'une session est sérialisé en JSON dans `import_sessions.rows_json`.
 struct ImportSessionRepository {
 

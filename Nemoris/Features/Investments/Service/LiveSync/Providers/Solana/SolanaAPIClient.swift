@@ -3,7 +3,7 @@ import Foundation
 // MARK: - AXE I Couche 3b — Client Solana RPC public
 //
 // Protocol JSON-RPC 2.0 vers le RPC public officiel Solana (`api.mainnet-beta.solana.com`).
-// Gratuit, pas de clé, mais rate limit raisonnable. Pour usage prod intensif, l'user peut
+// Gratuit, pas de clé, mais rate limit raisonnable. Pour usage prod intensif, l'utilisateur peut
 // passer son propre endpoint (Helius, QuickNode, Triton, etc.) — futur amélioration.
 //
 // Méthodes utilisées :
@@ -44,7 +44,7 @@ struct SolanaAPIClient {
         let response: JSONRPCResponse<GetTokenAccountsResult> = try await post(body)
         return response.result.value.compactMap { wrapped -> SolanaTokenAccount? in
             let info = wrapped.account.data.parsed.info
-            // Skip accounts à 0 (l'user a fermé le SPL token account sans le delete)
+            // Skip accounts à 0 (l'utilisateur a fermé le SPL token account sans le delete)
             guard let amount = Double(info.tokenAmount.amount), amount > 0 else { return nil }
             let qty = amount / pow(10.0, Double(info.tokenAmount.decimals))
             return SolanaTokenAccount(

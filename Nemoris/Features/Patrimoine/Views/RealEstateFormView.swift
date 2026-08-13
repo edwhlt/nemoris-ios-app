@@ -114,7 +114,7 @@ struct RealEstateFormView: View {
                             .frame(maxWidth: 160)
                     }
 
-                    // Toggle "Date d'estimation" : l'user peut choisir de la marquer
+                    // Toggle "Date d'estimation" : l'utilisateur peut choisir de la marquer
                     // (utile pour se rappeler quand il a fait la dernière revalo) ou
                     // de la laisser nulle (estimation au doigt mouillé permanente).
                     Toggle("Marquer la date d'estimation", isOn: Binding(
@@ -131,7 +131,7 @@ struct RealEstateFormView: View {
                     }
 
                     // Preview live de la plus-value. Donne un feedback éditorial
-                    // immédiat à l'user pendant la saisie.
+                    // immédiat à l'utilisateur pendant la saisie.
                     if purchasePrice > 0 && currentValue > 0 {
                         HStack(spacing: AppTheme.Spacing.xs) {
                             Image(systemName: capitalGain >= 0 ? "arrow.up.right" : "arrow.down.right")

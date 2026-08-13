@@ -24,7 +24,7 @@ extension AlertSeverity {
 //   - 4+ → on affiche la plus sévère + badge "N alertes au total"
 //
 // **Tap action** : route vers l'onglet pertinent via `appState.selectedTab`.
-// Pour MVP on n'ouvre pas la fiche exacte (deep-link complexe) — l'user
+// Pour MVP on n'ouvre pas la fiche exacte (deep-link complexe) — l'utilisateur
 // arrive sur l'onglet et trouve l'item facilement.
 //
 // **Animation** : transition d'apparition douce (move + opacity), pour éviter

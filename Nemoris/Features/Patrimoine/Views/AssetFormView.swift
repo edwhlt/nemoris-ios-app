@@ -5,9 +5,9 @@ import SwiftUI
 // Sheet de création/édition d'un asset Patrimoine (Mobilier & Liquidités).
 //
 // 2 modes mutuellement exclusifs :
-//   • **Standalone** : l'user saisit une valeur manuelle. Champ éditable, figé
-//     tant que l'user ne le met pas à jour.
-//   • **Linked** : l'user choisit un compte source (Account ou InvestmentAccount)
+//   • **Standalone** : l'utilisateur saisit une valeur manuelle. Champ éditable, figé
+//     tant que l'utilisateur ne le met pas à jour.
+//   • **Linked** : l'utilisateur choisit un compte source (Account ou InvestmentAccount)
 //     via `AccountLinkPickerSheet`. La valeur affichée devient lecture seule —
 //     elle sera résolue dynamiquement à chaque ouverture de la PatrimoineView.
 //
@@ -245,7 +245,7 @@ struct AssetFormView: View {
                 ) { newSelection in
                     linkSelection = newSelection
                     // Si on bascule en .none, on remet manualValueText à 0 (vide pour
-                    // forcer l'user à taper sa valeur).
+                    // forcer l'utilisateur à taper sa valeur).
                     if newSelection == .none, existingAsset == nil {
                         manualValueText = ""
                     }
@@ -296,7 +296,7 @@ struct AssetFormView: View {
             updated.linkedAccountId = bankId
             updated.linkedInvestmentAccountId = investmentId
             // Si l'asset passe en linked, on garde la manualValue précédente comme
-            // valeur de secours (utile si l'user re-bascule en standalone plus tard).
+            // valeur de secours (utile si l'utilisateur re-bascule en standalone plus tard).
             // En .none, on prend la valeur saisie.
             if !isLinked {
                 updated.manualValue = manualValueParsed
@@ -305,7 +305,7 @@ struct AssetFormView: View {
             success = viewModel.updateAsset(updated)
         } else {
             // Create — pour un linked, manualValue stocke la valeur actuelle lue
-            // comme "valeur de bascule possible" si l'user désactive le lien plus tard.
+            // comme "valeur de bascule possible" si l'utilisateur désactive le lien plus tard.
             let manualForCreate = isLinked ? linkedLiveValue : manualValueParsed
             success = viewModel.createAsset(
                 name: trimmedName,

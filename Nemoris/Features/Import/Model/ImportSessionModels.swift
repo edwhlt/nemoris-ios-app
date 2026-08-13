@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - ImportSession (AXE D + E)
+// MARK: - ImportSession
 
 /// Statut d'une session d'import. Une seule session 'active' à la fois en DB.
 enum ImportSessionStatus: String, Codable {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Parseur CSV minimal pour le nouveau parcours d'import (AXE D).
+/// Parseur CSV minimal pour le nouveau parcours d'import.
 /// Autodétection séparateur + lecture des cellules en respectant les guillemets.
 enum CSVParser {
 

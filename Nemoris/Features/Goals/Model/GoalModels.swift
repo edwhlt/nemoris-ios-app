@@ -15,7 +15,7 @@ enum GoalKind: String, CaseIterable {
     /// Rembourser intégralement la dette. `current` = totalLiabilities, target = 0.
     /// Progress = (1 − current/initialDebt) — capé à 100%.
     case debtPayoff = "DEBT_PAYOFF"
-    /// Objectif libre — l'user édite manuellement le "current" (pas de calcul auto).
+    /// Objectif libre — l'utilisateur édite manuellement le "current" (pas de calcul auto).
     case custom     = "CUSTOM"
 
     var label: String {

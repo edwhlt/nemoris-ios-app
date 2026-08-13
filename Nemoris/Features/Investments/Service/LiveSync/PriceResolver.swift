@@ -12,7 +12,7 @@ import Foundation
 //       * `/simple/token_price/<chain>` par contract address — pour ERC-20/BEP-20/SPL
 //   - Cache RAM 10 min : on suppose que pour usage perso, refresh par sync manuel suffit
 //   - Tokens sans prix CoinGecko → renvoyés avec value nil, traités par UI comme
-//     "Valeur indisponible" (cf. décision user)
+//     "Valeur indisponible" (cf. décision produit)
 //
 // Privacy : appels directs à api.coingecko.com depuis le device. Aucun proxy serveur.
 
@@ -353,7 +353,7 @@ actor PriceResolver {
             throw LiveSyncError.networkError("Réponse HTTP invalide")
         }
         // 429 = rate limit. CoinGecko free n'a pas de header Retry-After fiable, on indique
-        // juste qu'on est limité et l'user devra retry plus tard. On alimente aussi
+        // juste qu'on est limité et l'utilisateur devra retry plus tard. On alimente aussi
         // le breaker partagé pour que les fetchs d'HISTORIQUE (InvestmentAutoSyncService)
         // sachent immédiatement que CoinGecko est indisponible.
         if http.statusCode == 429 {

@@ -9,7 +9,7 @@ enum ImportSortMode: String, CaseIterable {
     case byAmountAbs = "Montant"
 }
 
-/// Orchestrateur de la vue d'import (AXE D). Charge la session depuis la DB,
+/// Orchestrateur de la vue d'import. Charge la session depuis la DB,
 /// lance la résolution moteur en arrière-plan, persiste à chaque action user,
 /// et déclenche le commit final dans la table `transactions`.
 @MainActor
@@ -361,7 +361,7 @@ final class ImportSessionViewModel {
         lastBulkApply = BulkApplyInfo(action: action, count: count, timestamp: Date())
     }
 
-    // MARK: - Enrichissement multi-sources (AXE B)
+    // MARK: - Enrichissement multi-sources
 
     /// Pour chaque row .needsManualPick : tente Sirene + LLM + MapKit, et si on récupère
     /// un signal exploitable, "upgrade" la résolution vers .suggestCreate avec les infos

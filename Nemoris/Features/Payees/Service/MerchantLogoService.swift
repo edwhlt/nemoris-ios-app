@@ -7,7 +7,7 @@ import NemorisEngine
 
 /// Récupère et cache les favicons de marchands depuis Google.
 ///
-/// Stratégie (AXE A) :
+/// Stratégie :
 ///   - Le domaine vient en priorité de `payees.domain` (rempli au fil de l'usage).
 ///   - Si vide, on tente le seed engine `MerchantDomains.map[engine_merchant_id]`.
 ///   - Si toujours rien → renvoie nil → l'UI affiche le fallback SF Symbol.

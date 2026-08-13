@@ -2,15 +2,15 @@ import Foundation
 
 // MARK: - EnvelopeSuggestionService
 //
-// Suggère des enveloppes budgétaires à partir de l'historique de l'user.
+// Suggère des enveloppes budgétaires à partir de l'historique de l'utilisateur.
 // L'algo : on regarde les 90 derniers jours, on groupe les dépenses par
 // catégorie, on calcule la moyenne mensuelle et on propose un budget de
 // `moyenne × 1.10` (arrondi à la dizaine) — léger overhead pour ne pas
-// rendre l'user "en dépassement" dès le 1er mois.
+// rendre l'utilisateur "en dépassement" dès le 1er mois.
 //
 // **Filtre catégorie déjà couverte** : si une enveloppe existe déjà pour
 // cette catégorie, on ne la propose pas (évite les doublons). On peut
-// l'écraser via le form classique si l'user veut ajuster.
+// l'écraser via le form classique si l'utilisateur veut ajuster.
 //
 // **Critères de pertinence** :
 //   - Minimum 3 transactions dans les 90 derniers jours (signal solide)
@@ -86,7 +86,7 @@ enum EnvelopeSuggestionService {
             guard let cat = categoryById[cid] else { continue }
             let avgMonthly = stats.total * monthlyFactor
             // Arrondi à la dizaine supérieure + 10 % d'overhead — donne une cible
-            // réaliste mais pas serrée au point que l'user soit en dépassement
+            // réaliste mais pas serrée au point que l'utilisateur soit en dépassement
             // dès le 1er mois.
             // ⚠️ Arrondi au centime AVANT de monter à la dizaine. En virgule
             // flottante, 100 × 1,10 vaut 110.00000000000001 : un ceil direct le

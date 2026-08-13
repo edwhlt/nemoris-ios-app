@@ -296,7 +296,7 @@ final class BudgetViewModel {
 
     func skipPrevision(_ prevision: BudgetPrevision) {
         self.repo.updatePrevisionStatus(id: prevision.id, status: .skipped, transactionId: nil)
-        // Skip → cancel la notif j-3 (sinon on rappelle une échéance que l'user a ignorée)
+        // Skip → cancel la notif j-3 (sinon on rappelle une échéance que l'utilisateur a ignorée)
         BudgetNotificationService.cancel(forPrevisionId: prevision.id)
         refresh()
     }

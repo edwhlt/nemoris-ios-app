@@ -17,7 +17,7 @@ enum TierResolution {
     case suggestContact(name: String, hint: String)
 
     /// Opération bancaire interne (RETRAIT DAB, frais, etc.) → pas de payee classique
-    /// nécessaire. L'app peut utiliser une catégorie système ou laisser le user décider.
+    /// nécessaire. L'app peut utiliser une catégorie système ou laisser l'utilisateur décider.
     case systemOperation(category: NemorisEngine.SystemCategory, displayName: String)
 
     /// Le moteur n'a rien d'utilisable → l'utilisateur doit choisir ou créer manuellement.

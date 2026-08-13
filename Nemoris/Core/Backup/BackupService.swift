@@ -35,12 +35,12 @@ final class BackupService {
     /// de backup quotidien — suffisant pour récupérer d'une corruption récente.
     var maxSnapshots: Int = 30
 
-    /// Container iCloud par défaut — `nil` quand l'user n'a pas iCloud configuré
+    /// Container iCloud par défaut — `nil` quand l'utilisateur n'a pas iCloud configuré
     /// ou que l'entitlement n'a pas été activé côté Xcode. Recalculé à chaque accès
     /// pour suivre les changements d'état (login/logout iCloud).
     private var iCloudContainerURL: URL? {
         // Container par défaut associé au bundle ID. Renvoie nil si :
-        //   - L'user n'est pas connecté à iCloud
+        //   - l'utilisateur n'est pas connecté à iCloud
         //   - L'entitlement iCloud Documents n'est pas activé
         //   - L'app vient juste de lancer (le container met parfois quelques
         //     secondes à devenir disponible — d'où l'absence de cache)
@@ -49,7 +49,7 @@ final class BackupService {
 
     // MARK: - User-facing config (persistée UserDefaults)
 
-    /// Auto-backup activé. Par défaut : true (sauf si l'user désactive).
+    /// Auto-backup activé. Par défaut : true (sauf si l'utilisateur désactive).
     var autoBackupEnabled: Bool {
         get { UserDefaults.standard.object(forKey: "backupAutoEnabled") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "backupAutoEnabled") }
@@ -63,7 +63,7 @@ final class BackupService {
     }
 
     /// Dernière erreur rencontrée lors d'une opération iCloud. Affichée dans
-    /// Settings pour informer l'user sans bloquer l'opération locale.
+    /// Settings pour informer l'utilisateur sans bloquer l'opération locale.
     var lastSyncError: String? {
         get { UserDefaults.standard.string(forKey: "backupLastSyncError") }
         set { UserDefaults.standard.set(newValue, forKey: "backupLastSyncError") }
@@ -87,7 +87,7 @@ final class BackupService {
         let isICloud: Bool
         /// `true` pour une sauvegarde de sécurité auto-créée juste avant une
         /// restauration (préfixe `nemoris-pre-restore-`) — pas déclenchée par
-        /// l'user, mais restaurable/supprimable comme n'importe quel snapshot.
+        /// l'utilisateur, mais restaurable/supprimable comme n'importe quel snapshot.
         let isPreRestore: Bool
 
         var displayName: String {
@@ -175,7 +175,7 @@ final class BackupService {
     }
 
     /// Restaure le snapshot donné. Crée d'abord une sauvegarde de sécurité de la
-    /// DB courante (suffixe `-pre-restore-<timestamp>`) — l'user peut toujours
+    /// DB courante (suffixe `-pre-restore-<timestamp>`) — l'utilisateur peut toujours
     /// revenir en arrière si la restauration le laisse dans un état non-désiré.
     /// L'appelant doit ensuite invalider tous les VMs (cf. AppState.dataRefreshToken).
     func restore(snapshot: Snapshot) throws {
@@ -195,7 +195,7 @@ final class BackupService {
         if snapshot.isICloud, !FileManager.default.fileExists(atPath: snapshot.url.path) {
             try FileManager.default.startDownloadingUbiquitousItem(at: snapshot.url)
             // On attend que le téléchargement aboutisse (timeout 30s). Pour MVP
-            // on bloque le main thread quelques secondes — acceptable car l'user
+            // on bloque le main thread quelques secondes — acceptable car l'utilisateur
             // a explicitement tapé "Restaurer" et voit un spinner.
             try waitForFile(at: snapshot.url, timeout: 30)
         }
@@ -259,7 +259,7 @@ final class BackupService {
             throw BackupError.iCloudUnavailable
         }
         // Le sous-dossier `Documents` est obligatoire dans un container iCloud
-        // pour être visible côté Files app de l'user.
+        // pour être visible côté Files app de l'utilisateur.
         let documentsURL = container.appendingPathComponent("Documents", isDirectory: true)
         let backupDir = documentsURL.appendingPathComponent("Backups", isDirectory: true)
         try FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
@@ -313,7 +313,7 @@ final class BackupService {
             let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
             // iCloud fichiers pas encore téléchargés : `.fileSize` peut être 0 ou nil
             // mais la métadata système contient la vraie taille. On accepte 0 si rien
-            // d'autre — l'user voit "0 octets" et comprend que c'est en attente.
+            // d'autre — l'utilisateur voit "0 octets" et comprend que c'est en attente.
             let size = (attrs?[.size] as? Int64) ?? 0
             let date = Self.dateFromFilename(name) ?? (attrs?[.creationDate] as? Date) ?? Date()
             return Snapshot(

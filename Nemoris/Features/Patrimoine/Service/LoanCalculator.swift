@@ -36,7 +36,7 @@ import Foundation
 //         CR(k) = P · (1+i)^(k−d) − M · ((1+i)^(k−d) − 1) / i
 //
 //   • REVOLVING (crédit renouvelable, capital saisi manuellement)
-//     CR = principal (l'user met à jour le champ Capital quand il rembourse)
+//     CR = principal (l'utilisateur met à jour le champ Capital quand il rembourse)
 //     M = 0 (pas de mensualité fixe — varie selon utilisation)
 
 /// État calculé d'un prêt à une date donnée. Tous les montants en EUR (cohérent
@@ -84,7 +84,7 @@ enum LoanCalculator {
         let monthsElapsed = max(0, min(rawMonths, totalDuration))
         let isCompleted = rawMonths >= totalDuration
 
-        // REVOLVING : pas de math. Capital = principal saisi (l'user le tient à jour).
+        // REVOLVING : pas de math. Capital = principal saisi (l'utilisateur le tient à jour).
         if loan.loanType == .revolving {
             return LoanState(
                 remainingCapital: loan.principal,

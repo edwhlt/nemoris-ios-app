@@ -76,7 +76,7 @@ enum TransactionDensity: String, CaseIterable, Identifiable {
     var showLogo: Bool { self != .compact }
 
     /// En compact on supprime la 2e ligne (info user + balance courante) pour
-    /// avoir un row strictement à 1 ligne dense. Le user peut tap pour voir
+    /// avoir un row strictement à 1 ligne dense. l'utilisateur peut tap pour voir
     /// les détails.
     var showSecondaryInfo: Bool { self != .compact }
 }

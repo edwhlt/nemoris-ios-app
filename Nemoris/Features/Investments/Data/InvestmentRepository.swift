@@ -475,7 +475,7 @@ struct InvestmentRepository {
         }
     }
 
-    /// AXE I Couche 1.5 : vérifie si un ordre avec cet `external_id` existe déjà.
+    /// vérifie si un ordre avec cet `external_id` existe déjà.
     /// Permet au sync d'éviter le re-INSERT inutile (l'UNIQUE INDEX bloquerait
     /// de toute façon mais ça évite la requête).
     func orderExistsWithExternalId(_ externalId: String) -> Bool {
@@ -524,7 +524,7 @@ struct InvestmentRepository {
     /// Détection : `external_id IS NULL` (ce sont nos seeds locaux, pas des
     /// trades Binance qui ont tous un `external_id`) ET `notes LIKE 'Sync %'`
     /// (= marqueur posé par persistPositions). On préserve donc les ordres
-    /// saisis manuellement par l'user (qui ont external_id nul mais des notes
+    /// saisis manuellement par l'utilisateur (qui ont external_id nul mais des notes
     /// différentes).
     ///
     /// À appeler depuis `persistTransactions` après qu'on ait inséré des
@@ -698,7 +698,7 @@ struct InvestmentRepository {
     /// Réparation crypto : reset à 0 le `current_value` de TOUTES les positions
     /// CRYPTO + purge les `investment_price_history` stockés sous leurs tickers
     /// (BTC, ETH, FET, etc.) qui correspondent en fait à des données d'actions
-    /// homonymes scrappées sur Yahoo. Après ça, l'user relance LiveSync Binance/
+    /// homonymes scrappées sur Yahoo. Après ça, l'utilisateur relance LiveSync Binance/
     /// wallet pour récupérer les vraies valeurs depuis CoinGecko.
     ///
     /// Sûr à appeler plusieurs fois (idempotent).

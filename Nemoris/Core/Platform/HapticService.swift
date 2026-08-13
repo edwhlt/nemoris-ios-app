@@ -65,7 +65,7 @@ final class HapticService {
     /// Lecture du toggle global. Source de vérité = UserDefaults pour éviter
     /// le couplage AppState (le service est instancié avant l'AppState peut-être).
     private var enabled: Bool {
-        // Default true — c'est l'attente standard d'une app moderne. L'user
+        // Default true — c'est l'attente standard d'une app moderne. l'utilisateur
         // peut désactiver explicitement dans Settings s'il préfère.
         UserDefaults.standard.object(forKey: "hapticsEnabled") as? Bool ?? true
     }

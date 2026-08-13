@@ -1,7 +1,7 @@
 import SwiftUI
 import NemorisEngine
 
-/// Sheet d'édition complète d'un payee (AXE C). Remplace l'ancien form
+/// Sheet d'édition complète d'un payee. Remplace l'ancien form
 /// minimal (name + regex + categoryId) de ReferenceDataView.
 ///
 /// Sections : Identité | Localisation | Appartenance | Catégorisation | Avancé.
@@ -392,11 +392,11 @@ struct PayeeDetailView: View {
         updated.groupId          = groupId
         updated.custom           = custom
         updated.note             = note.trimmingCharacters(in: .whitespaces).nilIfEmpty
-        // AXE F : ces 2 champs étaient oubliés du remap → le picker tierType et
+        // ces 2 champs étaient oubliés du remap → le picker tierType et
         // le lien contact ne se persistaient jamais (on écrivait les valeurs
         // initialPayee, pas les @State courants). Bug fix critique.
         updated.tierType         = tierType
-        // Si le user a explicitement délié, on stocke nil. Sinon on prend la valeur courante
+        // Si l'utilisateur a explicitement délié, on stocke nil. Sinon on prend la valeur courante
         // (peut être nil si jamais lié). On ne garde le contact que si tier_type == .contact
         // pour éviter qu'un tier qu'on re-type en .merchant garde un lien orphelin.
         updated.contactIdentifier = (tierType == .contact) ? contactIdentifier : nil

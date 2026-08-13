@@ -17,7 +17,7 @@ import os
 // Aucun grace period : pour une app finance, c'est l'attente standard et ça
 // évite la surface d'attaque "écran allumé sans surveillance".
 //
-// **Activation** : l'user doit s'authentifier UNE fois pour activer le toggle
+// **Activation** : l'utilisateur doit s'authentifier UNE fois pour activer le toggle
 // dans Settings (preuve de propriété du device). Pareil pour le désactiver
 // (sinon n'importe qui qui prend le téléphone déverrouillé pourrait désactiver
 // le lock à l'insu du propriétaire).
@@ -101,7 +101,7 @@ final class AppLockService {
     // MARK: - Public API
 
     /// Lance une authentification biometry/code iOS. Bloque le caller jusqu'à
-    /// décision user (réussite, échec, annulation). Retourne `true` si auth OK.
+    /// décision produit (réussite, échec, annulation). Retourne `true` si auth OK.
     ///
     /// `reason` est affichée par iOS dans la sheet Face ID — DOIT être courte et
     /// claire ("Déverrouiller Nemoris" et pas "Veuillez vous authentifier pour
@@ -136,7 +136,7 @@ final class AppLockService {
     }
 
     /// Active ou désactive le lock. **Demande auth d'abord** pour les 2 sens :
-    ///   - Activer : preuve que l'user est bien le propriétaire (sinon n'importe
+    ///   - Activer : preuve que l'utilisateur est bien le propriétaire (sinon n'importe
     ///     qui peut activer et "verrouiller" le téléphone du propriétaire légitime).
     ///   - Désactiver : preuve aussi — sinon une personne qui choperait l'app
     ///     déverrouillée pourrait désactiver le lock à l'insu du propriétaire.
@@ -158,7 +158,7 @@ final class AppLockService {
         guard success else { return false }
 
         UserDefaults.standard.set(enabled, forKey: "appLockEnabled")
-        // Quand on active, on considère que l'user vient d'authentifier → pas de
+        // Quand on active, on considère que l'utilisateur vient d'authentifier → pas de
         // re-prompt immédiat. Quand on désactive, on clear le flag aussi.
         needsAuthentication = false
         Self.log.info("Lock \(enabled ? "activé" : "désactivé")")

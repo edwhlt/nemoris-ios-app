@@ -14,13 +14,13 @@ import Foundation
 //      Revenus + libellé contenant "Loyer" comme heuristique fallback)
 //
 // **Limites assumées** :
-//   - Pas de gestion des moins-values reportables (case 3VH) — l'user les
+//   - Pas de gestion des moins-values reportables (case 3VH) — l'utilisateur les
 //     compense lui-même via les exports.
 //   - Pas de gestion fiscale crypto (BIC/BNC vs case 3AN — complexe).
 //   - Pas de calcul d'abattement PEA selon ancienneté de retrait.
-//   - Pas de gestion CSG/CRDS (l'user a 17.2% par défaut, on l'affiche en info).
+//   - Pas de gestion CSG/CRDS (l'utilisateur a 17.2% par défaut, on l'affiche en info).
 //
-// Le but est de pré-remplir 90 % du travail — l'user vérifie et reporte
+// Le but est de pré-remplir 90 % du travail — l'utilisateur vérifie et reporte
 // les chiffres sur sa déclaration.
 
 struct TaxReportYear {
@@ -101,7 +101,7 @@ struct PropertyIncomeSummary {
     let entriesCount: Int
 
     /// Au-delà de 15 000 € → régime réel obligatoire ; sous → micro-foncier
-    /// possible (abattement 30 %). On informe l'user.
+    /// possible (abattement 30 %). On informe l'utilisateur.
     var suggestedRegime: String {
         totalAmount > 15000
             ? "Régime réel obligatoire (> 15 000 €)"

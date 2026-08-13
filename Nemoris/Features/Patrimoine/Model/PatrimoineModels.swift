@@ -112,7 +112,7 @@ struct PatrimoineLoan: Identifiable, Hashable {
     /// Assurance emprunteur mensuelle (en EUR). Charge séparée de la mensualité
     /// d'amortissement — n'affecte PAS le capital restant dû ni le calcul des
     /// intérêts. Affichée dans le form + sommée dans le coût mensuel total.
-    /// 0 si pas d'assurance ou si l'user ne la suit pas séparément.
+    /// 0 si pas d'assurance ou si l'utilisateur ne la suit pas séparément.
     var insuranceMonthly: Double
     /// Lien optionnel vers un bien immobilier (typiquement le prêt finance ce bien).
     /// ON DELETE SET NULL côté SQL — la suppression du bien ne supprime pas le prêt.
@@ -137,12 +137,12 @@ struct PatrimoineAsset: Identifiable, Hashable {
     var linkedAccountId: Int?            // Lien vers accounts.id (livret, courant, épargne)
     var linkedInvestmentAccountId: Int?  // Lien vers investment_accounts.id (PEA, CTO, etc.)
 
-    /// Valeur saisie manuellement par l'user. Utilisée UNIQUEMENT si aucun link n'est défini.
+    /// Valeur saisie manuellement par l'utilisateur. Utilisée UNIQUEMENT si aucun link n'est défini.
     var manualValue: Double
 
     /// Dernier snapshot de la valeur résolue (lu depuis le compte lié ou copié de
     /// manualValue). Conservé même si le lien est rompu — sert de fallback offline
-    /// et de mémoire si l'user supprime son compte source.
+    /// et de mémoire si l'utilisateur supprime son compte source.
     var lastKnownValue: Double
 
     var notes: String?

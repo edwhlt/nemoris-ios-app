@@ -16,7 +16,7 @@ import Observation
 /// Provenance de la valeur résolue d'un asset. Sert à afficher un badge contextuel
 /// dans la liste (lié, manuel, lien rompu).
 enum AssetValueSource {
-    case manual              // Mode standalone, valeur saisie par l'user
+    case manual              // Mode standalone, valeur saisie par l'utilisateur
     case linkedAccount       // Lié à un compte bancaire (Account)
     case linkedInvestment    // Lié à un compte investissement (InvestmentAccount)
     case brokenLink          // L'ID lié existe encore en mémoire mais le compte est introuvable
@@ -82,7 +82,7 @@ final class PatrimoineViewModel {
     }
 
     /// Somme de la valeur actuelle estimée de tous les biens immobiliers.
-    /// `currentValue` est saisi manuellement par l'user — pas de résolution dynamique
+    /// `currentValue` est saisi manuellement par l'utilisateur — pas de résolution dynamique
     /// nécessaire (l'immobilier ne s'apparente pas à un compte qui bouge tout seul).
     var totalRealEstateValue: Double {
         realEstates.reduce(0) { $0 + $1.currentValue }
@@ -137,7 +137,7 @@ final class PatrimoineViewModel {
     var goalProgresses: [Int: GoalProgress] = [:]
 
     /// Baseline de dette pour les goals `.debtPayoff`. Stockée en UserDefaults
-    /// par goal_id — l'idée : au moment où l'user crée un goal de remboursement,
+    /// par goal_id — l'idée : au moment où l'utilisateur crée un goal de remboursement,
     /// on capture la dette MAX (= snapshot.totalLiabilities à cet instant) qui
     /// devient le 100% à atteindre. Sans ça, le progress serait toujours 0%
     /// (current dette / current dette = 1 → ratio = 0).
@@ -326,7 +326,7 @@ final class PatrimoineViewModel {
             return false
         }
         // Pour un asset linked, on calcule la valeur initiale du snapshot last_known_value
-        // pour qu'il ne soit pas à 0 même si l'user ne consulte pas la liste tout de suite.
+        // pour qu'il ne soit pas à 0 même si l'utilisateur ne consulte pas la liste tout de suite.
         var lastKnown: Double = manualValue
         if let bankId = linkedAccountId {
             lastKnown = transactionRepo.fetchAccountBalance(accountId: bankId, upToDate: nil)
@@ -350,7 +350,7 @@ final class PatrimoineViewModel {
 
     @discardableResult
     func updateAsset(_ asset: PatrimoineAsset) -> Bool {
-        // Conflit possible aussi sur update si l'user re-link vers un autre compte
+        // Conflit possible aussi sur update si l'utilisateur re-link vers un autre compte
         if let conflict = patrimoineRepo.assetIdLinkedTo(
             accountId: asset.linkedAccountId,
             investmentAccountId: asset.linkedInvestmentAccountId,
@@ -401,7 +401,7 @@ final class PatrimoineViewModel {
     func deleteRealEstate(id: Int) -> Bool {
         // ON DELETE SET NULL côté SQL fait que les prêts liés à ce bien (loan.linked_real_estate_id)
         // passent automatiquement en "prêt orphelin" sans être supprimés — exactement
-        // la sémantique souhaitée (le user peut continuer à suivre la dette même
+        // la sémantique souhaitée (l'utilisateur peut continuer à suivre la dette même
         // après vente du bien).
         let ok = patrimoineRepo.deleteRealEstate(id: id)
         if ok { load() }

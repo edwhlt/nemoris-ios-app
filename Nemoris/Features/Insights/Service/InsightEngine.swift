@@ -3,7 +3,7 @@ import Foundation
 // MARK: - InsightEngine
 //
 // Moteur de détection des "insights" — opportunités d'optimisation détectées
-// statistiquement à partir de l'historique de l'user. Pas de ML / LLM ici :
+// statistiquement à partir de l'historique de l'utilisateur. Pas de ML / LLM ici :
 // 5 détecteurs purs déterministes. Le wording naturel sera optionnellement
 // posé par Foundation Models (Couche 3 — voir `InsightLLMService` si activé).
 //
@@ -23,7 +23,7 @@ enum InsightEngine {
     private static let analysisDays = 180
 
     /// Génère tous les insights pertinents, triés par `compositeScore` décroissant.
-    /// Cap à 8 insights max — au-delà ça devient du bruit pour l'user.
+    /// Cap à 8 insights max — au-delà ça devient du bruit pour l'utilisateur.
     /// - Parameters:
     ///   - txRepo: repository, à valeur par défaut sur la base de
     ///     l'application. Les tests l'injectent sur une base temporaire.
@@ -75,7 +75,7 @@ enum InsightEngine {
             // Dernière transaction ASSOCIÉE au payee (toutes, pas seulement récurrente).
             // En MVP on n'a pas de flag "is_recurring_match" → approximation : on
             // prend la dernière tx du payee. Si elle est récente (≤ 90j) on
-            // considère que l'user "consomme" — pas d'insight. Sinon on alerte.
+            // considère que l'utilisateur "consomme" — pas d'insight. Sinon on alerte.
             let payeeTxs = txs.filter { $0.tiersId == payeeId }.sorted { $0.date > $1.date }
             guard let last = payeeTxs.first else { continue }
             let daysSinceLast = cal.dateComponents([.day], from: last.date, to: now).day ?? 0
@@ -107,10 +107,10 @@ enum InsightEngine {
 
     // MARK: - 2. Habitudes café/snack
 
-    /// Détecte les payees où l'user a un comportement "rituel" : fréquence
+    /// Détecte les payees où l'utilisateur a un comportement "rituel" : fréquence
     /// élevée (≥ 8 transactions / 90 jours) ET montant unitaire faible
     /// (≤ 10 €). Typiquement : café Starbucks, snack midi, viennoiseries.
-    /// La somme cumulée annuelle peut être surprenante pour l'user.
+    /// La somme cumulée annuelle peut être surprenante pour l'utilisateur.
     private static func detectSmallFrequentHabits(
         txs: [FinanceTransaction],
         allTiers: [Tiers]
@@ -156,7 +156,7 @@ enum InsightEngine {
 
     /// Détecte plusieurs récurrents actifs dans la même catégorie (ex : Netflix +
     /// Disney+ + Apple TV simultanés). Pas une recommandation explicite de
-    /// "supprimer le plus cher" — juste un éclairage que l'user a peut-être
+    /// "supprimer le plus cher" — juste un éclairage que l'utilisateur a peut-être
     /// oublié de combien il en avait.
     private static func detectDuplicateSubscriptions(
         patterns: [RecurringPattern],
@@ -191,7 +191,7 @@ enum InsightEngine {
 
     /// Détecte les catégories dont les dépenses du dernier mois sont
     /// significativement (> +25 %) au-dessus de la moyenne des 3 mois précédents.
-    /// Signal d'une dérive comportementale récente que l'user n'a peut-être pas
+    /// Signal d'une dérive comportementale récente que l'utilisateur n'a peut-être pas
     /// remarquée.
     private static func detectCategoryDrift(
         txs: [FinanceTransaction],
@@ -240,7 +240,7 @@ enum InsightEngine {
 
     /// Calcule la part du top-1 dans les dépenses totales sur la période.
     /// Si > 30 %, on génère un insight informatif (pas vraiment actionable
-    /// mais éclairant — souvent l'user sous-estime ce poste).
+    /// mais éclairant — souvent l'utilisateur sous-estime ce poste).
     private static func detectTopCategoryConcentration(
         txs: [FinanceTransaction],
         allCategories: [Category]
