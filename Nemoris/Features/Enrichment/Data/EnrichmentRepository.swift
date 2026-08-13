@@ -15,15 +15,10 @@ import Foundation
 /// l'orchestrator (actor) `await` pour faire un hop vers MainActor.
 struct EnrichmentRepository {
 
-    private let store: SQLiteStore
-
-    /// La valeur par défaut vise la base de l'application : les sites d'appel
-    /// existants n'ont pas à changer.
-    init(store: SQLiteStore = SQLiteStore()) {
-        self.store = store
-    }
-
-
+    /// ⚠️ Ce dépôt ne touche PAS la base de l'utilisateur : son contenu est un
+    /// cache d'APIs externes, toujours récupérable, et volontairement tenu hors
+    /// des données saisies (cf. l'explication ci-dessus). Il n'a donc aucune
+    /// connexion SQLite à recevoir, contrairement aux autres dépôts.
     @MainActor private static let store = JSONFileCache<MerchantEnrichment>(name: "enrichment_cache")
 
     func fetch(cacheKey: String) async -> MerchantEnrichment? {

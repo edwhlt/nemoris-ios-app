@@ -277,12 +277,19 @@ final class DatabaseManager: @unchecked Sendable {
 
     // MARK: - Liste des migrations
 
-    private struct Migration {
+    /// Interne plutôt que privé pour que les tests puissent vérifier la
+    /// COHÉRENCE de la chaîne : numéros uniques et croissants, aucune migration
+    /// vide. Deux migrations au même numéro produisent un bug qu'on ne voit
+    /// jamais en développement — la seconde ne s'applique pas sur un appareil
+    /// ayant déjà passé la première, donc uniquement chez les utilisateurs
+    /// existants. `DatabaseManager` étant interne au module, rien n'est exposé
+    /// au-delà.
+    struct Migration {
         let version: Int
         let statements: [String]
     }
 
-    private static let migrations: [Migration] = [
+    static let migrations: [Migration] = [
 
         // v1 — tables de base (compatible avec les bases JavaApp existantes)
         Migration(version: 1, statements: [
