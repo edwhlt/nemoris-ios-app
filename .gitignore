@@ -10,3 +10,15 @@ DerivedData/
 
 # Produits de build locaux (xcodebuild -derivedDataPath / build)
 build/
+
+# Données bancaires réelles — ne doivent JAMAIS être commitées.
+#
+# Le corpus de test (Tests/Fixtures/merchant_labels_corpus.json) est la version
+# ASSAINIE : noms de personnes anonymisés et identifiants numériques substitués
+# par build_corpus.py. Le CSV source, lui, contient de vrais libellés de compte
+# et reste hors du dépôt.
+*personal*.csv
+*releve*.csv
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
