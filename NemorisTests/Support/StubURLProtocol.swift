@@ -39,16 +39,28 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
 
     // MARK: - Table des réponses
 
+    /// Requête telle qu'elle est réellement partie — ce qui permet de vérifier
+    /// non seulement OÙ un client appelle, mais COMMENT il s'annonce.
+    struct Capture {
+        let url: URL
+        let headers: [String: String]
+        let body: Data?
+
+        var bodyText: String { body.map { String(decoding: $0, as: UTF8.self) } ?? "" }
+        func header(_ nom: String) -> String? {
+            headers.first { $0.key.caseInsensitiveCompare(nom) == .orderedSame }?.value
+        }
+    }
+
     private static let lock = NSLock()
     /// Prédicat sur l'URL → réponse. Le premier qui matche gagne.
     nonisolated(unsafe) private static var stubs: [(match: (URL) -> Bool, stub: Stub)] = []
-    /// URLs réellement demandées, dans l'ordre — permet de vérifier qu'un client
-    /// a bien appelé ce qu'il devait, et pas autre chose.
-    nonisolated(unsafe) private static var requested: [URL] = []
+    /// Requêtes réellement émises, dans l'ordre.
+    nonisolated(unsafe) private static var captures: [Capture] = []
 
     /// Arme l'interception et vide la table. À appeler au début de chaque test.
     static func start() {
-        lock.lock(); stubs = []; requested = []; lock.unlock()
+        lock.lock(); stubs = []; captures = []; lock.unlock()
         URLProtocol.registerClass(StubURLProtocol.self)
     }
 
@@ -56,7 +68,7 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     /// suivants et les fait échouer de façon incompréhensible.
     static func stop() {
         URLProtocol.unregisterClass(StubURLProtocol.self)
-        lock.lock(); stubs = []; requested = []; lock.unlock()
+        lock.lock(); stubs = []; captures = []; lock.unlock()
     }
 
     /// Sert `stub` à toute URL dont le texte contient `fragment`.
@@ -75,13 +87,40 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
 
     static var requestedURLs: [URL] {
         lock.lock(); defer { lock.unlock() }
-        return requested
+        return captures.map(\.url)
     }
 
-    private static func stub(for url: URL) -> Stub? {
+    /// Requêtes émises, avec leurs en-têtes et leur corps.
+    static var requests: [Capture] {
         lock.lock(); defer { lock.unlock() }
-        requested.append(url)
+        return captures
+    }
+
+    private static func stub(for requete: URLRequest, url: URL) -> Stub? {
+        lock.lock(); defer { lock.unlock() }
+        captures.append(Capture(url: url,
+                                headers: requete.allHTTPHeaderFields ?? [:],
+                                body: corps(de: requete)))
         return stubs.first { $0.match(url) }?.stub
+    }
+
+    /// ⚠️ `URLProtocol` reçoit le corps sous forme de FLUX, pas de `Data` :
+    /// `httpBody` est presque toujours `nil` ici, même quand l'appelant l'a
+    /// renseigné. Sans cette lecture du flux, toute vérification portant sur le
+    /// corps passerait à côté et ne testerait rien.
+    private static func corps(de requete: URLRequest) -> Data? {
+        if let direct = requete.httpBody { return direct }
+        guard let flux = requete.httpBodyStream else { return nil }
+        flux.open()
+        defer { flux.close() }
+        var accumulateur = Data()
+        var tampon = [UInt8](repeating: 0, count: 4096)
+        while flux.hasBytesAvailable {
+            let lus = flux.read(&tampon, maxLength: tampon.count)
+            if lus <= 0 { break }
+            accumulateur.append(contentsOf: tampon[0..<lus])
+        }
+        return accumulateur.isEmpty ? nil : accumulateur
     }
 
     // MARK: - URLProtocol
@@ -94,7 +133,7 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocol(self, didFailWithError: URLError(.badURL))
             return
         }
-        guard let stub = Self.stub(for: url) else {
+        guard let stub = Self.stub(for: request, url: url) else {
             // Aucune réponse prévue : on échoue explicitement plutôt que de
             // laisser la requête partir sur le vrai réseau. Un test qui appelle
             // une URL non prévue doit le savoir.
