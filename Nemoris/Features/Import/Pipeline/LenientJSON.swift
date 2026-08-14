@@ -159,7 +159,7 @@ enum LenientJSON {
         // chiffre. Le lookahead sur `,`/`}`/`]` garantit qu'on s'arrête au
         // VRAI séparateur de champ suivant plutôt que de le consommer.
         text = replacing(text,
-                         pattern: #"(:\s*-?\d+),(\d+)(?=\s*[,}\]])"#,
+                         pattern: #"(\s*-?\d+),(\d+)(?=\s*[,}\]])"#,
                          template: "$1.$2")
 
         // Virgules dupliquées, puis virgule finale avant une fermeture.

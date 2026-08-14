@@ -10,7 +10,7 @@ import SwiftUI
 // ⚠️ Source UNIQUE, partagée par `MoreView` (iOS, onglet "Plus") et
 // `SearchView` (recherche globale, les deux plateformes). Avant ce fichier,
 // `MainTabView.MoreView` portait sa propre copie privée — exactement la classe
-// de bug déjà payée ailleurs dans ce dépôt ( : 4 calculs d'enveloppes
+// de bug déjà payée ailleurs dans ce dépôt (4 calculs d'enveloppes
 // divergents) : deux implémentations de la même liste finissent par diverger.
 //
 // ⚠️ `.settings` est un cas À PART : il n'existe aucun hook générique

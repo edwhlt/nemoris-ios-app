@@ -262,7 +262,7 @@ final class InvestmentPDFParser: Sendable {
     /// plus.
     ///
     /// Le modèle multimodal, lui, voit la GRILLE. C'est déjà la décision prise
-    /// pour les captures d'écran ( : « l'image passe au modèle, pas son
+    /// pour les captures d'écran (« l'image passe au modèle, pas son
     /// OCR ») ; elle vaut tout autant pour une page PDF, qui est une image que
     /// l'on se trouve pouvoir aussi lire en texte.
     ///
