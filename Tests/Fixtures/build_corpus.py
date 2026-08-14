@@ -224,6 +224,45 @@ def name_variants(full):
         yield f"{parts[1]} {parts[0]}"
 
 
+# MARK: - Situation personnelle
+
+# ⚠️ Substitutions MESURÉES : le spectre passe de 87,5 % à 87,1 % et aucun cas
+# de régression ne casse. Les libellés tagués `regression` sont préservés — ils
+# encodent une cohérence réelle (« 78 VERSAILLES » lie un département à sa
+# commune) et trois noms de communes dans des fixtures n'identifient personne,
+# là où 275 libellés groupés sur un même bassin de vie, si.
+#
+# Les remplacements ont la MÊME LONGUEUR que l'original : un libellé bancaire
+# tronque la localité à ~13 caractères, et c'est cette troncature que le moteur
+# doit savoir résoudre.
+LIEUX_ET_ORGANISMES = {
+    "GIF SUR YVETT": "MONT SUR LOIR",
+    "VERSAILLES":    "BEAUVAISIN",
+    "ESSONNE":       "MAYENNE",
+    "SACLAY":        "VERNON",
+    "MASSY":         "VIMES",
+    "CAF DE L":      "ORG DE L",
+    "AMUNDI ESR":    "EPARGNE SAL",
+}
+
+# Les quatre derniers chiffres de carte : identifiant stable reliant toutes les
+# transactions à un même porteur. Leur VALEUR n'est jamais lue par le moteur,
+# seule leur position marque la fin du champ marchand.
+CARTES = {"5974": "1042", "7083": "3865"}
+
+
+def scrub_situation(text, tags):
+    """Retire ce qui situe l'auteur : bassin de vie, organismes, carte."""
+    if not text:
+        return text
+    out = text
+    if "regression" not in (tags or []):
+        for avant, apres in LIEUX_ET_ORGANISMES.items():
+            out = re.sub(re.escape(avant), apres, out, flags=re.I)
+    return re.sub(r"\b(CARTE|PAYWEB)\s+(\d{4})\b",
+                  lambda m: f"{m.group(1)} {CARTES.get(m.group(2), m.group(2))}", out)
+
+
 # MARK: - Identifiants numériques
 
 LONGUE_SUITE = re.compile(r"\d{7,}")
