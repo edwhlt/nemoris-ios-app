@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - AXE I Couche 0g → repris 2026-08-08 : gestion des liens live sync
+// MARK: - Couche 0g → repris 2026-08-08 : gestion des liens live sync
 // intégrée au module Investissements (n'est plus un écran de Settings).
 //
 // 3 niveaux :

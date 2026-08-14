@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - AXE I Couche 3b — Client Solana RPC public
+// MARK: - Client Solana RPC public
 //
 // Protocol JSON-RPC 2.0 vers le RPC public officiel Solana (`api.mainnet-beta.solana.com`).
 // Gratuit, pas de clé, mais rate limit raisonnable. Pour usage prod intensif, l'utilisateur peut

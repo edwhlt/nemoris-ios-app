@@ -328,7 +328,7 @@ enum ReimbursementStatus: String, Codable, CaseIterable, Identifiable {
 }
 
 /// Un remboursement attendu — rattaché à une transaction simple OU une entrée
-/// Tricount (jamais les deux, CHECK XOR en base, v44 AXE R). Remplace
+/// Tricount (jamais les deux, CHECK XOR en base, v44). Remplace
 /// `transactions.reimbursement_payee_id` (0..1 payee) et `tricount_reimbursements`
 /// (0..N payees).
 struct Reimbursement: Identifiable {
@@ -650,7 +650,7 @@ struct InvestmentPosition: Identifiable, Hashable {
     }
 }
 
-// MARK: - AXE K : ordres d'investissement (multi-ordres par position)
+// MARK: - Ordres d'investissement (multi-ordres par position)
 
 /// Type d'un ordre. MVP : achat, vente, dividende. Splits/fusions hors scope.
 enum InvestmentOrderType: String, CaseIterable, Identifiable {

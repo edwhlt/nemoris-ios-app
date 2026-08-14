@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import PhotosUI
 
-/// Point d'entrée du parcours d'import de transactions (AXE D, étendu).
+/// Point d'entrée du parcours d'import de transactions.
 ///
 /// Flux :
 ///   1. Sélection du compte cible + sélection d'UN OU PLUSIEURS fichiers.
@@ -19,7 +19,7 @@ import PhotosUI
 /// documentée dans `InvestmentPDFParser.detectKind`).
 struct ImportEntryView: View {
     // Vue présentée dans des contextes MIXTES : pushée (sidebar macOS, MoreView,
-    // Settings) OU pane adaptatif (Dashboard, import préchargé AXE P). La
+    // Settings) OU pane adaptatif (Dashboard, import préchargé). La
     // fermeture appelle les DEUX mécanismes — chacun est no-op hors de son
     // contexte (paneDismiss par défaut = {}, DismissAction sans présentation = rien).
     @Environment(\.dismiss) private var navDismiss

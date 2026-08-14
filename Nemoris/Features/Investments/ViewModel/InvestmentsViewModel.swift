@@ -484,7 +484,7 @@ final class InvestmentsViewModel {
     }
 
     /// Valorisation totale courante = somme des `currentValue` de toutes les positions
-    /// de tous les comptes. AXE J : fixé pour utiliser le cache `allPositions` (la
+    /// de tous les comptes. : fixé pour utiliser le cache `allPositions` (la
     /// version précédente utilisait `account.currentValue` qui n'est jamais synchronisé
     /// et restait à 0 → hero affichait toujours 0,00 € même avec des positions valorisées).
     var portfolioCurrentValue: Double {
@@ -502,7 +502,7 @@ final class InvestmentsViewModel {
         InvestmentAssetType(rawValue: raw)?.label ?? raw.capitalized
     }
 
-    // MARK: - AXE J Phase 2 — Évolutions par compte / par position
+    // MARK: - Phase 2 — Évolutions par compte / par position
 
     /// Calcule l'évolution d'un compte spécifique sur la plage sélectionnée.
     /// Même algo que `recomputePortfolioEvolution` mais restreint aux positions du compte.

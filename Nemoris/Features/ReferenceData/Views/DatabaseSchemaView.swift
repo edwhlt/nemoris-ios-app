@@ -382,16 +382,16 @@ enum SchemaDoc {
                     .init("regex",              "TEXT", "Regex legacy d'auto-matching"),
                     .init("category_id",        "INTEGER", fk: true, "Catégorie par défaut des nouvelles transactions"),
                     .init("linked_account_id",  "INTEGER", fk: true, "Pour les virements internes (pointe vers le compte cible)"),
-                    .init("city",               "TEXT", "AXE C — ville pour matching moteur"),
+                    .init("city",               "TEXT", "ville pour matching moteur"),
                     .init("country",            "TEXT", "ISO 3166-1 alpha-2 (ex. « FR »)"),
                     .init("address",            "TEXT"),
                     .init("engine_merchant_id", "TEXT", "ID canonique côté NemorisEngine (ex. « carrefour »)"),
                     .init("group_id",           "INTEGER", fk: true, "Groupe de marque (toutes les enseignes Carrefour)"),
                     .init("custom",             "INTEGER", nullable: false, "1 = créé par user, pas réassigné auto par moteur"),
-                    .init("domain",             "TEXT", "AXE A — pour favicon Google (v20)"),
-                    .init("note",               "TEXT", "AXE C — note libre de l'utilisateur (v21)"),
-                    .init("tier_type",          "TEXT", nullable: false, "AXE F (v25) — 'merchant' | 'contact' | 'internal' | 'organization'"),
-                    .init("contact_identifier", "TEXT", "AXE F (v25) — CNContact.identifier si tier_type='contact'"),
+                    .init("domain",             "TEXT", "pour favicon Google (v20)"),
+                    .init("note",               "TEXT", "note libre de l'utilisateur (v21)"),
+                    .init("tier_type",          "TEXT", nullable: false, "(v25) 'merchant' | 'contact' | 'internal' | 'organization'"),
+                    .init("contact_identifier", "TEXT", "(v25) CNContact.identifier si tier_type='contact'"),
                 ],
                 relations: [
                     "payees.group_id → payee_groups.id",
@@ -481,7 +481,7 @@ enum SchemaDoc {
             SchemaTable(
                 name: "transaction_metadata_keys",
                 systemImage: "tag.circle",
-                summary: "Clés de métadonnées libres définies par l'utilisateur (AXE Y, v46)",
+                summary: "Clés de métadonnées libres définies par l'utilisateur (v46)",
                 description: "Remplace payment_types : l'utilisateur crée les clés dont il a l'usage (« Projet », « Pro/Perso », « Compte joint »…) — aucune n'existe par défaut sur une base neuve. `role` optionnel, une seule valeur connue : 'payment_method', la clé que l'import remplit automatiquement depuis ce qu'il déduit du libellé (CB, VIREMENT, PRÉLÈVEMENT…). Un seul rôle exclusif à la fois (index UNIQUE partiel) ; sans clé portant ce rôle, l'indice d'import est simplement ignoré.",
                 columns: [
                     .init("id",         "INTEGER", nullable: false, pk: true),
@@ -500,7 +500,7 @@ enum SchemaDoc {
             SchemaTable(
                 name: "transaction_metadata_values",
                 systemImage: "tag",
-                summary: "Valeurs posées sur une transaction — 0..N par transaction (AXE Y, v46)",
+                summary: "Valeurs posées sur une transaction — 0..N par transaction (v46)",
                 description: "Une ligne = une métadonnée posée sur une transaction. Contrairement à payment_type_id (0..1), une transaction peut porter PLUSIEURS métadonnées. `value` est du texte libre : aucune contrainte de valeurs en base, seulement des suggestions côté UI triées par fréquence (`distinctValues`).",
                 columns: [
                     .init("id",             "INTEGER", nullable: false, pk: true),
@@ -795,7 +795,7 @@ enum SchemaDoc {
             SchemaTable(
                 name: "investment_orders",
                 systemImage: "list.bullet.indent",
-                summary: "Ordres BUY / SELL / DIV par position (AXE K, v28)",
+                summary: "Ordres BUY / SELL / DIV par position (v28)",
                 description: "Une ligne par opération chronologique. La position parent est recalculée (qty + PRU + purchase_date) à chaque add/update/delete via `recomputePositionFromOrders`. `external_id` (v33) est l'ID natif côté provider (ex. « binance_BTCUSDT_3848291 ») — UNIQUE quand non-NULL pour dédup atomique des trades LiveSync.",
                 columns: [
                     .init("id",          "INTEGER", nullable: false, pk: true),
@@ -817,7 +817,7 @@ enum SchemaDoc {
             SchemaTable(
                 name: "investment_live_sync",
                 systemImage: "arrow.triangle.2.circlepath",
-                summary: "Liens de synchronisation auto (Binance, EVM, BTC, SOL) — AXE I",
+                summary: "Liens de synchronisation auto (Binance, EVM, BTC, SOL)",
                 description: "Un lien = un compte chez un provider externe. Les credentials sont stockés dans le Keychain (jamais en clair en DB). `config_json` contient des paramètres optionnels (ex. chain pour EVM).",
                 columns: [
                     .init("id",                        "INTEGER", nullable: false, pk: true),

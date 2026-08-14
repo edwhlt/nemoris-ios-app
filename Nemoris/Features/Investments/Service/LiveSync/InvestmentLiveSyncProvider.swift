@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - AXE I Couche 0b — Protocol + types communs pour les providers de live sync
+// MARK: - Protocol + types communs pour les providers de live sync
 //
 // Tous les providers (Binance CEX, wallets EVM/BTC/SOL) implémentent ce protocol.
 // Ils sont read-only : on lit l'état d'un compte externe sans jamais y écrire.

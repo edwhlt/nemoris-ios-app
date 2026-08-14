@@ -146,7 +146,7 @@ struct InvestmentRepository {
     @discardableResult
     /// Variante d'`addAccount` qui retourne le `Int` ID du compte créé (utile pour
     /// le live sync qui doit lier le link à l'account fraîchement créé).
-    /// AXE I Couche 4.
+    /// Couche 4.
     func addAccountAndGetId(name: String, broker: String, currency: String, accountType: String,
                             openedAt: Date) -> Int? {
         guard store.databaseExists else { return nil }
@@ -404,7 +404,7 @@ struct InvestmentRepository {
         return deleted
     }
 
-    // MARK: - AXE K : Orders CRUD + recompute position
+    // MARK: - Orders CRUD + recompute position
 
     /// Récupère les ordres d'une position, triés chronologiquement (plus ancien d'abord).
     func fetchOrders(positionId: Int) -> [InvestmentOrder] {

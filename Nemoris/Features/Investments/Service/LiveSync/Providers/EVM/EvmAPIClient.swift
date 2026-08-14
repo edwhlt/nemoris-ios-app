@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - AXE I Couche 2a — Client Etherscan V2 Multichain API
+// MARK: - Client Etherscan V2 Multichain API
 //
 // Etherscan V2 (lancée fin 2024) unifie l'accès aux explorers EVM via UN SEUL endpoint
 // `https://api.etherscan.io/v2/api` paramétré par `chainid`. Une seule clé API gratuite

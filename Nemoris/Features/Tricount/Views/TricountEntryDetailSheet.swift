@@ -18,7 +18,7 @@ struct TricountEntryDetailSheet: View {
     @State private var reimbursements: [Reimbursement] = []
     /// Ligne en cours d'édition via "Modifier…" — nil pour un nouvel assignement.
     /// Distingue une vraie mise à jour (par id) d'un nouvel upsert, pour ne
-    /// jamais dupliquer silencieusement si le payee change (fix bug v44 AXE R).
+    /// jamais dupliquer silencieusement si le payee change (correctif v44).
     @State private var editingReimbursement: Reimbursement? = nil
     @State private var linkedTransaction: FinanceTransaction? = nil
     @State private var entryTags: [Tag] = []
@@ -217,7 +217,7 @@ struct TricountEntryDetailSheet: View {
                 ) { tiersId, amount, currency in
                     if let existing = editingReimbursement {
                         // Édition par id : met à jour la ligne existante même si
-                        // le payee change, ne duplique jamais (fix bug v44 AXE R).
+                        // le payee change, ne duplique jamais (correctif v44).
                         reimbursementRepo.updateReimbursement(id: existing.id, payeeId: tiersId, amount: amount, currency: currency)
                     } else {
                         reimbursementRepo.addOrUpdateReimbursement(tricountEntryId: entry.id, payeeId: tiersId, amount: amount, currency: currency)

@@ -4,7 +4,7 @@ import Foundation
 //
 // ─── Pourquoi un réglage global ne suffit plus ─────────────────────────────
 //
-// AXE T a livré une préférence unique par appareil (Automatique / Serveur local
+// Une version antérieure livrait une préférence unique par appareil (Automatique / Serveur local
 // / Désactivée). C'était suffisant tant qu'une seule capacité était en jeu : du
 // texte.
 //
@@ -335,7 +335,7 @@ enum AIFeatureSettings {
         UserDefaults.standard.set(data, forKey: key(feature))
     }
 
-    /// Reprend le réglage global d'AXE T sur TOUTES les fonctionnalités.
+    /// Reprend le réglage global antérieur sur TOUTES les fonctionnalités.
     ///
     /// Un utilisateur qui avait configuré un serveur local doit le retrouver
     /// partout après la mise à jour, pas revenir à « Automatique » sans le

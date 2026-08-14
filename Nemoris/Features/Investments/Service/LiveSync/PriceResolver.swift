@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - AXE I Couche 0e — Résolution des prix EUR via CoinGecko
+// MARK: - Résolution des prix EUR via CoinGecko
 //
 // Tous les providers crypto (Binance, EVM, BTC, SOL) utilisent ce service pour
 // convertir des holdings (BTC, ETH, USDC, etc.) en valeur EUR pour le portfolio.

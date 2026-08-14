@@ -39,7 +39,7 @@ import Foundation
 /// bien aux `ExtractedStatementOrder` (moteur pur, date en chaîne) qu'aux
 /// `PDFExtractedOrder` (modèle d'UI, date en `Date`, identité et sélection).
 /// Écrire la règle deux fois, une par modèle, c'est la classe de bug que ce
-/// dépôt paie déjà ailleurs (AXE Q, quatre calculs d'enveloppes divergents).
+/// dépôt paie déjà ailleurs (, quatre calculs d'enveloppes divergents).
 protocol StatementOrderFields {
     var orderType: String { get }
     var assetName: String { get }

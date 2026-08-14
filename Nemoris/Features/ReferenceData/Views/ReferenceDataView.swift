@@ -111,7 +111,7 @@ struct ReferenceDataView: View {
     @State private var selectedTiersIds: Set<Int> = []
     @State private var showDeleteConfirm = false
 
-    // Import CSV des tiers : retiré lors du cleanup AXE B (cluster SmartImport legacy supprimé).
+    // Import CSV des tiers : retiré lors d'un nettoyage (cluster SmartImport legacy supprimé).
 
     // MARK: Filtrage + tri
     //

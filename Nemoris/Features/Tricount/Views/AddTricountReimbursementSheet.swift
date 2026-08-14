@@ -7,7 +7,7 @@ struct AddTricountReimbursementSheet: View {
     let defaultAmount: Double
     let currency: String
     /// Non-nil = édition d'une ligne existante — préchargée au lieu de repartir
-    /// du calcul théorique de part (fix bug v44 AXE R : "Modifier…" dupliquait
+    /// du calcul théorique de part (correctif v44 : "Modifier…" dupliquait
     /// silencieusement si l'utilisateur changeait de payee).
     var existingReimbursement: Reimbursement? = nil
     let onAdd: (Int, Double, String) -> Void

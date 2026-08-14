@@ -97,7 +97,7 @@ enum ImportPipeline {
         // Indexé pour recoller dans l'ordre : un `TaskGroup` rend les résultats
         // dans l'ordre d'ACHÈVEMENT, qui dépend de la taille des fichiers. Sans
         // ça, l'ordre des lignes importées dépendrait du hasard des durées de
-        // lecture — la classe de bug déjà payée en AXE S (`results.first` sur
+        // lecture — la classe de bug déjà rencontrée ici (`results.first` sur
         // une concaténation de `withTaskGroup`).
         var readUnits: [Int: [ImportDocumentReader.Unit]] = [:]
 

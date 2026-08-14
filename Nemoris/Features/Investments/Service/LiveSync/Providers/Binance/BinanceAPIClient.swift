@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-// MARK: - AXE I Couche 1a — Client bas niveau Binance Spot API
+// MARK: - Client bas niveau Binance Spot API
 //
 // Implémente l'authentification HMAC SHA256 requise par Binance (cf. docs officielles
 // https://developers.binance.com/docs/binance-spot-api-docs/rest-api/general-api-information).

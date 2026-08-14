@@ -157,7 +157,7 @@ final class InvestmentPDFParser: Sendable {
     /// lecture appartient à `ImportPipeline`. C'est ce qui répare au passage
     /// une asymétrie réelle — l'ancienne boucle appelait `textUnits`, qui JETAIT
     /// l'image, donc l'import d'investissements faisait systématiquement un OCR
-    /// même avec un backend multimodal disponible. La décision AXE V « l'image
+    /// même avec un backend multimodal disponible. La décision « l'image
     /// passe au modèle, pas son OCR » n'avait été câblée que côté transactions,
     /// alors que la mise en page d'une capture de courtier (colonnes, PRU
     /// aligné à droite) porte exactement le même genre de sens.
@@ -262,7 +262,7 @@ final class InvestmentPDFParser: Sendable {
     /// plus.
     ///
     /// Le modèle multimodal, lui, voit la GRILLE. C'est déjà la décision prise
-    /// pour les captures d'écran (AXE V : « l'image passe au modèle, pas son
+    /// pour les captures d'écran ( : « l'image passe au modèle, pas son
     /// OCR ») ; elle vaut tout autant pour une page PDF, qui est une image que
     /// l'on se trouve pouvoir aussi lire en texte.
     ///
@@ -451,7 +451,7 @@ final class InvestmentPDFParser: Sendable {
     ///
     /// ⚠️ CORRECTIF : cette fonction n'appelait QUE Foundation
     /// Models, en dur — jamais `AIEnrichmentBackend`, le point de dispatch
-    /// par fonctionnalité livré en AXE X. Un utilisateur ayant configuré un
+    /// par fonctionnalité livré en. Un utilisateur ayant configuré un
     /// serveur local ou une clé cloud pour « Import de portefeuille »
     /// n'avait donc JAMAIS d'IA sur le texte d'une page PDF : sans Apple
     /// Intelligence disponible, `parsePageWithAI` n'était jamais atteinte, et
@@ -524,7 +524,7 @@ final class InvestmentPDFParser: Sendable {
     }
 
     /// Chemin non-Apple (serveur local, Claude, OpenAI) : pas de génération
-    /// guidée possible (`@Generable` est propre à Foundation Models, AXE X),
+    /// guidée possible (`@Generable` est propre à Foundation Models,),
     /// donc JSON en texte libre — le même `parsePageResponse`/`systemInstructions`
     /// que le repli image, pour ne jamais avoir deux prompts ou deux parseurs
     /// à faire diverger.

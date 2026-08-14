@@ -3,7 +3,7 @@ import SQLite3
 
 private let SQLITE_TRANSIENT_LIVESYNC = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-// MARK: - AXE I Couche 0d — Repository CRUD pour investment_live_sync
+// MARK: - Repository CRUD pour investment_live_sync
 //
 // Stocke uniquement les métadonnées non-sensibles des liens (provider_id, display_name,
 // account_id, config_json, status). Les credentials sont gérés séparément par

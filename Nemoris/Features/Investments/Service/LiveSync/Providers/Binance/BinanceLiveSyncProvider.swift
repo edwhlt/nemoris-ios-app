@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - AXE I Couche 1b — Provider Binance (impl réelle)
+// MARK: - Provider Binance (impl réelle)
 //
 // Synchronise les balances spot Binance via l'API officielle :
 //   - validate : ping public + fetch account (vérifie les credentials read-only)

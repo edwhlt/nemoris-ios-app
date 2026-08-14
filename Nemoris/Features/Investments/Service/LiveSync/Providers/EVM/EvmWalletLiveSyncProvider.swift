@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - AXE I Couche 2b — Provider EVM Wallet (impl réelle multi-chain)
+// MARK: - Provider EVM Wallet (impl réelle multi-chain)
 //
 // Synchronise les balances d'un wallet EVM (Ethereum, Polygon, BSC, Arbitrum, Optimism, Base).
 // Utilise Etherscan V2 Multichain API (1 endpoint paramétré par chainid).

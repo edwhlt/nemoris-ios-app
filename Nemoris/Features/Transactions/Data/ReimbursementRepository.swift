@@ -3,7 +3,7 @@ import SQLite3
 
 private let SQLITE_TRANSIENT_RB = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-/// Remboursements — table unifiée `reimbursements` (v44, AXE R), rattachée à
+/// Remboursements — table unifiée `reimbursements` (v44), rattachée à
 /// une transaction simple (0..1 payee, `idx_reimbursements_transaction`) OU une
 /// entrée Tricount (0..N payees, `idx_reimbursements_tricount`), jamais les
 /// deux (CHECK XOR en base). Remplace la logique historiquement éclatée entre

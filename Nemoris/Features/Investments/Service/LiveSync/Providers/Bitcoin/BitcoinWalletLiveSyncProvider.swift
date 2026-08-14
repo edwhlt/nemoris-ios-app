@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - AXE I Couche 3a — Provider Bitcoin Wallet (impl réelle)
+// MARK: - Provider Bitcoin Wallet (impl réelle)
 //
 // Sync simple — 1 seule requête vers Blockstream Esplora pour la balance.
 // Bitcoin n'a pas de tokens (au sens ERC-20), donc 1 position unique = BTC native.

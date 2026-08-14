@@ -12,7 +12,7 @@ import Compression
 // exactement deux choses : lister les entrées et décompresser celles qu'on veut.
 // C'est ~200 lignes bien balisées par la spécification APPNOTE.
 //
-// Le projet a une doctrine explicite de réduction des dépendances (AXE H a
+// Le projet a une doctrine explicite de réduction des dépendances ( a
 // retiré 7 paquets SPM pour ~100 Mo d'embed). Ajouter ZIPFoundation pour lire
 // deux fichiers XML par classeur irait contre cette ligne, et ferait entrer
 // dans le binaire tout un moteur d'écriture, de chiffrement et de streaming

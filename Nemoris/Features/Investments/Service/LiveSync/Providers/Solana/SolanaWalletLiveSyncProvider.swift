@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - AXE I Couche 3b — Provider Solana Wallet (impl réelle)
+// MARK: - Provider Solana Wallet (impl réelle)
 //
 // Flow fetchPositions :
 //   1. fetchBalance(address) → SOL natif en unités humaines

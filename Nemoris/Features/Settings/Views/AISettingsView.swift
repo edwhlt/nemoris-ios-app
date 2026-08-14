@@ -11,7 +11,7 @@ import FoundationModels
 /// qui rend le réglage par fonctionnalité praticable : sans ça, il faudrait
 /// ressaisir la même clé cinq fois.
 ///
-/// ⚠️ **Piège de localisation** (déjà payé en AXE P et AXE T) :
+/// ⚠️ **Piège de localisation** (déjà rencontré ailleurs) :
 /// `Text(uneVariable)` / `Label(String, ...)` ne consultent JAMAIS
 /// `Localizable.strings` — seuls `Text("littéral")` et
 /// `Label(LocalizedStringKey, ...)` le font. Tous les libellés dynamiques de cet

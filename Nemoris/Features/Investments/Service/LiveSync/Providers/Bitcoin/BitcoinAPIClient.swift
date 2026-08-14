@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - AXE I Couche 3a — Client Blockstream pour Bitcoin
+// MARK: - Client Blockstream pour Bitcoin
 //
 // Blockstream Esplora API publique (https://blockstream.info/api/) :
 //   - gratuite, sans clé

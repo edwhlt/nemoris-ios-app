@@ -104,7 +104,7 @@ struct SyncPayloadStore: Sendable {
         "tricount_shares": [
             "entry_id": "tricount_entries",
         ],
-        // — Remboursement unifié (L.3+, AXE R)
+        // — Remboursement unifié
         "reimbursements": [
             "transaction_id": "transactions",
             "tricount_entry_id": "tricount_entries",

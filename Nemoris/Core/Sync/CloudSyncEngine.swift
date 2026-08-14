@@ -255,7 +255,7 @@ actor CloudSyncEngine {
     /// TestFlight/App Store tapent l'environnement CloudKit Production, où la
     /// création JIT des record types est interdite — il faut déployer le
     /// schéma Development → Production dans la console CloudKit (checklist
-    /// CLAUDE.md §AXE L). Le texte exact n'étant pas contractuel côté Apple,
+    /// la documentation interne). Le texte exact n'étant pas contractuel côté Apple,
     /// un fallback générique couvre les autres refus.
     private static func rejectionMessage(for error: CKError, table: String) -> String {
         let raw = String(describing: error).lowercased()

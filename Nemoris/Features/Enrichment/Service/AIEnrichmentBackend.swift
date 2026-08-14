@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// Point de dispatch UNIQUE vers le backend IA, **par fonctionnalité**.
 ///
-/// Toutes les fonctionnalités IA de l'app passent par ici. Avant AXE T, chacune
+/// Toutes les fonctionnalités IA de l'app passent par ici. Auparavant, chacune
 /// appelait `EnrichmentLLMService.shared` en direct, donc un serveur local
 /// configuré n'était respecté que par certaines d'entre elles. Le réglage était
 /// ensuite devenu global — insuffisant dès que les capacités ont divergé

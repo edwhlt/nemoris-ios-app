@@ -240,7 +240,7 @@ final class DatabaseManager: @unchecked Sendable {
             }
         }
 
-        // AXE L (sync CloudKit) : (ré)installe les triggers de dirty-tracking.
+        // Synchronisation CloudKit : (ré)installe les triggers de dirty-tracking.
         // Hors migrations pour pouvoir évoluer librement (DROP + CREATE idempotent).
         // Prérequis : colonnes uuid/updated_at présentes (migration v40).
         if Self.userVersion(db) >= 40 {
@@ -710,7 +710,7 @@ final class DatabaseManager: @unchecked Sendable {
             "ALTER TABLE payees ADD COLUMN note TEXT;",
         ]),
 
-        // v22 — AXE D + E : import repensé + session persistante.
+        // v22 — import repensé + session persistante.
         // - import_sessions : sauvegarde JSON des [ImportSessionRow] pour reprise après quit.
         //   Une seule session 'active' à la fois (UI doit proposer reprise ou cancel avant new).
         // - csv_mappings : mapping date/montant/libellé indexé par signature du header

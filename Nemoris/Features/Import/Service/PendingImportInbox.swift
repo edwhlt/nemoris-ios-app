@@ -1,6 +1,6 @@
 import Foundation
 
-/// Chantier D + AXE P — boîte de réception des documents déposés par un App
+/// boîte de réception des documents déposés par un App
 /// Intent / raccourci Siri (`ImportInvestmentDocumentIntent`, `ImportFileIntent`)
 /// ou par les share extensions (`NemorisShareInvest`, `NemorisShareTransactions`).
 ///

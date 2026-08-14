@@ -163,7 +163,7 @@ struct EnrichmentSheetView: View {
         AIEnrichmentBackend.unavailabilityReason(for: .merchantEnrichment)
     }
 
-    // MARK: AXE S — plan de recherche et résultats du registre
+    // MARK: Plan de recherche et résultats du registre
 
     /// Ce que le planificateur a retiré du nom, et ce qu'il a réellement tenté.
     @ViewBuilder

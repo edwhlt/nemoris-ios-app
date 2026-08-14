@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-// MARK: - AXE I Couche 0c — Stockage Keychain pour les credentials live sync
+// MARK: - Stockage Keychain pour les credentials live sync
 //
 // Les clés API / secrets ne touchent JAMAIS la base SQLite. Ils sont stockés
 // chiffrés dans le Keychain iOS avec ces propriétés :

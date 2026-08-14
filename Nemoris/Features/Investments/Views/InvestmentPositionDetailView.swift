@@ -1,7 +1,7 @@
 import SwiftUI
 import Charts
 
-// MARK: - AXE J Phase 2 — Niveau Valeur (Position Detail)
+// MARK: - Phase 2 — Niveau Valeur (Position Detail)
 //
 // Écran de détail d'une position individuelle, accessible via NavigationLink depuis
 // AccountDetailView. Affiche :
@@ -349,7 +349,7 @@ struct InvestmentPositionDetailView: View {
                     } else {
                         heroAndChartCard
                         kpisCard
-                        ordersCard       // AXE K — historique des ordres BUY/SELL/DIV
+                        ordersCard       // — historique des ordres BUY/SELL/DIV
                         detailsCard
                         syncTraceCard    // Diagnostic dernière tentative de sync
                         if let statusMessage {

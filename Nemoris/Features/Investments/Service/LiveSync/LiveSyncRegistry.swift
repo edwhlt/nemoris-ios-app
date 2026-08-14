@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - AXE I Couche 0f — Registry orchestrateur des providers
+// MARK: - Registry orchestrateur des providers
 //
 // Point d'entrée unique pour :
 //   - lister les providers disponibles (catalogue à montrer dans l'UI d'ajout)
@@ -61,7 +61,7 @@ final class LiveSyncRegistry {
 
         let providerInstance = providerType.init()
         do {
-            // AXE I Couche 1-3 : fetch les positions réelles
+            // Couche 1-3 : fetch les positions réelles
             let positions = try await providerInstance.fetchPositions(credentials: creds, config: link.config)
             // persistance vers investment_positions.
             // Retourne aussi l'accountId effectif (résolu OU créé par persistPositions)
@@ -119,7 +119,7 @@ final class LiveSyncRegistry {
         return results
     }
 
-    // MARK: - AXE I Couche 4 — Persistance vers investment_positions
+    // MARK: - Persistance vers investment_positions
     //
     // Stratégie :
     //   1. Si `link.accountId` est nil → on crée un nouveau `investment_account` auto
@@ -291,7 +291,7 @@ final class LiveSyncRegistry {
         return "\(providerType.displayName)\(chainHint) — \(nameSuffix)"
     }
 
-    // MARK: - AXE I Couche 1.5 — Persistance des transactions vers investment_orders
+    // MARK: - Persistance des transactions vers investment_orders
     //
     // Stratégie :
     //   1. Pour chaque LiveSyncTransaction → on cherche la position correspondante
@@ -477,7 +477,7 @@ struct EvmWalletLiveSyncProvider: InvestmentLiveSyncProvider {
             isSecret: true,
             placeholder: "Clé générée sur etherscan.io/apis",
             // ⚠️ 2026-08-08 : cette clé était documentée "optionnelle" (5 req/s
-            // sans clé) au moment où AXE I a été livré, mais Etherscan a depuis
+            // sans clé) au moment où a été livré, mais Etherscan a depuis
             // retiré l'accès anonyme sur le module account/balance de V2 — sans
             // clé, l'API renvoie `result: "Missing/Invalid API Key"` au lieu
             // d'un solde, et `EvmAPIClient.fetchNativeBalance` échoue à parser

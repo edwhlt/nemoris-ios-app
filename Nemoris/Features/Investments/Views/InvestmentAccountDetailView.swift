@@ -1,7 +1,7 @@
 import SwiftUI
 import Charts
 
-// MARK: - AXE J Phase 2 — Niveau Compte
+// MARK: - Phase 2 — Niveau Compte
 //
 // Écran de détail d'un compte d'investissement, accessible via NavigationLink depuis
 // la liste des comptes du dashboard. Reproduit la structure du dashboard global mais

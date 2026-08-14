@@ -45,7 +45,7 @@ struct InvestmentsView: View {
     /// voir `InvestmentAccountFormView.linkedSourcesSection`.
     @State private var showLiveSyncCatalog = false
 
-    // AXE J Phase 2 : import devient un sheet dédié, plus un onglet.
+    // Phase 2 : import devient un sheet dédié, plus un onglet.
     @State private var showImportSheet = false
     @State private var showFilePicker = false
 
@@ -147,7 +147,7 @@ struct InvestmentsView: View {
     @ViewBuilder private var globalDashboard: some View {
         ZStack {
             AppTheme.Colors.background.ignoresSafeArea()
-            // AXE J Phase 2 : un seul écran d'accueil = dashboard global.
+            // Phase 2 : un seul écran d'accueil = dashboard global.
             // L'accès aux comptes/positions se fait par drill-down (NavigationLink).
             // L'import CSV est accessible via le toolbar Menu (anciennement onglet).
             dashboardTab
@@ -371,7 +371,7 @@ struct InvestmentsView: View {
         .minimumScaleFactor(0.7)
     }
 
-    // MARK: - Dashboard Tab (AXE J — refonte style Finary, DA Nemoris)
+    // MARK: - Dashboard Tab ( — refonte style Finary, DA Nemoris)
 
     private var dashboardTab: some View {
         let stats = viewModel.dashboard
