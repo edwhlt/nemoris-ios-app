@@ -38,11 +38,15 @@ struct BudgetRatioBar: View {
             .frame(height: 10)
             HStack {
                 if isOver {
-                    Label("Dépassement de \((actualExpenses - forecastedExpenses).formatted(.currency(code: "EUR").precision(.fractionLength(0))))", systemImage: ratio >= 1.0 + budgetRedOverPct / 100 ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
-                        .font(AppTheme.Typography.labelSmall)
-                        .foregroundStyle(AppTheme.Colors.danger)
+                    Label {
+                        Text("Dépassement de ") + Text(actualExpenses - forecastedExpenses, format: .currency(code: "EUR").precision(.fractionLength(0)))
+                    } icon: {
+                        Image(systemName: ratio >= 1.0 + budgetRedOverPct / 100 ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                    }
+                    .font(AppTheme.Typography.labelSmall)
+                    .foregroundStyle(AppTheme.Colors.danger)
                 } else {
-                    Text("Reste \((forecastedExpenses - actualExpenses).formatted(.currency(code: "EUR").precision(.fractionLength(0))))")
+                    (Text("Reste ") + Text(forecastedExpenses - actualExpenses, format: .currency(code: "EUR").precision(.fractionLength(0))))
                         .font(AppTheme.Typography.labelSmall)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }

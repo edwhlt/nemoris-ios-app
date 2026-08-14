@@ -1,7 +1,7 @@
 import Foundation
 import MapKit
 
-/// AXE B — Wrapper léger autour de `MKLocalSearch` pour récupérer adresse / coords / POI.
+/// Wrapper léger autour de `MKLocalSearch` pour récupérer adresse / coords / POI.
 /// Pas de clé API requise. Limites Apple : pas documenté, mais raisonnable.
 ///
 /// Toujours appelé depuis `Task.detached` (la complétion peut être lente, ~500ms-2s).

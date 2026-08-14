@@ -18,11 +18,16 @@ final class InvestmentsViewModel {
     var isSyncingMarketData = false
     var marketStatusMessage: String?
 
-    // AXE J — état pour le nouveau dashboard graphique
+    // état pour le nouveau dashboard graphique
     /// Plage temporelle sélectionnée pour le chart d'évolution.
     var selectedTimeRange: InvestmentTimeRange = .threeMonth
     /// Évolution calculée du portefeuille global sur la plage sélectionnée.
     var portfolioEvolution: [PortfolioEvolutionPoint] = []
+    /// Renseigné quand la plage 1J est sélectionnée mais qu'aucune position n'a
+    /// de cotation intrajournalière : la courbe est alors volontairement vide
+    /// et l'UI affiche cette explication plutôt qu'une ligne fabriquée à partir
+    /// de clôtures quotidiennes.
+    var oneDayUnavailableNote: String?
     /// Toggle UI : affiche allocation par type ou par compte.
     var allocationGroupByAccount: Bool = false
     /// Cache de TOUTES les positions de TOUS les comptes (chargé dans `load()`).
@@ -51,7 +56,7 @@ final class InvestmentsViewModel {
     }
 
     var dashboard: InvestmentDashboardStats {
-        // AXE J — tout dérivé de allPositions (vrai état) au lieu de
+        // tout dérivé de allPositions (vrai état) au lieu de
         // account.currentValue (cache jamais resynchronisé qui restait à 0).
         let totalValuation = allPositions.reduce(0) { $0 + $1.currentValue }
         let totalInvested = allPositions.reduce(0) { $0 + $1.investedAmount }
@@ -95,10 +100,10 @@ final class InvestmentsViewModel {
             selectedAccountId = accounts.first?.id
         }
         loadPositions()
-        // AXE J : charge le cache global de toutes les positions de tous les comptes
+        // charge le cache global de toutes les positions de tous les comptes
         // (source unique pour dashboard.totalValuation, allocations, hero, etc.)
         allPositions = accounts.flatMap { repository.fetchPositions(accountId: $0.id) }
-        // AXE J : refresh l'évolution pour le dashboard graphique
+        // refresh l'évolution pour le dashboard graphique
         recomputePortfolioEvolution()
         // Chantier B : sparkline 1 mois par compte pour la liste du dashboard.
         var sparklines: [Int: [PortfolioEvolutionPoint]] = [:]
@@ -321,7 +326,7 @@ final class InvestmentsViewModel {
         marketHistory = repository.fetchPriceHistory(identifier: identifier)
     }
 
-    // MARK: - AXE J — Portfolio evolution (Niveau Global)
+    // MARK: - Portfolio evolution (Niveau Global)
 
     /// Calcule l'évolution du portefeuille total sur la plage sélectionnée.
     /// Pour chaque date couverte par l'historique de prix de l'une des positions,
@@ -358,6 +363,26 @@ final class InvestmentsViewModel {
                 history: seriesHistory(for: position, range: selectedTimeRange)
             )
         }
+
+        // ⚠️ 1J sans AUCUNE cotation intrajournalière : ne rien tracer.
+        //
+        // Sinon le builder compose une courbe à partir de clôtures
+        // QUOTIDIENNES sur une fenêtre de 24 h — au mieux une ligne plate, au
+        // pire deux paliers — présentée comme la journée en cours. C'est la
+        // version agrégée du « 1J n'affiche que 2 points ». Un message clair
+        // vaut mieux qu'une courbe fabriquée dans une autre granularité.
+        if selectedTimeRange == .oneDay {
+            let withIntraday = allPositions.filter { !intradaySeries(for: $0).isEmpty }.count
+            if withIntraday == 0 && !allPositions.isEmpty {
+                portfolioEvolution = []
+                oneDayUnavailableNote = "Aucun cours intrajournalier disponible pour ce portefeuille. Les titres à valeur liquidative quotidienne (fonds, ETF peu liquides) n'en publient pas ; les autres arrivent à la prochaine synchronisation."
+                return
+            }
+            oneDayUnavailableNote = nil
+        } else {
+            oneDayUnavailableNote = nil
+        }
+
         portfolioEvolution = PortfolioEvolutionBuilder
             .build(inputs: inputs, range: selectedTimeRange)
             .points
@@ -371,18 +396,27 @@ final class InvestmentsViewModel {
     private func seriesHistory(for position: InvestmentPosition,
                                range: InvestmentTimeRange) -> [InvestmentPricePoint] {
         if range == .oneDay {
-            // ⚠️ Pas de `cutoff: range.startDate` ici : une fenêtre calée sur
-            // `Date()` est VIDE dès qu'on consulte hors séance (le samedi, la
-            // dernière cotation du vendredi a plus de 24 h) → repli sur le
-            // quotidien → courbe à 2 points. On récupère la série intraday
-            // entière (rétention 96 h) puis on garde les dernières 24 h COTÉES,
-            // ancrées sur le dernier point réel. Cf. `lastQuotedWindow`.
-            let intraday = resolveHistory(for: position, cutoff: nil, resolution: .intraday30m)
-                .lastQuotedWindow()
+            let intraday = intradaySeries(for: position)
             if !intraday.isEmpty { return intraday }
+            // Repli quotidien conservé UNIQUEMENT quand d'autres positions ont
+            // de l'intraday : le builder maintient alors celle-ci à plat sur son
+            // dernier cours réel, ce qui est correct (elle n'a pas bougé). Si
+            // AUCUNE position n'a d'intraday, l'appelant coupe court et
+            // n'affiche pas de courbe du tout.
             return resolveHistory(for: position, cutoff: nil, resolution: .daily)
         }
         return resolveHistory(for: position, cutoff: range.startDate, resolution: .daily)
+    }
+
+    /// Série intrajournalière d'une position, bornée aux dernières 24 h COTÉES.
+    ///
+    /// ⚠️ Pas de `cutoff: range.startDate` : une fenêtre calée sur `Date()` est
+    /// VIDE dès qu'on consulte hors séance (le samedi, la dernière cotation du
+    /// vendredi a plus de 24 h). On lit la série entière (rétention 96 h) puis
+    /// on garde les dernières 24 h ancrées sur le dernier point réel.
+    private func intradaySeries(for position: InvestmentPosition) -> [InvestmentPricePoint] {
+        resolveHistory(for: position, cutoff: nil, resolution: .intraday30m)
+            .lastQuotedWindow()
     }
 
     /// Résolution ROBUSTE de l'historique de cours d'une position.
@@ -418,7 +452,7 @@ final class InvestmentsViewModel {
     }
 
     /// Allocation par type d'actif (toutes positions confondues) — pour le donut chart.
-    /// AXE J : utilise le cache `allPositions` (au lieu de fetcher la DB à chaque render).
+    /// utilise le cache `allPositions` (au lieu de fetcher la DB à chaque render).
     var allocationByAssetType: [AllocationSlice] {
         Dictionary(grouping: allPositions, by: { $0.assetType })
             .map { key, positions in
@@ -430,7 +464,7 @@ final class InvestmentsViewModel {
     }
 
     /// Allocation par compte — pour le donut chart en mode "par compte".
-    /// AXE J : utilise le cache `allPositions` au lieu de `account.currentValue`
+    /// utilise le cache `allPositions` au lieu de `account.currentValue`
     /// (qui restait à 0 et faisait disparaître la section).
     var allocationByAccount: [AllocationSlice] {
         let positionsByAccount = Dictionary(grouping: allPositions) { $0.accountId }
@@ -479,11 +513,15 @@ final class InvestmentsViewModel {
 
     /// Diagnostic d'évolution compte : retourne les points + la liste des positions
     /// pour lesquelles on n'a trouvé aucun cours historique. Permet à l'UI
-    /// d'afficher "X positions sans historique : ABC, DEF, ..." pour que l'user
+    /// d'afficher "X positions sans historique : ABC, DEF, ..." pour que l'utilisateur
     /// sache lesquelles synchroniser.
     struct AccountEvolutionResult {
         let points: [PortfolioEvolutionPoint]
         let positionsWithoutHistory: [InvestmentPosition]
+        /// Renseigné en 1J quand aucune position du compte n'a de cotation
+        /// intrajournalière : la courbe est vide À DESSEIN (cf. le même garde
+        /// au niveau global), l'UI doit afficher cette explication.
+        var oneDayUnavailableNote: String? = nil
     }
 
     func computeAccountEvolutionWithDiagnostic(
@@ -497,6 +535,15 @@ final class InvestmentsViewModel {
         // Même moteur que le niveau global (grille régulière, jamais de PRU) —
         // parent et enfant ne peuvent plus diverger, ni sur la résolution des
         // identifiants, ni sur l'algorithme d'agrégation.
+        // Même garde qu'au niveau global : en 1J sans aucune cotation en
+        // continu, ne pas fabriquer de courbe à partir de clôtures quotidiennes.
+        if range == .oneDay, positions.allSatisfy({ intradaySeries(for: $0).isEmpty }) {
+            return AccountEvolutionResult(
+                points: [], positionsWithoutHistory: [],
+                oneDayUnavailableNote: "Aucun cours intrajournalier disponible pour ce compte. Les titres à valeur liquidative quotidienne n'en publient pas ; les autres arrivent à la prochaine synchronisation."
+            )
+        }
+
         let inputs = positions.map { position in
             PortfolioSeriesInput(
                 positionId: position.id,

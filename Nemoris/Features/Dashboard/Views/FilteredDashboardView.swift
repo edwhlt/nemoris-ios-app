@@ -10,6 +10,7 @@ struct FilteredDashboardView: View {
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
     @Environment(\.paneDismiss) private var dismiss
     @Environment(PurchaseManager.self) private var store
+    @Environment(AppState.self) private var appState
     @State private var vm = FilteredDashboardViewModel()
     private let chartTip = FilteredChartTip()
 
@@ -78,7 +79,7 @@ struct FilteredDashboardView: View {
                         color: AppTheme.Colors.accent
                     )
                     InfoBadge(
-                        label: "\(filter.from.formatted(date: .abbreviated, time: .omitted)) – \(filter.to.formatted(date: .abbreviated, time: .omitted))",
+                        label: "\(filter.from.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(appState.locale))) – \(filter.to.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(appState.locale)))",
                         icon: "calendar",
                         color: AppTheme.Colors.accentSecondary
                     )
@@ -104,7 +105,7 @@ struct FilteredDashboardView: View {
         DashboardSummaryCard(
             stats: vm.stats,
             title: filter.accountName,
-            subtitle: "\(filter.from.formatted(date: .abbreviated, time: .omitted)) – \(filter.to.formatted(date: .abbreviated, time: .omitted))"
+            subtitle: "\(filter.from.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(appState.locale))) – \(filter.to.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(appState.locale)))"
         )
     }
 

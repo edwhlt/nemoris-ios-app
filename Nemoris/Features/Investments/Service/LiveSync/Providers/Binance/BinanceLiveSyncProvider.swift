@@ -71,7 +71,7 @@ extension BinanceLiveSyncProvider {
         }
     }
 
-    /// AXE I Couche 1.5 — Sync l'historique des trades Binance.
+    /// Sync l'historique des trades Binance.
     ///
     /// Stratégie pour éviter de spam Binance :
     ///   1. Fetch les balances actuelles → liste des assets détenus
@@ -83,7 +83,7 @@ extension BinanceLiveSyncProvider {
     /// Conversion EUR : on récupère le taux USDT/EUR courant via CoinGecko (1 req)
     /// et on l'applique uniformément à tous les trades. C'est une APPROXIMATION
     /// (le vrai taux USDT/EUR au jour J est différent), mais acceptable pour le suivi
-    /// perso. Pour le calcul de PRU précis, l'user peut éditer les unitPrice manuellement.
+    /// perso. Pour le calcul de PRU précis, l'utilisateur peut éditer les unitPrice manuellement.
     func fetchTransactions(credentials: [String: String], config: [String: String], since: Date?) async throws -> [LiveSyncTransaction] {
         guard let apiKey = credentials["apiKey"], !apiKey.isEmpty,
               let apiSecret = credentials["apiSecret"], !apiSecret.isEmpty else {

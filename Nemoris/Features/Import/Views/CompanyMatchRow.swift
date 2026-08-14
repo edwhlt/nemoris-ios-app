@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// AXE S — Affichage à DEUX NIVEAUX d'un résultat de registre d'entreprises.
+/// Affichage à DEUX NIVEAUX d'un résultat de registre d'entreprises.
 ///
 /// Pourquoi deux niveaux : une enseigne est une personne morale (« OULLIDIS », « CSF »,
 /// « SAS SISENS ») qui exploite N établissements. Le siège social est souvent à l'autre

@@ -1,5 +1,8 @@
 import SwiftUI
 import StoreKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - PaywallView
 
@@ -10,28 +13,49 @@ struct PaywallView: View {
 
     @State private var selectedProductID: String? = nil
 
+    /// `true` si l'utilisateur a un abonnement récurrent actif (mensuel/annuel) —
+    /// PAS Lifetime, qui n'a rien à "changer". C'est ce qui bascule l'écran de
+    /// "vendre l'offre" à "gérer sa formule".
+    private var hasActiveSubscription: Bool {
+        store.activeSubscriptionProductID != nil
+    }
+
+    /// Lifetime acheté EN PLUS d'un abonnement encore actif — StoreKit n'annule
+    /// jamais automatiquement un abonnement d'un autre groupe/type quand on achète
+    /// un non-consommable, donc rien ne le fait à la place de l'utilisateur.
+    private var hasRedundantSubscription: Bool {
+        store.accessLevel == .lifetime && hasActiveSubscription
+    }
+
     var body: some View {
             ScrollView {
                 VStack(spacing: 28) {
                     headerSection
+                    if hasRedundantSubscription { redundantSubscriptionWarning }
                     featureListSection
-                    productPickerSection
-                    actionSection
+                    if store.accessLevel == .lifetime {
+                        lifetimeConfirmationSection
+                    } else {
+                        productPickerSection
+                        actionSection
+                    }
                     legalFooter
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 32)
             }
             .paneChrome("Finance Pro", cancelLabel: "Fermer", onCancel: { dismiss() })
-        .onAppear {
-            // Sélection par défaut : annuel (meilleur rapport qualité/prix)
-            selectedProductID = store.yearlyProduct?.id ?? store.products.first?.id
-        }
-        .onChange(of: store.products) { _, products in
-            if selectedProductID == nil {
-                selectedProductID = store.yearlyProduct?.id ?? products.first?.id
-            }
-        }
+        .onAppear { selectDefaultProduct() }
+        .onChange(of: store.products) { _, _ in selectDefaultProduct() }
+    }
+
+    /// Sélection par défaut : la formule déjà active (pour "gérer sa formule" plutôt
+    /// que revendre l'existant), sinon annuel (meilleur rapport qualité/prix).
+    private func selectDefaultProduct() {
+        guard selectedProductID == nil else { return }
+        selectedProductID = store.activeSubscriptionProductID
+            ?? store.yearlyProduct?.id
+            ?? store.products.first?.id
     }
 
     // MARK: - Sections
@@ -43,16 +67,69 @@ struct PaywallView: View {
                 .foregroundStyle(Color(hex: "FFD700"))
                 .padding(.top, 8)
 
-            Text("Passez à Finance Pro")
+            Text(headerTitle)
                 .font(.title2)
                 .fontWeight(.bold)
 
-            Text("Débloquez toutes les fonctionnalités et gérez vos finances sans aucune limite.")
+            Text(headerSubtitle)
                 .font(.subheadline)
                 .foregroundStyle(AppTheme.Colors.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
         }
+    }
+
+    private var headerTitle: String {
+        switch store.accessLevel {
+        case .free:     return "Passez à Finance Pro"
+        case .pro:      return "Votre abonnement Finance Pro"
+        case .lifetime: return "Vous avez l'accès à vie"
+        }
+    }
+
+    private var headerSubtitle: String {
+        switch store.accessLevel {
+        case .free:
+            return "Débloquez toutes les fonctionnalités et gérez vos finances sans aucune limite."
+        case .pro:
+            return "Changez de formule à tout moment — mensuel, annuel, ou passez à l'accès à vie."
+        case .lifetime:
+            return "Merci d'avoir choisi Finance à vie. Toutes les fonctionnalités Pro restent débloquées, pour toujours."
+        }
+    }
+
+    private var redundantSubscriptionWarning: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Abonnement toujours actif", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppTheme.Colors.warning)
+            Text("Vous avez l'accès à vie, mais un abonnement continue de se renouveler et de vous être facturé en plus. Annulez-le depuis les Réglages Apple pour ne payer qu'une fois.")
+                .font(.caption)
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+            Button("Gérer l'abonnement") { openAppleSubscriptionManagement() }
+                .font(.caption.weight(.semibold))
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.Colors.warning.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var lifetimeConfirmationSection: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.title2)
+                .foregroundStyle(AppTheme.Colors.success)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Formule Définitif")
+                    .font(.subheadline.weight(.semibold))
+                Text("Aucune échéance, aucune reconduction.")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+            }
+            Spacer()
+        }
+        .padding()
+        .background(AppTheme.Colors.success.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var featureListSection: some View {
@@ -109,6 +186,7 @@ struct PaywallView: View {
                     ProductRowView(
                         product: product,
                         isSelected: selectedProductID == product.id,
+                        isCurrentPlan: product.id == store.activeSubscriptionProductID,
                         badge: badgeFor(product)
                     )
                     .onTapGesture { selectedProductID = product.id }
@@ -117,12 +195,34 @@ struct PaywallView: View {
         }
     }
 
+    /// `nil` tant qu'aucune sélection ; sinon le produit correspondant à `selectedProductID`.
+    private var selectedProduct: Product? {
+        store.products.first { $0.id == selectedProductID }
+    }
+
+    /// La sélection pointe EXACTEMENT vers la formule déjà active — rien à faire.
+    private var isSelectionCurrentPlan: Bool {
+        selectedProductID != nil && selectedProductID == store.activeSubscriptionProductID
+    }
+
+    private var actionButtonTitle: String {
+        guard let product = selectedProduct else { return "Continuer" }
+        if isSelectionCurrentPlan { return "Formule actuelle" }
+        // Changement de formule (mensuel ↔ annuel, ou vers Lifetime) : StoreKit
+        // gère nativement la proratisation puisque mensuel et annuel partagent le
+        // même groupe d'abonnement — le même appel `purchase(_:)` suffit, Apple
+        // affiche sa propre confirmation de changement.
+        if hasActiveSubscription {
+            return "Changer pour ce plan · \(product.displayPrice)"
+        }
+        return "Continuer · \(product.displayPrice)"
+    }
+
     private var actionSection: some View {
         VStack(spacing: 12) {
-            // Bouton d'achat principal
+            // Bouton d'achat / changement de formule
             Button {
-                guard let id = selectedProductID,
-                      let product = store.products.first(where: { $0.id == id }) else { return }
+                guard let product = selectedProduct else { return }
                 Task { await store.purchase(product) }
             } label: {
                 Group {
@@ -130,8 +230,7 @@ struct PaywallView: View {
                         ProgressView()
                             .tint(.white)
                     } else {
-                        let price = store.products.first(where: { $0.id == selectedProductID })?.displayPrice
-                        Text(price.map { "Continuer · \($0)" } ?? "Continuer")
+                        Text(actionButtonTitle)
                             .font(.headline)
                     }
                 }
@@ -140,7 +239,7 @@ struct PaywallView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(selectedProductID == nil || store.isLoading || store.products.isEmpty)
+            .disabled(selectedProductID == nil || store.isLoading || store.products.isEmpty || isSelectionCurrentPlan)
 
             // Erreur éventuelle
             if let error = store.purchaseError {
@@ -157,6 +256,14 @@ struct PaywallView: View {
             .font(.subheadline)
             .foregroundStyle(AppTheme.Colors.textSecondary)
             .disabled(store.isLoading)
+
+            // Déjà abonné : renvoi vers Apple pour résilier / changer de moyen de
+            // paiement — StoreKit ne l'expose pas depuis l'app.
+            if hasActiveSubscription {
+                Button("Gérer l'abonnement depuis les Réglages Apple") { openAppleSubscriptionManagement() }
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+            }
         }
     }
 
@@ -189,6 +296,17 @@ struct PaywallView: View {
         }
         return "Populaire"
     }
+
+    /// StoreKit ne permet ni de résilier ni de changer de moyen de paiement depuis
+    /// l'app — seule la page Réglages Apple le fait.
+    private func openAppleSubscriptionManagement() {
+        let url = AppConstants.Store.manageSubscriptionsURL
+        #if os(iOS)
+        UIApplication.shared.open(url)
+        #else
+        NSWorkspace.shared.open(url)
+        #endif
+    }
 }
 
 // MARK: - ProductRowView
@@ -196,6 +314,7 @@ struct PaywallView: View {
 private struct ProductRowView: View {
     let product: Product
     let isSelected: Bool
+    var isCurrentPlan: Bool = false
     let badge: String?
 
     var body: some View {
@@ -204,7 +323,17 @@ private struct ProductRowView: View {
                 HStack(spacing: 8) {
                     Text(product.displayName)
                         .font(.headline)
-                    if let badge {
+                    if isCurrentPlan {
+                        // Prend le pas sur le badge marketing (-17%, Populaire) :
+                        // une fois qu'on l'a déjà, l'argument de vente n'a plus lieu d'être.
+                        Text("Formule actuelle")
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(AppTheme.Colors.success, in: Capsule())
+                    } else if let badge {
                         Text(badge)
                             .font(.caption2)
                             .fontWeight(.bold)
@@ -346,7 +475,7 @@ struct ProBadge: View {
 /// `.overlay {}` posé sur le CONTENU, et les items de `.toolbar` (barre de
 /// navigation) vivent dans une couche à part que cet overlay ne recouvre
 /// jamais — ils restent tapables même quand l'écran affiche le cadenas.
-/// Incident réel (2026-08-01) : le menu "⋯" d'Investissements et le "+" de
+/// Incident réel : le menu "⋯" d'Investissements et le "+" de
 /// la Console SQL restaient pleinement fonctionnels derrière l'écran
 /// verrouillé. Toujours passer une action de toolbar par ce wrapper plutôt
 /// que de l'exposer nue à côté d'un `paywallOverlay` sur le contenu.

@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 #endif
 
-/// AXE P — wrapper Identifiable pour présenter l'import V3 pré-rempli via
+/// wrapper Identifiable pour présenter l'import V3 pré-rempli via
 /// `.sheet(item:)` (CSV déposé par un raccourci Siri ou la share extension).
 /// Miroir de `PreloadedInvestmentImport` côté Investissements.
 struct PreloadedTransactionImport: Identifiable {
@@ -28,7 +28,7 @@ struct MainTabView: View {
     @State private var showAnalysisReview = false
     @State private var showInvestmentReview = false
     @State private var showCancelAnalysisConfirm = false
-    /// AXE P — import V3 pré-rempli par un CSV partagé/raccourci.
+    /// import V3 pré-rempli par un CSV partagé/raccourci.
     @State private var preloadedTransactionImport: PreloadedTransactionImport?
     /// iPhone : l'outil d'importation demandé par un module, présenté en feuille
     /// faute de sidebar où l'envoyer.
@@ -37,6 +37,11 @@ struct MainTabView: View {
     /// Slot unique de l'inspecteur global desktop : les `.adaptivePane` de
     /// niveau 1 routent leur contenu ici (cf. doc `AdaptivePane.swift`).
     @State private var paneCenter = InspectorPaneCenter()
+    /// Recherche globale — bouton posé à côté du toggle de sidebar (cf.
+    /// `sidebarList`). Sur iOS, l'équivalent vit dans le toolbar Dashboard ;
+    /// macOS n'a pas de Dashboard "toujours visible" au même titre (l'utilisateur
+    /// peut être sur n'importe quel module), donc l'entrée vit à la racine.
+    @State private var showGlobalSearch = false
     #endif
     private let moreTag = "more"
     /// Entrées "Outils" propres à la sidebar (pas des MainTabItem).
@@ -44,12 +49,12 @@ struct MainTabView: View {
     private let sidebarImportTag = AppState.sidebarImportTag
     private let sidebarSettingsTag = AppState.sidebarSettingsTag
 
-    /// AXE M — layout desktop : sidebar sur Mac et iPad en paysage, où une
+    /// layout desktop : sidebar sur Mac et iPad en paysage, où une
     /// tab bar iPhone dépareille dans une grande fenêtre. iPhone (et iPad
     /// compact / Split View étroit) garde la TabView.
     private var useSidebar: Bool {
         #if os(macOS)
-        return true   // AXE N : Mac natif = toujours la sidebar
+        return true   // Mac natif = toujours la sidebar
         #else
         return UIDevice.current.userInterfaceIdiom == .pad && hSizeClass == .regular
         #endif
@@ -110,7 +115,7 @@ struct MainTabView: View {
                 }
             }
         }
-        // AXE P — CSV déposé par le raccourci "Importer des transactions (CSV)"
+        // CSV déposé par le raccourci "Importer des transactions (CSV)"
         // ou la share extension Transactions : import V3 pré-rempli. Si une
         // session est déjà active, ImportEntryView affiche l'alerte de reprise.
         .adaptivePane(item: $preloadedTransactionImport) { item in
@@ -191,7 +196,8 @@ struct MainTabView: View {
             isPresented: $showCancelAnalysisConfirm,
             titleVisibility: .visible
         ) {
-            Button("Abandonner", role: .destructive) {
+            Button(importCoordinator.isReady ? "Abandonner le résultat" : "Interrompre l'analyse",
+                   role: .destructive) {
                 importCoordinator.cancel()
                 // ⚠️ Refermer AUSSI la relecture éventuellement ouverte : sinon
                 // l'inspecteur macOS restait affiché sur un résultat qui
@@ -201,7 +207,14 @@ struct MainTabView: View {
             }
             Button("Poursuivre", role: .cancel) {}
         } message: {
-            Text("Le document analysé n'est pas conservé : il faudra le re-sélectionner.")
+            // ⚠️ Le message affirmait « le document analysé n'est pas
+            // conservé : il faudra le re-sélectionner » — devenu FAUX pour les
+            // investissements depuis que l'analyse est persistée en session
+            // (migration v45). Il reste vrai pendant l'analyse, où rien n'est
+            // encore écrit en base.
+            Text(importCoordinator.isReady
+                 ? "Les opérations reconnues seront perdues : il faudra relancer l'analyse du document."
+                 : "Le document en cours d'analyse ne sera pas conservé : il faudra le re-sélectionner.")
         }
         .onAppear {
             ensureValidSelection()
@@ -227,6 +240,9 @@ struct MainTabView: View {
         }
         #if os(macOS)
         .environment(paneCenter)
+        .adaptivePane(isPresented: $showGlobalSearch) {
+            SearchView()
+        }
         #endif
     }
 
@@ -265,7 +281,7 @@ struct MainTabView: View {
         }
     }
 
-    /// AXE P — présente l'import V3 pré-rempli et libère les URL en attente
+    /// présente l'import V3 pré-rempli et libère les URL en attente
     /// (one-shot). No-op si vide ou si une sheet préchargée est déjà en cours.
     /// Miroir de `consumePendingInvestmentImport` dans InvestmentsView.
     private func consumePendingTransactionImport(_ urls: [URL]) {
@@ -308,7 +324,7 @@ struct MainTabView: View {
         .tint(AppTheme.Colors.accent)
     }
 
-    /// Layout desktop (AXE M) : sidebar avec TOUS les modules (pas de limite
+    /// Layout desktop : sidebar avec TOUS les modules (pas de limite
     /// à 4, pas d'onglet Plus) + section Outils. Chaque module garde sa propre
     /// NavigationStack dans sa colonne.
     ///
@@ -469,6 +485,15 @@ struct MainTabView: View {
             }
         }
         .listStyle(.sidebar)
+        // Placement `.navigation` = segment de toolbar où macOS peint déjà le
+        // bouton de bascule sidebar (auto-généré par `NavigationSplitView`) —
+        // c'est ce qui met la loupe juste à côté de lui plutôt que noyée dans
+        // la toolbar du module affiché.
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                PaneToggleButton(label: "Rechercher", systemImage: "magnifyingglass", isOn: $showGlobalSearch)
+            }
+        }
         #else
         // iOS / iPad : sélection native (le highlight suit le `.tint` ici).
         List(selection: Binding<String?>(
@@ -569,7 +594,7 @@ struct MainTabView: View {
     // à jour quand `.transactions`/`.referenceData` ont rejoint le filtre
     // (elle retombait sur `return true`, donc le toggle Transactions des
     // Réglages n'avait strictement aucun effet). Un seul filtre, une seule
-    // fois — même doctrine que les calculs d'enveloppes budgétaires (AXE Q).
+    // fois — même doctrine que les calculs d'enveloppes budgétaires.
     private var availableTabs: [MainTabItem] { appState.availableTabsResolved }
 
     /// Max 4 onglets visibles avant le bouton "Plus" (iOS tab bar tolère 5 slots
@@ -629,7 +654,7 @@ private struct MoreView: View {
     @Environment(AppState.self) private var appState
     let orderedHiddenTabs: [MainTabItem]
     @State private var searchText = ""
-    /// Path de navigation contrôlé. Sert à push programmatiquement quand l'user
+    /// Path de navigation contrôlé. Sert à push programmatiquement quand l'utilisateur
     /// arrive ici via `appState.pendingMoreDestination` (ex : bandeau Patrimoine
     /// sur le Dashboard).
     @State private var navPath: [MainTabItem] = []
@@ -680,13 +705,13 @@ private struct MoreView: View {
             .onChange(of: appState.pendingMoreDestination) { _, newValue in
                 guard let tab = newValue else { return }
                 // On reset le path avant de pousser pour ne pas empiler si la
-                // destination était déjà ouverte (l'user fait 2 fois la navigation).
+                // destination était déjà ouverte (l'utilisateur fait 2 fois la navigation).
                 navPath = [tab]
                 // Consommé → clear pour ne pas re-push à chaque rebuild.
                 appState.pendingMoreDestination = nil
             }
             .onAppear {
-                // Cas où l'user atteint MoreView avec une destination déjà pending
+                // Cas où l'utilisateur atteint MoreView avec une destination déjà pending
                 // (helper appelé avant que MoreView soit instancié).
                 if let pending = appState.pendingMoreDestination {
                     navPath = [pending]
@@ -791,110 +816,13 @@ private struct MoreView: View {
     }
 
     // MARK: - Feature Search
-
-    private var featureEntries: [FeatureEntry] {
-        var entries: [FeatureEntry] = [
-            FeatureEntry(
-                title: "Dashboard",
-                description: "Vue annuelle de vos revenus, dépenses et répartition par catégorie.",
-                icon: MainTabItem.dashboard.systemImage,
-                color: AppTheme.Colors.accent,
-                keywords: ["graphique", "bilan", "statistiques", "recettes", "dépenses", "année", "catégorie", "résumé"],
-                target: .tab(.dashboard)
-            ),
-            FeatureEntry(
-                title: "Transactions",
-                description: "Historique complet de vos opérations bancaires. Filtrez par catégorie, tiers ou montant.",
-                icon: MainTabItem.transactions.systemImage,
-                color: AppTheme.Colors.accent,
-                keywords: ["liste", "historique", "opérations", "banque", "filtrer", "recherche", "tiers", "solde", "chercher"],
-                target: .tab(.transactions)
-            ),
-            FeatureEntry(
-                title: "Importation",
-                description: "Importez un relevé de compte bancaire au format CSV pour alimenter l'application.",
-                icon: "square.and.arrow.down",
-                color: AppTheme.Colors.success,
-                keywords: ["importer", "relevé", "banque", "fichier", "csv", "charger", "données", "démarrage", "ajouter"],
-                target: .importCSV
-            ),
-            FeatureEntry(
-                title: "Données de référence",
-                description: "Gérez vos tiers, catégories et moyens de paiement utilisés lors de l'import.",
-                icon: MainTabItem.referenceData.systemImage,
-                color: AppTheme.Colors.accent,
-                keywords: ["tiers", "catégorie", "moyen de paiement", "regex", "fournisseur", "référentiel", "compte", "règle"],
-                target: .tab(.referenceData)
-            ),
-            FeatureEntry(
-                title: "Paramètres",
-                description: "Configurez l'application : thème, langue, sauvegarde et base de données.",
-                icon: "gearshape",
-                color: AppTheme.Colors.textSecondary,
-                keywords: ["réglages", "configuration", "thème", "langue", "sauvegarde", "exporter", "base de données", "couleur"],
-                target: .settings
-            ),
-        ]
-        if appState.showInvestments {
-            entries.append(FeatureEntry(
-                title: "Investissements",
-                description: "Consulter vos investissements, planifier vos investissements et suivre vos rendements.",
-                icon: MainTabItem.investments.systemImage,
-                color: AppTheme.Colors.accent,
-                keywords: ["investir", "investissement", "actifs", "valeur", "taux de rendement", "retour", "gain"],
-                target: .tab(.investments)
-            ))
-        }
-        if appState.showPatrimoine {
-            entries.append(FeatureEntry(
-                title: "Patrimoine",
-                description: "Consulter et gérer votre patrimoine, en incluant actifs financiers et personnels.",
-                icon: MainTabItem.patrimoine.systemImage,
-                color: AppTheme.Colors.accent,
-                keywords: ["actifs", "valeur", "taux de rendement", "retour", "gain"],
-                target: .tab(.patrimoine)
-            ))
-        }
-        if appState.showBudget {
-            entries.append(FeatureEntry(
-                title: "Budget",
-                description: "Définissez des enveloppes budgétaires par catégorie et suivez vos dépenses en temps réel.",
-                icon: MainTabItem.budget.systemImage,
-                color: AppTheme.Colors.warning,
-                keywords: ["enveloppe", "limite", "prévision", "plafond", "mensuel", "contrôle", "objectif"],
-                target: .tab(.budget)
-            ))
-        }
-        if appState.showTricount {
-            entries.append(FeatureEntry(
-                title: "Tricount",
-                description: "Gérez les dépenses partagées en groupe et calculez qui doit rembourser qui.",
-                icon: MainTabItem.tricount.systemImage,
-                color: AppTheme.Colors.accent,
-                keywords: ["partage", "groupe", "remboursement", "partager", "dépenses communes", "équité"],
-                target: .tab(.tricount)
-            ))
-        }
-        if appState.showSQLConsole {
-            entries.append(FeatureEntry(
-                title: "Console SQL",
-                description: "Exécutez des requêtes SQL directes sur votre base de données. Assistant IA disponible.",
-                icon: MainTabItem.sqlConsole.systemImage,
-                color: AppTheme.Colors.textSecondary,
-                keywords: ["sql", "requête", "base", "données", "schéma", "query", "console", "avancé"],
-                target: .tab(.sqlConsole)
-            ))
-        }
-        return entries
-    }
+    //
+    // Catalogue partagé avec `SearchView` — cf. `FeatureCatalog.swift`.
 
     private func filteredFeatures() -> [FeatureEntry] {
-        let q = searchText.lowercased().trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return featureEntries }
-        return featureEntries.filter { entry in
-            let corpus = ([entry.title, entry.description] + entry.keywords).joined(separator: " ").lowercased()
-            return q.components(separatedBy: " ").filter { !$0.isEmpty }.allSatisfy { corpus.contains($0) }
-        }
+        let q = searchText.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return FeatureCatalog.entries(for: appState) }
+        return FeatureCatalog.matching(q, in: appState)
     }
 
     @ViewBuilder private var featureSearchResults: some View {
@@ -992,20 +920,5 @@ private struct MoreItem {
     let destination: () -> AnyView
 }
 
-// MARK: - Feature search models
-
-private enum FeatureTarget {
-    case tab(MainTabItem)
-    case importCSV
-    case settings
-}
-
-private struct FeatureEntry: Identifiable {
-    let id = UUID()
-    let title: String
-    let description: String
-    let icon: String
-    let color: Color
-    let keywords: [String]
-    let target: FeatureTarget
-}
+// `FeatureTarget` / `FeatureEntry` : cf. `Features/Search/Service/FeatureCatalog.swift`
+// (partagés avec `SearchView`).

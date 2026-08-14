@@ -12,14 +12,14 @@ extension Notification.Name {
     static let nemorisSyncDidApplyRemoteChanges = Notification.Name("nemorisSyncDidApplyRemoteChanges")
 }
 
-/// AXE L — Couche L.1 : moteur de synchronisation CloudKit.
+/// Couche L.1 : moteur de synchronisation CloudKit.
 ///
 /// Wrapper `CKSyncEngine` (iOS 17+) autour de la base SQLite :
 ///   • zone privée unique `NemorisZone` dans le container iCloud de l'app
 ///   • 1 record CloudKit = 1 row SQLite, recordName = "<table>_<uuid>",
 ///     recordType = nom de la table
 ///   • payload = blob JSON dans `encryptedValues["p"]` → chiffrement E2E,
-///     clés dans le trousseau iCloud de l'user, Apple ne peut pas lire
+///     clés dans le trousseau iCloud de l'utilisateur, Apple ne peut pas lire
 ///   • conflits résolus en last-writer-wins via `updated_at` (payload "t")
 ///   • state CKSyncEngine sérialisé dans `sync_meta['ck_state']`
 ///
@@ -128,7 +128,7 @@ actor CloudSyncEngine {
         guard account == .available else { throw SyncError.iCloudUnavailable(account) }
 
         // Doctrine : snapshot de sécurité AVANT la première fusion — si la
-        // descente initiale tourne mal (merge inattendu), l'user peut restaurer
+        // descente initiale tourne mal (merge inattendu), l'utilisateur peut restaurer
         // l'état exact d'avant l'activation. Best-effort (échec non bloquant).
         _ = try? await MainActor.run { try BackupService.shared.createSnapshot() }
 

@@ -7,7 +7,7 @@ import PhotosUI
 /// **Flux :**
 /// 1. Sélection du fichier OU d'une capture (photothèque) + compte cible
 /// 2. Extraction texte (PDFKit / Vision OCR) + parsing IA page par page (progress bar)
-/// 3. Preview des ordres OU positions détectés — l'user peut cocher/décocher
+/// 3. Preview des ordres OU positions détectés — l'utilisateur peut cocher/décocher
 /// 4. Résumé + bouton Importer
 /// 5. Commit en base : création positions + ordres (BUY synthétique en mode snapshot)
 struct InvestmentPDFImportView: View {
@@ -566,7 +566,7 @@ struct InvestmentPDFImportView: View {
                             .font(.caption)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
-                    Text("×\(position.quantity.formatted()) @ \(position.averageBuyPrice.formatted(.currency(code: position.currency)))")
+                    (Text("×") + Text(position.quantity, format: .number) + Text(" @ ") + Text(position.averageBuyPrice, format: .currency(code: position.currency)))
                         .font(.caption)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .lineLimit(1)
@@ -617,7 +617,7 @@ struct InvestmentPDFImportView: View {
                 HStack {
                     Text(orderTypeLabel(order.orderType))
                         .font(.subheadline).fontWeight(.medium)
-                    Text("×\(order.quantity.formatted())")
+                    (Text("×") + Text(order.quantity, format: .number))
                         .font(.subheadline)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
@@ -625,11 +625,11 @@ struct InvestmentPDFImportView: View {
                     Text(order.executedAt, style: .date)
                         .font(.caption)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
-                    Text("@ \(order.unitPrice.formatted(.currency(code: order.currency)))")
+                    (Text("@ ") + Text(order.unitPrice, format: .currency(code: order.currency)))
                         .font(.caption)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                     if order.fees > 0 {
-                        Text("+ \(order.fees.formatted(.currency(code: order.currency))) frais")
+                        (Text("+ ") + Text(order.fees, format: .currency(code: order.currency)) + Text(" frais"))
                             .font(.caption2)
                             .foregroundStyle(AppTheme.Colors.warning)
                     }
@@ -912,7 +912,7 @@ struct InvestmentPDFImportView: View {
             // Nouvelle position → création + BUY synthétique (qty @ PRU) pour
             // matérialiser qty/PRU (dérivés des ordres depuis v30) + current_value.
             // Position existante → maj current_value (+ backfill ISIN), SANS
-            // toucher aux ordres saisis par l'user (pas d'écrasement silencieux).
+            // toucher aux ordres saisis par l'utilisateur (pas d'écrasement silencieux).
             for snap in posSnapshots {
                 let existing = existingPositions.first { pos in
                     if !snap.isin.isEmpty && !pos.isin.isEmpty {

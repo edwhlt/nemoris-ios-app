@@ -16,7 +16,7 @@ struct ReferenceDataView: View {
         // coexistence explicitement écartée.
         //
         // La table `payment_types` reste en base, dépréciée et non lue
-        // (doctrine AXE H : on ne supprime qu'une fois certain que plus rien
+        // (doctrine du projet : on ne supprime qu'une fois certain que plus rien
         // ne la référence), ce qui rend la bascule réversible.
         case metadata       = "Métadonnées"
         case tags           = "Tags"
@@ -67,7 +67,7 @@ struct ReferenceDataView: View {
     /// macOS). Fonctionne identiquement sur iOS.
     @State private var showIconPicker = false
 
-    // AXE C : édition complète d'un payee via PayeeDetailView.
+    // édition complète d'un payee via PayeeDetailView.
     @State private var editingPayee: Tiers? = nil
 
     // Nombre de transactions associées, par entité (id → count).
@@ -228,12 +228,18 @@ struct ReferenceDataView: View {
                             // Groupé par type, trié alphabétiquement
                             ForEach(accounts.groupedByType, id: \.type) { group in
                                 Section(group.type.label) {
-                                    ForEach(group.accounts) { a in accountRow(a) }
+                                    ForEach(group.accounts) { a in
+                                        accountRow(a)
+                                            .macGroupedRow(first: a.id == group.accounts.first?.id, last: a.id == group.accounts.last?.id)
+                                    }
                                 }
                             }
                         } else {
                             // Plat : résultats de recherche ou tri par création
-                            ForEach(filteredAccounts) { a in accountRow(a) }
+                            ForEach(filteredAccounts) { a in
+                                accountRow(a)
+                                    .macGroupedRow(first: a.id == filteredAccounts.first?.id, last: a.id == filteredAccounts.last?.id)
+                            }
                         }
                     case .categories:
                         if categories.isEmpty {
@@ -242,6 +248,7 @@ struct ReferenceDataView: View {
                             // Mode recherche : liste plate avec indicateur visuel
                             ForEach(filteredCategories) { c in
                                 flatCategoryRow(c)
+                                    .macGroupedRow(first: c.id == filteredCategories.first?.id, last: c.id == filteredCategories.last?.id)
                             }
                         } else {
                             // Mode normal : arbre hiérarchique
@@ -282,6 +289,7 @@ struct ReferenceDataView: View {
                                         leadingFullSwipe: false,
                                         trailingFullSwipe: false
                                     )
+                                    .macGroupedRow(first: t.id == visibleTiers.first?.id, last: t.id == visibleTiers.last?.id)
                             }
                             // Sentinelle de pagination : son apparition à l'écran
                             // déclenche le chargement de la page suivante.
@@ -317,13 +325,32 @@ struct ReferenceDataView: View {
                                                                          count: tagCounts[tag.id] ?? 0, childIds: [], blocked: false))],
                                     trailingFullSwipe: false
                                 )
+                                .macGroupedRow(first: tag.id == filteredTags.first?.id, last: tag.id == filteredTags.last?.id)
                             }
                         }
                     }
                     }  // end else (hasLoaded)
                 }
+                #if os(macOS)
+                // Même politique que Transactions/Patrimoine/Tricount : .plain =
+                // base neutre pour les cartes custom dessinées par macGroupedRow.
+                // iOS garde son insetGrouped natif.
+                .listStyle(.plain)
+                // Décolle la 1ère carte du Divider() du dessus — même correctif
+                // que TransactionsView (macGroupedRow ne pose pas de marge
+                // extérieure en haut de la 1ère row, seulement en bas de la
+                // dernière). Cf. retour d'usage.
+                .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+                #endif
+                .scrollContentBackground(.hidden)
                 .searchable(text: $searchText, prompt: "Rechercher…")
             }
+            // Fond de l'app posé explicitement — sans lui la colonne « content »
+            // de la NavigationSplitView macOS montre son matériau vibrant par
+            // défaut (translucide, capte la couleur du bureau/fenêtre derrière),
+            // pas le fond neutre AppTheme. Même correctif que TricountListView/
+            // TricountDetailView/SQLConsoleView ().
+            .background(AppTheme.Colors.background.ignoresSafeArea())
             .safeAreaInset(edge: .bottom) {
                 if isSelectingTiers && !selectedTiersIds.isEmpty {
                     HStack(spacing: 16) {

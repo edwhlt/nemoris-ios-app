@@ -87,6 +87,19 @@ enum ImportDocumentReader {
         var pdfSourceData: Data?
         var pdfPageIndex: Int?
 
+        /// Octets d'origine d'une unité IMAGE, conservés pour un repli OCR si
+        /// le modèle multimodal ne rend rien d'exploitable.
+        ///
+        /// ⚠️ Le chemin image n'avait AUCUN filet : le modèle y est la seule
+        /// source, donc une réponse tronquée ou un JSON irréparable rendait
+        /// « aucune opération » — et comme une génération n'est pas
+        /// déterministe, la MÊME capture donnait tantôt N opérations, tantôt
+        /// zéro. L'OCR de repli ramène du texte, donc l'extraction
+        /// déterministe ET une seconde chance au modèle. Pas d'OCR À L'AVANCE
+        /// pour autant : Vision coûte 1 à 5 s par capture, inutile de le payer
+        /// quand la lecture d'image suffit.
+        var imageSourceData: Data?
+
         /// Raccourci de lecture — vide pour les formes non textuelles.
         var text: String {
             if case .text(let value) = content { return value }
@@ -167,7 +180,7 @@ enum ImportDocumentReader {
            let cgImage = await Task.detached(priority: .userInitiated, operation: {
                InvestmentPDFParser.decodeImage(from: data)
            }).value {
-            return [Unit(content: .image(cgImage), kind: .image)]
+            return [Unit(content: .image(cgImage), kind: .image, imageSourceData: data)]
         }
         let text = await Task.detached(priority: .userInitiated) {
             InvestmentPDFParser.ocrText(from: data)

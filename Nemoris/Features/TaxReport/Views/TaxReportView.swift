@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - TaxReportView
 //
-// Sheet pleine page accessible depuis Settings → Avancé → "Rapport fiscal".
+// Écran poussé depuis Settings → Avancé → "Rapport fiscal".
 // Sélecteur d'année + 3 sections (CTO PV, PEA, Fonciers) avec un récap
 // pré-rempli des cases de la déclaration française.
 //
@@ -11,7 +11,6 @@ import SwiftUI
 // pourra ajouter en V2.
 
 struct TaxReportView: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
 
     @State private var selectedYear: Int = Calendar.current.component(.year, from: Date()) - 1
@@ -23,47 +22,45 @@ struct TaxReportView: View {
         return Array((current - 5)...current).reversed()
     }
 
+    // Toujours atteinte par PUSH (settingsLink : NavigationLink iOS / pushedSection
+    // macOS), jamais en sheet — la NavigationStack + le bouton "Fermer" propres à
+    // cet écran doublaient le bouton retour natif fourni par l'appelant. Titre
+    // conservé (nécessaire côté iOS, où l'appelant n'en pose pas) mais sans
+    // conteneur de navigation propre.
     var body: some View {
-        NavigationStack {
-            ZStack {
-                AppTheme.Colors.background.ignoresSafeArea()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
-                        yearPicker
-                            .padding(.horizontal, AppTheme.Spacing.lg)
-                            .padding(.top, AppTheme.Spacing.md)
+        ZStack {
+            AppTheme.Colors.background.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
+                    yearPicker
+                        .padding(.horizontal, AppTheme.Spacing.lg)
+                        .padding(.top, AppTheme.Spacing.md)
 
-                        if let r = report {
-                            if r.hasData {
-                                ctoSection(report: r)
-                                peaSection(report: r)
-                                fonciersSection(report: r)
-                                disclaimer
-                            } else {
-                                emptyState
-                            }
-                        } else if isComputing {
-                            HStack {
-                                Spacer()
-                                ProgressView().controlSize(.large).tint(AppTheme.Colors.accent)
-                                Spacer()
-                            }
-                            .padding(.top, AppTheme.Spacing.xxxl)
+                    if let r = report {
+                        if r.hasData {
+                            ctoSection(report: r)
+                            peaSection(report: r)
+                            fonciersSection(report: r)
+                            disclaimer
+                        } else {
+                            emptyState
                         }
+                    } else if isComputing {
+                        HStack {
+                            Spacer()
+                            ProgressView().controlSize(.large).tint(AppTheme.Colors.accent)
+                            Spacer()
+                        }
+                        .padding(.top, AppTheme.Spacing.xxxl)
                     }
-                    .padding(.bottom, AppTheme.Spacing.xxxl)
                 }
+                .padding(.bottom, AppTheme.Spacing.xxxl)
             }
-            .navigationTitle("Rapport fiscal \(selectedYear.yearLabel)")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { dismiss() }
-                }
-            }
-            .onAppear { compute() }
-            .onChange(of: selectedYear) { _, _ in compute() }
         }
+        .navigationTitle("Rapport fiscal \(selectedYear.yearLabel)")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { compute() }
+        .onChange(of: selectedYear) { _, _ in compute() }
     }
 
     private func compute() {
@@ -173,11 +170,11 @@ struct TaxReportView: View {
                 )
             }
             HStack(spacing: 6) {
-                Text(gain.soldAt.formatted(.dateTime.day().month().year()))
+                Text(gain.soldAt, format: .dateTime.day().month().year())
                 Text("·")
-                Text("\(gain.quantity.formatted(.number.precision(.fractionLength(0...4)))) × \(gain.unitSalePrice.formatted(.currency(code: "EUR").presentation(.narrow)))")
+                Text(gain.quantity, format: .number.precision(.fractionLength(0...4))) + Text(" × ") + Text(gain.unitSalePrice, format: .currency(code: "EUR").presentation(.narrow))
                 Text("·")
-                Text("PRU \(gain.weightedBuyPrice.formatted(.currency(code: "EUR").presentation(.narrow)))")
+                Text("PRU ") + Text(gain.weightedBuyPrice, format: .currency(code: "EUR").presentation(.narrow))
             }
             .font(AppTheme.Typography.bodySmall)
             .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -193,7 +190,7 @@ struct TaxReportView: View {
         var text = "Rapport fiscal Nemoris — Année \(report.year)\n"
         text += "Plus-values mobilières (case 3VG) :\n\n"
         for gain in report.ctoGains {
-            text += "- \(gain.assetName) (\(gain.ticker)) — \(gain.soldAt.formatted(.dateTime.day().month().year())) — Gain : \(String(format: "%.2f", gain.gain)) €\n"
+            text += "- \(gain.assetName) (\(gain.ticker)) — \(gain.soldAt.formatted(.dateTime.day().month().year().locale(appState.locale))) — Gain : \(String(format: "%.2f", gain.gain)) €\n"
         }
         text += "\nTOTAL NET : \(String(format: "%.2f", report.ctoNetGain)) €\n"
         UIPasteboard.general.string = text

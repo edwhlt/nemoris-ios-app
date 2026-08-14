@@ -58,16 +58,16 @@ struct PatternDetailPane: View {
             }
 
             Section("Période") {
-                LabeledContent("Début", value: pattern.startDate.formatted(date: .abbreviated, time: .omitted))
+                LabeledContent("Début") { Text(pattern.startDate, format: Date.FormatStyle(date: .abbreviated, time: .omitted)) }
                 if let end = pattern.endDate {
-                    LabeledContent("Fin", value: end.formatted(date: .abbreviated, time: .omitted))
+                    LabeledContent("Fin") { Text(end, format: Date.FormatStyle(date: .abbreviated, time: .omitted)) }
                 }
                 if let detected = pattern.lastDetectedAt {
-                    LabeledContent("Dernière détection", value: detected.formatted(date: .abbreviated, time: .omitted))
+                    LabeledContent("Dernière détection") { Text(detected, format: Date.FormatStyle(date: .abbreviated, time: .omitted)) }
                 }
             }
         }
-        .formStyle(.grouped)
+        .nemorisFormStyle()
         .onAppear {
             if pattern.payeeId != nil, allTiers.isEmpty {
                 allTiers = TransactionRepository().fetchTiers()

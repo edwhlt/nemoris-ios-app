@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Sheet de réassignation : liste tous les payees existants, filtrable par recherche.
-/// Utilisé depuis `ImportSessionView` (AXE D) et `PayeeDetailView` (AXE C) pour les
+/// Utilisé depuis `ImportSessionView` et `PayeeDetailView` pour les
 /// lignes/payees que l'utilisateur veut lier à un payee existant.
 struct PayeePickerSheet: View {
 
@@ -79,13 +79,17 @@ struct PayeePickerSheet: View {
                 }
                 .listStyle(.plain)
             } else if allPayees.isEmpty {
-                ContentUnavailableView(
-                    "Aucun tiers existant",
-                    systemImage: "person.crop.circle.badge.questionmark",
-                    description: Text("Créez d'abord un tiers depuis la liste des données de référence.")
+                EmptyStateView(
+                    icon: "person.crop.circle.badge.questionmark",
+                    title: "Aucun tiers existant",
+                    message: "Créez d'abord un tiers depuis la liste des données de référence."
                 )
             } else if filteredPayees.isEmpty {
-                ContentUnavailableView.search
+                EmptyStateView(
+                    icon: "magnifyingglass",
+                    title: "Aucun résultat",
+                    message: "Aucun tiers ne correspond à votre recherche."
+                )
             } else {
                 List(filteredPayees) { payee in
                     Button {

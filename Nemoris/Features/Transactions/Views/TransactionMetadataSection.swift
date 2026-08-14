@@ -400,7 +400,7 @@ struct MetadataKeysTabContent: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 6)
-                .listRowBackground(AppTheme.Colors.surface)
+                .macGroupedRow(first: true, last: false)
             } else {
                 ForEach(filtered) { key in
                     HStack(spacing: 10) {
@@ -420,7 +420,7 @@ struct MetadataKeysTabContent: View {
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
-                    .listRowBackground(AppTheme.Colors.surface)
+                    .macGroupedRow(first: key.id == filtered.first?.id, last: false)
                 }
             }
 
@@ -429,7 +429,8 @@ struct MetadataKeysTabContent: View {
             } label: {
                 Label("Gérer les métadonnées", systemImage: "slider.horizontal.3")
             }
-            .listRowBackground(AppTheme.Colors.surface)
+            // Seule row du groupe si la recherche ne matche aucune clé existante.
+            .macGroupedRow(first: keys.isEmpty ? false : filtered.isEmpty, last: true)
         }
         .adaptivePane(isPresented: $showManager) {
             MetadataKeyManagerView(onChange: load)

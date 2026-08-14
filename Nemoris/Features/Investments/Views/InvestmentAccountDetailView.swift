@@ -24,11 +24,14 @@ struct InvestmentAccountDetailView: View {
 
     @State private var localTimeRange: InvestmentTimeRange = .threeMonth
     @State private var evolution: [PortfolioEvolutionPoint] = []
+    /// Explication affichée quand la plage 1J n'a aucun cours intrajournalier
+    /// (courbe volontairement vide plutôt que fabriquée depuis le quotidien).
+    @State private var oneDayUnavailableNote: String?
     /// Positions sans price_history → empêchent l'affichage du chart de
     /// porter sur leur valeur. Affiché en card diagnostic.
     @State private var positionsWithoutHistory: [InvestmentPosition] = []
     @State private var positions: [InvestmentPosition] = []
-    // AXE M : add (Bool) + edit (Identifiable item) séparés pour éviter le bug
+    // add (Bool) + edit (Identifiable item) séparés pour éviter le bug
     // "edit ouvre parfois le formulaire d'ajout" causé par la race state.
     @State private var showAddPositionForm = false
     @State private var editingPosition: InvestmentPosition?
@@ -295,13 +298,13 @@ struct InvestmentAccountDetailView: View {
 
     // MARK: - Cards
 
-    /// AXE J — hero+chart sortis de la carte pour effet "premium" Robinhood/Finary.
+    /// hero+chart sortis de la carte pour effet "premium" Robinhood/Finary.
     /// KPIs déplacés dans une carte dédiée en dessous pour respiration visuelle.
     /// Card affichée seulement quand au moins une position n'a pas de cours
     /// historique récupérable. Liste les positions concernées avec un CTA
     /// "Synchroniser celles-ci" qui ne sync QUE ces positions (pas les autres).
     ///
-    /// Diagnostic critique : explique à l'user que le graphique est incomplet
+    /// Diagnostic critique : explique à l'utilisateur que le graphique est incomplet
     /// parce que ces positions ne contribuent pas (rien à multiplier par leur
     /// quantity), donc la valeur agrégée est tronquée.
     /// Chantier B — réduite à une ligne discrète tappable (au lieu d'une carte
@@ -335,7 +338,7 @@ struct InvestmentAccountDetailView: View {
     }
 
     /// Purge les price_history scrappés à tort sur Yahoo pour les tickers
-    /// crypto + reset current_value des positions crypto à 0. L'user doit
+    /// crypto + reset current_value des positions crypto à 0. l'utilisateur doit
     /// ensuite relancer LiveSync Binance/wallet pour récupérer les vraies
     /// valeurs CoinGecko.
     private func repairCryptoValues() {
@@ -398,6 +401,13 @@ struct InvestmentAccountDetailView: View {
             EvolutionChart(points: evolution, height: 190, timeRange: localTimeRange,
                            currency: account.currency)
                 .padding(.top, AppTheme.Spacing.xs)
+
+            if let oneDayUnavailableNote {
+                Text(oneDayUnavailableNote)
+                    .font(AppTheme.Typography.bodySmall)
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             TimeRangeChips(
                 selection: $localTimeRange,
@@ -498,6 +508,10 @@ struct InvestmentAccountDetailView: View {
                     }
                 }
             }
+            // Carte unique, même langage visuel que .macGroupedRow ailleurs dans
+            // l'app (cf. accountsListSection d'InvestmentsView.swift) : pas de
+            // List possible ici, donc un seul fond arrondi enveloppant les rows.
+            .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
             .adaptivePane(item: $panePosition) { pushed in
                 PositionPane(viewModel: viewModel, account: account, position: pushed)
             }
@@ -514,7 +528,7 @@ struct InvestmentAccountDetailView: View {
                     } label: {
                         positionRow(position)
                     }
-                    .listRowBackground(Color.clear)
+                    .listRowBackground(AppTheme.Colors.surface)
                     .listRowInsets(EdgeInsets(top: 6, leading: AppTheme.Spacing.sm, bottom: 6, trailing: AppTheme.Spacing.sm))
                     .listRowSeparatorTint(AppTheme.Colors.textSecondary.opacity(0.12))
                     .rowActions(
@@ -531,6 +545,9 @@ struct InvestmentAccountDetailView: View {
             .scrollDisabled(true)
             // Hauteur estimée : ~66pt par position (ticker + asset_name + valeur + PnL).
             .frame(height: CGFloat(positions.count) * 66)
+            // .plain (nécessaire pour le calcul de hauteur) désactive le groupement
+            // insetGrouped natif — même traitement que accountsListSection.
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
             #endif
         }
     }
@@ -577,7 +594,7 @@ struct InvestmentAccountDetailView: View {
                     .foregroundStyle(AppTheme.Colors.textPrimary)
                 pnlBadge(position)
             }
-            // Chevron supprimé : depuis le passage en List + NavigationLink (AXE M),
+            // Chevron supprimé : depuis le passage en List + NavigationLink,
             // iOS ajoute son propre chevron natif en bout de row.
         }
         .padding(.vertical, 8)
@@ -702,6 +719,7 @@ struct InvestmentAccountDetailView: View {
         )
         evolution = result.points
         positionsWithoutHistory = result.positionsWithoutHistory
+        oneDayUnavailableNote = result.oneDayUnavailableNote
     }
 
     private func variationRangeLabel(_ range: InvestmentTimeRange) -> String {

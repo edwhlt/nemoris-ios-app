@@ -11,12 +11,11 @@ struct PreloadedInvestmentImport: Identifiable {
 }
 
 struct InvestmentsView: View {
-    @Environment(PurchaseManager.self) private var store
     @Environment(AppState.self) private var appState
     @State private var viewModel = InvestmentsViewModel()
     private let overviewTip = InvestmentsOverviewTip()
 
-    // AXE M : sheet add/edit séparées pour éviter la race entre `editingAccount` et
+    // sheet add/edit séparées pour éviter la race entre `editingAccount` et
     // `showAccountForm` (qui causait "edit ouvre le formulaire d'ajout" parfois).
     // - `showAddAccountForm` (Bool) : nouvelle entrée
     // - `editingAccount` (Identifiable optional) : édition via `.sheet(item:)`
@@ -38,18 +37,20 @@ struct InvestmentsView: View {
     @State private var showAddPositionForm = false
     @State private var editingPosition: InvestmentPosition?
 
+    /// 2026-08-08 : point d'entrée du catalogue LiveSync (Binance/EVM/BTC/SOL),
+    /// déplacé depuis Settings — c'est une option du module Investissements,
+    /// pas un réglage global (cf. `LiveSyncSettingsView.swift`, en-tête).
+    /// Aucun compte n'est fourni ici (`accountId: nil`) : `LiveSyncLinkFormView`
+    /// en crée un dédié à la volée. Pour lier une source à un compte EXISTANT,
+    /// voir `InvestmentAccountFormView.linkedSourcesSection`.
+    @State private var showLiveSyncCatalog = false
+
     // AXE J Phase 2 : import devient un sheet dédié, plus un onglet.
     @State private var showImportSheet = false
     @State private var showFilePicker = false
 
     /// Chantier D — import intelligent pré-rempli par un raccourci Siri.
     @State private var preloadedImport: PreloadedInvestmentImport?
-    /// Paywall affiché quand un document déposé par Siri/Share Extension arrive
-    /// alors que l'utilisateur n'est pas débloqué — cf. `consumePendingInvestmentImport`.
-    /// `.paywallOverlay` sur le contenu ne suffit pas ici : `.adaptivePane`/`.sheet`
-    /// se présentent par-dessus, pas à l'intérieur, donc le sheet d'import IA
-    /// s'afficherait quand même par-dessus l'écran verrouillé sans ce garde-fou.
-    @State private var showPaywallFromPendingImport = false
 
     @State private var csvRawContent = ""
     @State private var csvMapping = InvestmentCSVMapping(
@@ -68,7 +69,6 @@ struct InvestmentsView: View {
         Group {
             if isEmbedded { navContent } else { NavigationStack { navContent } }
         }
-        .paywallOverlay(for: .investments)
     }
 
     @ViewBuilder private var navContent: some View {
@@ -160,45 +160,57 @@ struct InvestmentsView: View {
             // `ToolbarItemGroup` (le groupement natif — `ControlGroup` rendait
             // des boutons isolés).
             ToolbarItemGroup(placement: .topBarTrailing) {
-                ToolbarPaywallGate(feature: .investments) {
-                    PaneToggleButton(label: "Ajouter un compte", systemImage: "building.columns", isOn: $showAddAccountForm)
+                PaneToggleButton(label: "Ajouter un compte", systemImage: "building.columns", isOn: $showAddAccountForm)
+                // Entrée d'import UNIQUE : le parcours intelligent gère déjà
+                // PDF / capture d'écran / image / CSV (cf. branche iOS).
+                // ⚠️ Redirige vers l'OUTIL d'importation, il ne l'ouvre pas
+                // dans le volet latéral : l'import est un parcours à part
+                // entière (choix des fichiers, mapping, revue), pas une
+                // fiche de détail à afficher à côté du module.
+                Button {
+                    appState.openImportTool(destination: .investments)
+                } label: {
+                    Label("Importer un relevé…", systemImage: "square.and.arrow.down")
+                }
+                .help("Importer un relevé…")
+                // Déplacé depuis Settings : c'est une option du
+                // module, pas un réglage global. `ToolbarPaywallGate` gère le
+                // même verrouillage Pro que l'ancienne entrée Settings.
+                ToolbarPaywallGate(feature: .investmentsLiveSync) {
+                    PaneToggleButton(label: "Lier un exchange / wallet", systemImage: "arrow.triangle.2.circlepath", isOn: $showLiveSyncCatalog)
+                }
+                .help("Lier un exchange / wallet")
+            }
+            #else
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        showAddAccountForm = true
+                    } label: {
+                        Label("Ajouter un compte", systemImage: "building.columns")
+                    }
                     // Entrée d'import UNIQUE : le parcours intelligent gère déjà
-                    // PDF / capture d'écran / image / CSV (cf. branche iOS).
-                    // ⚠️ Redirige vers l'OUTIL d'importation, il ne l'ouvre pas
-                    // dans le volet latéral : l'import est un parcours à part
-                    // entière (choix des fichiers, mapping, revue), pas une
-                    // fiche de détail à afficher à côté du module.
+                    // PDF / capture d'écran / image / CSV. Si Apple Intelligence
+                    // n'est pas dispo, il propose lui-même le repli vers l'import
+                    // CSV déterministe (mapping de colonnes) — l'offline-first
+                    // reste garanti sans IA.
                     Button {
                         appState.openImportTool(destination: .investments)
                     } label: {
                         Label("Importer un relevé…", systemImage: "square.and.arrow.down")
                     }
-                    .help("Importer un relevé…")
-                }
-            }
-            #else
-            ToolbarItem(placement: .topBarTrailing) {
-                ToolbarPaywallGate(feature: .investments) {
-                    Menu {
-                        Button {
-                            showAddAccountForm = true
-                        } label: {
-                            Label("Ajouter un compte", systemImage: "building.columns")
-                        }
-                        // Entrée d'import UNIQUE : le parcours intelligent gère déjà
-                        // PDF / capture d'écran / image / CSV. Si Apple Intelligence
-                        // n'est pas dispo, il propose lui-même le repli vers l'import
-                        // CSV déterministe (mapping de colonnes) — l'offline-first
-                        // reste garanti sans IA.
-                        Button {
-                            appState.openImportTool(destination: .investments)
-                        } label: {
-                            Label("Importer un relevé…", systemImage: "square.and.arrow.down")
-                        }
+                    // Déplacé depuis Settings. Le verrouillage Pro
+                    // s'applique au CONTENU présenté (`.paywallOverlay` sur le
+                    // pane ci-dessous), pas à cette entrée de menu — même
+                    // doctrine que le reste de ce Menu, jamais gaté lui-même.
+                    Button {
+                        showLiveSyncCatalog = true
                     } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .tint(AppTheme.Colors.accent)
+                        Label("Lier un exchange / wallet", systemImage: "arrow.triangle.2.circlepath")
                     }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .tint(AppTheme.Colors.accent)
                 }
             }
             #endif
@@ -214,6 +226,16 @@ struct InvestmentsView: View {
             InvestmentAccountFormView(account: account) { updated, isNew in
                 viewModel.saveAccount(updated, isNew: isNew)
             }
+        }
+        // Catalogue LiveSync (déplacé depuis Settings) : accountId nil, un
+        // compte dédié est créé par `LiveSyncLinkFormView.save()`. `onDismiss`
+        // recharge la liste des comptes pour que le nouveau compte (créé même
+        // si la 1ʳᵉ sync échoue) apparaisse immédiatement.
+        .adaptivePane(isPresented: $showLiveSyncCatalog, onDismiss: { viewModel.load() }) {
+            NavigationStack {
+                LiveSyncProviderPickerView()
+            }
+            .paywallOverlay(for: .investmentsLiveSync)
         }
         .confirmationDialog(
             "Supprimer ce compte ?",
@@ -254,10 +276,6 @@ struct InvestmentsView: View {
         .adaptivePane(item: $preloadedImport) { item in
             InvestmentPDFImportView(preloadedFileURLs: item.urls,
                                     onFallbackToCSV: { showImportSheet = true })
-        }
-        .adaptivePane(isPresented: $showPaywallFromPendingImport) {
-            PaywallView()
-                .environment(store)
         }
         .onChange(of: appState.pendingInvestmentImportURLs) { _, urls in
             consumePendingInvestmentImport(urls)
@@ -397,6 +415,16 @@ struct InvestmentsView: View {
                     )
                     .padding(.top, AppTheme.Spacing.xs)
 
+                    // 1J sans aucune cotation en continu : on explique, au lieu
+                    // de laisser croire à une panne devant un chart vide.
+                    if let note = viewModel.oneDayUnavailableNote {
+                        Text(note)
+                            .font(AppTheme.Typography.bodySmall)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, AppTheme.Spacing.xs)
+                    }
+
                     TimeRangeChips(
                         selection: Binding(
                             get: { viewModel.selectedTimeRange },
@@ -417,7 +445,7 @@ struct InvestmentsView: View {
                             }
                         ),
                         // Compte le plus ancien comme référence : pas de sens
-                        // d'afficher 10A si l'user le plus ancien a 6 mois.
+                        // d'afficher 10A si l'utilisateur le plus ancien a 6 mois.
                         ranges: InvestmentTimeRange.availableRanges(
                             since: viewModel.accounts.map(\.openedAt).min() ?? Date()
                         )
@@ -483,16 +511,9 @@ struct InvestmentsView: View {
 
     /// Chantier D — présente l'import intelligent pré-rempli et libère l'URL en
     /// attente (one-shot). No-op si nil ou si une sheet est déjà en cours.
-    /// Si l'utilisateur n'est pas débloqué, on ouvre le paywall à la place :
-    /// sans ce check, le document déposé par Siri/Share Extension ouvrirait
-    /// quand même le sheet d'import IA, par-dessus l'écran verrouillé.
     private func consumePendingInvestmentImport(_ urls: [URL]) {
         guard !urls.isEmpty, preloadedImport == nil else { return }
         appState.pendingInvestmentImportURLs = []
-        guard store.isUnlocked(.investments) else {
-            showPaywallFromPendingImport = true
-            return
-        }
         preloadedImport = PreloadedInvestmentImport(urls: urls)
     }
 
@@ -605,6 +626,11 @@ struct InvestmentsView: View {
                     }
                 }
             }
+            // Carte unique (pas de List possible ici, cf. commentaire ci-dessus) :
+            // même langage visuel que .macGroupedRow ailleurs dans l'app — un seul
+            // fond arrondi enveloppant toutes les rows, séparées par de simples
+            // Divider. Pas de first/last par row : un seul groupe, pas de section.
+            .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
             // Pas de présentation ici : `pushedAccount` bascule le CONTENU du
             // module (cf. `dashboardContent`) — le compte s'affiche en pleine
             // largeur, pas dans le panneau.
@@ -617,7 +643,7 @@ struct InvestmentsView: View {
                     } label: {
                         accountRow(account)
                     }
-                    .listRowBackground(Color.clear)
+                    .listRowBackground(AppTheme.Colors.surface)
                     .listRowInsets(EdgeInsets(top: 6, leading: AppTheme.Spacing.sm, bottom: 6, trailing: AppTheme.Spacing.sm))
                     .listRowSeparatorTint(AppTheme.Colors.textSecondary.opacity(0.12))
                     .rowActions(
@@ -634,6 +660,11 @@ struct InvestmentsView: View {
             .scrollDisabled(true)
             // Hauteur estimée : ~64pt par row (titre + sous-titre + paddings aérés).
             .frame(height: CGFloat(viewModel.accounts.count) * 64)
+            // .plain (nécessaire pour le calcul de hauteur ci-dessus) désactive le
+            // groupement insetGrouped natif dont dépend .macGroupedRow ailleurs —
+            // on arrondit donc la List entière en un seul bloc, même langage visuel
+            // que la branche macOS juste au-dessus (un seul fond, pas de first/last).
+            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
             #endif
         }
     }
@@ -665,7 +696,7 @@ struct InvestmentsView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(AppTheme.Colors.textPrimary)
-                // Cash en sous-ligne discrète si > 0 — l'user voit que sur ce
+                // Cash en sous-ligne discrète si > 0 — l'utilisateur voit que sur ce
                 // compte une partie du capital est en trésorerie
                 if account.cashBalance > 0 {
                     Text("dont \(account.cashBalance, format: .currency(code: account.currency)) cash")
@@ -673,7 +704,7 @@ struct InvestmentsView: View {
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
             }
-            // Chevron supprimé : depuis le passage en List + NavigationLink (AXE M),
+            // Chevron supprimé : depuis le passage en List + NavigationLink,
             // iOS ajoute son propre chevron natif en bout de row. On évite le doublon.
         }
         .padding(.vertical, 8)
@@ -904,9 +935,17 @@ struct InvestmentAccountFormView: View {
     @State private var openedAt: Date
     @State private var cashBalance: Double
 
+    /// 2026-08-08 : gestion des liens LiveSync (Binance/EVM/BTC/SOL) rattachés
+    /// à CE compte — déplacée depuis l'ancien écran Settings global, cf.
+    /// `LiveSyncSettingsView.swift` (en-tête). `nil` pour une création (pas
+    /// encore d'id de compte à filtrer).
+    @State private var linkedSources: [InvestmentLiveSyncLink] = []
+    @State private var showLinkPicker = false
+    @State private var selectedLinkForDetail: InvestmentLiveSyncLink?
+
     private var isNew: Bool { account == nil }
 
-    /// AXE M : init() set tous les @State au build time depuis l'account passé en
+    /// init() set tous les @State au build time depuis l'account passé en
     /// argument. Avant on faisait `.onAppear { populateFields() }`, ce qui causait
     /// des bugs de stale state quand SwiftUI réutilisait l'instance d'une présentation
     /// précédente. Ici les valeurs sont figées dès la construction de la View.
@@ -984,10 +1023,28 @@ struct InvestmentAccountFormView: View {
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
                 }
+
+                // Un compte tout juste créé n'a pas encore d'id à filtrer —
+                // section visible uniquement en édition, comme le Récap.
+                if let account {
+                    linkedSourcesSection(account)
+                }
             }
             .nemorisFormStyle()
-            // Pas de .onAppear pour repopulate — l'init() le fait déjà,
-            // ce qui évite la stale state quand SwiftUI réutilise l'instance.
+            .onAppear(perform: loadLinkedSources)
+            .adaptivePane(isPresented: $showLinkPicker, onDismiss: loadLinkedSources) {
+                NavigationStack {
+                    LiveSyncProviderPickerView(accountId: account?.id)
+                }
+                .paywallOverlay(for: .investmentsLiveSync)
+            }
+            .adaptivePane(item: $selectedLinkForDetail, onDismiss: loadLinkedSources) { link in
+                LiveSyncLinkDetailView(link: link, onChange: loadLinkedSources)
+            }
+            // Pas de .onAppear pour repopulate les champs éditables — l'init()
+            // le fait déjà, ce qui évite la stale state quand SwiftUI réutilise
+            // l'instance. `linkedSources` est une liste auxiliaire en
+            // LECTURE, pas un champ éditable : `.onAppear` ci-dessus est sûr.
             .paneChrome(isNew ? "Nouveau compte" : "Modifier compte",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
                         confirmLabel: "Enregistrer", confirmIcon: "checkmark",
@@ -1011,12 +1068,73 @@ struct InvestmentAccountFormView: View {
                 dismiss()
             }
     }
+
+    // MARK: - Synchronisation (LiveSync)
+
+    @ViewBuilder
+    private func linkedSourcesSection(_ account: InvestmentAccount) -> some View {
+        Section {
+            ForEach(linkedSources) { link in
+                Button {
+                    selectedLinkForDetail = link
+                } label: {
+                    HStack(spacing: AppTheme.Spacing.sm) {
+                        Image(systemName: LiveSyncRegistry.provider(for: link.providerId)?.iconName ?? "questionmark.circle")
+                            .foregroundStyle(AppTheme.Colors.accent)
+                            .frame(width: 22)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(link.displayName)
+                                .foregroundStyle(AppTheme.Colors.textPrimary)
+                            Text(LiveSyncRegistry.provider(for: link.providerId)?.displayName ?? link.providerId)
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.textSecondary)
+                        }
+                        Spacer()
+                        if !link.enabled {
+                            Text("Désactivé")
+                                .font(.system(size: 10, weight: .semibold))
+                                .padding(.horizontal, 6).padding(.vertical, 3)
+                                .background(AppTheme.Colors.textSecondary.opacity(0.15), in: Capsule())
+                                .foregroundStyle(AppTheme.Colors.textSecondary)
+                        } else if link.lastSyncStatus == .error {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundStyle(AppTheme.Colors.danger)
+                        } else if link.lastSyncStatus == .ok {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(AppTheme.Colors.success)
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Button {
+                showLinkPicker = true
+            } label: {
+                Label(linkedSources.isEmpty ? "Lier un exchange / wallet" : "Lier une autre source",
+                      systemImage: "arrow.triangle.2.circlepath")
+            }
+        } header: {
+            Text("Synchronisation")
+        } footer: {
+            Text("Les identifiants restent dans le Keychain de cet appareil — un lien créé ici n'apparaît pas sur vos autres appareils, à refaire sur chacun.")
+        }
+    }
+
+    private func loadLinkedSources() {
+        guard let account else { linkedSources = []; return }
+        linkedSources = LiveSyncRepository.shared.fetchLinks().filter { $0.accountId == account.id }
+    }
 }
 
-// Accessible aussi depuis InvestmentAccountDetailView + InvestmentPositionDetailView (AXE J)
+// Accessible aussi depuis InvestmentAccountDetailView + InvestmentPositionDetailView
 struct InvestmentPositionFormView: View {
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
     @Environment(\.paneDismiss) private var dismiss
+    @Environment(AppState.self) private var appState
     let accountId: Int
     let position: InvestmentPosition?
     let onSave: (InvestmentPosition, Bool) -> Void
@@ -1029,7 +1147,7 @@ struct InvestmentPositionFormView: View {
 
     private var isNew: Bool { position == nil }
 
-    /// AXE M : init() set @State au build time depuis la position passée. Évite
+    /// init() set @State au build time depuis la position passée. Évite
     /// la stale state qui causait "modifications pas enregistrées" quand la même
     /// instance était réutilisée par SwiftUI entre deux présentations.
     init(accountId: Int, position: InvestmentPosition?, onSave: @escaping (InvestmentPosition, Bool) -> Void) {
@@ -1044,7 +1162,7 @@ struct InvestmentPositionFormView: View {
     }
 
     /// Validation ISIN : 12 chars (2 lettres pays + 10 alphanum). On laisse passer
-    /// vide (optionnel) ou exactement 12 chars conformes — sinon on alerte l'user.
+    /// vide (optionnel) ou exactement 12 chars conformes — sinon on alerte l'utilisateur.
     private var isinValidationError: String? {
         let trimmed = isin.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if trimmed.isEmpty { return nil }
@@ -1097,8 +1215,8 @@ struct InvestmentPositionFormView: View {
                     Text("Mise à jour automatiquement par la synchronisation de cours, ou modifiable manuellement.")
                 }
 
-                // Champs DÉRIVÉS des ordres (AXE K). Affichés en lecture seule
-                // pour éviter toute confusion : si l'user les modifiait ici, le
+                // Champs DÉRIVÉS des ordres. Affichés en lecture seule
+                // pour éviter toute confusion : si l'utilisateur les modifiait ici, le
                 // premier add/edit d'ordre écraserait silencieusement leurs valeurs.
                 if let position {
                     Section {
@@ -1107,7 +1225,7 @@ struct InvestmentPositionFormView: View {
                         LabeledContent("PRU (Prix de Revient Unitaire)",
                             value: formattedMoney(position.averageBuyPrice))
                         LabeledContent("Date du premier achat",
-                            value: position.purchaseDate.formatted(date: .abbreviated, time: .omitted))
+                            value: position.purchaseDate.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(appState.locale)))
                     } header: {
                         Text("Dérivé des ordres")
                     } footer: {
@@ -1159,6 +1277,7 @@ struct InvestmentPositionFormView: View {
 
     private func formattedMoney(_ value: Double) -> String {
         let f = NumberFormatter()
+        f.locale = appState.locale
         f.numberStyle = .currency
         f.currencyCode = "EUR"
         f.maximumFractionDigits = 4

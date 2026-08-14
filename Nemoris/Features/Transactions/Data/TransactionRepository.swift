@@ -288,7 +288,7 @@ struct TransactionRepository {
         }) ?? []
     }
 
-    /// Met à jour TOUS les champs éditables d'un payee (AXE C).
+    /// Met à jour TOUS les champs éditables d'un payee.
     /// Retourne true si la ligne a été modifiée.
     @discardableResult
     func updatePayeeFull(_ p: Tiers) -> Bool {
@@ -341,7 +341,7 @@ struct TransactionRepository {
         }
     }
 
-    // MARK: - Payee groups (AXE C)
+    // MARK: - Payee groups
 
     func fetchPayeeGroups() -> [PayeeGroup] {
         query(read: { db in
@@ -539,7 +539,7 @@ struct TransactionRepository {
 
     /// Retourne l'id de la transaction créée (nil si échec). Le remboursement
     /// éventuel (`remboursementTiersId`) n'est plus une colonne de cette table
-    /// depuis v44 (AXE R) — l'appelant doit enchaîner avec
+    /// depuis v44 — l'appelant doit enchaîner avec
     /// `ReimbursementRepository.setReimbursement(transactionId:payeeId:)` une
     /// fois l'id obtenu.
     @discardableResult
@@ -612,7 +612,7 @@ struct TransactionRepository {
     }
 
     /// Remboursement géré séparément par ReimbursementRepository.setReimbursement
-    /// depuis v44 (AXE R) — l'appelant enchaîne après ce updateTransaction.
+    /// depuis v44 — l'appelant enchaîne après ce updateTransaction.
     @discardableResult
     func updateTransaction(_ draft: TransactionEditDraft) -> Bool {
         let formatter = DateFormatter()
@@ -1318,7 +1318,7 @@ struct TransactionRepository {
         var delTiersStmt:  OpaquePointer?
 
         sqlite3_prepare_v2(db, "UPDATE transactions SET payee_id = NULL WHERE payee_id = ?;",      -1, &nullTiersStmt, nil)
-        // Couvre les 2 origines (transaction simple + Tricount) en un seul DELETE — v44 AXE R.
+        // Couvre les 2 origines (transaction simple + Tricount) en un seul DELETE — v44
         sqlite3_prepare_v2(db, "DELETE FROM reimbursements WHERE payee_id = ?;",                    -1, &delRembStmt,  nil)
         sqlite3_prepare_v2(db, "DELETE FROM payees WHERE id = ?;",                                  -1, &delTiersStmt, nil)
         defer {

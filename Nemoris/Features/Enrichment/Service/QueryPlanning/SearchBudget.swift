@@ -1,6 +1,6 @@
 import Foundation
 
-// AXE S — Budget d'une recherche marchand.
+// Budget d'une recherche marchand.
 // ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
 //
 // Le budget est une DONNÉE, pas une politique éparpillée dans l'exécuteur. Conséquence

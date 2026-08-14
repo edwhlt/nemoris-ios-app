@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -199,10 +200,10 @@ enum SQLVariableParsing {
         return result
     }
 
-    /// Encode une valeur brute tapée par l'user en littéral SQL selon le type
+    /// Encode une valeur brute tapée par l'utilisateur en littéral SQL selon le type
     /// déclaré. Seul `.number` reste non guillemété — tout le reste (y compris
     /// `.year`) est quoté et échappé pour être un littéral SQL valide sans que
-    /// l'user ait à retaper ses propres guillemets dans le corps de la requête.
+    /// l'utilisateur ait à retaper ses propres guillemets dans le corps de la requête.
     static func sqlLiteral(_ rawValue: String, type: SQLVariableType) -> String {
         switch type {
         case .number:
@@ -561,6 +562,60 @@ struct SQLQuerySection: Identifiable {
     var error: String?
 }
 
+// MARK: - Chart detection (heuristic)
+
+/// Détecte si un résultat a une forme "graphable" : EXACTEMENT une colonne
+/// label + 1 à 4 colonnes numériques. Volontairement conservateur — pas de
+/// tentative de tout visualiser, seulement le cas le plus courant d'une
+/// requête d'agrégat (GROUP BY + SUM/COUNT/AVG), qui couvre la plupart des
+/// recettes de `DatabaseSchemaView` (total par catégorie, évolution par mois,
+/// répartition par métadonnée…). Un résultat qui ne matche pas reste un
+/// tableau, sans message d'erreur — c'est un bonus, pas une fonctionnalité
+/// qui peut "rater".
+struct SQLResultChartPlan {
+    let labelIndex: Int
+    let seriesIndices: [Int]
+    /// Ligne (LineMark) si le label ressemble à une date/mois (« 2026-01 »,
+    /// « 2026-01-15 ») — sinon barres (BarMark) pour une répartition catégorielle.
+    let isTimeSeries: Bool
+
+    static func detect(from result: SQLQueryResult) -> SQLResultChartPlan? {
+        // Cap de lignes : au-delà, un bar chart devient illisible et une requête
+        // de ce volume n'est presque jamais la forme "1 label + N numériques"
+        // qu'on cible ici (elle a déjà échoué la règle des colonnes en pratique).
+        guard !result.rows.isEmpty, result.columns.count >= 2, result.rows.count <= 60 else { return nil }
+
+        var labelIndices: [Int] = []
+        var numericIndices: [Int] = []
+        for (idx, name) in result.columns.enumerated() {
+            // Les colonnes d'identifiant (id, foo_id) sont numériques mais ne
+            // portent aucune magnitude à représenter — ce sont des clés, pas
+            // des grandeurs. Les ignorer évite un bar chart de "id" absurde.
+            let lower = name.lowercased()
+            if lower == "id" || lower.hasSuffix("_id") { continue }
+
+            let values = result.rows.compactMap { idx < $0.count ? $0[idx] : nil }.filter { !$0.isEmpty }
+            if !values.isEmpty, values.allSatisfy({ Double($0) != nil }) {
+                numericIndices.append(idx)
+            } else {
+                labelIndices.append(idx)
+            }
+        }
+
+        guard labelIndices.count == 1, (1...4).contains(numericIndices.count) else { return nil }
+        let labelIndex = labelIndices[0]
+        let looksLikeDate = result.rows.allSatisfy { row in
+            guard labelIndex < row.count, !row[labelIndex].isEmpty else { return true }
+            return row[labelIndex].range(of: #"^\d{4}-\d{2}(-\d{2})?"#, options: .regularExpression) != nil
+        }
+        return SQLResultChartPlan(labelIndex: labelIndex, seriesIndices: numericIndices, isTimeSeries: looksLikeDate)
+    }
+}
+
+enum SQLResultViewMode {
+    case table, chart
+}
+
 // MARK: - Files List View
 
 struct SQLFilesListView: View {
@@ -619,7 +674,7 @@ struct SQLFilesListView: View {
         #if os(macOS)
         // ⚠️ Sur macOS, le fichier n'est PAS ouvert par un push (même via
         // `.navigationDestination(isPresented:)`, la forme "sûre"). Constaté
-        // sur device (2026-08-01) : dès qu'une vue est poussée dans CETTE
+        // sur device : dès qu'une vue est poussée dans CETTE
         // NavigationStack, tout `.adaptivePane` ouvert depuis elle (le panneau
         // latéral desktop de `MainTabView`, cf. `AdaptivePane.swift`) se peint
         // SOUS le contenu poussé au lieu d'à côté — repro à 100% en ouvrant
@@ -648,6 +703,11 @@ struct SQLFilesListView: View {
                 }
             }
         }
+        // Fond de l'app posé explicitement — sans lui la colonne « content » de
+        // la NavigationSplitView macOS montre son matériau vibrant par défaut
+        // au lieu du fond neutre AppTheme (). Couvre les deux
+        // branches (liste de fichiers ET éditeur, swap par @State).
+        .background(AppTheme.Colors.background.ignoresSafeArea())
         #else
         fileListBody
             .navigationTitle(navTitle)
@@ -674,12 +734,18 @@ struct SQLFilesListView: View {
                 entryRow(node)
             }
         }
+        #if os(macOS)
+        // Décolle la 1ère carte du délimiteur natif macOS (barre d'outils ↔
+        // contenu scrollé) — même correctif que TransactionsView.
+        .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+        #endif
+        .scrollContentBackground(.hidden)
         .overlay {
             if tree.isEmpty {
-                ContentUnavailableView(
-                    "Aucun fichier SQL",
-                    systemImage: "doc.text",
-                    description: Text("Appuyez sur + pour créer un fichier ou un dossier.")
+                EmptyStateView(
+                    icon: "doc.text",
+                    title: "Aucun fichier SQL",
+                    message: "Appuyez sur + pour créer un fichier ou un dossier."
                 )
             }
         }
@@ -1036,13 +1102,17 @@ struct SQLEditorView: View {
             }
         }
         .adaptivePane(isPresented: $showAssistant) {
-            SQLAssistantSheet { generatedSQL in
-                // Si l'éditeur a déjà du contenu, on append (avec un saut de section
-                // SQL pour que le parseur de queries nommées le voie comme un nouveau bloc).
+            SQLAssistantSheet { title, generatedSQL in
+                // Section nommée par le titre confirmé dans l'alerte de l'assistant
+                // (au lieu du générique "-- Assistant IA --" d'avant, qui rendait
+                // toutes les requêtes insérées indiscernables dans la liste des
+                // résultats dès qu'il y en avait plusieurs dans le même fichier).
+                let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let block = cleanTitle.isEmpty ? generatedSQL : "-- \(cleanTitle) --\n" + generatedSQL
                 if sqlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    sqlText = generatedSQL
+                    sqlText = block
                 } else {
-                    sqlText += "\n\n-- Assistant IA --\n" + generatedSQL
+                    sqlText += "\n\n" + block
                 }
                 autoSave()
                 refreshVariables(sqlText)
@@ -1267,6 +1337,7 @@ struct SQLEditorView: View {
 struct SQLResultSectionView: View {
     let section: SQLQuerySection
     @State private var isExpanded: Bool = true
+    @State private var viewMode: SQLResultViewMode = .table
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1321,6 +1392,22 @@ struct SQLResultSectionView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(AppTheme.Colors.success.opacity(0.1))
                             .cornerRadius(6)
+                    } else if let plan = SQLResultChartPlan.detect(from: result) {
+                        HStack {
+                            Spacer()
+                            Picker("Affichage", selection: $viewMode) {
+                                Image(systemName: "tablecells").tag(SQLResultViewMode.table)
+                                Image(systemName: "chart.bar.fill").tag(SQLResultViewMode.chart)
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .frame(width: 90)
+                        }
+                        if viewMode == .chart {
+                            SQLResultChart(result: result, plan: plan)
+                        } else {
+                            SQLResultTable(columns: result.columns, rows: result.rows)
+                        }
                     } else {
                         SQLResultTable(columns: result.columns, rows: result.rows)
                     }
@@ -1405,5 +1492,95 @@ private struct SQLResultTable: View {
         }
         .background(AppTheme.Colors.surfaceSecondary.opacity(0.2))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+// MARK: - Result Chart
+
+/// Rendu graphique d'un résultat "graphable" (cf. `SQLResultChartPlan`).
+/// Barres pour une répartition catégorielle, ligne pour une série temporelle.
+private struct SQLResultChart: View {
+    let result: SQLQueryResult
+    let plan: SQLResultChartPlan
+
+    /// Palette stable, dérivée de l'accent — même esprit que
+    /// `AllocationDonutChart` (Investissements), en plus court : 4 séries max.
+    private static let palette: [Color] = [
+        AppTheme.Colors.accent,
+        AppTheme.Colors.accentSecondary,
+        AppTheme.Colors.success,
+        AppTheme.Colors.warning,
+    ]
+
+    private struct Point: Identifiable {
+        let id = UUID()
+        let label: String
+        let series: String
+        let value: Double
+    }
+
+    private var points: [Point] {
+        var out: [Point] = []
+        for row in result.rows {
+            guard plan.labelIndex < row.count else { continue }
+            let label = row[plan.labelIndex]
+            for seriesIndex in plan.seriesIndices {
+                guard seriesIndex < row.count, let value = Double(row[seriesIndex]) else { continue }
+                out.append(Point(label: label, series: result.columns[seriesIndex], value: value))
+            }
+        }
+        return out
+    }
+
+    private var seriesNames: [String] { plan.seriesIndices.map { result.columns[$0] } }
+
+    /// Labels dans l'ordre où SQL les a renvoyés — souvent un ORDER BY
+    /// intentionnel (ex. un "Top 10" trié par montant). Sans domaine explicite,
+    /// Swift Charts trie un axe String par ordre alphabétique et détruirait ce tri.
+    private var orderedLabels: [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for row in result.rows where plan.labelIndex < row.count {
+            let label = row[plan.labelIndex]
+            if seen.insert(label).inserted { out.append(label) }
+        }
+        return out
+    }
+
+    var body: some View {
+        Chart {
+            ForEach(points) { point in
+                if plan.isTimeSeries {
+                    LineMark(x: .value("X", point.label), y: .value(point.series, point.value))
+                        .foregroundStyle(by: .value("Série", point.series))
+                        .symbol(by: .value("Série", point.series))
+                        .interpolationMethod(.monotone)
+                } else {
+                    BarMark(x: .value("X", point.label), y: .value(point.series, point.value))
+                        .foregroundStyle(by: .value("Série", point.series))
+                        .position(by: .value("Série", point.series))
+                }
+            }
+        }
+        .chartForegroundStyleScale(domain: seriesNames, range: seriesNames.indices.map { Self.palette[$0 % Self.palette.count] })
+        .chartLegend(seriesNames.count > 1 ? .visible : .hidden)
+        .chartXScale(domain: orderedLabels)
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: min(6, orderedLabels.count))) { _ in
+                AxisValueLabel()
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
+                    .font(.system(size: 9))
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { _ in
+                AxisValueLabel()
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.55))
+                    .font(.system(size: 9))
+            }
+        }
+        .frame(height: 200)
+        .padding(.top, 4)
+        .padding(.trailing, 4)
     }
 }

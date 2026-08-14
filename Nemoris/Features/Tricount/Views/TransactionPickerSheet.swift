@@ -29,7 +29,7 @@ struct TransactionPickerSheet: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(tx.tiersName.isEmpty ? tx.information : tx.tiersName)
                                 .font(.subheadline).foregroundStyle(AppTheme.Colors.textPrimary)
-                            Text(tx.date.formatted(date: .abbreviated, time: .omitted))
+                            Text(tx.date, format: Date.FormatStyle(date: .abbreviated, time: .omitted))
                                 .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
                             if !tx.information.isEmpty && !tx.tiersName.isEmpty {
                                 Text(tx.information).font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5)).lineLimit(1)
@@ -37,7 +37,7 @@ struct TransactionPickerSheet: View {
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 3) {
-                            Text(tx.amount.formatted(.currency(code: "EUR")))
+                            Text(tx.amount, format: .currency(code: "EUR"))
                                 .font(.subheadline).bold()
                                 .foregroundStyle(tx.amount < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                             if tx.id == currentId {

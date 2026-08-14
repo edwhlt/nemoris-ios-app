@@ -17,7 +17,7 @@ struct PDFExtractedOrder: Identifiable, Hashable {
     var notes: String?          // Infos complémentaires extraites
     var pageNumber: Int         // Page source dans le PDF
     var confidence: Double      // 0…1 — confiance de l'IA sur cet ordre
-    var isSelected: Bool = true // L'user peut décocher avant import
+    var isSelected: Bool = true // l'utilisateur peut décocher avant import
 
     /// Coût total brut
     var totalCost: Double { quantity * unitPrice + fees }
@@ -31,6 +31,20 @@ struct PDFExtractedOrder: Identifiable, Hashable {
         if upper.contains("CRYPTO") || upper.contains("BTC") || upper.contains("ETH") { return "CRYPTO" }
         return "STOCK"
     }
+}
+
+/// Conformance au moteur de fusion PUR (`StatementReconciler`), pour que la
+/// règle « cette seconde lecture parle-t-elle de la même opération ? » soit
+/// écrite UNE fois et s'applique aussi bien au modèle d'UI qu'au modèle pur.
+extension PDFExtractedOrder: StatementOrderFields {
+    private static let isoDay: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    var isoDay: String { Self.isoDay.string(from: executedAt) }
 }
 
 /// Mode détecté par l'IA pour un document/page : relevé d'ORDRES (avis d'opéré)
@@ -56,7 +70,7 @@ struct PDFExtractedPosition: Identifiable, Hashable {
     var currency: String
     var pageNumber: Int
     var confidence: Double
-    var isSelected: Bool = true  // L'user peut décocher avant import
+    var isSelected: Bool = true  // l'utilisateur peut décocher avant import
 
     /// Coût d'acquisition estimé (qté × PRU). Sert de valeur par défaut si la
     /// capture n'affiche pas de valeur de marché.
@@ -75,7 +89,7 @@ struct PDFExtractedPosition: Identifiable, Hashable {
 
 // ⚠️ `ImportSourceKind` et `ImportUnitDiagnostic` vivaient ici sous les noms
 // `InvestmentDocumentKind` / `PDFPageDiagnostic`. Ils sont partagés par les DEUX
-// imports depuis AXE V et ne portent rien de spécifique aux investissements :
+// imports depuis et ne portent rien de spécifique aux investissements :
 // ils sont remontés dans `Features/Import/Pipeline/ImportElement.swift`, socle
 // commun du pipeline unifié.
 

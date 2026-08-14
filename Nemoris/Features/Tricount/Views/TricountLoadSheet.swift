@@ -45,13 +45,14 @@ struct TricountLoadSheet: View {
                         Section("Tricount chargé") {
                             LabeledContent("Titre", value: result.title)
                             LabeledContent("Entrées", value: "\(result.entries.count)")
-                            LabeledContent(
-                                "Dépenses",
-                                value: result.entries
-                                    .filter { $0.typeTransaction.uppercased() == "NORMAL" && $0.total > 0 }
-                                    .reduce(0.0) { $0 + $1.total }
-                                    .formatted(.currency(code: result.currency))
-                            )
+                            LabeledContent("Dépenses") {
+                                Text(
+                                    result.entries
+                                        .filter { $0.typeTransaction.uppercased() == "NORMAL" && $0.total > 0 }
+                                        .reduce(0.0) { $0 + $1.total },
+                                    format: .currency(code: result.currency)
+                                )
+                            }
                             LabeledContent("Devise", value: result.currency)
                         }
                         Section {

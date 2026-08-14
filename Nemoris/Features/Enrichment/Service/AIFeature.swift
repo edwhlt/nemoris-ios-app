@@ -119,6 +119,25 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
 
     /// Vrai si cette fonctionnalité tire un vrai bénéfice de la lecture d'image.
     var benefitsFromImage: Bool { optionalCapabilities.contains(.image) }
+
+    /// Ordre de grandeur de ce qui part au modèle, affiché dans les Réglages
+    /// quand le backend résolu n'est PAS 100 % sur l'appareil (serveur local ou
+    /// cloud) — pour que l'utilisateur sache à quoi s'attendre avant que ça
+    /// consomme du réseau, du temps de calcul, ou une facture API. Volontairement
+    /// SANS chiffre de coût en euros (les tarifs des fournisseurs bougent plus
+    /// vite que l'app) : un ordre de grandeur en tokens reste vrai plus longtemps.
+    var consumptionHint: String {
+        switch self {
+        case .merchantEnrichment:
+            return "Prompt court par marchand inconnu — quelques centaines de tokens."
+        case .transactionImport, .investmentImport:
+            return "Le document entier part au modèle : plusieurs milliers de tokens par page, davantage encore si elle est transmise en image plutôt qu'en texte."
+        case .insights:
+            return "Un prompt court par analyse, relancé à chaque ouverture du tableau de bord."
+        case .sqlAssistant:
+            return "Conversation multi-tours : le contexte s'accumule au fil des questions, donc la consommation augmente avec l'échange."
+        }
+    }
 }
 
 // MARK: - Choix de backend
@@ -159,7 +178,7 @@ enum AIBackendChoice: Codable, Hashable, Sendable {
     /// Foundation Models imposé. Erreur explicite si la capacité manque, plutôt
     /// qu'un repli muet : c'est ce qui permet de diagnostiquer.
     case foundationModels
-    /// Serveur HTTP compatible OpenAI (LM Studio, Ollama…), cf. AXE T.
+    /// Serveur HTTP compatible OpenAI (LM Studio, Ollama…).
     case localServer
     case cloud(AICloudProvider)
     /// Aucun appel, jamais.
@@ -296,7 +315,7 @@ enum AIFeatureSettings {
 
     private static func key(_ feature: AIFeature) -> String { "ai.backend.\(feature.rawValue)" }
 
-    /// Ancienne clé globale (AXE T), lue une seule fois pour reprendre le choix
+    /// Ancienne clé globale, lue une seule fois pour reprendre le choix
     /// existant plutôt que de le perdre silencieusement à la mise à jour.
     private static let legacyGlobalKey = "ai.backendPreference"
     private static let migrationDoneKey = "ai.backend.migratedToPerFeature"

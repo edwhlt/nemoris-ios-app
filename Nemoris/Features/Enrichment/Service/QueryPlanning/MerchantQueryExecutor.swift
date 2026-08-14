@@ -1,6 +1,6 @@
 import Foundation
 
-/// AXE S — Exécute la cascade planifiée par `MerchantQueryPlanner`.
+/// Exécute la cascade planifiée par `MerchantQueryPlanner`.
 ///
 /// Chaîne complète, une seule direction, aucun cycle :
 ///

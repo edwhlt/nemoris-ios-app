@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 //
 // **Gate** : ce flow ne s'affiche que si `hasDatabase == false` côté NemorisApp.
 // Une fois la DB créée (étape `database`), on a déjà atteint un état "no return"
-// — l'user peut quitter l'app, au prochain launch il aura `hasDatabase == true`
+// — l'utilisateur peut quitter l'app, au prochain launch il aura `hasDatabase == true`
 // et n'aura plus le flow. Mais on lui propose quand même les étapes restantes
 // (modules + ready) tant qu'il est dans le flow courant. S'il quitte au step
 // modules, c'est OK : il pourra activer les modules plus tard dans Settings.
@@ -36,7 +36,7 @@ struct OnboardingFlowView: View {
     @State private var showFilePicker = false
     @State private var errorMessage: String?
 
-    // Détection restauration (2026-07-26) : au 1er lancement on scanne les
+    // Détection restauration : au 1er lancement on scanne les
     // snapshots iCloud de BackupService (ils survivent à la désinstallation). Si
     // une sauvegarde existe, on la propose EN PREMIER, avec un badge de fraîcheur
     // — pour ne plus jamais laisser un user repartir de zéro alors qu'une
@@ -49,7 +49,7 @@ struct OnboardingFlowView: View {
     @State private var accountType: String = "COURANT"
 
     // Modules opt-in (step .modules)
-    // Préchargés depuis UserDefaults : si l'user a déjà ouvert l'app avant, on
+    // Préchargés depuis UserDefaults : si l'utilisateur a déjà ouvert l'app avant, on
     // respecte ses choix précédents au lieu de tout remettre à false.
     @State private var enableInvestments: Bool = UserDefaults.standard.bool(forKey: "featureInvestments")
     @State private var enableBudget: Bool      = UserDefaults.standard.bool(forKey: "featureBudget")
@@ -108,7 +108,7 @@ struct OnboardingFlowView: View {
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             }
 
-            // 3 promesses différenciantes — ce qui fait que l'user CHOISIT Nemoris
+            // 3 promesses différenciantes — ce qui fait que l'utilisateur CHOISIT Nemoris
             // plutôt que Bankin' ou un Excel. Plus parlant qu'une liste de features.
             VStack(spacing: AppTheme.Spacing.lg) {
                 promiseRow(
@@ -285,11 +285,14 @@ struct OnboardingFlowView: View {
 
             ScrollView {
                 VStack(spacing: AppTheme.Spacing.md) {
+                    // Investissements — module gratuit (comme Patrimoine/Tricount) ;
+                    // seul le Live Sync (exchanges/wallets) reste Pro, découvert
+                    // plus tard dans le module lui-même.
                     moduleCard(
                         icon: "chart.line.uptrend.xyaxis",
                         title: "Investissements",
-                        subtitle: "PEA, CTO, crypto. Suivi de portefeuille, sync live exchanges.",
-                        isPro: !store.isUnlocked(.investments),
+                        subtitle: "PEA, CTO, crypto. Suivi de portefeuille manuel ou automatique.",
+                        isPro: false,
                         isOn: $enableInvestments
                     )
                     moduleCard(
@@ -300,7 +303,7 @@ struct OnboardingFlowView: View {
                         isOn: $enableBudget
                     )
                     moduleCard(
-                        icon: "house.lodge.fill",
+                        icon: "house.fill",
                         title: "Patrimoine",
                         subtitle: "Liquidités, immobilier, prêts. Valeur nette globale.",
                         isPro: false,
@@ -347,7 +350,7 @@ struct OnboardingFlowView: View {
                         .font(AppTheme.Typography.titleSmall)
                         .foregroundStyle(AppTheme.Colors.textPrimary)
                     if isPro {
-                        // Badge "Pro" discret — l'user voit que l'activation
+                        // Badge "Pro" discret — l'utilisateur voit que l'activation
                         // déclenchera le paywall plus tard (depuis Settings).
                         Text("PRO")
                             .font(.system(size: 9, weight: .bold))
@@ -437,7 +440,7 @@ struct OnboardingFlowView: View {
         }
     }
 
-    /// Base vierge sans seed : l'user activera la sync iCloud dans Réglages.
+    /// Base vierge sans seed : l'utilisateur activera la sync iCloud dans Réglages.
     private func createForICloud() {
         do {
             try DatabaseManager.shared.createNewDatabase(seedDefaults: false)

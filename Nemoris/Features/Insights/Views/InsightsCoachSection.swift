@@ -8,7 +8,7 @@ import SwiftUI
 //
 // **Persistance des dismissals** : les insights "Pas pour moi" sont stockés
 // dans UserDefaults par `id` — on ne les re-suggère plus pendant 90 j (au-delà,
-// peut-être que le user a changé d'avis ou que les conditions ont évolué).
+// peut-être que l'utilisateur a changé d'avis ou que les conditions ont évolué).
 
 struct InsightsCoachSection: View {
     let insights: [Insight]
@@ -140,7 +140,7 @@ struct InsightDetailSheet: View {
                     // KPIs (gain potentiel, faisabilité, confiance)
                     if insight.isActionable {
                         HStack(spacing: AppTheme.Spacing.lg) {
-                            kpi(label: "Impact / an", value: insight.annualImpact.formatted(.currency(code: "EUR").presentation(.narrow)), color: AppTheme.Colors.success)
+                            kpi(label: "Impact / an", value: insight.annualImpact.formatted(.currency(code: "EUR").presentation(.narrow).locale(appState.locale)), color: AppTheme.Colors.success)
                             kpi(label: "Faisabilité", value: "\(insight.actionability)/5", color: AppTheme.Colors.accent)
                             kpi(label: "Confiance", value: "\(Int(insight.confidence * 100)) %", color: AppTheme.Colors.textSecondary)
                         }
@@ -206,7 +206,7 @@ struct InsightDetailSheet: View {
 
 // MARK: - Dismissal persistence
 
-/// Stocke les `insight.id` que l'user a marqués "Pas pour moi" avec leur
+/// Stocke les `insight.id` que l'utilisateur a marqués "Pas pour moi" avec leur
 /// date de dismissal. On les ignore pendant 90 jours, après quoi ils sont
 /// remis en lice (peut-être que les conditions ont changé).
 final class InsightDismissalStore: @unchecked Sendable {

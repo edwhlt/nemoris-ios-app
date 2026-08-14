@@ -10,6 +10,7 @@ struct BudgetApercuSheet: View {
     let allTiers: [Tiers]
     let allCategories: [Category]
     @Environment(\.paneDismiss) private var paneDismiss
+    @Environment(AppState.self) private var appState
 
     @State private var selectedCategoryName: String? = nil
     @State private var showCategoryTxSheet: Bool = false
@@ -91,7 +92,7 @@ struct BudgetApercuSheet: View {
                 .padding(.top, AppTheme.Spacing.md)
             }
             .background(AppTheme.Colors.background)
-            .paneChromeInline(month.formatted(.dateTime.month(.wide).year()).capitalized,
+            .paneChromeInline(month.formatted(.dateTime.month(.wide).year().locale(appState.locale)).capitalized,
                                cancelLabel: "Fermer", onCancel: { paneDismiss() })
             // #8 macOS : une .sheet imbriquée dans une vue elle-même présentée
             // en .sheet s'affiche VIDE sur Mac. On pousse la liste dans la

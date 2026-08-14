@@ -1,6 +1,6 @@
 import Foundation
 
-// AXE S — Villes et pays HORS FRANCE.
+// Villes et pays HORS FRANCE.
 // ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
 //
 // Périmètre volontairement restreint au non-français. Les communes FRANÇAISES ne sont

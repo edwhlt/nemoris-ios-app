@@ -4,7 +4,7 @@ import UIKit
 #endif
 
 /// Cercle affichant le logo d'un marchand (favicon Google) avec fallback SF Symbol
-/// teinté par la couleur de la catégorie. AXE A.
+/// teinté par la couleur de la catégorie.
 ///
 /// Usage minimal :
 ///     MerchantLogo(domain: tiers.domain, engineMerchantId: tiers.engineMerchantId,
@@ -99,7 +99,7 @@ struct MerchantLogo: View {
 extension MerchantLogo {
     /// Initializer pour une transaction (utilise allTiers + allCategories déjà chargés
     /// dans la vue parente pour résoudre payee → domain/engineId/icon).
-    /// AXE F : inclut aussi `contactIdentifier` et fallback contextuel par `tierType`
+    /// inclut aussi `contactIdentifier` et fallback contextuel par `tierType`
     /// pour que les transactions liées à un tier `.contact` affichent l'avatar carnet iOS.
     init(transaction tx: FinanceTransaction,
          allTiers: [Tiers],

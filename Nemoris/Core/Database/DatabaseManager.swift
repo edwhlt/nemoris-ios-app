@@ -151,7 +151,7 @@ final class DatabaseManager: @unchecked Sendable {
             // Seules les bases EXISTANTES gardent la clé « Mode de paiement »,
             // recréée à l'identique par la migration à partir de leurs données.
             // La table `payment_types` reste créée (dépréciée, pas supprimée —
-            // doctrine AXE H), simplement vide.
+            // doctrine du projet), simplement vide.
         ]
 
         for sql in seeds {
@@ -247,7 +247,7 @@ final class DatabaseManager: @unchecked Sendable {
             SyncSchema.installTriggers(db)
         }
 
-        // Réparation one-shot (2026-07-17) : fusionne les doublons de
+        // Réparation one-shot : fusionne les doublons de
         // categories/payment_types créés par les premières activations sync
         // (chaque appareil avait uploadé son seed usine avant que l'adoption
         // déterministe existe). Tourne APRÈS installTriggers et HORS suppress :
@@ -695,7 +695,7 @@ final class DatabaseManager: @unchecked Sendable {
             "CREATE INDEX IF NOT EXISTS idx_payee_groups_engine ON payee_groups(engine_merchant_id);",
         ]),
 
-        // v20 — AXE A : logos de marchands.
+        // v20 — logos de marchands.
         // domain TEXT sur payees : domaine web utilisé pour récupérer le favicon Google.
         // Nullable ; quand vide, MerchantLogoService retombe sur le seed engine
         // (merchants_domains.json) à partir de engine_merchant_id, sinon affiche le fallback
@@ -704,7 +704,7 @@ final class DatabaseManager: @unchecked Sendable {
             "ALTER TABLE payees ADD COLUMN domain TEXT;",
         ]),
 
-        // v21 — AXE C : édition complète des payees.
+        // v21 — édition complète des payees.
         // note TEXT sur payees : note libre saisie par l'utilisateur (contexte, alias, etc.).
         Migration(version: 21, statements: [
             "ALTER TABLE payees ADD COLUMN note TEXT;",
@@ -745,7 +745,7 @@ final class DatabaseManager: @unchecked Sendable {
             """,
         ]),
 
-        // v23 — AXE B : cache d'enrichissement multi-sources (Sirene + LLM + MapKit).
+        // v23 — cache d'enrichissement multi-sources (Sirene + LLM + MapKit).
         // Clé = engine_merchant_id quand connu, sinon canonical_name (libellé normalisé).
         // Un seul row par clé : on garde la résolution la plus confiante toutes sources confondues.
         Migration(version: 23, statements: [
@@ -775,7 +775,7 @@ final class DatabaseManager: @unchecked Sendable {
         // Certains users avaient un user_version >= 18 sans la colonne (DB importée d'un
         // schéma JavaApp ou app installée avant v18). L'ALTER est tolérant aux doublons
         // ("duplicate column name" avalé par migrateIfNeeded), donc safe pour tous.
-        // On ne re-peuple PAS les icônes pour ne pas écraser les choix custom du user.
+        // On ne re-peuple PAS les icônes pour ne pas écraser les choix custom de l'utilisateur.
         Migration(version: 24, statements: [
             "ALTER TABLE categories ADD COLUMN icon TEXT;",
         ]),
@@ -783,10 +783,10 @@ final class DatabaseManager: @unchecked Sendable {
         // v25 — Typage des tiers (merchant/contact/internal/organization).
         // tier_type : permet de distinguer un commerçant d'un contact P2P pour adapter
         //             l'UI (avatar, champs pertinents) et la résolution moteur.
-        //             Backfill : tous en 'merchant' (sécuritaire) — l'user re-type
+        //             Backfill : tous en 'merchant' (sécuritaire) — l'utilisateur re-type
         //             manuellement les contacts depuis PayeeDetailView.
         // contact_identifier : ID local CNContact (CNContactStore.unifiedContact)
-        //             pour récupérer la photo + nom depuis le carnet iOS de l'user.
+        //             pour récupérer la photo + nom depuis le carnet iOS de l'utilisateur.
         //             100% local, demande permission lazy au premier lien.
         Migration(version: 25, statements: [
             "ALTER TABLE payees ADD COLUMN tier_type TEXT NOT NULL DEFAULT 'merchant';",
@@ -804,7 +804,7 @@ final class DatabaseManager: @unchecked Sendable {
             "DROP TABLE IF EXISTS budget_prevision_rules;",
         ]),
 
-        // v27 — Cleanup des tables legacy (AXE H).
+        // v27 — Cleanup des tables legacy.
         // Audit complet : aucune de ces tables n'est référencée dans le code actuel
         // (ni repositories, ni migrations, ni DatabaseSchemaView, ni seed). Les tables
         // v1 sont des reliques de l'app pré-rebrand (anciens noms français + table mdp
@@ -823,7 +823,7 @@ final class DatabaseManager: @unchecked Sendable {
             "DROP TABLE IF EXISTS tiers;",
         ]),
 
-        // v28 — AXE K : multi-ordres par position
+        // v28 — multi-ordres par position
         // Avant : 1 ligne investment_positions = 1 transaction implicite (qty + PRU).
         // Inconvénient : impossible de suivre un BUY + un SELL + un dividende, ni
         // d'avoir un historique chronologique des opérations pour le chart évolution.
@@ -860,9 +860,9 @@ final class DatabaseManager: @unchecked Sendable {
             """
         ]),
 
-        // v29 — AXE I Couche 0 : live sync APIs publiques (opt-in)
+        // v29 — live sync APIs publiques (opt-in)
         //
-        // Permet à l'user de lier un compte d'investissement à une source externe
+        // Permet à l'utilisateur de lier un compte d'investissement à une source externe
         // read-only (Binance, wallets EVM/BTC/SOL) pour syncro automatique des
         // positions + transactions, sans backend Nemoris.
         //
@@ -901,7 +901,7 @@ final class DatabaseManager: @unchecked Sendable {
 
         // v30 — Normalisation : suppression des colonnes DÉRIVÉES.
         // - investment_positions.quantity, average_buy_price, purchase_date
-        //   → strictement dérivées des investment_orders (AXE K), calculées
+        //   → strictement dérivées des investment_orders, calculées
         //     à la volée via SQL au moment du fetch (JOIN + GROUP BY).
         // - investment_accounts.current_value, invested_amount
         //   → dérivées des positions (sum) et des ordres (sum BUY costs),
@@ -954,7 +954,7 @@ final class DatabaseManager: @unchecked Sendable {
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_invest_price_unique ON investment_price_history(identifier, price_date);"
         ]),
 
-        // v33 — AXE I Couche 1.5 : dédup des ordres synchronisés depuis le live sync
+        // v33 — dédup des ordres synchronisés depuis le live sync
         //
         // `external_id` stocke un ID externe stable retourné par le provider (Binance
         // tradeId, txHash blockchain, etc.) préfixé par le provider :
@@ -967,7 +967,7 @@ final class DatabaseManager: @unchecked Sendable {
         // trades historiques en doublon. L'INDEX UNIQUE garantit la dédup atomique
         // via `INSERT OR IGNORE` côté repo.
         //
-        // Les ordres saisis manuellement par l'user ont `external_id = NULL` →
+        // Les ordres saisis manuellement par l'utilisateur ont `external_id = NULL` →
         // pas affectés par la contrainte d'unicité.
         Migration(version: 33, statements: [
             "ALTER TABLE investment_orders ADD COLUMN external_id TEXT;",
@@ -982,10 +982,10 @@ final class DatabaseManager: @unchecked Sendable {
         // compte mais n'est pas modélisée comme une position (pas d'asset,
         // pas de cours). On la stocke comme une colonne directe sur l'account.
         //
-        // Le total compte affiché à l'user devient :
+        // Le total compte affiché à l'utilisateur devient :
         //   sum(positions.current_value) + cash_balance
         //
-        // Édité manuellement par l'user via le form compte. Pour les comptes
+        // Édité manuellement par l'utilisateur via le form compte. Pour les comptes
         // LiveSync (Binance, wallets), on pourra plus tard remonter le solde
         // EUR/USDT automatiquement comme cashBalance.
         Migration(version: 34, statements: [
@@ -996,7 +996,7 @@ final class DatabaseManager: @unchecked Sendable {
         //
         // L'historique des cours n'est pas data utilisateur (prix récupérables
         // gratuitement via Yahoo/Stooq/CoinGecko) — il n'a donc pas à polluer
-        // la base SQLite de l'user, qui doit représenter UNIQUEMENT ce qu'il
+        // la base SQLite de l'utilisateur, qui doit représenter UNIQUEMENT ce qu'il
         // a créé ou importé (positions, ordres, transactions, etc.).
         //
         // Le cache est désormais dans `Library/Caches/nemoris/investment_price_history.json`
@@ -1021,7 +1021,7 @@ final class DatabaseManager: @unchecked Sendable {
 
         // v37 — Module Patrimoine (Net Worth Tracker).
         //
-        // 3 tables indépendantes pour modéliser le patrimoine total de l'user :
+        // 3 tables indépendantes pour modéliser le patrimoine total de l'utilisateur :
         //
         //   • patrimoine_real_estate : biens immobiliers (saisie 100% manuelle,
         //     plus-value estimée = current_value - purchase_price).
@@ -1039,7 +1039,7 @@ final class DatabaseManager: @unchecked Sendable {
         //     PEA, etc.). Chaque asset est soit **standalone** (manual_value), soit
         //     **linké** à un compte existant — exactement 1 des 2 colonnes de link
         //     peut être renseignée (forcé par UNIQUE INDEX partiels).
-        //     Linking soft (ON DELETE SET NULL) → si l'user supprime son compte
+        //     Linking soft (ON DELETE SET NULL) → si l'utilisateur supprime son compte
         //     bancaire/investment, l'asset bascule auto en standalone avec la
         //     dernière valeur connue (last_known_value), pas de cascade destructrice.
         //
@@ -1099,10 +1099,10 @@ final class DatabaseManager: @unchecked Sendable {
         //
         // L'assurance emprunteur n'est pas un intérêt bancaire — elle ne modifie
         // PAS le capital restant dû ni le calcul d'amortissement. C'est une charge
-        // séparée que l'user supporte tous les mois en plus de la mensualité du
+        // séparée que l'utilisateur supporte tous les mois en plus de la mensualité du
         // prêt (typiquement 0.20% à 0.50% du capital initial par an, lissée).
         //
-        // Stockée en montant mensuel direct (pas en %) pour matcher ce que l'user
+        // Stockée en montant mensuel direct (pas en %) pour matcher ce que l'utilisateur
         // voit sur son contrat. Affichée dans le form + dans la row du prêt + dans
         // les totaux (coût mensuel global = Σ monthlyPayment + Σ insuranceMonthly).
         Migration(version: 38, statements: [
@@ -1119,7 +1119,7 @@ final class DatabaseManager: @unchecked Sendable {
         //   • SAVINGS     : atteindre X € d'épargne (totalAssetsValue)
         //   • NETWORTH    : atteindre X € de patrimoine net (assets + immo − dettes)
         //   • DEBT_PAYOFF : rembourser X € de dette (target = 0 = 100%)
-        //   • CUSTOM      : objectif manuel (l'user met à jour le "current" en
+        //   • CUSTOM: objectif manuel (l'utilisateur met à jour le "current" en
         //                   éditant le goal — pas de calcul auto)
         //
         // Volontairement pas de FK vers patrimoine_assets ou patrimoine_loans
@@ -1142,7 +1142,7 @@ final class DatabaseManager: @unchecked Sendable {
             """
         ]),
 
-        // v40 — AXE L Couche L.0 : instrumentation sync CloudKit.
+        // v40 — instrumentation sync CloudKit.
         //
         // Socle du dirty-tracking pour la future synchronisation CKSyncEngine :
         //   • tables d'infra : sync_meta (KV interne), sync_pending (queue
@@ -1176,7 +1176,7 @@ final class DatabaseManager: @unchecked Sendable {
                 ].flatMap { SyncSchema.columnStatements(table: $0) }
         ),
 
-        // v41 — AXE L Couche L.1 : état CKSyncEngine par row.
+        // v41 — état CKSyncEngine par row.
         //
         //   • sync_record_meta : system fields du CKRecord archivés
         //     (encodeSystemFields) — nécessaires pour ré-uploader une row sans
@@ -1206,7 +1206,7 @@ final class DatabaseManager: @unchecked Sendable {
             """,
         ]),
 
-        // v42 — AXE L Couche L.3 : extension de la sync aux modules
+        // v42 — extension de la sync aux modules
         // Budget / Investissements / Patrimoine / Objectifs / Tricount.
         //
         // Mêmes colonnes uuid/updated_at + backfill + index UNIQUE que v40,
@@ -1235,7 +1235,7 @@ final class DatabaseManager: @unchecked Sendable {
             }
         ),
 
-        // v43 — AXE L : file des records distants différés (FK NOT NULL dont
+        // v43 — file des records distants différés (FK NOT NULL dont
         // la cible n'est pas encore arrivée). Avant ce fix, l'INSERT violait
         // la contrainte NOT NULL et le record était PERDU définitivement
         // (CloudKit ne re-livre pas un record fetché non appliqué). Cas réel :
@@ -1246,7 +1246,7 @@ final class DatabaseManager: @unchecked Sendable {
         // rejoué en fin de batch dès que les cibles existent (SyncPayloadStore).
         Migration(version: 43, statements: SyncSchema.deferredRowsDDL),
 
-        // v44 — AXE R : remboursement unifié transaction simple + Tricount.
+        // v44 — remboursement unifié transaction simple + Tricount.
         // Remplace `transactions.reimbursement_payee_id` (colonne posée sur la
         // table cœur, présente NULL sur CHAQUE transaction) et généralise
         // `tricount_reimbursements` en une seule table `reimbursements`,
@@ -1335,10 +1335,10 @@ final class DatabaseManager: @unchecked Sendable {
         // ⚠️ BASCULE COMPLÈTE, pas coexistence : l'UI ne lit plus que les
         // métadonnées. Faire vivre les deux en parallèle donnerait deux endroits
         // où éditer la même information — le motif de divergence que ce dépôt
-        // combat partout ailleurs (cf. AXE Q, les quatre calculs d'enveloppes).
+        // combat partout ailleurs (, les quatre calculs d'enveloppes).
         //
         // ⚠️ `payment_types` et `transactions.payment_type_id` sont DÉPRÉCIÉS,
-        // pas supprimés : doctrine AXE H (on ne retire une colonne qu'une fois
+        // pas supprimés : doctrine du projet (on ne retire une colonne qu'une fois
         // confirmé que plus rien ne la référence). Les données y restent
         // intactes, ce qui rend la migration réversible.
         //

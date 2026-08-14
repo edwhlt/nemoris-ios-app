@@ -30,10 +30,10 @@ struct ContactPickerSheet: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            ContentUnavailableView(
-                "Bientôt sur Mac",
-                systemImage: "person.crop.circle.badge.clock",
-                description: Text("Le choix d'un contact du carnet arrive dans une prochaine version Mac. En attendant, liez vos contacts depuis l'iPhone — la synchronisation iCloud propage le lien.")
+            EmptyStateView(
+                icon: "person.crop.circle.badge.clock",
+                title: "Bientôt sur Mac",
+                message: "Le choix d'un contact du carnet arrive dans une prochaine version Mac. En attendant, liez vos contacts depuis l'iPhone — la synchronisation iCloud propage le lien."
             )
             Button("Fermer") { onPick(nil); dismiss() }
                 .keyboardShortcut(.cancelAction)
@@ -50,7 +50,7 @@ struct ContactPickerSheet: UIViewControllerRepresentable {
         let name: String
     }
 
-    /// Callback appelé quand l'user pick un contact (ou nil si annule).
+    /// Callback appelé quand l'utilisateur pick un contact (ou nil si annule).
     /// La sheet se ferme automatiquement après.
     let onPick: (PickedContact?) -> Void
 

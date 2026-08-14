@@ -11,6 +11,7 @@ trap "rm -rf $BUILD" EXIT
 
 xcrun swiftc \
   ../Nemoris/Features/Investments/Service/PDFImport/InvestmentStatementExtractor.swift \
+  ../Nemoris/Features/Investments/Service/PDFImport/StatementReconciler.swift \
   StatementExtractorTests.swift \
   -o "$BUILD/statement_tests"
 

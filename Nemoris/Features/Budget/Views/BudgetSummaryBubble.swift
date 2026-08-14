@@ -53,7 +53,7 @@ struct BudgetSummaryBubble: View {
                     Text(summary.actualExpenses, format: .currency(code: "EUR").precision(.fractionLength(0)))
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(overColor)
-                    Text("/ \(summary.forecastedExpenses.formatted(.currency(code: "EUR").precision(.fractionLength(0))))")
+                    (Text("/ ") + Text(summary.forecastedExpenses, format: .currency(code: "EUR").precision(.fractionLength(0))))
                         .font(.system(size: 10))
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }

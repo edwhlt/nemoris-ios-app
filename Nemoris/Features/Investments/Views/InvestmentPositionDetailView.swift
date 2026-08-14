@@ -22,13 +22,24 @@ struct InvestmentPositionDetailView: View {
     @State private var localTimeRange: InvestmentTimeRange = .all
     @State private var priceHistory: [InvestmentPricePoint] = []
     /// Série INTRADAY 30 min (plage 1J uniquement) — chargée on-demand quand
-    /// l'user sélectionne 1J, cache 48 h avec skip fraîcheur < 25 min.
+    /// l'utilisateur sélectionne 1J, cache 48 h avec skip fraîcheur < 25 min.
     @State private var intradayHistory: [InvestmentPricePoint] = []
+    /// État du chargement de la série intraday (plage 1J). Rend visible ce qui
+    /// était muet : tant que le fetch tourne on l'annonce, et s'il échoue on
+    /// dit pourquoi au lieu de retomber sans le dire sur le quotidien.
+    @State private var intradayState: IntradayState = .idle
+
+    enum IntradayState: Equatable {
+        case idle
+        case loading
+        case ready
+        case unavailable(String)
+    }
     @State private var isSyncing = false
     @State private var statusMessage: String?
     @State private var showEditForm = false
 
-    // AXE K — ordres
+    // ordres
     // Pour éviter le bug "tap pour modifier crée un nouveau ordre", on utilise
     // 2 sheets distinctes (pattern recommandé Apple) :
     //   - showOrderAddForm  : nouvelle saisie (order = nil)
@@ -40,7 +51,7 @@ struct InvestmentPositionDetailView: View {
     @State private var showOrderAddForm = false
     @State private var editingOrder: InvestmentOrder?
 
-    // AXE M : scrub interactif sur la position chart. Permet de "fixer" la chart
+    // scrub interactif sur la position chart. Permet de "fixer" la chart
     // sous le doigt (consomme les gestures horizontaux), tout en laissant le scroll
     // vertical fonctionner (le gesture refuse les drags verticaux).
     @State private var chartSelectedDate: Date?
@@ -139,11 +150,21 @@ struct InvestmentPositionDetailView: View {
     /// cette fenêtre — rien à tracer) ; sinon la série quotidienne, dédupliquée
     /// par jour calendaire (prévention "code-barres").
     private var chartPoints: [InvestmentPricePoint] {
-        if localTimeRange == .oneDay && !intradayHistory.isEmpty {
-            // Intraday : un point par HORODATAGE (pas par jour !), fenêtre des
-            // dernières 24 h COTÉES — ancrée sur le dernier point disponible et
-            // non sur `Date()`, sinon la vue est vide hors séance (cf.
-            // `lastQuotedWindow`).
+        if localTimeRange == .oneDay {
+            // ⚠️ PAS de repli sur la série quotidienne en 1J.
+            //
+            // C'est LA cause du « 1J n'affiche que 2 points » : sans cotations
+            // intrajournalières, on filtrait le QUOTIDIEN sur 24 h, ce qui
+            // laisse un ou deux points de clôture — tracés comme une courbe
+            // ordinaire. L'utilisateur voyait donc une droite entre deux points
+            // en croyant regarder la journée, sans rien pour lui dire que la
+            // série intraday manquait. Mieux vaut un état vide explicite
+            // (cf. `intradayState`) qu'une courbe fabriquée à partir d'une
+            // autre granularité.
+            guard !intradayHistory.isEmpty else { return [] }
+            // Un point par HORODATAGE (pas par jour !), fenêtre des dernières
+            // 24 h COTÉES — ancrée sur le dernier point disponible et non sur
+            // `Date()`, sinon la vue est vide hors séance (cf. `lastQuotedWindow`).
             var seen = Set<Date>()
             let deduped = intradayHistory
                 .filter { $0.close.isFinite && $0.close > 0 }
@@ -210,7 +231,7 @@ struct InvestmentPositionDetailView: View {
         return position.purchaseDate >= cutoff
     }
 
-    /// AXE K — ordres à afficher sur le chart : ceux qui tombent dans la plage temporelle
+    /// ordres à afficher sur le chart : ceux qui tombent dans la plage temporelle
     /// sélectionnée. Pour "Max" (cutoff == nil) on prend tous les ordres.
     private var visibleOrders: [InvestmentOrder] {
         guard let cutoff = localTimeRange.startDate else { return orders }
@@ -451,19 +472,51 @@ struct InvestmentPositionDetailView: View {
     /// Chargement de la série intraday : sync réseau (avec skip fraîcheur) puis
     /// lecture du cache sous les identifiants candidats (ISIN puis ticker —
     /// le service stocke sous `bestSyncIdentifier`).
+    ///
+    /// ⚠️ Le résultat de la synchro n'est PLUS jeté (`_ = await …`). Sans lui,
+    /// toute panne du 1J — cours limité par le provider, symbole introuvable,
+    /// réseau coupé — était strictement invisible : l'écran retombait sur la
+    /// série quotidienne et affichait une droite entre deux points comme si
+    /// c'était la courbe de la journée.
     private func loadIntradayHistory() async {
         let identifier = position.bestSyncIdentifier
-        guard !identifier.isEmpty else { return }
-        _ = await InvestmentAutoSyncService.shared.syncIntradayHistory(identifier: identifier)
+        guard !identifier.isEmpty else {
+            intradayState = .unavailable("Aucun ticker ni ISIN sur cette position.")
+            return
+        }
+        intradayState = .loading
+        let outcome = await InvestmentAutoSyncService.shared.syncIntradayHistory(identifier: identifier)
+
         let candidates = [position.isin, position.ticker].filter { !$0.isEmpty }
         for candidate in candidates {
             let points = PriceHistoryCache.shared.fetch(identifier: candidate, resolution: .intraday30m)
             if !points.isEmpty {
                 intradayHistory = points
+                intradayState = .ready
                 return
             }
         }
         intradayHistory = []
+        intradayState = .unavailable(Self.intradayFailureMessage(outcome))
+    }
+
+    /// Traduction FR du résultat de synchro intraday.
+    private static func intradayFailureMessage(_ outcome: PositionSyncOutcome) -> String {
+        switch outcome {
+        case .success, .upToDate:
+            // Synchro annoncée OK mais rien en cache : l'instrument n'a pas de
+            // cotation en continu (fonds à VL quotidienne, marché fermé depuis
+            // plus longtemps que la rétention).
+            return "Ce titre n'a pas de cotation en continu disponible — seul un cours de clôture quotidien existe."
+        case .rateLimited(let provider, let retryAfter):
+            return "\(provider.displayName) limite les requêtes — nouvelle tentative possible dans \(Int(retryAfter)) s."
+        case .noData:
+            return "Le fournisseur de cours n'a pas de données intrajournalières pour ce titre."
+        case .invalidIdentifier:
+            return "Identifiant de cotation invalide."
+        case .networkError(let message):
+            return "Cours intrajournaliers indisponibles : \(message)"
+        }
     }
 
     // MARK: - Skeleton
@@ -518,7 +571,7 @@ struct InvestmentPositionDetailView: View {
 
     // MARK: - Cards
 
-    // AXE M : `syncIconButton` retiré — la sync est désormais déclenchée par le
+    // `syncIconButton` retiré — la sync est désormais déclenchée par le
     // bouton refresh dans la toolbar (à gauche du menu ⋯), pas dans le hero.
     /// Chantier B — hero + chart à plat (sans carte), chips SOUS le chart.
     private var heroAndChartCard: some View {
@@ -580,7 +633,7 @@ struct InvestmentPositionDetailView: View {
 
             TimeRangeChips(selection: $localTimeRange)
 
-            // Info sur la profondeur de données disponible. Permet à l'user
+            // Info sur la profondeur de données disponible. Permet à l'utilisateur
             // de comprendre qu'un chart 10A tronqué n'est pas un bug mais
             // simplement que l'ETF/action est récent (Yahoo ne fournit que
             // l'historique depuis l'inception du titre).
@@ -644,18 +697,47 @@ struct InvestmentPositionDetailView: View {
     private var positionChart: some View {
         if chartPoints.isEmpty {
             VStack(spacing: 8) {
-                Image(systemName: "chart.xyaxis.line")
-                    .font(.system(size: 28, weight: .light))
-                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.4))
-                Text("Aucun historique synchronisé")
-                    .font(.system(size: 12))
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                Button("Synchroniser maintenant") {
-                    Task { await syncHistory() }
+                if localTimeRange == .oneDay, intradayState == .loading {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Récupération des cours de la journée…")
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                } else {
+                    Image(systemName: "chart.xyaxis.line")
+                        .font(.system(size: 28, weight: .light))
+                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.4))
+                    // En 1J, l'absence de courbe a une cause PROPRE (pas de
+                    // cotation en continu, provider limité…) : la dire, au lieu
+                    // du message générique « aucun historique » qui laissait
+                    // croire à un défaut de synchro globale.
+                    if localTimeRange == .oneDay, case .unavailable(let reason) = intradayState {
+                        Text("Pas de cours intrajournalier")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                        Text(reason)
+                            .font(.system(size: 11))
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, AppTheme.Spacing.md)
+                        Button("Réessayer") {
+                            Task { await loadIntradayHistory() }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(AppTheme.Colors.accent)
+                    } else {
+                        Text("Aucun historique synchronisé")
+                            .font(.system(size: 12))
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                        Button("Synchroniser maintenant") {
+                            Task { await syncHistory() }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(AppTheme.Colors.accent)
+                        .disabled(position.bestSyncIdentifier.isEmpty || isSyncing)
+                    }
                 }
-                .buttonStyle(.bordered)
-                .tint(AppTheme.Colors.accent)
-                .disabled(position.bestSyncIdentifier.isEmpty || isSyncing)
             }
             .frame(maxWidth: .infinity, minHeight: 200)
         } else {
@@ -752,7 +834,7 @@ struct InvestmentPositionDetailView: View {
                     .symbolSize(70)
                 }
 
-                // Indicateur visuel quand l'user scrub la chart (vertical line + dot
+                // Indicateur visuel quand l'utilisateur scrub la chart (vertical line + dot
                 // sur la courbe). N'apparaît que si chartSelectedDate est set.
                 if let selected = chartSelectedDate,
                    let snapped = closestPoint(to: selected) {
@@ -796,7 +878,7 @@ struct InvestmentPositionDetailView: View {
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.08))
                 }
             }
-            // AXE M : scrub interactif (consomme les drags horizontaux pour que la
+            // scrub interactif (consomme les drags horizontaux pour que la
             // chart se sente "fixe" sous le doigt, laisse les drags verticaux passer
             // au ScrollView parent pour le scroll de page).
             .chartOverlay { proxy in
@@ -882,7 +964,7 @@ struct InvestmentPositionDetailView: View {
                     HStack(spacing: AppTheme.Spacing.sm) {
                         StatBadge(
                             label: "P&L total",
-                            value: realizedPnL.formatted(.currency(code: account.currency)),
+                            value: realizedPnL.formatted(.currency(code: account.currency).locale(appState.locale)),
                             valueColor: realizedPnL >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger
                         )
                         StatBadge(
@@ -913,7 +995,7 @@ struct InvestmentPositionDetailView: View {
                     HStack(spacing: AppTheme.Spacing.sm) {
                         StatBadge(
                             label: "P&L total",
-                            value: totalPnL.formatted(.currency(code: account.currency)),
+                            value: totalPnL.formatted(.currency(code: account.currency).locale(appState.locale)),
                             valueColor: pnlColor
                         )
                         StatBadge(
@@ -964,9 +1046,9 @@ struct InvestmentPositionDetailView: View {
                 detailRow("ISIN", value: position.isin.isEmpty ? "— (à renseigner pour sync fiable)" : position.isin)
                 detailRow("Type", value: InvestmentAssetType(rawValue: position.assetType)?.label ?? position.assetType)
                 detailRow("Quantité", value: String(format: "%.6f", position.quantity).trimmedZeros)
-                detailRow("PRU", value: position.averageBuyPrice.formatted(.currency(code: account.currency)))
-                detailRow("Investi", value: position.investedAmount.formatted(.currency(code: account.currency)))
-                detailRow("Date d'achat", value: position.purchaseDate.formatted(date: .abbreviated, time: .omitted))
+                detailRow("PRU", value: position.averageBuyPrice.formatted(.currency(code: account.currency).locale(appState.locale)))
+                detailRow("Investi", value: position.investedAmount.formatted(.currency(code: account.currency).locale(appState.locale)))
+                detailRow("Date d'achat", value: position.purchaseDate.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(appState.locale)))
                 detailRow("Compte", value: "\(account.name) · \(account.accountType)", isLast: true)
             }
         }
@@ -1072,14 +1154,14 @@ struct InvestmentPositionDetailView: View {
         priceHistory = []
     }
 
-    /// AXE K — recharge la liste des ordres de cette position (chronologique ASC).
+    /// recharge la liste des ordres de cette position (chronologique ASC).
     private func loadOrders() {
         orders = repository.fetchOrders(positionId: position.id)
     }
 
     /// Card "Ordres" — historique des opérations + bouton + pour en ajouter.
     /// Liste les BUY/SELL/DIV en ordre antichronologique (le plus récent en haut).
-    /// AXE M : tap inactif (anti-modif accidentelle). Swipe leading = Modifier,
+    /// tap inactif (anti-modif accidentelle). Swipe leading = Modifier,
     /// swipe trailing = Supprimer (avec recompute auto qty/PRU).
     private var ordersCard: some View {
         AppCard {

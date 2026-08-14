@@ -73,6 +73,6 @@ struct PayeeDetailPane: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .nemorisFormStyle()
     }
 }

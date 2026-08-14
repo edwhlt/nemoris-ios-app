@@ -40,14 +40,16 @@ enum MainTabItem: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Fonctionnalité payante qui verrouille ce module, si applicable. `nil` = accès
-    /// libre dès que le toggle des Réglages est actif (Patrimoine, Tricount, Données).
+    /// Fonctionnalité payante qui verrouille ce module ENTIER, si applicable. `nil` =
+    /// accès libre dès que le toggle des Réglages est actif (Transactions, Patrimoine,
+    /// Investissements, Tricount, Données — seule leur couche avancée reste Pro,
+    /// gatée séparément dans la vue concernée : `.investmentsLiveSync`,
+    /// `.patrimoineProjection`, `.filteredDashboard`).
     /// Source unique partagée par le paywall (`paywallOverlay`/`proToggle`) et la
     /// disponibilité des cartes Dashboard (`AppState.isDashboardCardAvailable`) — les
     /// deux ne doivent jamais diverger sur "quel module est payant".
     var paywallFeature: AppFeature? {
         switch self {
-        case .investments: return .investments
         case .budget:      return .budget
         case .sqlConsole:  return .sqlConsole
         default:           return nil
@@ -77,7 +79,7 @@ final class AppState {
     var importStatus: String = "Aucun import lance"
     var dataRefreshToken: UUID = UUID()
 
-    /// AXE E — session d'import active (résumé léger). Pilote l'affichage du bandeau
+    /// session d'import active (résumé léger). Pilote l'affichage du bandeau
     /// "Import en cours" dans MainTabView et le tap pour reprendre.
     var activeImportSession: ImportSessionSummary? = nil
 
@@ -173,9 +175,9 @@ final class AppState {
     /// Quand `true`, tous les composants `MoneyText` affichent une chaîne masquée
     /// (`•• ••• €`) au lieu de la valeur réelle. Volontairement NON persisté —
     /// c'est un toggle de session, l'état repart à `false` à chaque cold launch
-    /// pour ne pas piéger l'user (sinon il rouvre l'app et ne comprend pas
+    /// pour ne pas piéger l'utilisateur (sinon il rouvre l'app et ne comprend pas
     /// pourquoi rien ne s'affiche). Persistance gérée séparément via le mode
-    /// face-down si l'user le souhaite.
+    /// face-down si l'utilisateur le souhaite.
     var amountsHidden: Bool = false
 
     /// Si `true`, le PrivacyMotionMonitor surveille l'orientation du téléphone
@@ -186,7 +188,7 @@ final class AppState {
     }
 
     /// Retours haptiques globaux. Default `true` (attente standard d'une app
-    /// moderne). L'user peut désactiver dans Settings → Confidentialité.
+    /// moderne). l'utilisateur peut désactiver dans Settings → Confidentialité.
     var hapticsEnabled: Bool = UserDefaults.standard.object(forKey: "hapticsEnabled") as? Bool ?? true {
         didSet { UserDefaults.standard.set(hapticsEnabled, forKey: "hapticsEnabled") }
     }
@@ -220,7 +222,7 @@ final class AppState {
     /// `PendingImportInbox`), consommé par `InvestmentsView` qui présente la sheet.
     var pendingInvestmentImportURLs: [URL] = []
 
-    /// AXE P — relevés bancaires déposés par le raccourci `ImportFileIntent` ou
+    /// relevés bancaires déposés par le raccourci `ImportFileIntent` ou
     /// la share extension Transactions, à ouvrir dans l'import V3 pré-rempli.
     /// Setté par NemorisApp au passage au premier plan (consommation de
     /// `PendingImportInbox`), consommé par `MainTabView` qui présente la sheet.

@@ -1,7 +1,7 @@
 import SwiftUI
 import NemorisEngine
 
-/// Vue principale du nouveau parcours d'import (AXE D).
+/// Vue principale du nouveau parcours d'import.
 ///
 /// Charge la session par id (depuis la DB), lance la résolution moteur en arrière-plan,
 /// affiche la liste des rows avec actions (confirmer / ignorer / réassigner manuellement),
@@ -114,7 +114,7 @@ struct ImportSessionView: View {
                         }
                     }
             } else if let loadError {
-                ContentUnavailableView("Erreur", systemImage: "exclamationmark.triangle", description: Text(loadError))
+                EmptyStateView(icon: "exclamationmark.triangle", title: "Erreur", message: loadError)
             } else {
                 // Skeleton initial avant que la session ne soit chargée + résolution moteur démarrée.
                 ScrollView {
@@ -337,7 +337,7 @@ struct ImportSessionView: View {
     @ViewBuilder
     private func rowsList(_ vm: ImportSessionViewModel) -> some View {
         if vm.session.rows.isEmpty {
-            ContentUnavailableView("Session vide", systemImage: "tray")
+            EmptyStateView(icon: "tray", title: "Session vide", message: "Aucune ligne à afficher.")
         } else {
             List {
                 ForEach(vm.displayedRows) { row in
@@ -464,7 +464,7 @@ private struct ImportSessionRowCell: View {
                     Text(row.amount, format: .currency(code: "EUR"))
                         .font(.subheadline.bold())
                         .foregroundStyle(row.amount < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
-                    Text(row.date.formatted(date: .abbreviated, time: .omitted))
+                    Text(row.date, format: Date.FormatStyle(date: .abbreviated, time: .omitted))
                         .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
                 }
             }

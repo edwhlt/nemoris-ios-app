@@ -161,10 +161,10 @@ struct TransactionFiltersSheet: View {
             .onAppear { localTiersSearch = tiersSearchText }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer") { paneDismiss() }
+                    Button("Fermer", systemImage: "xmark") { paneDismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Appliquer") {
+                    Button("Appliquer", systemImage: "checkmark") {
                         tiersSearchText = localTiersSearch
                         onApply()
                         paneDismiss()

@@ -123,6 +123,8 @@ struct AppChartCard<Content: View>: View {
 // MARK: - PremiumDashboardSummaryCard
 
 struct PremiumDashboardSummaryCard: View {
+    @Environment(AppState.self) private var appState
+
     let stats: DashboardStats
     let title: String
     let subtitle: String
@@ -162,7 +164,7 @@ struct PremiumDashboardSummaryCard: View {
             HStack(spacing: 0) {
                 StatBadge(
                     label: "Recettes",
-                    value: stats.totalIncome.formatted(.currency(code: "EUR").presentation(.narrow)),
+                    value: stats.totalIncome.formatted(.currency(code: "EUR").presentation(.narrow).locale(appState.locale)),
                     valueColor: AppTheme.Colors.success,
                     icon: "arrow.down.circle.fill"
                 )
@@ -171,7 +173,7 @@ struct PremiumDashboardSummaryCard: View {
                     .frame(width: 1, height: 48)
                 StatBadge(
                     label: "Dépenses",
-                    value: abs(stats.totalExpense).formatted(.currency(code: "EUR").presentation(.narrow)),
+                    value: abs(stats.totalExpense).formatted(.currency(code: "EUR").presentation(.narrow).locale(appState.locale)),
                     valueColor: AppTheme.Colors.danger,
                     icon: "arrow.up.circle.fill"
                 )

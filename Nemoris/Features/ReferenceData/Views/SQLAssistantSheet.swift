@@ -6,8 +6,9 @@ import SwiftUI
 ///   - "Utiliser cette requête" → colle dans l'éditeur parent et dismiss
 ///   - "Tester maintenant" → exécute la requête et affiche le résultat tronqué inline
 struct SQLAssistantSheet: View {
-    /// Callback appelé quand l'user choisit "Utiliser cette requête".
-    let onApply: (String) -> Void
+    /// Callback appelé quand l'utilisateur confirme "Utiliser cette requête" — après
+    /// avoir éventuellement ajusté le titre suggéré dans l'alerte de confirmation.
+    let onApply: (_ title: String, _ sql: String) -> Void
 
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
     @Environment(\.paneDismiss) private var dismiss
@@ -15,6 +16,10 @@ struct SQLAssistantSheet: View {
     @State private var messages: [ChatMessage] = []
     @State private var inputText: String = ""
     @State private var isThinking = false
+    /// SQL en attente de confirmation de titre (déclenché par "Utiliser cette
+    /// requête"). Non-nil ⇒ l'alerte de titre est présentée.
+    @State private var pendingApplySQL: String? = nil
+    @State private var titleInput: String = ""
 
     private let repository = TransactionRepository()
 
@@ -23,7 +28,7 @@ struct SQLAssistantSheet: View {
         let id = UUID()
         let role: Role
         var text: String
-        /// Résultat d'un "Tester maintenant" si l'user l'a déclenché.
+        /// Résultat d'un "Tester maintenant" si l'utilisateur l'a déclenché.
         var inlineResult: InlineResult? = nil
     }
     struct InlineResult {
@@ -68,6 +73,22 @@ struct SQLAssistantSheet: View {
                             service.resetConversation()
                             messages = []
                         } : nil)
+            .alert("Titre de la section", isPresented: Binding(
+                get: { pendingApplySQL != nil },
+                set: { if !$0 { pendingApplySQL = nil } }
+            )) {
+                TextField("Titre", text: $titleInput)
+                Button("Insérer") {
+                    if let sql = pendingApplySQL {
+                        onApply(titleInput, sql)
+                    }
+                    pendingApplySQL = nil
+                    dismiss()
+                }
+                Button("Annuler", role: .cancel) { pendingApplySQL = nil }
+            } message: {
+                Text("Devient l'en-tête « -- titre -- » de cette section dans le fichier .sql.")
+            }
     }
 
     // MARK: - Chat body
@@ -195,8 +216,8 @@ struct SQLAssistantSheet: View {
 
                 HStack(spacing: AppTheme.Spacing.sm) {
                     Button {
-                        onApply(sql)
-                        dismiss()
+                        titleInput = suggestedTitle(for: msg.id)
+                        pendingApplySQL = sql
                     } label: {
                         Label("Utiliser cette requête", systemImage: "arrow.down.doc")
                             .font(.caption.weight(.semibold))
@@ -272,6 +293,12 @@ struct SQLAssistantSheet: View {
             TextField("Décrivez votre requête…", text: $inputText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...4)
+                // Le champ étant multi-ligne (axis: .vertical), Retour insère un
+                // saut de ligne — comportement conservé. macOS dessine par défaut
+                // un anneau de focus SYSTÈME par-dessus le fond custom arrondi
+                // ci-dessous, qui jure visuellement ; désactivé pour ne garder que
+                // ce fond comme indicateur de focus (iOS : no-op).
+                .focusEffectDisabled()
                 .padding(.horizontal, AppTheme.Spacing.md)
                 .padding(.vertical, AppTheme.Spacing.sm)
                 .background(AppTheme.Colors.surfaceSecondary, in: RoundedRectangle(cornerRadius: 18))
@@ -284,6 +311,10 @@ struct SQLAssistantSheet: View {
                     .foregroundStyle(canSend ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary.opacity(0.4))
             }
             .disabled(!canSend)
+            // ⌘Retour envoie, en plus du tap — convention macOS standard pour un
+            // champ de texte multi-ligne où Retour seul reste un saut de ligne.
+            .keyboardShortcut(.return, modifiers: [.command])
+            .help("Envoyer (⌘Retour)")
         }
         .padding(AppTheme.Spacing.md)
         .background(AppTheme.Colors.surface)
@@ -334,6 +365,21 @@ struct SQLAssistantSheet: View {
                 }
             }
         }
+    }
+
+    /// Dérive un titre par défaut depuis la question de l'utilisateur qui a produit
+    /// cette réponse — déjà en langage naturel, donc un bon point de départ pour
+    /// l'en-tête `-- titre --` de la section SQL insérée dans le fichier.
+    private func suggestedTitle(for messageId: UUID) -> String {
+        guard let idx = messages.firstIndex(where: { $0.id == messageId }), idx > 0,
+              messages[idx - 1].role == .user else { return "" }
+        var title = messages[idx - 1].text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "--", with: "–")
+        if title.count > 60 {
+            title = String(title.prefix(60)) + "…"
+        }
+        return title
     }
 
     // MARK: - Unavailable state

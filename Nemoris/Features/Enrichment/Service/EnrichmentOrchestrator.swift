@@ -1,6 +1,6 @@
 import Foundation
 
-/// AXE B.1 — Orchestrateur qui lance Sirene + Apple Foundation Models + MapKit en parallèle
+/// Orchestrateur qui lance Sirene + Apple Foundation Models + MapKit en parallèle
 /// et fusionne les résultats par vote pondéré (confidence × source_weight).
 ///
 /// Stratégie cache :
@@ -59,7 +59,7 @@ actor EnrichmentOrchestrator {
     // MARK: - Source branches
 
     private func enrichViaSirene(_ context: MerchantEnrichmentContext) async -> MerchantEnrichment? {
-        // AXE S — passe par le planificateur + l'exécuteur de cascade au lieu d'envoyer le
+        // passe par le planificateur + l'exécuteur de cascade au lieu d'envoyer le
         // libellé entier dans `q=`.
         //
         // Avant : `q = canonicalName ?? rawLabel`, c'est-à-dire nom + ville + bruit mélangés.

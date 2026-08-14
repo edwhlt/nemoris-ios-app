@@ -36,8 +36,17 @@ enum AccessLevel: Int, Comparable {
 // MARK: - App Feature
 
 /// Fonctionnalités de l'application pouvant être verrouillées derrière un niveau d'accès.
+///
+/// Doctrine : Transactions, Patrimoine, Investissements et Tricount sont
+/// des modules GRATUITS dans leur ensemble — la promesse de base de chacun reste
+/// utilisable sans payer. Seule leur couche "avancée / automatisée" est Pro
+/// (`investmentsLiveSync`, `patrimoineProjection`), au même titre que l'analyse
+/// filtrée au sein de Transactions (`filteredDashboard`). Budget et Console SQL
+/// restent des murs complets : ce sont des modules "métier sérieux" où la promesse
+/// claire (payer = tout le module) vend mieux qu'un accès bridé.
 enum AppFeature: CaseIterable {
-    case investments
+    case investmentsLiveSync
+    case patrimoineProjection
     //case tricount
     case filteredDashboard
     case sqlConsole
@@ -48,31 +57,34 @@ enum AppFeature: CaseIterable {
 
     var title: String {
         switch self {
-        case .investments:       return "Investissements"
-        //case .tricount:          return "Tricount"
-        case .filteredDashboard: return "Dashboard filtré"
-        case .sqlConsole:        return "Console SQL"
-        case .budget:            return "Budget & Prévisions"
+        case .investmentsLiveSync:  return "Live Sync"
+        case .patrimoineProjection: return "Projection patrimoniale"
+        //case .tricount:            return "Tricount"
+        case .filteredDashboard:    return "Dashboard filtré"
+        case .sqlConsole:           return "Console SQL"
+        case .budget:               return "Budget & Prévisions"
         }
     }
 
     var description: String {
         switch self {
-        case .investments:       return "Suivi de portefeuille et performance"
-        //case .tricount:          return "Partage de dépenses en groupe"
-        case .filteredDashboard: return "Analyses par période, compte ou catégorie"
-        case .sqlConsole:        return "Requêtes SQL directes sur votre base de données"
-        case .budget:            return "Prévisions, récurrents, enveloppes et calendrier"
+        case .investmentsLiveSync:  return "Synchronisation automatique de vos exchanges et wallets crypto"
+        case .patrimoineProjection: return "Prévision de votre patrimoine net dans le temps"
+        //case .tricount:            return "Partage de dépenses en groupe"
+        case .filteredDashboard:    return "Analyses par période, compte ou catégorie"
+        case .sqlConsole:           return "Requêtes SQL directes sur votre base de données"
+        case .budget:               return "Prévisions, récurrents, enveloppes et calendrier"
         }
     }
 
     var icon: String {
         switch self {
-        case .investments:       return "chart.line.uptrend.xyaxis"
-        //case .tricount:          return "person.2.fill"
-        case .filteredDashboard: return "line.3.horizontal.decrease.circle"
-        case .sqlConsole:        return "terminal"
-        case .budget:            return "chart.bar.fill"
+        case .investmentsLiveSync:  return "arrow.triangle.2.circlepath"
+        case .patrimoineProjection: return "chart.line.uptrend.xyaxis"
+        //case .tricount:            return "person.2.fill"
+        case .filteredDashboard:    return "line.3.horizontal.decrease.circle"
+        case .sqlConsole:           return "terminal"
+        case .budget:               return "chart.bar.fill"
         }
     }
 }
@@ -104,6 +116,13 @@ final class PurchaseManager {
     // MARK: State (read-only publiquement)
 
     private(set) var accessLevel: AccessLevel = .free
+    /// ID du produit d'abonnement récurrent actif (mensuel/annuel), `nil` si aucun
+    /// abonnement en cours (gratuit, ou Lifetime acheté sans abonnement en parallèle).
+    /// Comme `accessLevel` : jamais persisté, recalculé à chaque `refreshEntitlements()`
+    /// depuis `Transaction.currentEntitlements`. Sert à l'écran Paywall pour proposer
+    /// un changement de formule (mensuel ↔ annuel) plutôt que de re-vendre l'offre déjà
+    /// possédée.
+    private(set) var activeSubscriptionProductID: String?
     private(set) var products: [Product] = []
     private(set) var isLoading = false
     private(set) var productsLoading = true
@@ -113,11 +132,12 @@ final class PurchaseManager {
     #if DEBUG
     /// Override développeur : force l'accès Lifetime sans achat réel.
     /// Jamais compilé en production (Release).
-    var devOverrideEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "devOverride") }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "devOverride")
-            accessLevel = newValue ? .lifetime : .free
+    /// Propriété STOCKÉE (pas de get/set custom) : `@Observable` n'instrumente que
+    /// les propriétés stockées, sinon le Toggle de SettingsView ne se rafraîchit jamais.
+    var devOverrideEnabled: Bool = UserDefaults.standard.bool(forKey: "devOverride") {
+        didSet {
+            UserDefaults.standard.set(devOverrideEnabled, forKey: "devOverride")
+            accessLevel = devOverrideEnabled ? .lifetime : .free
         }
     }
     #endif
@@ -197,6 +217,12 @@ final class PurchaseManager {
         products.first { $0.id == AppConstants.Store.lifetimeID }
     }
 
+    /// Le produit d'abonnement actif (mensuel ou annuel), s'il y en a un.
+    var activeSubscriptionProduct: Product? {
+        guard let id = activeSubscriptionProductID else { return nil }
+        return products.first { $0.id == id }
+    }
+
     // MARK: - Private
 
     private func loadProducts() async {
@@ -226,9 +252,10 @@ final class PurchaseManager {
     /// Jamais persisté — appelé à chaque lancement et à chaque mise à jour de transaction.
     func refreshEntitlements() async {
         #if DEBUG
-        if devOverrideEnabled { accessLevel = .lifetime; return }
+        if devOverrideEnabled { accessLevel = .lifetime; activeSubscriptionProductID = nil; return }
         #endif
         var highest = AccessLevel.free
+        var subscriptionID: String?
 
         // 1. Transactions StoreKit vérifiées cryptographiquement (anti-triche)
         for await result in Transaction.currentEntitlements {
@@ -240,10 +267,12 @@ final class PurchaseManager {
                 highest = .lifetime
             case AppConstants.Store.monthlyID, AppConstants.Store.yearlyID:
                 if highest < .pro { highest = .pro }
+                subscriptionID = tx.productID
             default:
                 break
             }
         }
+        activeSubscriptionProductID = subscriptionID
 
         accessLevel = highest
     }

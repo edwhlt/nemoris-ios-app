@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Étape 2 du nouveau parcours d'import (AXE D) : mapping des colonnes.
+/// Étape 2 du nouveau parcours d'import : mapping des colonnes.
 /// Affiche les en-têtes détectés + 3 pickers (date / montant / libellé) + preview.
 /// Si un mapping existe déjà pour la signature du header, il est préchargé et
 /// l'utilisateur peut juste valider.
@@ -179,12 +179,12 @@ struct ColumnMappingView: View {
             // Tentative de parsing live
             if let dateRaw = cell(row, dateColumn),
                let parsedDate = CSVParser.parseDate(dateRaw, hintFormat: dateFormat) {
-                Text("→ \(parsedDate.formatted(date: .abbreviated, time: .omitted))")
+                (Text("→ ") + Text(parsedDate, format: Date.FormatStyle(date: .abbreviated, time: .omitted)))
                     .font(.caption2).foregroundStyle(AppTheme.Colors.success)
             }
             if let amountRaw = cell(row, amountColumn),
                let parsedAmount = CSVParser.parseAmount(amountRaw, decimal: amountDecimal) {
-                Text("→ \(parsedAmount.formatted(.currency(code: "EUR")))")
+                (Text("→ ") + Text(parsedAmount, format: .currency(code: "EUR")))
                     .font(.caption2).foregroundStyle(parsedAmount >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
             }
         }

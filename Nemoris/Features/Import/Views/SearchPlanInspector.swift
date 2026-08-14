@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// AXE S — Rend VISIBLE ce que le planificateur a décidé.
+/// Rend VISIBLE ce que le planificateur a décidé.
 ///
 /// C'est la réponse à « comment apprendre au système que FLANCHES est un lieu ? ». Plutôt
 /// qu'une étape IA opaque, on montre ce qui a été retiré du nom et on laisse l'utilisateur

@@ -199,7 +199,7 @@ struct EnrichmentMapFullscreenSheet: View {
         // ici — l'utilisateur veut juste explorer la carte, on garde toutes les sources).
         var collected: [SearchCandidate] = []
 
-        // AXE S — même chemin que les deux autres écrans : planificateur + cascade.
+        // même chemin que les deux autres écrans : planificateur + cascade.
         // Laisser ici l'ancienne construction de `q=` aurait recréé deux chemins de code
         // divergents pour la même question, ce que la doctrine du projet proscrit.
         //

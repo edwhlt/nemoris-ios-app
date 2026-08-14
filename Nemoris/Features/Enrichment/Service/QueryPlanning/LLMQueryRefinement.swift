@@ -1,6 +1,6 @@
 import Foundation
 
-// AXE S — Raffinement d'un plan de requête.
+// Raffinement d'un plan de requête.
 // ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT. Surtout pas `FoundationModels`.
 //
 // C'est le type que le planificateur consomme, produit indifféremment par :

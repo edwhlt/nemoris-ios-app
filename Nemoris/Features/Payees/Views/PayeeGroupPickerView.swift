@@ -3,7 +3,7 @@ import SwiftUI
 /// Sheet de sélection d'un groupe de marque (`payee_groups`) pour un payee.
 /// Permet aussi de créer un nouveau groupe à la volée.
 ///
-/// AXE C — utilisé depuis `PayeeDetailView`.
+/// utilisé depuis `PayeeDetailView`.
 struct PayeeGroupPickerView: View {
     @Environment(\.dismiss) private var dismiss
 

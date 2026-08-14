@@ -12,6 +12,7 @@ struct TricountDetailView: View {
     // paneDismiss : ferme la présentation quand la vue est en sheet (niveau 2,
     // depuis TransactionsView). No-op en pleine page, où c'est `onBack` qui sert.
     @Environment(\.paneDismiss) private var paneDismiss
+    @Environment(AppState.self) private var appState
     @State private var entries: [TricountEntry] = []
     @State private var shares: [TricountShare] = []
     @State private var reimbursementGroups: [ReimbursementGroup] = []
@@ -129,6 +130,7 @@ struct TricountDetailView: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             } else {
                 summaryHeader
                 Divider()
@@ -149,6 +151,11 @@ struct TricountDetailView: View {
                 }
             }
         }
+        // Fond de l'app posé explicitement — sans lui la colonne « content » de
+        // la NavigationSplitView macOS montre son matériau vibrant par défaut
+        // au lieu du fond neutre AppTheme (). C'est l'écran
+        // exact du retour d'usage (détail Tricount, ex. « Vietnam »).
+        .background(AppTheme.Colors.background.ignoresSafeArea())
         .adaptivePane(isPresented: $showBulkEntryTagPicker) {
             BulkTagSheet(
                 allTags: allTags,
@@ -372,13 +379,13 @@ struct TricountDetailView: View {
 
     private var summaryHeader: some View {
         HStack(spacing: 0) {
-            summaryCell(label: "Mes dépenses", value: mySpentTotal.formatted(.currency(code: group.currency)))
+            summaryCell(label: "Mes dépenses", value: mySpentTotal.formatted(.currency(code: group.currency).locale(appState.locale)))
             Divider().frame(height: 40)
-            summaryCell(label: "Ma part nette", value: myNetShare.formatted(.currency(code: group.currency)))
+            summaryCell(label: "Ma part nette", value: myNetShare.formatted(.currency(code: group.currency).locale(appState.locale)))
             Divider().frame(height: 40)
             summaryCell(
                 label: myBalance >= 0 ? "On me doit" : "Je dois",
-                value: abs(myBalance).formatted(.currency(code: group.currency)),
+                value: abs(myBalance).formatted(.currency(code: group.currency).locale(appState.locale)),
                 color: myBalance >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger
             )
         }
@@ -438,20 +445,32 @@ struct TricountDetailView: View {
                     leadingFullSwipe: false,
                     trailingFullSwipe: false
                 )
+                .macGroupedRow(first: entry.id == entries.first?.id, last: entry.id == entries.last?.id)
             }
-        }.listStyle(.plain)
+        }
+        #if os(macOS)
+        .listStyle(.plain)
+        // Décolle la 1ère carte du Divider() du dessus (chemin sans
+        // remboursements) ou du picker (chemin avec) — même correctif que
+        // TransactionsView. Appliqué ici, dans la List elle-même, pour couvrir
+        // les deux points d'appel de `entriesTab` uniformément.
+        .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+        #endif
+        .scrollContentBackground(.hidden)
     }
 
     @ViewBuilder
     private var reimbursementsTab: some View {
         if reimbursementGroups.isEmpty {
             List {
-                ContentUnavailableView(
-                    "Aucun remboursement",
-                    systemImage: "arrow.uturn.left.circle",
-                    description: Text("Ajoutez des remboursements depuis le détail d'une dépense.")
+                EmptyStateView(
+                    icon: "arrow.uturn.left.circle",
+                    title: "Aucun remboursement",
+                    message: "Ajoutez des remboursements depuis le détail d'une dépense."
                 )
-            }.listStyle(.plain)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
         } else {
             // Form (pas List) : liste statique → boxes arrondies natives macOS
             // via nemorisFormStyle(), insetGrouped natif sur iOS.
@@ -473,11 +492,11 @@ struct TricountDetailView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(item.originDescription.isEmpty ? "Dépense Tricount" : item.originDescription)
                                         .font(.subheadline)
-                                    Text(item.originDate.formatted(date: .abbreviated, time: .omitted))
+                                    Text(item.originDate, format: Date.FormatStyle(date: .abbreviated, time: .omitted))
                                         .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
                                 }
                                 Spacer()
-                                Text(item.amount.formatted(.currency(code: item.currency)))
+                                Text(item.amount, format: .currency(code: item.currency))
                                     .font(.subheadline)
                                     .foregroundStyle(item.amount < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                             }
@@ -485,7 +504,7 @@ struct TricountDetailView: View {
                         HStack {
                             Text("Sous-total").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
                             Spacer()
-                            Text(rGroup.total.formatted(.currency(code: group.currency)))
+                            Text(rGroup.total, format: .currency(code: group.currency))
                                 .font(.caption).fontWeight(.semibold)
                                 .foregroundStyle(rGroup.total < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                         }

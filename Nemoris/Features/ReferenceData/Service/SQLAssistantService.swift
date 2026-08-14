@@ -134,6 +134,11 @@ final class SQLAssistantService {
     - tier_type: merchant|contact|internal|organization.
     - loan_type: AMORT|IN_FINE|DEFERRED_TOTAL|DEFERRED_PARTIAL|REVOLVING.
     - goals.kind: SAVINGS|NETWORTH|DEBT_PAYOFF|CUSTOM.
+    - payment_types / transactions.payment_type_id are DEPRECATED (v46, not
+      seeded on new DBs). For "payment method" questions, use
+      transaction_metadata_keys/transaction_metadata_values instead (join on
+      key_id, filter role='payment_method' or name). A transaction can carry
+      MULTIPLE metadata values (unlike the old 0..1 payment_type_id).
 
     VARIABLES (only for reusable queries the user wants to save and rerun):
     - Token: {{name}} (free text) | {{name:type}} | {{name:type=default}}.

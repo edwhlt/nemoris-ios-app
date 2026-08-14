@@ -1,6 +1,6 @@
 import Foundation
 
-// AXE S — Entreprise et établissements, indépendamment du registre qui les a fournis.
+// Entreprise et établissements, indépendamment du registre qui les a fournis.
 //
 // POURQUOI CES TYPES N'ENTRENT PAS DANS `MerchantEnrichment`
 //

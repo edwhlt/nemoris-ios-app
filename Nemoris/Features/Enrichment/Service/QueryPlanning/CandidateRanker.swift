@@ -1,6 +1,6 @@
 import Foundation
 
-// AXE S — Classement des candidats (entreprises, établissements, POI).
+// Classement des candidats (entreprises, établissements, POI).
 // ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
 //
 // Ce fichier existe pour tuer STRUCTURELLEMENT un bug, pas pour le contourner :

@@ -83,10 +83,10 @@ struct TransactionDocumentReviewView: View {
     private var resultsSection: some View {
         Section {
             if rows.isEmpty {
-                ContentUnavailableView(
-                    "Aucune opération reconnue",
-                    systemImage: "doc.questionmark",
-                    description: Text("Le détail ci-dessous indique ce qui a été lu. Un export CSV depuis ta banque reste le format le plus fiable.")
+                EmptyStateView(
+                    icon: "doc.questionmark",
+                    title: "Aucune opération reconnue",
+                    message: "Le détail ci-dessous indique ce qui a été lu. Un export CSV depuis ta banque reste le format le plus fiable."
                 )
             } else {
                 LabeledContent("Opérations trouvées") {

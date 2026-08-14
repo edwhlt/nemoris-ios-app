@@ -34,7 +34,7 @@ struct ReferenceDetailPane: View {
                 case .tag(let t):         tagSections(t)
                 }
             }
-            .formStyle(.grouped)
+            .nemorisFormStyle()
             .paneChrome(navTitle,
                         cancelLabel: "Fermer", onCancel: { paneDismiss() },
                         destructiveLabel: "Supprimer", onDestructive: { onDelete(); paneDismiss() },

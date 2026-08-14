@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - CurrencyConverterSheet
 //
 // Sheet de conversion de devises — accessible depuis Settings → Confidentialité.
-// MVP : usage ad-hoc (l'user tape un montant + 2 devises). Pas de conversion
+// MVP : usage ad-hoc (l'utilisateur tape un montant + 2 devises). Pas de conversion
 // automatique des transactions de la base — c'est une calculatrice avec cache
 // des taux + persistance dans `currency_rates`.
 //
@@ -98,7 +98,7 @@ struct CurrencyConverterSheet: View {
                         .tint(AppTheme.Colors.accent)
                     }
                     if let r = rate {
-                        Text("1 \(fromCurrency) = \(r.formatted(.number.precision(.fractionLength(0...6)))) \(toCurrency)")
+                        (Text("1 \(fromCurrency) = ") + Text(r, format: .number.precision(.fractionLength(0...6))) + Text(" \(toCurrency)"))
                             .font(AppTheme.Typography.bodySmall)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }

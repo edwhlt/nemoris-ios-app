@@ -1,6 +1,6 @@
 import Foundation
 
-// AXE S — Contrat de résolution d'une localité.
+// Contrat de résolution d'une localité.
 // ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
 //
 // Pourquoi le planificateur reçoit une localité DÉJÀ RÉSOLUE plutôt qu'un résolveur :

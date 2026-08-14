@@ -181,6 +181,8 @@ struct DayDetailPanel: View {
 // MARK: - MonthProjectionCard
 
 struct MonthProjectionCard: View {
+    @Environment(AppState.self) private var appState
+
     let days: [CalendarDay]
 
     private var totalForecasted: Double { days.reduce(0) { $0 + $1.forecastedAmount } }
@@ -202,19 +204,19 @@ struct MonthProjectionCard: View {
                 HStack(spacing: AppTheme.Spacing.xs) {
                     StatBadge(
                         label: "Prévisions",
-                        value: totalForecasted.formatted(.currency(code: "EUR").precision(.fractionLength(0))),
+                        value: totalForecasted.formatted(.currency(code: "EUR").precision(.fractionLength(0)).locale(appState.locale)),
                         valueColor: AppTheme.Colors.warning
                     )
                     Divider().frame(height: 36)
                     StatBadge(
                         label: "Dépenses",
-                        value: totalExpenses.formatted(.currency(code: "EUR").precision(.fractionLength(0))),
+                        value: totalExpenses.formatted(.currency(code: "EUR").precision(.fractionLength(0)).locale(appState.locale)),
                         valueColor: AppTheme.Colors.danger
                     )
                     Divider().frame(height: 36)
                     StatBadge(
                         label: "Revenus",
-                        value: totalIncome.formatted(.currency(code: "EUR").precision(.fractionLength(0))),
+                        value: totalIncome.formatted(.currency(code: "EUR").precision(.fractionLength(0)).locale(appState.locale)),
                         valueColor: AppTheme.Colors.success
                     )
                 }

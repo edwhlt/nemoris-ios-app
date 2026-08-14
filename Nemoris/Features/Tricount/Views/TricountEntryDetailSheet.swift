@@ -81,18 +81,18 @@ struct TricountEntryDetailSheet: View {
                     }
                     LabeledContent("Payé par") { Text(entry.whoPaid == myName ? "Moi" : entry.whoPaid).foregroundStyle(AppTheme.Colors.textSecondary) }
                     LabeledContent("Total") {
-                        Text(displayTotal.formatted(.currency(code: entry.currency)))
+                        Text(displayTotal, format: .currency(code: entry.currency))
                             .foregroundStyle(displayTotal < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                     }
                     if let share = displayShare {
                         LabeledContent("Ma part") {
-                            Text(share.formatted(.currency(code: groupCurrency)))
+                            Text(share, format: .currency(code: groupCurrency))
                                 // positif = je reçois / négatif = je dois
                                 .foregroundStyle(share >= 0 ? AppTheme.Colors.accent : AppTheme.Colors.danger)
                         }
                     }
                     LabeledContent("Date") {
-                        Text(entry.date.formatted(date: .abbreviated, time: .omitted)).foregroundStyle(AppTheme.Colors.textSecondary)
+                        Text(entry.date, format: Date.FormatStyle(date: .abbreviated, time: .omitted)).foregroundStyle(AppTheme.Colors.textSecondary)
                     }
                 }
 
@@ -104,11 +104,11 @@ struct TricountEntryDetailSheet: View {
                                 Text(tx.tiersName.isEmpty ? tx.information : tx.tiersName)
                                     .font(.subheadline)
                                 Spacer()
-                                Text(tx.amount.formatted(.currency(code: "EUR")))
+                                Text(tx.amount, format: .currency(code: "EUR"))
                                     .font(.subheadline).bold()
                                     .foregroundStyle(tx.amount < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                             }
-                            Text(tx.date.formatted(date: .abbreviated, time: .omitted))
+                            Text(tx.date, format: Date.FormatStyle(date: .abbreviated, time: .omitted))
                                 .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
                         }
                         Button("Modifier le lien") { showTransactionPicker = true }
@@ -153,7 +153,7 @@ struct TricountEntryDetailSheet: View {
                                     Text(r.payeeName).font(.subheadline)
                                 }
                                 Spacer()
-                                Text(abs(r.amount).formatted(.currency(code: r.currency)))
+                                Text(abs(r.amount), format: .currency(code: r.currency))
                                     .font(.subheadline).foregroundStyle(AppTheme.Colors.success)
                             }
                             Button("Modifier…") {

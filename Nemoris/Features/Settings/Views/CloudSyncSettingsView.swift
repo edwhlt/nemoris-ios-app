@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// AXE L — Couche L.1 : réglages de la synchronisation iCloud (CloudKit).
+/// Couche L.1 : réglages de la synchronisation iCloud (CloudKit).
 ///
 /// UI minimale de pilotage du `CloudSyncEngine` : toggle opt-in, état du
 /// compte iCloud, sync manuelle, dernier sync / erreurs. Le polish (progress
@@ -230,6 +230,8 @@ struct CloudSyncSettingsView: View {
         let parser = ISO8601DateFormatter()
         parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         guard let date = parser.date(from: iso) else { return iso }
-        return date.formatted(date: .abbreviated, time: .shortened)
+        // Locale forcée fr_FR : méthode `static`, pas d'accès à l'environnement
+        // SwiftUI — cf. commentaire équivalent dans InsightEngine.swift.
+        return date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Locale(identifier: "fr_FR")))
     }
 }

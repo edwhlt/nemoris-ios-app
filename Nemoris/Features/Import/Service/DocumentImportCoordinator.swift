@@ -58,7 +58,7 @@ final class DocumentImportCoordinator {
     ///     n'y sont pas) ;
     ///   • et présenter la revue par-dessus l'écran de mapping, c'est présenter
     ///     une seconde feuille alors que la première est à l'écran — le motif
-    ///     de crash/perte de présentation documenté en §N.1 et AXE V.
+    ///     de crash/perte de présentation documenté en §N.1 et
     private(set) var awaitingUserMapping = false
 
     private var job: Task<Void, Never>?
@@ -181,6 +181,9 @@ final class DocumentImportCoordinator {
               accountId > 0, persistedSessionId == nil else { return }
         persistedSessionId = ImportSessionRepository()
             .createSession(batch: result, accountId: accountId, sourceFile: sourceLabel)?.id
+        // Symétrique de `clear()` : le miroir en mémoire doit refléter la base
+        // aussi bien à la création qu'à la suppression.
+        NotificationCenter.default.post(name: .nemorisImportSessionsDidChange, object: nil)
     }
 
     /// Recharge une analyse d'investissements depuis sa session persistée.
@@ -257,6 +260,22 @@ final class DocumentImportCoordinator {
         }
         persistedSessionId = nil
         awaitingUserMapping = false
+        // ⚠️ Prévenir le MIROIR en mémoire (`AppState.activeImportSession`).
+        //
+        // Bug réel : ce miroir pilote le bandeau de SESSION, affiché dès que le
+        // bandeau d'ANALYSE s'efface — les deux sont les branches d'un même
+        // `if/else` (`MainTabView.importBanner`). Supprimer la ligne en base
+        // sans invalider le miroir faisait donc RÉAPPARAÎTRE le bandeau juste
+        // après l'abandon, avec cette fois la boîte de dialogue de la session,
+        // différente de celle qu'on venait de valider. Il fallait annuler DEUX
+        // fois, et la seconde portait sur une session déjà supprimée.
+        //
+        // Notifié ICI et pas chez l'appelant : `clear()` est le seul endroit
+        // qui supprime cette session, et trois sites l'appellent (abandon
+        // depuis le bandeau, fin de revue d'analyse, fin de revue de session).
+        // Laisser chacun s'en souvenir, c'est laisser l'un d'eux l'oublier —
+        // ce qui était le cas de deux des trois.
+        NotificationCenter.default.post(name: .nemorisImportSessionsDidChange, object: nil)
     }
 
     // MARK: - Présentation
@@ -303,4 +322,11 @@ final class DocumentImportCoordinator {
         guard case .analyzing(let done, let total) = phase, total > 1 else { return nil }
         return Double(done) / Double(total)
     }
+}
+
+extension Notification.Name {
+    /// Les sessions d'import en base ont changé (création ou suppression par le
+    /// coordinateur) — `AppState.activeImportSession`, qui les mirroite en
+    /// mémoire pour piloter le bandeau, doit être rechargé.
+    static let nemorisImportSessionsDidChange = Notification.Name("nemorisImportSessionsDidChange")
 }

@@ -18,10 +18,10 @@ struct TagSummaryView: View {
     var body: some View {
             Group {
                 if summaries.isEmpty && !isSyncingRates {
-                    ContentUnavailableView(
-                        "Aucun tag utilisé",
-                        systemImage: "tag.slash",
-                        description: Text("Assignez des tags à vos transactions ou dépenses Tricount.")
+                    EmptyStateView(
+                        icon: "tag.slash",
+                        title: "Aucun tag utilisé",
+                        message: "Assignez des tags à vos transactions ou dépenses Tricount."
                     )
                 } else {
                     List {
@@ -77,17 +77,25 @@ struct TagSummaryView: View {
                 Text(summary.tag.name).font(.headline)
                 HStack(spacing: 8) {
                     if summary.transactionTotal != 0 {
-                        Label(summary.transactionTotal.formatted(.currency(code: "EUR")), systemImage: "creditcard")
-                            .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
+                        Label {
+                            Text(summary.transactionTotal, format: .currency(code: "EUR"))
+                        } icon: {
+                            Image(systemName: "creditcard")
+                        }
+                        .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
                     }
                     if summary.tricountTotal != 0 {
-                        Label(summary.tricountTotal.formatted(.currency(code: "EUR")), systemImage: "person.2")
-                            .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
+                        Label {
+                            Text(summary.tricountTotal, format: .currency(code: "EUR"))
+                        } icon: {
+                            Image(systemName: "person.2")
+                        }
+                        .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
                     }
                 }
             }
             Spacer()
-            Text(summary.total.formatted(.currency(code: "EUR")))
+            Text(summary.total, format: .currency(code: "EUR"))
                 .fontWeight(.semibold)
                 .foregroundStyle(summary.total < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
         }

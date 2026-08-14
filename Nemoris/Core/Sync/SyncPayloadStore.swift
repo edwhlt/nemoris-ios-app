@@ -3,7 +3,7 @@ import SQLite3
 
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-/// AXE L — Couche L.1 : accès SQLite du moteur de sync.
+/// Couche L.1 : accès SQLite du moteur de sync.
 ///
 /// Fait le pont entre les rows locales (int PK/FK) et les payloads qui
 /// voyagent (uuid partout). Format du payload JSON (chiffré côté CloudKit
@@ -222,7 +222,7 @@ struct SyncPayloadStore: Sendable {
     }
 
     /// Retire une entrée pending SEULEMENT si elle n'a pas été re-queueée
-    /// depuis la construction du batch (l'user a pu rééditer la row pendant
+    /// depuis la construction du batch (l'utilisateur a pu rééditer la row pendant
     /// l'upload — dans ce cas la nouvelle version doit repartir).
     func clearPending(table: String, uuid: String, queuedAtNotAfter: String) {
         guard let db = openDB() else { return }
@@ -249,7 +249,7 @@ struct SyncPayloadStore: Sendable {
 
     /// Retire les catégories / modes de paiement « usine » d'une base vierge
     /// (zéro transaction) avant le scan initial CloudKit. Retourne le nombre
-    /// de rows supprimées. No-op si l'user a déjà commencé à saisir.
+    /// de rows supprimées. No-op si l'utilisateur a déjà commencé à saisir.
     func purgeVirginSeedReferenceData() -> Int {
         guard let db = openDB() else { return 0 }
         defer { sqlite3_close(db) }

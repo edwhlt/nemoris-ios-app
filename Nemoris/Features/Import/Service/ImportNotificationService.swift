@@ -1,7 +1,7 @@
 import Foundation
 import UserNotifications
 
-/// AXE E.3 — planifie/annule les rappels "Import Nemoris en attente".
+/// planifie/annule les rappels "Import Nemoris en attente".
 ///
 /// Permission demandée *lazy* (uniquement au moment où l'utilisateur lance son premier
 /// import — pas au launch), conformément à la convention CLAUDE.md §6.7.

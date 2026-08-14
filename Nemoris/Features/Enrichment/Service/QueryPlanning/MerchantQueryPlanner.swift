@@ -1,6 +1,6 @@
 import Foundation
 
-// AXE S — Le planificateur de requêtes marchand.
+// Le planificateur de requêtes marchand.
 // ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
 //
 // Deux fonctions pures totales :

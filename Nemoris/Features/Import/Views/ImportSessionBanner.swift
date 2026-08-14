@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Bandeau flottant "Import en cours" affiché au-dessus de la tab bar dans MainTabView
-/// quand une session est `active`. AXE E.2.
+/// quand une session est `active`.
 struct ImportSessionBanner: View {
     let summary: ImportSessionSummary
     let onTap: () -> Void

@@ -51,10 +51,10 @@ struct ReimbursementsSheet: View {
 
                 if isEmpty {
                     Section {
-                        ContentUnavailableView(
-                            "Aucun remboursement",
-                            systemImage: "arrow.uturn.left.circle",
-                            description: Text("Aucune transaction avec remboursement sur cette période.")
+                        EmptyStateView(
+                            icon: "arrow.uturn.left.circle",
+                            title: "Aucun remboursement",
+                            message: "Aucune transaction avec remboursement sur cette période."
                         )
                     }
                 } else {
@@ -188,7 +188,7 @@ struct ReimbursementsSheet: View {
     // MARK: Ligne item
 
     /// Repli : la note libre (`information`) est souvent vide (transactions
-    /// importées, jamais annotées par l'user) → repli sur le payee ORIGINAL de
+    /// importées, jamais annotées par l'utilisateur) → repli sur le payee ORIGINAL de
     /// la transaction (ex. "Netflix"), pas sur un libellé générique.
     private func displayLabel(_ item: Reimbursement) -> String {
         if !item.originDescription.isEmpty { return item.originDescription }
@@ -213,23 +213,23 @@ struct ReimbursementsSheet: View {
                         .foregroundStyle(AppTheme.Colors.accentSecondary)
                     }
                 }
-                Text(item.originDate.formatted(date: .abbreviated, time: .omitted))
+                Text(item.originDate, format: Date.FormatStyle(date: .abbreviated, time: .omitted))
                     .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
                 if item.needsConversion {
-                    Text(item.amount.formatted(.currency(code: item.currency)))
+                    Text(item.amount, format: .currency(code: item.currency))
                         .font(.subheadline)
                         .foregroundStyle(AppTheme.Colors.warning)
                     Text("non converti")
                         .font(.caption2).foregroundStyle(AppTheme.Colors.warning)
                 } else {
-                    Text(item.effectiveEurAmount.formatted(.currency(code: "EUR")))
+                    Text(item.effectiveEurAmount, format: .currency(code: "EUR"))
                         .font(.subheadline)
                         .foregroundStyle(item.effectiveEurAmount < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                     if item.isConverted {
-                        Text(item.amount.formatted(.currency(code: item.currency)))
+                        Text(item.amount, format: .currency(code: item.currency))
                             .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
                     }
                 }

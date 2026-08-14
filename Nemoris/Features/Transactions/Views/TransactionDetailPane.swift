@@ -31,7 +31,7 @@ struct TransactionDetailPane: View {
                             .font(AppTheme.Typography.bodyMedium)
                             .foregroundStyle(AppTheme.Colors.textPrimary)
                             .lineLimit(2)
-                        Text(tx.date.formatted(date: .long, time: .omitted))
+                        Text(tx.date, format: Date.FormatStyle(date: .long, time: .omitted))
                             .font(AppTheme.Typography.labelSmall)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
@@ -76,6 +76,6 @@ struct TransactionDetailPane: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .nemorisFormStyle()
     }
 }

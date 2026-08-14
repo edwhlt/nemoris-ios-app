@@ -2,7 +2,7 @@ import SwiftUI
 import MapKit
 import NemorisEngine
 
-/// Sheet d'enrichissement par ligne (AXE B affiné).
+/// Sheet d'enrichissement par ligne.
 ///
 /// Pour une `ImportSessionRow` non résolue, l'utilisateur peut :
 ///   - personnaliser la requête de recherche (le rawLabel est rarement parfait)
@@ -27,7 +27,7 @@ struct EnrichmentSheetView: View {
     @State private var candidates: [SearchCandidate] = []
     @State private var selectedCandidateId: UUID? = nil
     @State private var cameraPosition: MapCameraPosition = .automatic
-    /// AXE S — résultat structuré du registre : plan, tentatives réellement exécutées,
+    /// résultat structuré du registre : plan, tentatives réellement exécutées,
     /// entreprises classées avec leurs établissements. Séparé de `candidates`, qui reste
     /// la liste plate des sources cartographiques et IA.
     @State private var searchResult: MerchantSearchResult? = nil
@@ -311,10 +311,10 @@ struct EnrichmentSheetView: View {
             }
         } else if candidates.isEmpty && (searchResult?.companies.isEmpty ?? true) {
             Section {
-                ContentUnavailableView(
-                    "Aucun résultat",
-                    systemImage: "magnifyingglass",
-                    description: Text("Aucune source n'a trouvé de correspondance. Déplie « Détails de la recherche » pour voir ce qui a été tenté, ou réintègre un élément retiré du nom.")
+                EmptyStateView(
+                    icon: "magnifyingglass",
+                    title: "Aucun résultat",
+                    message: "Aucune source n'a trouvé de correspondance. Déplie « Détails de la recherche » pour voir ce qui a été tenté, ou réintègre un élément retiré du nom."
                 )
             }
         } else if candidates.isEmpty {
@@ -455,7 +455,7 @@ struct EnrichmentSheetView: View {
         var collected: [SearchCandidate] = []
 
         if useSirene {
-            // AXE S — passe par le planificateur + l'exécuteur de cascade.
+            // passe par le planificateur + l'exécuteur de cascade.
             //
             // Avant, la requête entière (donc le libellé brut avec sa ville et ses codes)
             // partait dans le `q=` du registre. Or l'API matche `q` contre la raison
@@ -483,7 +483,7 @@ struct EnrichmentSheetView: View {
         }
 
         if useMapKit {
-            // MapKit : pas de region constraint, le user peut chercher partout dans le monde.
+            // MapKit : pas de region constraint, l'utilisateur peut chercher partout dans le monde.
             // Si la query contient "HA GIANG", il trouvera les POI là-bas.
             let mapResults = await MapKitSearchService.searchAll(
                 query: trimmedQuery, near: nil, limit: 8

@@ -204,23 +204,124 @@ enum InvestmentStatementExtractor {
         // lignes suivant le libellé, après avoir retiré les dates reconnues :
         // sans ce retrait, le jour d'une date sur la ligne de données
         // (« 13/01/2025 4 … ») serait pris pour la quantité qui le suit.
+        // ⚠️ La variante tolérante s'applique aux DEUX fenêtres, pas seulement
+        // au préambule. Dans un tableau, l'en-tête de colonne et sa valeur sont
+        // sur deux lignes distinctes des deux côtés de l'ancre — les frais de
+        // l'avis d'opéré BoursoBank (« Commission … » puis « 1,11 EUR … »)
+        // tombaient APRÈS le code ISIN, donc dans une fenêtre où seule la
+        // recherche stricte, même-ligne, était tentée : la commission n'était
+        // jamais lue.
         let quantity = firstNumber(in: joined, labels: quantityLabels)
+            ?? firstNumberNearLabel(in: joined, labels: quantityLabels)
             ?? firstNumberNearLabel(in: preamble, labels: quantityLabels)
         let priceFromLabel = firstNumber(in: joined, labels: priceLabels)
+            ?? firstNumberNearLabel(in: joined, labels: priceLabels)
             ?? firstNumberNearLabel(in: preamble, labels: priceLabels)
-        let fees = firstNumber(in: joined, labels: feeLabels)
+        var fees = firstNumber(in: joined, labels: feeLabels)
+            ?? firstNumberNearLabel(in: joined, labels: feeLabels)
             ?? firstNumberNearLabel(in: preamble, labels: feeLabels) ?? 0
-        let gross = signedAmount(in: joined) ?? signedAmount(in: preamble)
+
+        // ⚠️ Le montant LIBELLÉ prime sur « le premier montant du bloc ».
+        //
+        // Bug réel (avis d'opéré BoursoBank) : le bloc s'ouvre sur « Code ISIN
+        // … Cours exécuté : 55,62 EUR », donc `signedAmount` retenait le COURS
+        // comme montant de l'opération — le vrai total, « Montant transaction
+        // brut 222,48 EUR », arrivant plus bas. Conséquence en cascade : la
+        // quantité ne pouvait plus se déduire (55,62 ÷ 55,62 = 1) et l'ordre
+        // s'importait en « 1 × 55,62 € » au lieu de « 4 × 55,62 € ».
+        //
+        // Un relevé qui donne un total le LIBELLE toujours ; le repli non
+        // libellé reste pour les captures d'app, où le montant est seul sur sa
+        // ligne sans en-tête.
+        let gross = firstNumber(in: joined, labels: totalLabels)
+            ?? firstNumberNearLabel(in: joined, labels: totalLabels)
+            ?? firstNumber(in: preamble, labels: totalLabels)
+            ?? firstNumberNearLabel(in: preamble, labels: totalLabels)
+            ?? signedAmount(in: joined) ?? signedAmount(in: preamble)
+
+        // ⚠️ Frais IMPLAUSIBLES rejetés avant tout repli. `firstNumberNearLabel`
+        // n'a aucune notion de COLONNE : sur la ligne de VALEURS d'un footer à
+        // 4 colonnes (« Montant brut | Commission | Frais | Montant net »),
+        // elle rend le PREMIER nombre de la ligne — qui est le montant brut,
+        // pas la commission, dès que « Commission » n'est pas la 1ʳᵉ colonne.
+        // Bug réel mesuré : les frais rendus valaient EXACTEMENT le montant
+        // brut, doublant le total affiché (`quantité × prix + frais`). Une
+        // commission plausible reste une PETITE fraction du montant de
+        // l'opération ; un nombre trouvé « pour les frais » qui se rapproche
+        // du brut n'est pas une lecture, c'est une confusion de colonne — on
+        // le traite comme si rien n'avait été trouvé, pour laisser la place
+        // au repli par soustraction ci-dessous.
+        if let grossValue = gross, grossValue > 0, fees >= grossValue * 0.5 {
+            fees = 0
+        }
+
+        // ⚠️ Repli par SOUSTRACTION quand aucun libellé de frais direct n'a
+        // payé (« Commission »/« Frais » introuvables, ou rejetés ci-dessus
+        // comme implausibles). Un footer à 4 colonnes (Montant brut |
+        // Commission | Frais (♦) | Montant net au débit) regroupe souvent ses
+        // 4 EN-TÊTES d'un bloc avant ses 4 VALEURS une fois le tableau aplati
+        // par PDFKit — la valeur de « Commission » peut alors se retrouver à
+        // plus de `lineSpan` lignes de son libellé, ou dans la mauvaise
+        // colonne d'une ligne de valeurs groupées. Plutôt que de complexifier
+        // la recherche par position, on déduit les frais de la différence
+        // entre le montant NET et le montant BRUT — deux totaux que le
+        // document donne presque toujours, chacun bien identifié par son
+        // propre libellé complet en fin de ligne, sans dépendre de la
+        // position d'une cellule isolée dans une mise en page qui varie d'un
+        // courtier à l'autre. `abs(...)` marche dans les deux sens : un achat
+        // paie plus que le brut (net > brut), une vente reçoit moins (net <
+        // brut).
+        if fees == 0, let grossValue = gross {
+            // ⚠️ `lastNumberNearLabel`, pas `firstNumberNearLabel` : « Montant
+            // net » est la DERNIÈRE colonne du footer, alors que la variante
+            // « first » — pensée pour « Montant brut », en 1ʳᵉ colonne —
+            // renverrait ENCORE le montant brut sur la ligne de valeurs
+            // groupées, rendant `net == grossValue` et la soustraction nulle.
+            let net = lastNumber(in: joined, labels: netLabels)
+                ?? lastNumberNearLabel(in: joined, labels: netLabels)
+                ?? lastNumber(in: preamble, labels: netLabels)
+                ?? lastNumberNearLabel(in: preamble, labels: netLabels)
+            if let net {
+                let derived = abs(net - grossValue)
+                // Garde-fou : des frais ne dépassent normalement pas le
+                // montant brut lui-même — au-delà, les deux nombres trouvés
+                // ne décrivent probablement pas la même opération (deux
+                // lignes voisines d'un relevé à plusieurs opérations).
+                if derived > 0.001, derived < grossValue {
+                    fees = derived
+                }
+            }
+        }
 
         var confidence = 0.85
         if priceFromLabel == nil { confidence -= 0.05 }
-        if quantity == nil { confidence -= 0.15 }
 
         let valuation = valuation(orderType: orderType,
                                   quantity: quantity,
                                   unitPrice: priceFromLabel,
                                   gross: gross)
-        if valuation.deduced { confidence -= 0.1 }
+
+        // ⚠️ Une quantité DÉRIVÉE de `montant ÷ cours`, quand les DEUX sont
+        // libellés dans le document, n'est pas une supposition : c'est une
+        // vérification. `4 × 55,62 = 222,48` reproduit exactement le montant
+        // brut imprimé sur l'avis. Elle reste donc AU-DESSUS du seuil de
+        // relecture (`StatementReconciler.uncertainConfidence`) — sans quoi un
+        // modèle qui répond « quantité 1 » écrase une valeur arithmétiquement
+        // exacte, ce qui était le cas et annulait tout le bénéfice de la
+        // déduction.
+        //
+        // Sans ces deux ancrages, en revanche, la quantité vaut « 1 » faute de
+        // mieux : c'est une vraie inconnue, et l'IA doit pouvoir la corriger.
+        let quantityIsVerified = quantity == nil
+            && valuation.quantity > 0 && gross != nil && priceFromLabel != nil
+        if quantityIsVerified {
+            confidence -= 0.05
+        } else if quantity == nil {
+            confidence -= 0.15
+            if valuation.deduced { confidence -= 0.1 }
+        } else if valuation.deduced {
+            confidence -= 0.1
+        }
         let unitPrice = valuation.unitPrice
 
         let name = assetName(in: nameWindow, fallbackAfter: fields)
@@ -235,7 +336,10 @@ enum InvestmentStatementExtractor {
             fees: fees,
             executedAt: date,
             currency: detectCurrency(in: upper),
-            notes: "Extraction automatique (sans IA)",
+            // Note NEUTRE plutôt que « sans IA » : l'opération peut être
+            // renforcée juste après par `StatementReconciler`, et la note
+            // aurait alors affirmé le contraire de ce qui s'est passé.
+            notes: "Extraction automatique (ancrage ISIN)",
             confidence: max(0.2, min(1, confidence))
         )
     }
@@ -276,7 +380,28 @@ enum InvestmentStatementExtractor {
         if let knownQuantity, amount > 0 {
             return (knownQuantity, amount / knownQuantity, true)
         }
-        // Quantité absente : le montant devient le prix d'une « unité ».
+        // ⚠️ Quantité absente, mais PRIX et MONTANT connus : `quantité =
+        // montant ÷ prix`. C'est de l'arithmétique, pas une heuristique de
+        // mise en page — donc valable quel que soit le courtier, là où aucune
+        // fenêtre de recherche autour d'un libellé ne peut couvrir toutes les
+        // dispositions possibles.
+        //
+        // Cas réel (avis d'opéré BoursoBank) : la quantité « 4 » se trouve
+        // TROIS lignes sous son en-tête de colonne, une fois le tableau aplati
+        // par PDFKit — introuvable par libellé. Mais « Montant transaction
+        // brut 222,48 EUR » et « Cours exécuté : 55,62 EUR » sont tous les
+        // deux libellés, et leur quotient vaut exactement 4.
+        if let knownPrice, amount > 0 {
+            let derived = amount / knownPrice
+            // Garde-fou : un rapport absurde signale qu'on a comparé deux
+            // grandeurs sans rapport (un montant de frais avec un cours, par
+            // exemple) — mieux vaut alors ne rien déduire.
+            if derived.isFinite, derived > 0, derived < 1_000_000 {
+                return (snappedToWhole(derived), knownPrice, true)
+            }
+        }
+        // Quantité absente et aucun montant : le prix devient celui d'une
+        // « unité ».
         if let knownPrice, knownQuantity == nil {
             return (1, knownPrice, true)
         }
@@ -285,6 +410,18 @@ enum InvestmentStatementExtractor {
         }
         // Rien d'exploitable : on ne fabrique pas un montant.
         return (knownQuantity ?? 0, knownPrice ?? 0, false)
+    }
+
+    /// Arrondit une quantité déduite d'une division quand elle frôle un entier.
+    ///
+    /// ⚠️ Tolérance très serrée, et volontairement : les parts d'ETF et de fonds
+    /// se détiennent en fractions (0,347 part), donc on ne « corrige » que le
+    /// résidu d'arrondi d'une division exacte (222,48 ÷ 55,62), jamais une
+    /// quantité réellement fractionnaire.
+    private static func snappedToWhole(_ value: Double) -> Double {
+        let rounded = value.rounded()
+        guard rounded >= 1, abs(value - rounded) < 0.001 else { return value }
+        return rounded
     }
 
     // MARK: - Champs
@@ -337,6 +474,27 @@ enum InvestmentStatementExtractor {
     private static let feeLabels = [
         "FRAIS", "COMMISSION", "COURTAGE", "FEES", "FEE"
     ]
+    /// Libellés du MONTANT de l'opération, du plus spécifique au plus général.
+    ///
+    /// ⚠️ Aucun libellé nu (« MONTANT », « TOTAL ») : « Montant total des
+    /// frais » et « TOTALENERGIES » y répondraient. Chaque entrée est une
+    /// locution complète, et le BRUT passe avant le NET — c'est le brut qui
+    /// vaut `quantité × cours`, le net en ayant déjà déduit les frais.
+    private static let totalLabels = [
+        "MONTANT TRANSACTION BRUT", "MONTANT TOTAL BRUT", "MONTANT BRUT",
+        "MONTANT DE L'OPÉRATION", "MONTANT DE L'OPERATION",
+        "MONTANT TRANSACTION NET", "MONTANT NET",
+        "GROSS AMOUNT", "NET AMOUNT", "TOTAL AMOUNT", "TOTAL COST"
+    ]
+    /// Libellés du montant NET spécifiquement — distincts de `totalLabels`
+    /// (qui mélange brut et net dans un seul repli en cascade) : ici on veut
+    /// les DEUX totaux, brut ET net, pour en déduire les frais par différence
+    /// quand le libellé direct des frais est introuvable. Cf. `parseBlock`.
+    private static let netLabels = [
+        "MONTANT NET AU DÉBIT", "MONTANT NET AU DEBIT",
+        "MONTANT NET AU CRÉDIT", "MONTANT NET AU CREDIT",
+        "MONTANT TRANSACTION NET", "MONTANT NET", "NET AMOUNT"
+    ]
 
     /// Une ligne « plausible » pour être le nom d'un titre : ni une date, ni un
     /// montant, ni un intitulé de champ, ni un ISIN, ni du bruit ponctuation.
@@ -355,7 +513,19 @@ enum InvestmentStatementExtractor {
             || upper.hasPrefix("MONTANT") || upper.hasPrefix("FRAIS") { return false }
         // Une ligne composée uniquement de chiffres/ponctuation n'est pas un nom.
         let letters = trimmed.filter { $0.isLetter }
-        return letters.count >= 3
+        guard letters.count >= 3 else { return false }
+
+        // ⚠️ Un nom de valeur porte TOUJOURS une part de majuscules — code
+        // court (« AM.PEA EM.ES.T.ACC », « ISHS CO.EURO STOX50 »), raison
+        // sociale (« TOTALENERGIES SE ») ou casse de titre (« Amundi MSCI
+        // World UCITS ETF »). Une phrase française tout en minuscules est un
+        // INTITULÉ DE CHAMP, pas un titre.
+        //
+        // Bug réel : sur un avis d'opéré BoursoBank, la ligne la plus proche
+        // du code ISIN est « Type d'ordre : au marché » — c'est ce libellé qui
+        // s'affichait comme nom de la valeur dans l'écran de revue.
+        let uppercase = letters.filter { $0.isUppercase }.count
+        return Double(uppercase) / Double(letters.count) >= 0.3
     }
 
     /// Nom du titre : première ligne « plausible » au-dessus de l'ISIN. On
@@ -365,13 +535,42 @@ enum InvestmentStatementExtractor {
         // La ligne LA PLUS PROCHE de l'ISIN gagne : au-dessus se trouvent aussi
         // les en-têtes de l'écran (« Mes mouvements », « Type d'opération »).
         for line in nameWindow.reversed() where isPlausibleNameLine(line) {
-            return line.trimmingCharacters(in: .whitespaces)
+            return cleanedName(line)
         }
         // Certains formats mettent le nom APRÈS le code : on tente en aval.
         for line in fields.dropFirst() where isPlausibleNameLine(line) {
-            return line.trimmingCharacters(in: .whitespaces)
+            return cleanedName(line)
         }
         return ""
+    }
+
+    /// Isole le titre d'une ligne qui porte aussi autre chose.
+    ///
+    /// Une cellule de tableau aplatie agrège volontiers plusieurs colonnes sur
+    /// la même ligne : `4 ISHS CO.EURO STOX50 UC.ETF EUR Référence : 170145383379`.
+    /// Deux nettoyages, tous deux indépendants du format :
+    ///   • couper à l'entrée du premier CHAMP LIBELLÉ (`Mot :`) — un libellé
+    ///     ouvre une autre donnée, le titre le précède ;
+    ///   • retirer un nombre isolé en tête, qui est la colonne voisine
+    ///     (quantité), jamais le début d'un nom.
+    ///
+    /// ⚠️ Le libellé recherché est UN SEUL MOT. Autoriser les libellés de
+    /// plusieurs mots rendait la coupure trop gourmande : sur « … UC.ETF EUR
+    /// Référence : 170145383379 », « EUR Référence » passait pour le libellé et
+    /// la devise disparaissait du nom. Un libellé en deux mots ne sera donc pas
+    /// coupé — un nom un peu long est moins grave qu'un nom amputé.
+    private static func cleanedName(_ line: String) -> String {
+        var name = line.trimmingCharacters(in: .whitespaces)
+        if let regex = try? NSRegularExpression(pattern: "\\s+[\\p{L}][\\p{L}'’\\-]{2,19}\\s*:\\s"),
+           let match = regex.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)),
+           let range = Range(match.range, in: name) {
+            name = String(name[..<range.lowerBound])
+        }
+        if let regex = try? NSRegularExpression(pattern: "^-?\\d+(?:[.,]\\d+)?\\s+") {
+            name = regex.stringByReplacingMatches(
+                in: name, range: NSRange(name.startIndex..., in: name), withTemplate: "")
+        }
+        return name.trimmingCharacters(in: .whitespaces)
     }
 
     /// Index (dans `nameWindow`) de la ligne de nom la plus proche de l'ISIN —
@@ -439,7 +638,7 @@ enum InvestmentStatementExtractor {
     /// même titre que le label lui-même, cette proximité limite le risque de
     /// faux positif sur un nombre sans rapport, plus loin dans le document.
     static func firstNumberNearLabel(in text: String, labels: [String], lineSpan: Int = 2) -> Double? {
-        let lines = stripDates(from: text).components(separatedBy: "\n")
+        let lines = stripDatesAndTimes(from: text).components(separatedBy: "\n")
         let upperLines = lines.map { $0.uppercased() }
 
         for label in labels {
@@ -462,6 +661,38 @@ enum InvestmentStatementExtractor {
         return nil
     }
 
+    /// Variante de `firstNumberNearLabel` qui prend le DERNIER nombre d'une
+    /// ligne de valeurs plutôt que le premier.
+    ///
+    /// ⚠️ Nécessaire pour un libellé dont la colonne est la DERNIÈRE d'une
+    /// rangée groupée (« Montant net », qui clôt toujours le footer d'un avis
+    /// d'opéré). Sur une ligne de synthèse à plusieurs colonnes aplatie par
+    /// PDFKit (« Montant brut | Commission | Frais | Montant net » en
+    /// en-tête, puis leurs valeurs sur la ligne suivante), `firstNumberNearLabel`
+    /// renvoie TOUJOURS le premier nombre de la ligne de valeurs — correct
+    /// pour le brut (1ʳᵉ colonne), faux pour le net (dernière colonne). Ni
+    /// l'une ni l'autre variante ne sait vraiment se positionner par colonne ;
+    /// celle-ci exploite juste le fait que le montant net est, par
+    /// construction d'un relevé bancaire, toujours le total final.
+    static func lastNumberNearLabel(in text: String, labels: [String], lineSpan: Int = 2) -> Double? {
+        let lines = stripDatesAndTimes(from: text).components(separatedBy: "\n")
+        let upperLines = lines.map { $0.uppercased() }
+
+        for label in labels {
+            guard let labelLine = upperLines.firstIndex(where: { $0.contains(label) }) else { continue }
+            if let labelRange = upperLines[labelLine].range(of: label) {
+                let sameLine = String(upperLines[labelLine][labelRange.upperBound...])
+                if let value = lastNumber(in: sameLine) { return value }
+            }
+            var offset = 1
+            while offset <= lineSpan, labelLine + offset < lines.count {
+                if let value = lastNumber(in: lines[labelLine + offset]) { return value }
+                offset += 1
+            }
+        }
+        return nil
+    }
+
     /// Retire toute date reconnue (cf. `datePatterns`) d'un texte.
     ///
     /// ⚠️ Sert UNIQUEMENT à `firstNumberNearLabel` : la recherche stricte
@@ -469,10 +700,17 @@ enum InvestmentStatementExtractor {
     /// comportement déjà éprouvé sur le format « libellé : valeur » ligne à
     /// ligne — seule la variante tolérante, plus permissive par construction,
     /// a besoin de cette protection contre les dates.
-    private static func stripDates(from text: String) -> String {
+    private static func stripDatesAndTimes(from text: String) -> String {
         var result = text
         for (regex, _) in datePatterns {
             guard let regex else { continue }
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
+        }
+        // ⚠️ Les HEURES aussi. Un avis d'opéré horodate son exécution sur sa
+        // propre ligne (« 12:30:21 ») : sans ce retrait, la recherche d'une
+        // valeur sous un en-tête de colonne y lisait « 12 » comme quantité.
+        if let regex = try? NSRegularExpression(pattern: "\\b\\d{1,2}:\\d{2}(?::\\d{2})?\\b") {
             let range = NSRange(result.startIndex..., in: result)
             result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
         }
@@ -512,6 +750,38 @@ enum InvestmentStatementExtractor {
         let range = NSRange(cleaned.startIndex..., in: cleaned)
         guard let match = regex.firstMatch(in: cleaned, range: range),
               let r = Range(match.range, in: cleaned) else { return nil }
+        return parseNumber(String(cleaned[r]))
+    }
+
+    /// Pendant de `firstNumber(in:labels:)`, même fenêtre (ligne courante),
+    /// mais dernier nombre plutôt que premier — cf. `lastNumber(in:)`.
+    static func lastNumber(in text: String, labels: [String]) -> Double? {
+        let upper = text.uppercased()
+        for label in labels {
+            var searchStart = upper.startIndex
+            while let labelRange = upper.range(of: label, range: searchStart..<upper.endIndex) {
+                let tail = String(upper[labelRange.upperBound...])
+                let window = String(tail.prefix(while: { $0 != "\n" }))
+                if let value = lastNumber(in: window) { return value }
+                searchStart = labelRange.upperBound
+            }
+        }
+        return nil
+    }
+
+    /// Dernier nombre d'une chaîne — pendant de `firstNumber(in:)` pour un
+    /// montant qui clôt SYSTÉMATIQUEMENT une ligne de synthèse (le montant
+    /// net d'un avis d'opéré est toujours le total final, quel que soit le
+    /// nombre de colonnes qui le précèdent). Cf. `lastNumberNearLabel`.
+    static func lastNumber(in text: String) -> Double? {
+        let cleaned = text
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+            .replacingOccurrences(of: "\u{202F}", with: " ")
+            .replacingOccurrences(of: "'", with: "")
+        guard let regex = try? NSRegularExpression(pattern: "-?\\d+(?:[ .,]\\d+)*") else { return nil }
+        let range = NSRange(cleaned.startIndex..., in: cleaned)
+        let matches = regex.matches(in: cleaned, range: range)
+        guard let last = matches.last, let r = Range(last.range, in: cleaned) else { return nil }
         return parseNumber(String(cleaned[r]))
     }
 

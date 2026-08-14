@@ -1,14 +1,14 @@
 import Foundation
 import UserNotifications
 
-/// AXE G — planifie/annule les rappels "Échéance budget dans 3 jours".
+/// planifie/annule les rappels "Échéance budget dans 3 jours".
 ///
 /// Permission demandée *lazy* (uniquement au premier scheduling, pas au launch),
-/// conformément à la convention CLAUDE.md §6.7. Si l'user refuse, no-op silencieux.
+/// conformément à la convention CLAUDE.md §6.7. Si l'utilisateur refuse, no-op silencieux.
 ///
 /// Architecture :
 ///   - 1 notification par prévision PENDING dont `expectedDate - 3 jours >= maintenant`.
-///   - Identifier : `budget_prevision_<id>` → permet de cancel quand l'user skip/match.
+///   - Identifier : `budget_prevision_<id>` → permet de cancel quand l'utilisateur skip/match.
 ///   - Trigger : `UNCalendarNotificationTrigger` daté pour le j-3 à 9h00 locale.
 ///   - Idempotent : `removePendingNotificationRequests` avant chaque add (re-schedule safe).
 ///
@@ -125,6 +125,9 @@ enum BudgetNotificationService {
 
     private static func formatAmount(_ amount: Double) -> String {
         let f = NumberFormatter()
+        // Locale forcée fr_FR : service statique, pas d'accès à l'environnement
+        // SwiftUI — cf. commentaire équivalent dans InsightEngine.swift.
+        f.locale = Locale(identifier: "fr_FR")
         f.numberStyle = .currency
         f.currencyCode = "EUR"
         f.maximumFractionDigits = 2

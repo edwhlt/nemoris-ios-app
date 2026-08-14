@@ -719,6 +719,17 @@ struct PaneToggleButton: View {
             Label(label, systemImage: systemImage)
         }
         .toggleStyle(.button)
+        // ⚠️ `.toggleStyle(.button)` sans `.tint` explicite hérite du
+        // `.tint(AppTheme.Colors.accent)` ambiant posé sur `MainTabView`
+        // (`App/MainTabView.swift`) — donc coloré en accent MÊME À L'ÉTAT
+        // OFF (comportement standard iOS du style bordered pour un bouton
+        // togglable, indépendant de `isOn`). Inoffensif seul, mais à côté
+        // d'icônes de toolbar voisines qui, elles, forcent explicitement
+        // `AppTheme.Colors.textSecondary` (ex. `DashboardView` : œil de
+        // confidentialité, menu ⋯), le bouton de recherche ressortait teinté
+        // alors que rien n'était ouvert — lu comme "actif" à tort (retour
+        // user 2026-08-12). Le tint suit maintenant `isOn`.
+        .tint(isOn ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary)
         .help(label)
         .accessibilityLabel(label)
     }

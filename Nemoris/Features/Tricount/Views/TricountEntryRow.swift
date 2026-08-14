@@ -72,7 +72,7 @@ struct TricountEntryRow: View {
                         .foregroundStyle(isPaidByMe ? .primary : .secondary)
                         .lineLimit(1)
                     Text("·").font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
-                    Text(entry.date.formatted(date: .abbreviated, time: .omitted))
+                    Text(entry.date, format: Date.FormatStyle(date: .abbreviated, time: .omitted))
                         .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                         .lineLimit(1)
                     if isLinked {
@@ -122,18 +122,18 @@ struct TricountEntryRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(displayTotal.formatted(.currency(code: entry.currency)))
+                Text(displayTotal, format: .currency(code: entry.currency))
                     .font(.subheadline).bold()
                     .foregroundStyle(displayTotal < 0 ? AppTheme.Colors.danger : (displayTotal > 0 ? AppTheme.Colors.success : AppTheme.Colors.textPrimary))
                 if shouldShowLocalAmount,
                    let localTotal = entry.localTotal,
                    let localCurrency = entry.localCurrency {
                     let displayLocalTotal = entry.typeTransaction.uppercased() == "NORMAL" ? -localTotal : localTotal
-                    Text(displayLocalTotal.formatted(.currency(code: localCurrency)))
+                    Text(displayLocalTotal, format: .currency(code: localCurrency))
                         .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
                 }
                 if let share = displayShare, abs(share) > 0.005 {
-                    Text("Part : \(share.formatted(.currency(code: shareCurrency)))")
+                    (Text("Part : ") + Text(share, format: .currency(code: shareCurrency)))
                         .font(.caption2)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }

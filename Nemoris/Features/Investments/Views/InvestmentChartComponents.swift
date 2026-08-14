@@ -1,7 +1,7 @@
 import SwiftUI
 import Charts
 
-// MARK: - AXE J — Composants graphiques investissements style Finary
+// MARK: - Composants graphiques investissements style Finary
 //
 // Réutilisables aux 3 niveaux de profondeur : Global (dashboard), Compte, Valeur.
 // Respectent strictement la DA Nemoris (AppTheme.Colors / AppTheme.Typography).
@@ -357,7 +357,7 @@ struct ChartScrubReadout: View {
             .lineLimit(1)
             .minimumScaleFactor(0.7)
             if let date = point.date {
-                Text(dateLabel(date))
+                dateLabel(date)
                     .font(.system(size: 10))
                     .foregroundStyle(AppTheme.Colors.textSecondary)
                     .lineLimit(1)
@@ -366,11 +366,11 @@ struct ChartScrubReadout: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func dateLabel(_ date: Date) -> String {
+    private func dateLabel(_ date: Date) -> Text {
         if showsTime {
-            return date.formatted(.dateTime.day().month(.abbreviated).hour().minute())
+            return Text(date, format: .dateTime.day().month(.abbreviated).hour().minute())
         }
-        return date.formatted(.dateTime.day().month(.abbreviated).year(.twoDigits))
+        return Text(date, format: .dateTime.day().month(.abbreviated).year(.twoDigits))
     }
 }
 
@@ -385,7 +385,7 @@ struct InvestmentHeroCard: View {
     let currency: String
     /// Si fourni, label affiché à côté du %, ex : "sur 1 mois"
     var rangeLabel: String? = nil
-    /// AXE M : valeur à utiliser COMME BASE pour le calcul de variation, distincte du
+    /// valeur à utiliser COMME BASE pour le calcul de variation, distincte du
     /// `currentValue` cosmétique. Indispensable quand `currentValue` inclut la trésorerie
     /// (qui inflerait artificiellement la perf) — on passe ici la valeur des positions
     /// seules pour avoir une variation cohérente avec `previousValue` (positions seules
@@ -469,7 +469,7 @@ struct InvestmentHeroCard: View {
 struct EvolutionChart: View {
     let points: [PortfolioEvolutionPoint]
     var height: CGFloat = 200
-    /// Si fourni, callback notifié quand l'user drag pour inspecter un point.
+    /// Si fourni, callback notifié quand l'utilisateur drag pour inspecter un point.
     var onSelectPoint: ((PortfolioEvolutionPoint?) -> Void)? = nil
     /// Plage temporelle pour adapter la granularité des labels d'axe X.
     /// nil = on calcule depuis les points (utilisé pour les charts sans chip).
@@ -649,7 +649,7 @@ struct EvolutionChart: View {
                     Rectangle()
                         .fill(.clear)
                         .contentShape(Rectangle())
-                        // AXE M : utiliser .gesture avec minimumDistance > 0 + détection
+                        // utiliser .gesture avec minimumDistance > 0 + détection
                         // de direction → laisse le ScrollView parent gérer les drags
                         // verticaux (scroll) sans qu'on les intercepte. Avant on avait
                         // minimumDistance: 0 qui capturait tous les touches et faisait

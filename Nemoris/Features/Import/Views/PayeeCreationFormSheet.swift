@@ -43,7 +43,7 @@ struct PayeeCreationFormSheet: View {
     @State private var isSearching: Bool = false
     @State private var hasSearched: Bool = false
     @State private var candidates: [SearchCandidate] = []
-    /// AXE S — résultat structuré du registre (plan + entreprises + établissements),
+    /// résultat structuré du registre (plan + entreprises + établissements),
     /// distinct de `candidates` qui reste la liste plate des sources carto et IA.
     @State private var searchResult: MerchantSearchResult? = nil
     /// Pins de carte dérivés des établissements géolocalisés du registre.
@@ -504,7 +504,7 @@ struct PayeeCreationFormSheet: View {
 
     // MARK: - Apply candidate (fills form, doesn't dismiss)
 
-    // MARK: - AXE S — plan de recherche et entreprises
+    // MARK: - plan de recherche et entreprises
 
     /// Ce qui a été retiré du nom, et ce qui a réellement été tenté.
     @ViewBuilder
@@ -631,7 +631,7 @@ struct PayeeCreationFormSheet: View {
         var collected: [SearchCandidate] = []
 
         if useSirene {
-            // AXE S — planificateur + cascade au lieu d'un `q=` construit depuis le libellé
+            // planificateur + cascade au lieu d'un `q=` construit depuis le libellé
             // entier. L'API matche `q` contre la raison sociale et les enseignes, jamais
             // contre l'adresse : y laisser la ville faisait échouer la recherche
             // (`q=carrefour market flanches` → 0 ; `q=carrefour market` → 1411).
@@ -701,8 +701,8 @@ struct PayeeCreationFormSheet: View {
     private func autoApplyMetadataFromSearch() {
         var applied: [String] = []
 
-        // 1) Re-tente d'abord l'extraction déterministe sur la query éditée par l'user
-        //    (ex. l'user a copié-collé un meilleur libellé dans le champ recherche).
+        // 1) Re-tente d'abord l'extraction déterministe sur la query éditée par l'utilisateur
+        //    (ex. l'utilisateur a copié-collé un meilleur libellé dans le champ recherche).
         let locHit = LocationExtractor.extract(from: searchQuery)
         if country.isEmpty, let c = locHit.country, !c.isEmpty {
             country = c

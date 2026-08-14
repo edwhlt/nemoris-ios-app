@@ -178,17 +178,38 @@ final class InvestmentPDFParser: Sendable {
                 user: "Extrais toutes les opérations et lignes de portefeuille visibles sur cette capture.",
                 image: image
             )
-            guard let raw else {
+            let parsed = raw.map { Self.parsePageResponse($0, pageNumber: unitNumber) } ?? PageParse()
+
+            // ⚠️ Repli OCR quand la lecture d'image ne donne RIEN. Ce chemin
+            // n'avait aucun filet : le modèle est la seule source, donc une
+            // réponse tronquée ou un JSON irréparable rendait « 0 opération »
+            // — et comme une génération n'est pas déterministe, la MÊME capture
+            // donnait tantôt N opérations, tantôt aucune, sans que rien ne
+            // change côté app. L'OCR ramène du texte, donc l'extraction
+            // déterministe ET une seconde chance au modèle.
+            if parsed.isEmpty, let data = unit.imageSourceData,
+               let text = await Task.detached(priority: .userInitiated, operation: {
+                   Self.ocrText(from: data)
+               }).value,
+               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                print("[PDFParser] Unité \(unitNumber) : lecture image sans résultat, repli OCR")
+                // Le « texte lu » du diagnostic devient l'OCR, pas la réponse
+                // vide du modèle : c'est lui qui permet de comprendre ce que
+                // l'app a réellement vu de la capture.
+                return await parseUnit(text: text, unitNumber: unitNumber, kind: .image)
+            }
+
+            guard raw != nil else {
                 return failed(.aiFailed("le modèle n'a pas pu lire l'image"), kind: .image)
             }
-            let parsed = Self.parsePageResponse(raw, pageNumber: unitNumber)
             return PDFPageResult(
                 pageNumber: unitNumber,
                 // Le « texte lu » du diagnostic devient la réponse du modèle :
                 // sur ce chemin aucun texte n'est extrait, et c'est la seule
                 // chose qui reste exploitable pour comprendre un échec.
-                rawText: raw,
-                orders: parsed.orders, positions: parsed.positions,
+                rawText: raw ?? "",
+                orders: StatementReconciler.dedupe(parsed.orders),
+                positions: parsed.positions,
                 detectedMode: parsed.mode,
                 parsingNote: parsed.isEmpty ? ImportUnitDiagnostic.nothingRecognized.userMessage : nil,
                 diagnostic: parsed.isEmpty ? .nothingRecognized : .extracted,
@@ -228,17 +249,62 @@ final class InvestmentPDFParser: Sendable {
         }
     }
 
-    /// Analyse d'une unité TEXTE : IA guidée → IA JSON → extraction
-    /// déterministe. Chaque étage rattrape l'échec du précédent.
+    /// Analyse d'une unité TEXTE.
+    ///
+    /// ─── Ordre de lecture : L'IMAGE D'ABORD quand un modèle sait la lire ────
+    ///
+    /// Une page d'avis d'opéré est un TABLEAU. `PDFPage.string` l'aplatit en
+    /// une suite de lignes où les colonnes sont irrémédiablement mélangées —
+    /// mesuré sur un avis BoursoBank réel, la quantité « 4 » se retrouve trois
+    /// lignes sous son en-tête, de l'autre côté du code ISIN. Aucune fenêtre
+    /// de recherche autour d'un libellé ne couvrira toutes les mises en page
+    /// de tous les courtiers, et chaque nouveau format en réclamerait une de
+    /// plus.
+    ///
+    /// Le modèle multimodal, lui, voit la GRILLE. C'est déjà la décision prise
+    /// pour les captures d'écran (AXE V : « l'image passe au modèle, pas son
+    /// OCR ») ; elle vaut tout autant pour une page PDF, qui est une image que
+    /// l'on se trouve pouvoir aussi lire en texte.
+    ///
+    /// ⚠️ Le texte aplati est joint À L'IMAGE plutôt que jeté : il porte les
+    /// caractères EXACTS (montants au centime, ISIN), là où une lecture
+    /// purement visuelle peut confondre un chiffre. Le modèle a donc la
+    /// structure d'un côté et les valeurs sûres de l'autre.
+    ///
+    /// Trois étages, chacun rattrapant le précédent :
+    ///   1. lecture VISUELLE de la page (si un backend multimodal est actif) ;
+    ///   2. lecture TEXTE (génération guidée Apple, sinon JSON) ;
+    ///   3. extraction DÉTERMINISTE, toujours exécutée — elle ne coûte aucune
+    ///      I/O, fonctionne sans le moindre backend, et vérifie l'arithmétique
+    ///      (`quantité × cours = montant`) qu'aucun modèle ne garantit.
     ///
     /// `pdfSourceData`/`pdfPageIndex` : présents UNIQUEMENT pour une page PDF
-    /// (jamais pour un bloc de texte brut ou un OCR de capture) — c'est ce qui
-    /// permet un repli image ciblé, cf. `reinforceWithPageImage`.
+    /// (jamais pour un bloc de texte brut ou un OCR de capture).
     @MainActor private func parseUnit(text: String, unitNumber: Int,
                                       kind: ImportSourceKind,
                                       pdfSourceData: Data? = nil,
                                       pdfPageIndex: Int? = nil) async -> PDFPageResult {
-        let (parsed, diagnostic) = await parsePage(text: text, pageNumber: unitNumber)
+        var parsed = PageParse()
+        var diagnostic: ImportUnitDiagnostic = .nothingRecognized
+        var readVisually = false
+
+        if let pdfSourceData, let pdfPageIndex,
+           AIEnrichmentBackend.supportsImageInput(for: .investmentImport) {
+            let visual = await Self.parsePageImage(
+                pdfSourceData: pdfSourceData, pdfPageIndex: pdfPageIndex,
+                pageText: text, pageNumber: unitNumber)
+            if !visual.isEmpty {
+                parsed = visual
+                diagnostic = .extracted
+                readVisually = true
+            }
+        }
+
+        // Repli texte : pas de backend multimodal, rendu impossible, ou lecture
+        // visuelle muette.
+        if !readVisually {
+            (parsed, diagnostic) = await parsePage(text: text, pageNumber: unitNumber)
+        }
 
         // Extraction déterministe menée SYSTÉMATIQUEMENT, pas seulement en
         // repli : elle ne coûte rien (aucune I/O) et elle est exacte là où le
@@ -252,33 +318,27 @@ final class InvestmentPDFParser: Sendable {
         let deterministic = InvestmentStatementExtractor.extractOrders(from: text)
             .map { Self.convert($0, pageNumber: unitNumber) }
 
-        var merged = Self.reconcile(ai: parsed.orders, deterministic: deterministic)
-
-        // ⚠️ Repli image, ciblé sur les ISIN que le déterministe a lui-même
-        // signalés comme incertains (cf. `InvestmentStatementExtractor.
-        // parseBlock` — la confiance baisse quand une quantité/un prix est
-        // absent ou déduit). Un TABLEAU (colonnes Date | Quantité | Valeur |
-        // Exécution) perd sa structure une fois aplati par PDFKit : la
-        // cellule Quantité peut atterrir n'importe où selon la mise en page
-        // exacte du courtier, et aucune heuristique de fenêtre de recherche
-        // ne couvre TOUTES les mises en page possibles. Le modèle multimodal,
-        // lui, voit la vraie grille — comme il le fait déjà pour une capture
-        // de portefeuille (AXE V). Ciblé sur les seules pages/ISIN à
-        // confiance basse : une page où le déterministe est déjà sûr de lui
-        // ne paie jamais ce coût (rendu + appel IA supplémentaire).
-        if let pdfSourceData, let pdfPageIndex,
-           merged.contains(where: { !$0.isin.isEmpty && $0.confidence < Self.lowConfidenceThreshold }),
-           await AIEnrichmentBackend.supportsImageInput(for: .investmentImport) {
-            merged = await Self.reinforceWithPageImage(
-                merged, pdfSourceData: pdfSourceData, pdfPageIndex: pdfPageIndex, pageNumber: unitNumber)
-        }
+        let merged = StatementReconciler.reconcile(
+            ai: parsed.orders, deterministic: deterministic,
+            tag: readVisually ? StatementReconciler.imageTag : StatementReconciler.textTag)
 
         let usedFallback = !deterministic.isEmpty && parsed.orders.isEmpty
 
-        if !merged.isEmpty || !parsed.positions.isEmpty {
+        // ⚠️ Ordres ET positions s'excluent pour une même unité. Le modèle
+        // rend parfois les deux sur un relevé d'opérations — les mêmes titres,
+        // vus une fois comme opérations et une fois comme lignes détenues.
+        // Les garder tous les deux comptait chaque titre DEUX fois dans la
+        // revue (34 opérations réelles rendues en 36-37 éléments), et aurait
+        // créé à l'import une position en double de son propre ordre. Le
+        // prompt tranche déjà en faveur des ordres, plus précis pour
+        // l'historique : on applique la même règle côté code plutôt que de
+        // faire confiance au modèle pour l'avoir respectée.
+        let positions = merged.isEmpty ? parsed.positions : []
+
+        if !merged.isEmpty || !positions.isEmpty {
             return PDFPageResult(
                 pageNumber: unitNumber, rawText: text,
-                orders: merged, positions: parsed.positions,
+                orders: merged, positions: positions,
                 detectedMode: merged.isEmpty ? parsed.mode : .orders,
                 // On garde la trace d'un échec IA même quand le déterministe a
                 // sauvé la mise : c'est l'information utile en support.
@@ -298,104 +358,51 @@ final class InvestmentPDFParser: Sendable {
         )
     }
 
-    /// Fusionne les deux extractions.
+    /// Rend la page PDF en image et la fait lire par le modèle multimodal.
     ///
-    /// L'extraction déterministe fait AUTORITÉ sur les titres qu'elle a
-    /// reconnus (elle lit les champs à leur place exacte autour de l'ISIN) ;
-    /// l'IA complète avec ce que l'ancrage ISIN ne peut pas voir : opérations
-    /// sans code ISIN, formats en prose, tickers.
-    static func reconcile(ai: [PDFExtractedOrder],
-                          deterministic: [PDFExtractedOrder]) -> [PDFExtractedOrder] {
-        guard !deterministic.isEmpty else { return ai }
-
-        let knownISINs = Set(deterministic.map { $0.isin.uppercased() }.filter { !$0.isEmpty })
-        // Le ticker est le seul champ que le déterministe ne cherche pas.
-        var tickerByISIN: [String: String] = [:]
-        for order in ai where !order.isin.isEmpty && !order.ticker.isEmpty {
-            tickerByISIN[order.isin.uppercased()] = order.ticker
-        }
-
-        var result = deterministic.map { order -> PDFExtractedOrder in
-            var enriched = order
-            if enriched.ticker.isEmpty, let ticker = tickerByISIN[order.isin.uppercased()] {
-                enriched.ticker = ticker
-            }
-            return enriched
-        }
-        // Ajout des opérations que seule l'IA a vues. Filtrer sur l'ISIN évite
-        // de réintroduire les doublons dont le modèle a mal recopié le code.
-        result.append(contentsOf: ai.filter { !knownISINs.contains($0.isin.uppercased()) })
-        return result
-    }
-
-    /// En dessous de ce seuil, un ordre déterministe est considéré incertain
-    /// — la quantité ou le prix ont été DÉDUITS (`valuation(...).deduced`,
-    /// -0.1) plutôt que lus, ou carrément absents (-0.15). Choisi pour
-    /// laisser passer un ordre parfaitement lu (confiance 0.85+) sans jamais
-    /// déclencher le repli image, tout en couvrant les deux cas de doute.
-    private static let lowConfidenceThreshold = 0.75
-
-    /// Rend la page PDF source en image et redemande au modèle multimodal —
-    /// UNIQUEMENT pour les ISIN que le déterministe a extraits avec une
-    /// confiance basse. Le modèle voit la vraie mise en page (tableau,
-    /// colonnes) là où le déterministe n'avait que le texte aplati par
-    /// PDFKit ; quand il retrouve le MÊME ISIN à la MÊME date, ses champs
-    /// NUMÉRIQUES remplacent ceux du déterministe (qui admet lui-même le
-    /// doute). Le nom, la date et le type restent ceux du déterministe —
-    /// déjà fiables, ce n'est pas leur zone d'incertitude.
+    /// C'est le chemin PRIMAIRE d'une page PDF dès qu'un backend sait lire une
+    /// image : la mise en page d'un avis d'opéré EST l'information (colonnes
+    /// Date | Quantité | Valeur | Exécution), et `PDFPage.string` la détruit.
     ///
-    /// ⚠️ La vérification de date protège contre une page à opérations
-    /// multiples : sans elle, un ISIN mal recopié par le modèle (déjà
-    /// constaté — cf. `parseUnit`) pourrait réattribuer les nombres d'un
-    /// autre ordre de la même page.
-    @MainActor private static func reinforceWithPageImage(
-        _ orders: [PDFExtractedOrder], pdfSourceData: Data, pdfPageIndex: Int, pageNumber: Int
-    ) async -> [PDFExtractedOrder] {
+    /// ⚠️ Le texte aplati accompagne l'image dans le prompt. Il ne s'agit pas
+    /// de redondance : l'image donne la STRUCTURE, le texte donne les
+    /// CARACTÈRES EXACTS (un montant au centime, un ISIN de 12 signes), que
+    /// même un bon modèle de vision peut altérer. Borné, parce que la fenêtre
+    /// de contexte sert d'abord à l'image.
+    @MainActor private static func parsePageImage(
+        pdfSourceData: Data, pdfPageIndex: Int, pageText: String, pageNumber: Int
+    ) async -> PageParse {
         let renderedImage = await Task.detached(priority: .userInitiated) {
             renderPageImage(pdfData: pdfSourceData, pageIndex: pdfPageIndex)
         }.value
         guard let image = renderedImage else {
-            print("[PDFParser] Unité \(pageNumber) : rendu image impossible, repli ignoré")
-            return orders
+            print("[PDFParser] Unité \(pageNumber) : rendu image impossible, lecture texte")
+            return PageParse()
         }
 
         let raw = await AIEnrichmentBackend.completeText(
             feature: .investmentImport,
             system: Self.systemInstructions,
-            user: "Extrais toutes les opérations visibles sur cette page. C'est un TABLEAU : lis chaque colonne (date, quantité, valeur, exécution) à sa vraie position, pas dans l'ordre où le texte pourrait sembler s'enchaîner.",
+            user: """
+            Voici l'image d'une page de relevé d'investissement. C'est un TABLEAU : \
+            lis chaque colonne (date, quantité, informations sur la valeur, cours \
+            d'exécution, montant) à sa position RÉELLE dans la grille.
+
+            Le texte ci-dessous est le même contenu extrait automatiquement, mais sa \
+            mise en page a été perdue : les cellules y sont mélangées. Sers-t'en \
+            uniquement pour lire les caractères exacts (montants au centime, codes \
+            ISIN), et de l'image pour savoir à quelle colonne chacun appartient.
+
+            --- TEXTE EXTRAIT ---
+            \(pageText.prefix(3000))
+            --- FIN ---
+            """,
             image: image
         )
-        guard let raw else { return orders }
-        let imageParsed = Self.parsePageResponse(raw, pageNumber: pageNumber)
-        guard !imageParsed.orders.isEmpty else { return orders }
-
-        var imageByISIN: [String: PDFExtractedOrder] = [:]
-        for order in imageParsed.orders where !order.isin.isEmpty {
-            imageByISIN[order.isin.uppercased()] = order
-        }
-
-        return orders.map { order in
-            guard order.confidence < lowConfidenceThreshold, !order.isin.isEmpty,
-                  let fromImage = imageByISIN[order.isin.uppercased()],
-                  Calendar.current.isDate(fromImage.executedAt, inSameDayAs: order.executedAt)
-            else { return order }
-            print("[PDFParser] Unité \(pageNumber) : \(order.isin) renforcé par lecture image (quantité \(order.quantity) → \(fromImage.quantity), prix \(order.unitPrice) → \(fromImage.unitPrice))")
-            var reinforced = order
-            reinforced.quantity = fromImage.quantity
-            reinforced.unitPrice = fromImage.unitPrice
-            if fromImage.fees > 0 { reinforced.fees = fromImage.fees }
-            reinforced.confidence = max(order.confidence, 0.75)
-            // Trace VISIBLE dans l'app (fiche de l'ordre après import), pas
-            // seulement dans la console : sans elle, rien ne distingue un
-            // ordre corrigé par cette voie d'un ordre lu du premier coup.
-            let tag = "Quantité/prix relus sur l'image (tableau)"
-            if let existing = order.notes, !existing.isEmpty {
-                reinforced.notes = existing + " · " + tag
-            } else {
-                reinforced.notes = tag
-            }
-            return reinforced
-        }
+        guard let raw else { return PageParse() }
+        let parsed = Self.parsePageResponse(raw, pageNumber: pageNumber)
+        print("[PDFParser] Unité \(pageNumber) [image/\(parsed.mode.rawValue)] : \(parsed.orders.count) ordres, \(parsed.positions.count) positions")
+        return parsed
     }
 
     /// Pont moteur déterministe (pur) → modèle d'UI.
@@ -442,7 +449,7 @@ final class InvestmentPDFParser: Sendable {
     /// un échec du modèle est indiscernable d'un document réellement vide
     /// côté UI.
     ///
-    /// ⚠️ CORRECTIF (2026-08-07) : cette fonction n'appelait QUE Foundation
+    /// ⚠️ CORRECTIF : cette fonction n'appelait QUE Foundation
     /// Models, en dur — jamais `AIEnrichmentBackend`, le point de dispatch
     /// par fonctionnalité livré en AXE X. Un utilisateur ayant configuré un
     /// serveur local ou une clé cloud pour « Import de portefeuille »
@@ -450,19 +457,64 @@ final class InvestmentPDFParser: Sendable {
     /// Intelligence disponible, `parsePageWithAI` n'était jamais atteinte, et
     /// tout retombait sur le seul moteur déterministe — exactement le
     /// symptôme rapporté (« aucune IA utilisée sur le PDF », quantité jamais
-    /// détectée sur un format que le déterministe ne couvre pas). Seul le
-    /// repli image ciblé (`reinforceWithPageImage`, ajouté la session
-    /// précédente) passait déjà par `AIEnrichmentBackend` — mais il ne se
-    /// déclenche QUE si le déterministe a d'abord trouvé l'ISIN avec une
-    /// confiance basse ; un utilisateur sans Apple Intelligence n'avait donc
-    /// ni l'IA texte NI, pour beaucoup de pages, le repli image.
+    /// détectée sur un format que le déterministe ne couvre pas).
+    ///
+    /// Ce chemin TEXTE n'est depuis lors plus le premier essai d'une page PDF :
+    /// `parseUnit` fait d'abord lire l'IMAGE de la page quand un backend
+    /// multimodal est actif (cf. `parsePageImage`). Il reste le chemin de tous
+    /// les autres cas — pas de backend multimodal, rendu impossible, blocs de
+    /// texte brut, OCR d'une capture.
+    @MainActor private func parsePage(text: String, pageNumber: Int) async -> (PageParse, ImportUnitDiagnostic) {
+        // ⚠️ Une page PDF n'est PAS découpée par le lecteur, contrairement à un
+        // texte brut (`ImportDocumentReader.textUnits`) : elle arrive ENTIÈRE.
+        // Un relevé de mouvements listant plusieurs dizaines d'opérations
+        // dépasse largement la fenêtre du modèle embarqué, et le `prefix(...)`
+        // posé plus bas amputait alors la fin de la page en silence — le modèle
+        // ne voyait qu'une partie des lignes. C'est aussi une source de
+        // variabilité : selon l'endroit exact de la coupure, la dernière
+        // opération visible est complète ou tronquée, donc lue ou perdue.
+        let chunks = Self.splitTextIntoChunks(text, maxChars: Self.aiChunkSize)
+            .prefix(Self.maxAIChunks)
+        guard chunks.count > 1 else {
+            return await parseChunk(text: text, pageNumber: pageNumber)
+        }
+
+        var merged = PageParse()
+        var diagnostic: ImportUnitDiagnostic = .nothingRecognized
+        for chunk in chunks {
+            let (parsed, chunkDiagnostic) = await parseChunk(text: chunk, pageNumber: pageNumber)
+            merged.orders += parsed.orders
+            merged.positions += parsed.positions
+            if parsed.mode != .unknown { merged.mode = parsed.mode }
+            if chunkDiagnostic == .extracted {
+                diagnostic = .extracted
+            } else if diagnostic != .extracted, chunkDiagnostic != .nothingRecognized {
+                diagnostic = chunkDiagnostic
+            }
+        }
+        // Les blocs se lisent indépendamment : une opération à cheval sur une
+        // coupure peut être rendue par les deux.
+        merged.orders = StatementReconciler.dedupe(merged.orders)
+        return (merged, merged.isEmpty ? diagnostic : .extracted)
+    }
+
+    /// Taille d'un bloc envoyé au modèle. Sous la fenêtre du modèle embarqué,
+    /// et sous le `prefix` de garde des deux chemins d'appel.
+    private static let aiChunkSize = 3500
+    /// Plafond de blocs par unité : au-delà, l'analyse d'un seul document
+    /// prendrait plusieurs minutes pour un gain marginal — l'extraction
+    /// déterministe, elle, voit de toute façon le texte entier.
+    private static let maxAIChunks = 8
+
+    /// Un bloc, un appel au modèle — par le backend résolu pour l'import de
+    /// portefeuille.
     ///
     /// `usesGuidedGeneration` reflète le backend RÉSOLU pour cette
-    /// fonctionnalité (préférence utilisateur + disponibilité réelle) — pas
-    /// un simple test de plateforme : un iPhone iOS 26+ dont l'utilisateur a
-    /// choisi « Serveur local » doit passer par le chemin générique lui
-    /// aussi, pas par Foundation Models envers et contre son réglage.
-    @MainActor private func parsePage(text: String, pageNumber: Int) async -> (PageParse, ImportUnitDiagnostic) {
+    /// fonctionnalité (préférence utilisateur + disponibilité réelle) — pas un
+    /// simple test de plateforme : un iPhone iOS 26+ dont l'utilisateur a
+    /// choisi « Serveur local » doit passer par le chemin générique lui aussi,
+    /// pas par Foundation Models envers et contre son réglage.
+    @MainActor private func parseChunk(text: String, pageNumber: Int) async -> (PageParse, ImportUnitDiagnostic) {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *), AIEnrichmentBackend.usesGuidedGeneration(for: .investmentImport) {
             return await parsePageWithAI(text: text, pageNumber: pageNumber)

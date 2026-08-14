@@ -156,6 +156,46 @@ do {
     }
 }
 
+// MARK: - t2ter — Footer à colonnes groupées (frais confondus avec le brut)
+
+print("\nt2ter · Footer 4 colonnes groupées (Montant brut | Commission | Frais | Montant net)")
+do {
+    // ⚠️ Bug réel (retour user, capture d'un avis d'opéré réel — BNPP EASY
+    // S&P 500, 5 titres @ 27,9161 €) : les frais rendus valaient EXACTEMENT
+    // le montant brut (139,58 €), doublant le total affiché à 279,16 € au
+    // lieu du débit réel 140,28 €. Cause : `firstNumberNearLabel`, sur une
+    // ligne de VALEURS groupées (les 4 en-têtes du footer sur une ligne, les
+    // 4 valeurs sur la suivante), rend le PREMIER nombre de la ligne — le
+    // montant brut, positionnellement en tête — dès que « Commission » n'est
+    // pas la 1ʳᵉ colonne. Un footer à colonnes groupées, contrairement au
+    // format « libellé : valeur » ligne par ligne de t2, est monnaie
+    // courante chez les courtiers qui exportent leurs avis en tableau.
+    let pdf = """
+    ACHAT COMPTANT
+    ACTION
+    Date et heure
+    locale d'exécution Quantité Informations sur la valeur Informations sur l'exécution
+    08/11/2024 5 BNPP EASY S&P 500 UC.EUR ETF Référence : 010173469017
+    17:04:30 Code ISIN : FR0011550185 Type d'ordre : au marché
+    Cours exécuté : 27,9161 EUR
+    Lieu d'exécution : EURONEXT PARIS
+    Montant brut Commission Frais (♦) Montant net au débit de votre compte
+    139,58 EUR 0,70 EUR 140,28 EUR
+    """
+    let orders = InvestmentStatementExtractor.extractOrders(from: pdf)
+    expect(orders.count == 1, "1 opération extraite", "\(orders.count)")
+    if let o = orders.first {
+        expect(o.quantity == 5, "quantité correcte", "\(o.quantity)")
+        expect(abs(o.unitPrice - 27.9161) < 0.001, "cours correct", "\(o.unitPrice)")
+        expect(abs(o.fees - 0.70) < 0.01,
+               "frais réels (0,70 €), pas le montant brut confondu avec eux",
+               "\(o.fees)")
+        expect(abs(o.quantity * o.unitPrice + o.fees - 140.28) < 0.01,
+               "total cohérent avec le débit réel (140,28 €), pas le double",
+               "\(o.quantity * o.unitPrice + o.fees)")
+    }
+}
+
 // MARK: - t3 — Vente et formats anglo-saxons
 
 print("\nt3 · Vente, format US (point décimal, virgule de milliers)")
@@ -264,6 +304,198 @@ do {
     let empty = E.valuation(orderType: "DIV", quantity: nil, unitPrice: nil, gross: nil)
     expect(empty.quantity == 0 && empty.unitPrice == 0,
            "rien d'exploitable → aucun montant fabriqué")
+}
+
+// MARK: - t8bis — Avis d'opéré BoursoBank RÉEL (texte PDFKit vérbatim)
+
+print("\nt8bis · Avis d'opéré BoursoBank — texte extrait du PDF réel")
+do {
+    // ⚠️ Ce texte est la sortie EXACTE de `PDFPage.string` sur le PDF fourni
+    // par l'utilisateur (dump PDFKit), pas une reconstruction. C'est la seule
+    // façon de tester ce que l'app voit réellement : la mise en page 2D du
+    // tableau y est déjà aplatie, colonnes mélangées comprises.
+    let pdf = """
+    OPERATION DE BOURSE
+    le 09/06/2025
+    000000
+    P46983
+    MR HELET EDWIN
+    4 RUE DU CARRE
+    10100 GELANNES
+    Références de votre compte titres
+    40618 80314 00088441579 Compte PEA
+    Résident Français
+    VENTE COMPTANT ETR
+    ACTION
+    Date et heure
+    locale d'exécution Quantité Informations sur la valeur 09/06/2025
+    12:30:21
+    Informations sur l'exécution
+    4 ISHS CO.EURO STOX50 UC.ETF EUR Référence : 170145383379
+    Type d'ordre : au marché
+    Code ISIN : IE0008471009 Cours exécuté : 55,62 EUR
+    Lieu d'exécution : EURONEXT AMSTERDAM
+    Montant transaction brut Intérêts
+    222,48 EUR 0,00 EUR
+    000 jours
+    Montant transaction
+    total brut Courtages Montant transaction net
+    222,48 EUR 0,00 EUR 0,00 EUR
+    Commission Frais divers Montant total des frais
+    1,11 EUR 0,00 EUR 1,11 EUR
+    Montant net au crédit de votre compte
+    221,37 EUR
+    Sous réserve de bonne fin.
+    """
+    let orders = InvestmentStatementExtractor.extractOrders(from: pdf)
+    expect(orders.count == 1, "1 opération extraite", "\(orders.count) trouvée(s)")
+    if let order = orders.first {
+        expect(order.orderType == "SELL", "vente reconnue", order.orderType)
+        expect(order.isin == "IE0008471009", "ISIN correct", order.isin)
+        expect(order.executedAt == "2025-06-09", "date correcte", order.executedAt)
+        // ⚠️ LE symptôme rapporté : « 1 × 55,62 € » au lieu de « 4 × 55,62 € ».
+        // La quantité 4 est trois lignes sous son en-tête de colonne, donc
+        // introuvable par libellé — mais 222,48 ÷ 55,62 = 4 exactement.
+        expect(order.quantity == 4, "quantité déduite du montant ÷ cours",
+               "quantité \(order.quantity)")
+        expect(abs(order.unitPrice - 55.62) < 0.001, "cours exécuté lu",
+               "\(order.unitPrice)")
+        expect(abs(order.quantity * order.unitPrice - 222.48) < 0.01,
+               "le total vaut le montant brut du relevé",
+               "\(order.quantity) × \(order.unitPrice)")
+        expect(abs(order.fees - 1.11) < 0.001, "commission lue", "\(order.fees)")
+        // ⚠️ Le nom affiché était « Type d'ordre : au marché » — la ligne la
+        // plus proche du code ISIN, mais un intitulé de champ, pas un titre.
+        expect(order.assetName == "ISHS CO.EURO STOX50 UC.ETF EUR",
+               "nom du titre isolé de sa ligne de tableau", order.assetName)
+
+        // ⚠️ RÉGRESSION À NE JAMAIS REPERDRE : cette quantité est DÉRIVÉE
+        // (222,48 ÷ 55,62) mais arithmétiquement VÉRIFIÉE — son produit
+        // reproduit le montant brut imprimé. Elle doit donc rester au-dessus du
+        // seuil de relecture, sinon un modèle qui répond « quantité 1 » écrase
+        // une valeur exacte et on retombe sur le « ×1 » d'origine.
+        expect(order.confidence >= StatementReconciler.uncertainConfidence,
+               "une quantité vérifiée n'est pas réécrasable par l'IA",
+               "confiance \(order.confidence)")
+        let contradicted = ExtractedStatementOrder(
+            orderType: "SELL", assetName: "iShares Core EURO STOXX 50",
+            isin: "IE0008471009", quantity: 1, unitPrice: 55.62, fees: 0,
+            executedAt: "2025-06-09", currency: "EUR", notes: nil, confidence: 0.9)
+        let fused = StatementReconciler.reconcile(ai: [contradicted], deterministic: [order])
+        expect(fused.count == 1 && fused[0].quantity == 4,
+               "et elle survit à une lecture IA qui la contredit",
+               "quantité \(fused.first?.quantity ?? -1)")
+    }
+}
+
+// MARK: - t9 — Fusion déterministe × IA (StatementReconciler)
+
+print("\nt9 · Fusion des deux lectures d'un même relevé")
+do {
+    typealias R = StatementReconciler
+
+    func order(_ type: String, _ name: String, _ isin: String, day: String,
+               qty: Double, price: Double, fees: Double = 0,
+               confidence: Double, notes: String? = nil) -> ExtractedStatementOrder {
+        ExtractedStatementOrder(orderType: type, assetName: name, isin: isin,
+                                quantity: qty, unitPrice: price, fees: fees,
+                                executedAt: day, currency: "EUR", notes: notes,
+                                confidence: confidence)
+    }
+
+    // ─── Le cas signalé : un relevé en TABLEAU ───────────────────────────────
+    // Le libellé « Quantité » n'apparaît qu'une fois, dans l'en-tête de
+    // colonne. L'ancrage par ISIN ne peut donc pas le lire ligne par ligne :
+    // il retombe sur « 1 × montant » et ABAISSE sa confiance pour le dire.
+    let det = order("BUY", "ISHARES CORE MSCI", "IE00B4L5Y983", day: "2025-01-13",
+                    qty: 1, price: 982.40, confidence: 0.60,
+                    notes: "Extraction automatique (ancrage ISIN)")
+    let ai = order("BUY", "iShares Core MSCI World", "IE00B4L5Y983", day: "2025-01-13",
+                   qty: 4, price: 245.60, confidence: 0.9)
+
+    let fused = R.reconcile(ai: [ai], deterministic: [det])
+    expect(fused.count == 1, "une opération lue deux fois reste UNE opération",
+           "\(fused.count) rendue(s)")
+    expect(fused[0].quantity == 4, "la quantité de l'IA remplace le « 1 » déduit",
+           "quantité \(fused[0].quantity)")
+    expect(abs(fused[0].quantity * fused[0].unitPrice - 982.40) < 0.01,
+           "le montant total est préservé", "\(fused[0].quantity) × \(fused[0].unitPrice)")
+    expect(fused[0].notes?.contains(R.textTag) == true,
+           "l'opération porte la trace de la relecture IA", fused[0].notes ?? "nil")
+
+    // ⚠️ Une opération PARFAITEMENT lue n'est jamais réécrite, même si le
+    // modèle propose autre chose : c'est le déterministe qui a raison là où il
+    // a réellement LU les nombres.
+    let sure = order("BUY", "TOTALENERGIES SE", "FR0000120271", day: "2025-02-04",
+                     qty: 7, price: 34.53, confidence: 0.85)
+    let wrong = order("BUY", "TotalEnergies", "FR0000120271", day: "2025-02-04",
+                      qty: 1, price: 241.71, confidence: 0.9)
+    let kept = R.reconcile(ai: [wrong], deterministic: [sure])
+    expect(kept.count == 1 && kept[0].quantity == 7,
+           "une lecture sûre n'est pas réécrite par le modèle", "quantité \(kept[0].quantity)")
+
+    // ⚠️ Le MONTANT lu prime quand le modèle recopie le total dans le champ
+    // « prix unitaire » — sans ce garde-fou, 982,40 € devenait 3 929,60 €.
+    let totalAsPrice = order("BUY", "iShares", "IE00B4L5Y983", day: "2025-01-13",
+                             qty: 4, price: 982.40, confidence: 0.9)
+    let guarded = R.reconcile(ai: [totalAsPrice], deterministic: [det])
+    expect(abs(guarded[0].quantity * guarded[0].unitPrice - 982.40) < 0.01,
+           "un prix unitaire aberrant est redéduit du montant réellement lu",
+           "\(guarded[0].quantity) × \(guarded[0].unitPrice)")
+
+    // ─── Le compte qui gonflait : 34 opérations rendues en 36-37 ─────────────
+    // Une opération vue par l'IA SANS ISIN était ajoutée sans aucune
+    // vérification de doublon (l'ancien filtre testait l'appartenance à un
+    // ensemble d'ISIN, qui ne peut par construction pas contenir la chaîne
+    // vide).
+    let noISIN = order("BUY", "ISHARES CORE MSCI", "", day: "2025-01-13",
+                       qty: 4, price: 245.60, confidence: 0.5)
+    let deduped = R.reconcile(ai: [noISIN], deterministic: [det])
+    expect(deduped.count == 1, "une ligne sans ISIN ne se rajoute pas en double",
+           "\(deduped.count) rendue(s)")
+
+    // …mais une opération que SEULE l'IA a vue doit bien être ajoutée.
+    let onlyAI = order("DIV", "THALES", "FR0000121329", day: "2025-05-18",
+                       qty: 1, price: 2.95, confidence: 0.8)
+    let widened = R.reconcile(ai: [noISIN, onlyAI], deterministic: [det])
+    expect(widened.count == 2, "une opération vue par la seule IA est conservée",
+           "\(widened.count) rendue(s)")
+
+    // ⚠️ Deux opérations RÉELLES du même titre le même jour restent deux
+    // opérations : l'appariement est un-pour-un, et le montant départage.
+    let det1 = order("BUY", "AMUNDI", "LU1681043599", day: "2025-03-02",
+                     qty: 1, price: 400, confidence: 0.60)
+    let det2 = order("BUY", "AMUNDI", "LU1681043599", day: "2025-03-02",
+                     qty: 1, price: 900, confidence: 0.60)
+    let ai1 = order("BUY", "Amundi", "LU1681043599", day: "2025-03-02",
+                    qty: 2, price: 200, confidence: 0.9)
+    let ai2 = order("BUY", "Amundi", "LU1681043599", day: "2025-03-02",
+                    qty: 3, price: 300, confidence: 0.9)
+    let pair = R.reconcile(ai: [ai2, ai1], deterministic: [det1, det2])
+    expect(pair.count == 2, "deux opérations du même titre le même jour restent deux",
+           "\(pair.count) rendue(s)")
+    expect(pair[0].quantity == 2 && pair[1].quantity == 3,
+           "chacune reçoit les nombres de SA lecture (appariement par montant)",
+           "\(pair[0].quantity) puis \(pair[1].quantity)")
+
+    // La trace distingue la lecture VISUELLE de la lecture texte : sans elle,
+    // rien ne dit après coup par quel chemin l'opération a été corrigée.
+    let visual = R.reconcile(ai: [ai], deterministic: [det], tag: R.imageTag)
+    expect(visual[0].notes?.contains(R.imageTag) == true,
+           "la lecture image laisse sa propre trace", visual[0].notes ?? "nil")
+
+    // ─── Déduplication d'une source seule (blocs qui se recouvrent) ──────────
+    let repeated = R.dedupe([ai, ai, onlyAI])
+    expect(repeated.count == 2, "une opération répétée par le modèle ne compte qu'une fois",
+           "\(repeated.count) rendue(s)")
+    expect(R.dedupe([det1, det2]).count == 2,
+           "mais deux montants différents ne sont pas une répétition")
+
+    // Sans ossature déterministe (chemin image pur), l'IA passe telle quelle,
+    // dédupliquée.
+    let aiOnly = R.reconcile(ai: [ai, ai, onlyAI], deterministic: [])
+    expect(aiOnly.count == 2, "sans déterministe, la sortie IA est simplement dédupliquée",
+           "\(aiOnly.count) rendue(s)")
 }
 
 // MARK: - Verdict

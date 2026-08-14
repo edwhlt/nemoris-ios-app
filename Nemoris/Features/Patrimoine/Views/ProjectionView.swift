@@ -81,6 +81,7 @@ struct ProjectionView: View {
                 }
             }
             .background(AppTheme.Colors.background)
+            .paywallOverlay(for: .patrimoineProjection)
             .paneChrome("Projection 5 ans", cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 
@@ -215,7 +216,7 @@ struct ProjectionView: View {
     // MARK: - Caveat éditorial
 
     /// Caveat sous le chart : explique les hypothèses du moteur ET donne un
-    /// message contextuel si le cashFlow est négatif (= mois où l'user dépense
+    /// message contextuel si le cashFlow est négatif (= mois où l'utilisateur dépense
     /// plus qu'il ne gagne en récurrents → la projection est purement extrapolée
     /// et ne tient pas compte de mécanismes correcteurs réels comme l'agios,
     /// l'augmentation de salaire, etc.).

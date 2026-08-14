@@ -1,6 +1,6 @@
 import Foundation
 
-// AXE S — Similarité entre deux noms commerciaux.
+// Similarité entre deux noms commerciaux.
 // ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
 //
 // ⚠️ Ce n'est PAS un doublon de `NemorisEngine.JaroWinkler`, et il ne faut pas les fusionner :

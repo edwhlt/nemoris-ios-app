@@ -1,6 +1,6 @@
 import Foundation
 
-/// AXE B — Persistance du cache d'enrichissement (Sirene / MapKit / LLM / merged).
+/// Persistance du cache d'enrichissement (Sirene / MapKit / LLM / merged).
 ///
 /// Depuis v36, ce cache vit sur disque (`Library/Caches/nemoris/enrichment_cache.json`)
 /// via `JSONFileCache`, plus dans SQLite. Raison :

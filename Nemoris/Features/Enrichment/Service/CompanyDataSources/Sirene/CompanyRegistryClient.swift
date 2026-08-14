@@ -1,6 +1,6 @@
 import Foundation
 
-/// AXE S — Client de l'API publique recherche-entreprises.api.gouv.fr.
+/// Client de l'API publique recherche-entreprises.api.gouv.fr.
 /// Pas de clé, pas d'auth, ~7 req/s (cadencé par `RemoteProvider.sireneGouv`).
 ///
 /// Privacy : seul le nom NETTOYÉ du commerce sort de l'appareil, plus éventuellement un

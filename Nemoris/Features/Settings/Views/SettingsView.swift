@@ -112,12 +112,7 @@ struct DocumentPickerView: UIViewControllerRepresentable {
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(PurchaseManager.self) private var store
-    @State private var accounts: [Account] = []
-    @State private var tabOrder: [MainTabItem] = []
     @State private var showPaywall = false
-    @AppStorage("nemoris.reimbursementsEnabled") private var reimbursementsEnabled = true
-    @AppStorage("nemoris.budgetRedOverPct") private var budgetRedOverPct = 20.0
-    private let repository = TransactionRepository()
 
     var isEmbedded: Bool = false
 
@@ -151,23 +146,44 @@ struct SettingsView: View {
 
     #if os(macOS)
     /// Une sous-section en pleine page + retour vers la liste des réglages.
+    ///
+    /// ⚠️ `.modules` et `.ai` sont des cas À PART : `ModulesSettingsView` et
+    /// `AISettingsView` ont chacune leur PROPRE navigation interne (liste →
+    /// sous-page), donc leur propre bouton retour. Leur superposer ICI un
+    /// second bouton retour générique produit deux chevrons empilés dans la
+    /// même barre — les deux `.toolbar` (celui-ci + celui de la sous-page)
+    /// fusionnent au lieu de se remplacer. Ces deux vues reçoivent donc
+    /// `onBack` et gèrent tout leur chrome elles-mêmes, exactement comme
+    /// `DashboardCustomizeView`.
     @ViewBuilder
     private func settingsSectionPage(_ section: SettingsSection) -> some View {
-        section.destination
-            .navigationTitle(section.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    Button {
-                        paneCenter?.dismissCurrent()
-                        pushedSection = nil
-                    } label: {
-                        Image(systemName: "chevron.left")
+        if section == .modules {
+            ModulesSettingsView(onBack: {
+                paneCenter?.dismissCurrent()
+                pushedSection = nil
+            })
+        } else if section == .ai {
+            AISettingsView(onBack: {
+                paneCenter?.dismissCurrent()
+                pushedSection = nil
+            })
+        } else {
+            section.destination
+                .navigationTitle(section.title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Button {
+                            paneCenter?.dismissCurrent()
+                            pushedSection = nil
+                        } label: {
+                            Image(systemName: "chevron.left")
+                        }
+                        .help("Réglages")
+                        .accessibilityLabel("Réglages")
                     }
-                    .help("Réglages")
-                    .accessibilityLabel("Réglages")
                 }
-            }
+        }
     }
 
     #endif
@@ -196,17 +212,6 @@ struct SettingsView: View {
         #endif
     }
 
-    @ViewBuilder private var accountPickerOptions: some View {
-        Text("Premier disponible").tag(0)
-        ForEach(accounts.groupedByType, id: \.type) { group in
-            Section(group.type.label) {
-                ForEach(group.accounts) { a in
-                    Text(a.name).tag(a.id)
-                }
-            }
-        }
-    }
-
     @ViewBuilder private var navBody: some View {
         @Bindable var appState = appState
         // Fond appliqué via .background (borné par le Form) et non via un
@@ -216,15 +221,11 @@ struct SettingsView: View {
                 // ── Abonnement ────────────────────────────────────────────
                 subscriptionSection
 
-                // ── Général ───────────────────────────────────────────────
-                Section("Général") {
-                    if !accounts.isEmpty {
-                        Picker("Compte par défaut", selection: $appState.defaultAccountId) {
-                            accountPickerOptions
-                        }
-                    }
-                }
-                .listRowBackground(AppTheme.Colors.surface)
+                // ⚠️ Le compte par défaut ("Général" avant) a déménagé dans
+                // « Modules & navigation → Réglages de Transactions » : c'est
+                // un réglage propre au module Transactions, au même titre que
+                // le seuil budget ou la trésorerie des Investissements — pas
+                // de raison qu'il vive ailleurs.
 
                 // ── Sécurité (verrouillage Face ID / Touch ID / code) ────
                 appLockSection
@@ -235,84 +236,27 @@ struct SettingsView: View {
                 .listRowBackground(AppTheme.Colors.surface)
 
                 // ── Modules ───────────────────────────────────────────────
-                // Activation des modules optionnels. "Remboursements" est groupé
-                // ici car c'est aussi une fonctionnalité activable, pas un réglage de Tricount.
+                // Activation, ordre ET réglages spécifiques d'un module sont
+                // regroupés dans UN SEUL écran dédié (`ModulesSettingsView`) —
+                // les trois questions ("ce module est-il actif", "où
+                // apparaît-il", "a-t-il un réglage propre") portent sur la
+                // même ligne, elles n'ont pas de raison de vivre à des endroits
+                // différents. C'est aussi ce qui répare le réordonnancement sur
+                // Mac : `ModulesSettingsView` reprend le `Form` isolé de
+                // `DashboardCustomizeView`, seul pattern de drag&drop validé sur
+                // macOS dans l'app — imbriqué parmi une douzaine d'autres
+                // sections comme avant, le glisser-déposer macOS n'amorçait pas.
                 Section {
-                    // ⚠️ Transactions est le module CŒUR, activé par défaut —
-                    // mais activable/désactivable comme les autres : qui ne se
-                    // sert de Nemoris que pour son portefeuille n'a aucune
-                    // raison de garder une liste d'opérations vide. Le désactiver
-                    // retire aussi « Données », qui n'est que son référentiel.
-                    proToggle(
-                        isOn: $appState.showTransactions,
-                        feature: nil,
-                        label: "Transactions",
-                        icon: "list.bullet.rectangle"
-                    )
-                    proToggle(
-                        isOn: $appState.showTricount,
-                        feature: nil,
-                        label: "Tricount",
-                        icon: "person.2"
-                    )
-                    proToggle(
-                        isOn: $appState.showInvestments,
-                        feature: .investments,
-                        label: "Investissements",
-                        icon: "chart.line.uptrend.xyaxis"
-                    )
-                    proToggle(
-                        isOn: $appState.showBudget,
-                        feature: .budget,
-                        label: "Budget & Prévisions",
-                        icon: "chart.bar"
-                    )
-                    // Patrimoine — pas paywallé pour l'instant (feature: nil),
-                    // alignement avec Tricount. Promotion possible plus tard.
-                    proToggle(
-                        isOn: $appState.showPatrimoine,
-                        feature: nil,
-                        label: "Patrimoine",
-                        icon: "house"
-                    )
-                    proToggle(
-                        isOn: $appState.showSQLConsole,
-                        feature: .sqlConsole,
-                        label: "Console SQL",
-                        icon: "terminal"
-                    )
-                    Toggle(isOn: $reimbursementsEnabled) {
-                        Label("Remboursements", systemImage: "arrow.uturn.left.circle")
+                    settingsLink(.modules) {
+                        Label("Modules & navigation", systemImage: "square.grid.2x2.fill")
                     }
-                    .tint(AppTheme.Colors.accent)
                 } header: {
                     Text("Modules")
                 } footer: {
-                    Text("Activez les fonctionnalités que vous souhaitez voir dans l'app.")
+                    Text("Activez, réordonnez et configurez les modules de l'app.")
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
                 .listRowBackground(AppTheme.Colors.surface)
-
-                // ── Investissements ───────────────────────────────────────
-                // N'apparaît que si le module Investissements est activé.
-                if appState.showInvestments {
-                    Section {
-                        Toggle(isOn: $appState.investmentsIncludeCashInTotal) {
-                            Label("Inclure la trésorerie dans la valorisation", systemImage: "eurosign.circle")
-                        }
-                        .tint(AppTheme.Colors.accent)
-                        Toggle(isOn: $appState.investmentsAutoSyncEnabled) {
-                            Label("Synchronisation automatique des cours", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                        .tint(AppTheme.Colors.accent)
-                    } header: {
-                        Text("Investissements")
-                    } footer: {
-                        Text("Si activé, la trésorerie (cash disponible) est ajoutée au gros chiffre de valorisation. Le calcul de performance reste basé uniquement sur les positions, peu importe ce réglage. La synchronisation automatique actualise portefeuilles et cours à l'ouverture de l'app ou du module, au plus toutes les 4 heures.")
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
-                    }
-                    .listRowBackground(AppTheme.Colors.surface)
-                }
 
                 // ── Personnalisation ──────────────────────────────────────
                 Section("Personnalisation") {
@@ -332,54 +276,6 @@ struct SettingsView: View {
                 }
                 .listRowBackground(AppTheme.Colors.surface)
 
-                // ── Budget ────────────────────────────────────────────────
-                Section {
-                    Stepper(value: $budgetRedOverPct, in: 0...100, step: 5) {
-                        HStack {
-                            Label("Seuil rouge budget", systemImage: "exclamationmark.triangle.fill")
-                                .foregroundStyle(AppTheme.Colors.textPrimary)
-                            Spacer()
-                            Text("+\(Int(budgetRedOverPct)) %")
-                                .foregroundStyle(AppTheme.Colors.textSecondary)
-                                .font(.subheadline)
-                        }
-                    }
-                } header: {
-                    Text("Budget")
-                } footer: {
-                    Text("Orange de 0 % à +\(Int(budgetRedOverPct)) % de dépassement, rouge au-delà.")
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                }
-                .listRowBackground(AppTheme.Colors.surface)
-
-                Section {
-                    ForEach(tabOrder) { tab in
-                        HStack {
-                            Label(tab.title, systemImage: tab.systemImage)
-                                .foregroundStyle(AppTheme.Colors.textPrimary)
-                            Spacer()
-                            if tab == .investments && !store.isUnlocked(.investments) {
-                                ProBadge()
-                            }
-                            Image(systemName: "line.3.horizontal")
-                                .foregroundStyle(AppTheme.Colors.textSecondary)
-                                .font(.subheadline)
-                        }
-                    }
-                    .onMove(perform: moveTab)
-                } header: {
-                    Text("Ordre des onglets")
-                } footer: {
-                    Text("Les 4 premiers s'affichent dans la barre du bas. Les suivants vont dans Plus.")
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                }
-                .listRowBackground(AppTheme.Colors.surface)
-                #if os(iOS)
-                // editMode n'existe pas sur macOS — le drag&drop de réordonnancement
-                // marche nativement sur Mac sans mode édition.
-                .environment(\.editMode, .constant(.active))
-                #endif
-
                 // ── Données ───────────────────────────────────────────────
                 // ⚠️ L'entrée « Importation » a été RETIRÉE d'ici : elle
                 // existait aussi dans la navigation principale, et deux chemins
@@ -393,16 +289,20 @@ struct SettingsView: View {
                 .listRowBackground(AppTheme.Colors.surface)
 
                 // ── Synchronisation ───────────────────────────────────────
-                // Un seul groupe pour les 2 types de sync :
-                //   - Synchronisation du fichier de base (iCloud Drive, OneDrive…)
-                //   - Synchronisation automatique des positions (exchanges, wallets)
+                // Synchronisation du fichier de base (iCloud Drive, OneDrive…).
+                // La sync des exchanges/wallets n'est PLUS ici depuis
+                // 2026-08-08 : ce n'est pas un réglage global, c'est propre au
+                // module Investissements — chaque lien est rattaché à un compte
+                // et se gère depuis SA fiche (toolbar "Lier un exchange /
+                // wallet" pour un nouveau compte, section "Synchronisation" de
+                // la fiche pour un compte existant).
                 Section("Sauvegarde & synchronisation") {
                     // Filet de sécurité de base — gratuit, snapshots quotidiens iCloud
                     // (recommandé pour tous les users).
                     settingsLink(.backup) {
                         Label("Sauvegarde locale & iCloud", systemImage: "icloud.and.arrow.up.fill")
                     }
-                    // Sync CloudKit chiffrée multi-appareils (AXE L).
+                    // Sync CloudKit chiffrée multi-appareils.
                     settingsLink(.cloudSync) {
                         HStack {
                             Label("Synchronisation iCloud", systemImage: "arrow.trianglehead.2.clockwise.rotate.90.icloud")
@@ -416,11 +316,6 @@ struct SettingsView: View {
                     //  avec les snapshots iCloud de BackupService, qui sont déjà
                     //  des .sqlite bruts accessibles dans Fichiers et survivent à
                     //  la désinstallation. Le multi-cloud viendra côté BackupService.)
-                    if appState.showInvestments {
-                        settingsLink(.liveSync) {
-                            Label("Exchanges & wallets", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                    }
                 }
                 .listRowBackground(AppTheme.Colors.surface)
 
@@ -482,12 +377,6 @@ struct SettingsView: View {
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
         .navigationTitle("Paramètres")
-        .onAppear {
-            if DatabaseManager.shared.hasDatabase() {
-                accounts = repository.fetchAccounts()
-            }
-            tabOrder = appState.mainTabOrder
-        }
         .adaptivePane(isPresented: $showPaywall) {
             PaywallView().environment(store)
         }
@@ -497,7 +386,7 @@ struct SettingsView: View {
 
     /// Section "Sécurité" : toggle de verrouillage adaptatif (Face ID / Touch ID
     /// / code iOS selon disponibilité). Le label suit ce que le device propose
-    /// pour que l'user voie immédiatement ce qui sera utilisé.
+    /// pour que l'utilisateur voie immédiatement ce qui sera utilisé.
     @State private var lockEnabledMirror = UserDefaults.standard.bool(forKey: "appLockEnabled")
     @State private var lockBiometryType: AppLockService.BiometryType = .none
     @State private var showCurrencyConverter = false
@@ -651,18 +540,18 @@ struct SettingsView: View {
                     Spacer()
 
                     if store.accessLevel == .free {
+                        // Fond plein (pas de dégradé) : même recette que ProBadge et
+                        // tous les autres CTA capsule de l'app (accent.Colors.accent
+                        // seul). Un dégradé vers accentSecondary — cuivre volontairement
+                        // FIXE entre les thèmes (cf. AppTheme.swift) — se détachait mal
+                        // du vert accent qui, lui, devient beaucoup plus clair en dark
+                        // mode : le cuivre inchangé y lisait comme un marron terne.
                         Button("Passer Pro") { showPaywall = true }
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
-                            .background(
-                                LinearGradient(
-                                    colors: [AppTheme.Colors.accent, AppTheme.Colors.accentSecondary],
-                                    startPoint: .leading, endPoint: .trailing
-                                ),
-                                in: Capsule()
-                            )
+                            .background(AppTheme.Colors.accent, in: Capsule())
                     }
                 }
                 .padding(.vertical, 4)
@@ -684,14 +573,30 @@ struct SettingsView: View {
                         .foregroundStyle(AppTheme.Colors.textPrimary)
                     }
                 } else {
-                    Button("Gérer l'abonnement") {
-                        if let url = URL(string: "itms-apps://apps.apple.com/account/subscriptions") {
-                            #if os(iOS)
-                            UIApplication.shared.open(url)
-                            #else
-                            NSWorkspace.shared.open(url)
-                            #endif
+                    // "Changer de formule" ouvre le même Paywall que l'achat initial —
+                    // il s'adapte tout seul (formule actuelle marquée, mensuel ↔ annuel
+                    // via le crossgrade StoreKit natif, état dédié si Lifetime). "Gérer
+                    // l'abonnement" reste la sortie vers Apple pour résilier ou changer
+                    // de moyen de paiement, ce que StoreKit n'expose pas depuis l'app.
+                    Button {
+                        showPaywall = true
+                    } label: {
+                        HStack {
+                            Text("Changer de formule")
+                                .fontWeight(.medium)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.textSecondary)
                         }
+                        .foregroundStyle(AppTheme.Colors.textPrimary)
+                    }
+                    Button("Gérer l'abonnement") {
+                        #if os(iOS)
+                        UIApplication.shared.open(AppConstants.Store.manageSubscriptionsURL)
+                        #else
+                        NSWorkspace.shared.open(AppConstants.Store.manageSubscriptionsURL)
+                        #endif
                     }
                     .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
@@ -702,52 +607,6 @@ struct SettingsView: View {
         .listRowBackground(AppTheme.Colors.surface)
     }
     
-    // MARK: - Pro Toggle Helper
-
-    @ViewBuilder
-    private func proToggle(isOn: Binding<Bool>, feature: AppFeature?, label: String, icon: String) -> some View {
-        // `feature == nil` = feature gratuite, pas de paywall → toggle normal.
-        // `feature != nil` et unlocked → toggle normal.
-        // `feature != nil` et locked → bouton paywall.
-        let isUnlocked = feature.map { store.isUnlocked($0) } ?? true
-        if isUnlocked {
-            Toggle(isOn: isOn) {
-                Label(label, systemImage: icon)
-            }
-            .tint(AppTheme.Colors.accent)
-        } else {
-            Button {
-                showPaywall = true
-            } label: {
-                HStack {
-                    Label(label, systemImage: icon)
-                        .foregroundStyle(AppTheme.Colors.textPrimary)
-                    Spacer()
-                    Text("Pro")
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            LinearGradient(
-                                colors: [AppTheme.Colors.accent, AppTheme.Colors.accentSecondary],
-                                startPoint: .leading, endPoint: .trailing
-                            ),
-                            in: Capsule()
-                        )
-                    Image(systemName: "lock.fill")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                }
-            }
-        }
-    }
-
-    private func moveTab(from source: IndexSet, to destination: Int) {
-        tabOrder.move(fromOffsets: source, toOffset: destination)
-        appState.mainTabOrder = tabOrder
-    }
 }
 
 // (SyncSettingsView + SyncService retirés 2026-07-26 — l'export continu one-way
@@ -970,36 +829,36 @@ struct PrivacyView: View {
 /// (cf. `SettingsView.pushedSection`) — un push n'y est pas défait au changement
 /// de module et désynchronise la sidebar. Sur iOS, push classique.
 enum SettingsSection: String, Identifiable, CaseIterable {
-    case importCSV, companySources, backup, cloudSync, liveSync
+    case modules, importCSV, companySources, backup, cloudSync
     case ai, privacy, taxReport, advanced
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .importCSV:      return "Importation"
-        case .companySources: return "Sources entreprises"
-        case .backup:         return "Sauvegarde locale & iCloud"
-        case .cloudSync:      return "Synchronisation iCloud"
-        case .liveSync:       return "Exchanges & wallets"
-        case .ai:             return "Intelligence artificielle"
-        case .privacy:        return "Données & vie privée"
-        case .taxReport:      return "Rapport fiscal France"
-        case .advanced:       return "Base de données & Console SQL"
+        case .modules:         return "Modules & navigation"
+        case .importCSV:       return "Importation"
+        case .companySources:  return "Sources entreprises"
+        case .backup:          return "Sauvegarde locale & iCloud"
+        case .cloudSync:       return "Synchronisation iCloud"
+        case .ai:              return "Intelligence artificielle"
+        case .privacy:         return "Données & vie privée"
+        case .taxReport:       return "Rapport fiscal France"
+        case .advanced:        return "Base de données & Console SQL"
         }
     }
 
     @ViewBuilder var destination: some View {
         switch self {
-        case .importCSV:      ImportEntryView(isEmbedded: true)
-        case .companySources: CompanyDataSourcesSettingsView()
-        case .backup:         BackupSettingsView()
-        case .cloudSync:      CloudSyncSettingsView()
-        case .liveSync:       LiveSyncSettingsView()
-        case .ai:             AISettingsView()
-        case .privacy:        PrivacyView()
-        case .taxReport:      TaxReportView()
-        case .advanced:       AdvancedSettingsView()
+        case .modules:         ModulesSettingsView()
+        case .importCSV:       ImportEntryView(isEmbedded: true)
+        case .companySources:  CompanyDataSourcesSettingsView()
+        case .backup:          BackupSettingsView()
+        case .cloudSync:       CloudSyncSettingsView()
+        case .ai:              AISettingsView()
+        case .privacy:         PrivacyView()
+        case .taxReport:       TaxReportView()
+        case .advanced:        AdvancedSettingsView()
         }
     }
 }

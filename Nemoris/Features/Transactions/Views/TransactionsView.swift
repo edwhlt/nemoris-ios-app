@@ -164,18 +164,18 @@ struct TransactionsView: View {
         }
     }
 
-    private func groupLabel(for date: Date) -> String {
+    private func groupLabel(for date: Date) -> Text {
         switch grouping {
         case .day:
-            return date.formatted(.dateTime.weekday(.wide).day().month(.wide).year())
+            return Text(date, format: .dateTime.weekday(.wide).day().month(.wide).year())
         case .week:
-            return "Semaine du \(date.formatted(.dateTime.day().month(.abbreviated).year()))"
+            return Text("Semaine du ") + Text(date, format: .dateTime.day().month(.abbreviated).year())
         case .month:
-            return date.formatted(.dateTime.month(.wide).year())
+            return Text(date, format: .dateTime.month(.wide).year())
         }
     }
 
-    private var groupedTransactions: [(date: Date, label: String, transactions: [FinanceTransaction])] {
+    private var groupedTransactions: [(date: Date, label: Text, transactions: [FinanceTransaction])] {
         Dictionary(grouping: filteredTransactions) { groupDate(for: $0) }
             .sorted { $0.key > $1.key }
             .map { (date, txs) in
@@ -211,16 +211,16 @@ struct TransactionsView: View {
                 if isLoading {
                     transactionsSkeleton
                 } else if transactions.isEmpty {
-                    ContentUnavailableView(
-                        "Aucune transaction",
-                        systemImage: "tray",
-                        description: Text("Vérifiez que le compte selectionné et la plage de temps correspondent. Sinon commencez par ajouter vos transactions ou les importer depuis un fichier sqlite existant ou un fichier csv.")
+                    EmptyStateView(
+                        icon: "tray",
+                        title: "Aucune transaction",
+                        message: "Vérifiez que le compte selectionné et la plage de temps correspondent. Sinon commencez par ajouter vos transactions ou les importer depuis un fichier sqlite existant ou un fichier csv."
                     )
                 } else if filteredTransactions.isEmpty {
-                    ContentUnavailableView(
-                        "Aucun résultat",
-                        systemImage: "magnifyingglass",
-                        description: Text("Aucune transaction ne correspond aux filtres actifs.")
+                    EmptyStateView(
+                        icon: "magnifyingglass",
+                        title: "Aucun résultat",
+                        message: "Aucune transaction ne correspond aux filtres actifs."
                     )
                 } else {
                     List {
@@ -341,7 +341,7 @@ struct TransactionsView: View {
                                         }
                                 }
                             } header: {
-                                Text(group.label)
+                                group.label
                                     .macGroupedSectionHeader()
                             }
                         }
@@ -483,7 +483,7 @@ struct TransactionsView: View {
                 }
             } message: {
                 if let tx = txToDelete {
-                    Text("\(tx.tiersName.isEmpty ? tx.information : tx.tiersName) · \(tx.amount.formatted(.currency(code: "EUR")))")
+                    Text("\(tx.tiersName.isEmpty ? tx.information : tx.tiersName) · ") + Text(tx.amount, format: .currency(code: "EUR"))
                 }
             }
             .adaptivePane(isPresented: $showFilters) {
@@ -551,7 +551,7 @@ struct TransactionsView: View {
                 }
             }
             .adaptivePane(isPresented: $showAddTransaction) {
-                // Si l'user est en mode "Tous" (selectedAccountId == 0), on retombe
+                // Si l'utilisateur est en mode "Tous" (selectedAccountId == 0), on retombe
                 // sur le premier compte disponible pour l'ajout manuel (impossible
                 // d'imputer une transaction au sentinel "Tous").
                 AddTransactionSheet(

@@ -66,7 +66,7 @@ enum DashboardCardID: String, CaseIterable, Identifiable, Sendable, Codable {
         switch self {
         case .insightsCoach:   return "lightbulb.fill"
         case .budgetEnvelopes: return "chart.bar.fill"
-        case .netWorth:        return "house.lodge.fill"
+        case .netWorth:        return "house.fill"
         case .monthlyFlow:     return "chart.bar.xaxis"
         case .topCategories:   return "list.number"
         case .tags:            return "tag.fill"

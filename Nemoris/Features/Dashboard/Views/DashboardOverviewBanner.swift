@@ -68,7 +68,7 @@ struct DashboardOverviewBanner: View {
 
                 if let patrimoine {
                     column(
-                        icon: "house.lodge.fill",
+                        icon: "house.fill",
                         tint: AppTheme.Colors.accent,
                         title: "Patrimoine",
                         destination: .patrimoine
@@ -221,6 +221,10 @@ struct DashboardOverviewBanner: View {
         if value >= 1_000 {
             return String(format: "%.1f k€", value / 1_000)
         }
-        return value.formatted(.currency(code: "EUR").presentation(.narrow))
+        // Reste cohérent avec les 2 branches ci-dessus (abrégé maison, décimale
+        // à point) plutôt que `.formatted(.currency(...))` — qui, appelé hors
+        // d'un `Text(_:format:)`, ignore la locale forcée par l'app et bascule
+        // sur celle, réelle, de l'appareil (cf. fix Patrimoine).
+        return String(format: "%.2f €", value)
     }
 }

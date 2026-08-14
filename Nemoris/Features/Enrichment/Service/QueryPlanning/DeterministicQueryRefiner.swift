@@ -1,6 +1,6 @@
 import Foundation
 
-// AXE S — Raffinement SANS IA.
+// Raffinement SANS IA.
 // ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
 //
 // Produit exactement le même `LLMQueryRefinement` que le chemin `@Generable`. C'est ce

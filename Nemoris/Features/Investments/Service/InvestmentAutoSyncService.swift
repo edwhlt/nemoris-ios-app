@@ -103,7 +103,15 @@ final class InvestmentAutoSyncService {
         print("[InvestmentAutoSyncService] Passe de sync démarrée")
 
         // 1. LiveSync exchanges/wallets (séquentiel, rate limits gérés côté providers)
-        let liveSyncResults = await LiveSyncRegistry.shared.syncAll()
+        // Feature Pro (`.investmentsLiveSync`) : un lien créé pendant une période Pro
+        // ne doit pas continuer à se synchroniser gratuitement après résiliation —
+        // seul l'écran de gestion (LiveSyncSettingsView) est verrouillé par son
+        // propre `paywallOverlay`, ce déclencheur en arrière-plan doit l'être aussi.
+        // Le reste de la passe (historique de cours des positions saisies à la
+        // main) n'a rien à voir avec Live Sync et continue pour tout le monde.
+        let liveSyncResults = PurchaseManager.shared.isUnlocked(.investmentsLiveSync)
+            ? await LiveSyncRegistry.shared.syncAll()
+            : []
         let liveSyncErrors = liveSyncResults.filter { $0.error != nil }
 
         // 2. Historique marché : cibles = positions dédupliquées par identifier
@@ -366,7 +374,7 @@ final class InvestmentAutoSyncService {
 
     // MARK: - Intraday (plage 1J — points 30 min sur 24-48 h glissantes)
 
-    /// Sync de l'historique INTRADAY d'un identifier, déclenchée quand l'user
+    /// Sync de l'historique INTRADAY d'un identifier, déclenchée quand l'utilisateur
     /// sélectionne la plage 1J. Adapte la fréquence à la plage : points 30 min,
     /// rétention 48 h (purge auto côté cache) — le quotidien 10 ans reste la
     /// série de référence pour toutes les autres plages.
@@ -399,17 +407,70 @@ final class InvestmentAutoSyncService {
         // par la sync quotidienne : les points quotidiens portent le symbole
         // gagnant dans leur champ `identifier` (ex. ISIN → "EWLD.PA"). Pas de
         // re-résolution OpenFIGI ici.
-        let dailySymbol = PriceHistoryCache.shared.fetch(identifier: clean).last?.identifier ?? clean
-        do {
-            let points = try await marketDataService.fetchIntradayHistory(symbol: dailySymbol)
-            guard !points.isEmpty else { return .noData(symbolsTried: [dailySymbol]) }
-            PriceHistoryCache.shared.save(identifier: clean, points: points, resolution: .intraday30m)
-            return .success(points: points.count, source: "yahoo")
-        } catch MarketDataFetchError.rateLimited(let provider, let retryAfter) {
-            return .rateLimited(provider: provider, retryAfter: retryAfter)
-        } catch {
-            return .networkError(error.localizedDescription)
+        //
+        // ⚠️ PLUSIEURS candidats, plus un seul. Le symbole porté par les points
+        // quotidiens peut ne pas être interrogeable en intraday (série venue de
+        // Stooq, ou cache quotidien vide → on retombait sur l'ISIN, que Yahoo
+        // ne connaît pas et renvoie en 404). Un seul essai raté = pas de vue 1J,
+        // silencieusement.
+        var candidates: [String] = []
+        func addCandidate(_ value: String?) {
+            guard let value, !value.isEmpty,
+                  !candidates.contains(where: { $0.caseInsensitiveCompare(value) == .orderedSame })
+            else { return }
+            candidates.append(value)
         }
+        addCandidate(PriceHistoryCache.shared.fetch(identifier: clean).last?.identifier)
+        if let trace = InvestmentSyncTraceStore.fetchBest(identifiers: [clean]), trace.status == .success {
+            trace.symbolsTried.forEach(addCandidate)
+        }
+        addCandidate(clean)
+
+        var lastOutcome: PositionSyncOutcome = .noData(symbolsTried: candidates)
+        for symbol in candidates {
+            do {
+                let points = try await marketDataService.fetchIntradayHistory(symbol: symbol)
+                guard !points.isEmpty else { continue }
+                PriceHistoryCache.shared.save(identifier: clean, points: points, resolution: .intraday30m)
+                InvestmentSyncTraceStore.record(.init(
+                    identifier: clean, attemptedAt: Date(), status: .success,
+                    message: "Cours intrajournaliers synchronisés via yahoo (\(points.count) points, pas de 30 min).",
+                    symbolsTried: candidates, source: "yahoo", pointsCount: points.count
+                ))
+                return .success(points: points.count, source: "yahoo")
+            } catch MarketDataFetchError.rateLimited(let provider, let retryAfter) {
+                // Inutile d'essayer les autres symboles : le breaker est ouvert
+                // pour tout le provider.
+                lastOutcome = .rateLimited(provider: provider, retryAfter: retryAfter)
+                break
+            } catch {
+                lastOutcome = .networkError(error.localizedDescription)
+                continue
+            }
+        }
+
+        // Trace persistante, comme la passe quotidienne : sans elle, la carte
+        // « Dernière synchro du cours » ne pouvait rien dire d'un échec 1J.
+        InvestmentSyncTraceStore.record(.init(
+            identifier: clean, attemptedAt: Date(),
+            status: {
+                if case .rateLimited = lastOutcome { return .rateLimited }
+                if case .networkError = lastOutcome { return .error }
+                return .noData
+            }(),
+            message: "Cours intrajournaliers (1J) indisponibles. " + {
+                switch lastOutcome {
+                case .rateLimited(let provider, let retryAfter):
+                    return "\(provider.displayName) limite les requêtes — réessai dans \(Int(retryAfter)) s."
+                case .networkError(let message):
+                    return message
+                default:
+                    return "Aucun point 30 min renvoyé pour ce titre."
+                }
+            }(),
+            symbolsTried: candidates, source: nil, pointsCount: 0
+        ))
+        return lastOutcome
     }
 
     /// Sync intraday séquentielle d'un lot d'identifiers (tap sur la chip 1J

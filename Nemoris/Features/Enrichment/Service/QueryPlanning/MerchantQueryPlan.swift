@@ -1,6 +1,6 @@
 import Foundation
 
-// AXE S — Modèles de la planification de requêtes marchand.
+// Modèles de la planification de requêtes marchand.
 //
 // ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
 // Pas de NemorisEngine (c'est un package SwiftPM, le harness swiftc devrait le compiler

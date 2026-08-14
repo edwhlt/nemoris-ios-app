@@ -1,6 +1,6 @@
 import Foundation
 
-/// AXE S — Résout un fragment de libellé en commune française via `geo.api.gouv.fr`.
+/// Résout un fragment de libellé en commune française via `geo.api.gouv.fr`.
 /// Sans clé, sans compte.
 ///
 /// POURQUOI UNE API PLUTÔT QU'UNE LISTE EN DUR

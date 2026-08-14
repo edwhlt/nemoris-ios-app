@@ -16,7 +16,7 @@ import CryptoKit
 //   - /api/v3/ping       (public, test connectivité)
 //   - /api/v3/account    (signed, balances spot)
 //
-// La clé fournie par l'user DOIT être créée en mode "Enable Reading" only (pas de
+// La clé fournie par l'utilisateur DOIT être créée en mode "Enable Reading" only (pas de
 // trading ni de withdrawal). Le code ne fait que des GET — aucun risque même si la
 // clé avait par erreur des permissions plus larges.
 
@@ -36,7 +36,7 @@ struct BinanceAccountResponse: Decodable {
     }
 }
 
-/// AXE I Couche 1.5 — Un trade tel que retourné par /api/v3/myTrades.
+/// Un trade tel que retourné par /api/v3/myTrades.
 /// Binance utilise des `String` pour les nombres décimaux pour préserver la précision.
 struct BinanceTrade: Decodable {
     let id: Int                  // Trade ID unique chez Binance
@@ -47,7 +47,7 @@ struct BinanceTrade: Decodable {
     let commission: String       // Frais en commissionAsset
     let commissionAsset: String  // Souvent "BNB" si BNB activé, sinon quote (USDT)
     let time: Int64              // Timestamp ms UTC
-    let isBuyer: Bool            // true → l'user a acheté (entrée en position)
+    let isBuyer: Bool            // true → l'utilisateur a acheté (entrée en position)
 
     var priceDouble: Double      { Double(price) ?? 0 }
     var qtyDouble: Double        { Double(qty) ?? 0 }
@@ -92,9 +92,9 @@ struct BinanceAPIClient {
         }
     }
 
-    /// AXE I Couche 1.5 — Historique des trades pour une paire donnée.
+    /// Historique des trades pour une paire donnée.
     /// `symbol` obligatoire (ex: "BTCUSDT"). Cap par défaut 500 (max Binance = 1000).
-    /// Retourne array vide si la paire n'existe pas / l'user n'a jamais tradé dessus.
+    /// Retourne array vide si la paire n'existe pas / l'utilisateur n'a jamais tradé dessus.
     ///
     /// Coût rate limit : 10 weight par requête. Avec quota 1200/min → ~120 paires/min max.
     func fetchMyTrades(symbol: String, limit: Int = 500, apiKey: String, apiSecret: String) async throws -> [BinanceTrade] {

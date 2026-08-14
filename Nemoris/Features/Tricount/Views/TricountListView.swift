@@ -59,11 +59,12 @@ struct TricountListView: View {
                             .listRowBackground(AppTheme.Colors.surface)
                     }
                 }
+                .scrollContentBackground(.hidden)
             } else if groups.isEmpty {
-                ContentUnavailableView(
-                    "Aucun Tricount",
-                    systemImage: "person.2",
-                    description: Text("Appuyez sur + pour charger un Tricount")
+                EmptyStateView(
+                    icon: "person.2",
+                    title: "Aucun Tricount",
+                    message: "Appuyez sur + pour charger un Tricount"
                 )
             } else {
                 List {
@@ -80,10 +81,25 @@ struct TricountListView: View {
                             leadingFullSwipe: false,
                             trailingFullSwipe: false
                         )
+                        .macGroupedRow(first: group.id == groups.first?.id, last: group.id == groups.last?.id)
                     }
                 }
+                #if os(macOS)
+                // Même politique que Transactions/Patrimoine : .plain = base neutre
+                // pour les cartes custom dessinées par macGroupedRow. iOS garde son
+                // insetGrouped natif.
+                .listStyle(.plain)
+                // Décolle la 1ère carte du délimiteur natif macOS (barre d'outils
+                // ↔ contenu scrollé) — même correctif que TransactionsView.
+                .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+                #endif
+                .scrollContentBackground(.hidden)
             }
         }
+        // Fond de l'app posé explicitement — sans lui la colonne « content » de
+        // la NavigationSplitView macOS montre son matériau vibrant par défaut
+        // au lieu du fond neutre AppTheme ().
+        .background(AppTheme.Colors.background.ignoresSafeArea())
         .navigationTitle("Tricounts")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

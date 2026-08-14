@@ -25,14 +25,7 @@ struct ImportEntryView: View {
     @Environment(\.dismiss) private var navDismiss
     @Environment(\.paneDismiss) private var paneDismiss
     @Environment(AppState.self) private var appState
-    @Environment(PurchaseManager.self) private var store
     @Environment(\.paneHostContext) private var paneHostContext
-
-    /// ⚠️ L'entonnoir étant UNIFIÉ, il est atteignable depuis une entrée
-    /// gratuite (Dashboard/Réglages → « Importation ») alors que la destination
-    /// « Investissements » appartient à un module payant. Sans ce garde, basculer
-    /// le sélecteur suffisait à contourner le paywall du module.
-    private var investmentsLocked: Bool { !store.isUnlocked(.investments) }
 
     /// Fermeture : EXACTEMENT un mécanisme, jamais les deux.
     ///
@@ -58,7 +51,7 @@ struct ImportEntryView: View {
         navDismiss()        // poussée dans le `NavigationStack` d'un parent
     }
 
-    /// AXE P — fichiers déjà déposés dans `PendingImportInbox` (raccourci Siri
+    /// fichiers déjà déposés dans `PendingImportInbox` (raccourci Siri
     /// ou share extension). Affichés comme "Fichier(s) reçu(s)" : l'utilisateur
     /// confirme le compte cible puis continue — pas de picker à rouvrir.
     var preloadedFileURLs: [URL] = []
@@ -81,7 +74,6 @@ struct ImportEntryView: View {
     @State private var selectedAccountId: Int? = nil
     @State private var selectedInvestmentAccountId: Int? = nil
     @State private var showFilePicker = false
-    @State private var showPaywall = false
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var parseError: String?
     /// Documents choisis mais PAS encore traités : la sélection s'accumule
@@ -203,20 +195,10 @@ struct ImportEntryView: View {
                 Section {
                     Picker("Destination", selection: Binding(
                         get: { destination ?? initialDestination },
-                        set: { newValue in
-                            // Module verrouillé : on présente le paywall et on
-                            // NE bascule PAS la destination.
-                            if newValue == .investments, investmentsLocked {
-                                showPaywall = true
-                                return
-                            }
-                            destination = newValue
-                        }
+                        set: { newValue in destination = newValue }
                     )) {
                         ForEach(ImportDestination.allCases) { dest in
-                            Label(dest.displayName,
-                                  systemImage: dest == .investments && investmentsLocked
-                                               ? "lock.fill" : dest.icon)
+                            Label(dest.displayName, systemImage: dest.icon)
                                 .tag(dest)
                         }
                     }
@@ -224,11 +206,7 @@ struct ImportEntryView: View {
                 } header: {
                     Text("Destination")
                 } footer: {
-                    if activeDestination == .transactions && investmentsLocked {
-                        Text("\(activeDestination.hint)\n\nL'import vers les investissements fait partie de Nemoris Pro.")
-                    } else {
-                        Text(activeDestination.hint)
-                    }
+                    Text(activeDestination.hint)
                 }
 
                 Section("Compte cible") {
@@ -261,7 +239,7 @@ struct ImportEntryView: View {
 
                 Section("Fichiers") {
                     if !preloadedFileURLs.isEmpty {
-                        // AXE P — fichiers déjà reçus (partage / raccourci) :
+                        // fichiers déjà reçus (partage / raccourci) :
                         // confirmation du compte puis continuation directe.
                         HStack(spacing: 10) {
                             Image(systemName: "tray.and.arrow.down.fill")
@@ -416,9 +394,6 @@ struct ImportEntryView: View {
                 guard !items.isEmpty else { return }
                 loadPhotos(items)
             }
-            .adaptivePane(isPresented: $showPaywall) {
-                PaywallView().environment(store)
-            }
             // iOS uniquement : sur macOS le mapping remplace le contenu sur
             // place (cf. `stepContent`), sans jamais empiler.
             #if !os(macOS)
@@ -492,7 +467,7 @@ struct ImportEntryView: View {
         }
     }
 
-    /// `sharedNaming` (AXE P) : les fichiers de l'inbox ont des noms UUID
+    /// `sharedNaming` : les fichiers de l'inbox ont des noms UUID
     /// opaques — on leur substitue un nom lisible pour l'affichage et pour le
     /// `source_file` de la session.
     private func handleFileResult(_ result: Result<[URL], Error>, sharedNaming: Bool = false) {
@@ -538,13 +513,6 @@ struct ImportEntryView: View {
     /// Lance le traitement de la sélection accumulée.
     private func startImport() {
         parseError = nil
-        // Second verrou : le sélecteur empêche déjà de choisir une destination
-        // verrouillée, celui-ci couvre une destination pré-remplie par le point
-        // d'entrée alors que l'abonnement a expiré entre-temps.
-        guard !(activeDestination == .investments && investmentsLocked) else {
-            showPaywall = true
-            return
-        }
         let files = stagedFiles          // capturés AVANT la remise à zéro
         guard !files.isEmpty else { return }
         resetPipeline()

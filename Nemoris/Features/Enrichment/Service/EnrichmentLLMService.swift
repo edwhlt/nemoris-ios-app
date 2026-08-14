@@ -4,7 +4,7 @@ import CoreGraphics
 import FoundationModels
 #endif
 
-/// AXE B — Wrapper Apple Foundation Models (`LanguageModelSession`) pour l'enrichissement
+/// Wrapper Apple Foundation Models (`LanguageModelSession`) pour l'enrichissement
 /// de libellés bancaires. 100% on-device, gratuit, pas de clé API. iOS 26.0+.
 ///
 /// Si le framework n'est pas disponible (iOS < 26.0) ou si le modèle n'est pas dispo

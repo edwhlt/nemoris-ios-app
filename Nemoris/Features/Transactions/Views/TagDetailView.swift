@@ -26,7 +26,7 @@ struct TagDetailView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Total").font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
-                        Text(grandTotal.formatted(.currency(code: "EUR")))
+                        Text(grandTotal, format: .currency(code: "EUR"))
                             .font(.title3).fontWeight(.bold)
                             .foregroundStyle(grandTotal < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                     }
@@ -35,7 +35,7 @@ struct TagDetailView: View {
                         VStack(alignment: .trailing, spacing: 2) {
                             Text("\(transactions.count) transaction(s)")
                                 .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
-                            Text(txTotal.formatted(.currency(code: "EUR")))
+                            Text(txTotal, format: .currency(code: "EUR"))
                                 .font(.caption).foregroundStyle(txTotal < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                         }
                     }
@@ -44,7 +44,7 @@ struct TagDetailView: View {
                         VStack(alignment: .trailing, spacing: 2) {
                             Text("\(tricountEntries.count) Tricount\(hasConvertedEntries ? " ~EUR" : "")\(hasUnconvertedEntries ? " ⚠" : "")")
                                 .font(.caption2).foregroundStyle(hasUnconvertedEntries ? AppTheme.Colors.warning : AppTheme.Colors.textSecondary)
-                            Text((hasUnconvertedEntries ? "≈ " : "") + tcTotal.formatted(.currency(code: "EUR")))
+                            (Text(hasUnconvertedEntries ? "≈ " : "") + Text(tcTotal, format: .currency(code: "EUR")))
                                 .font(.caption).foregroundStyle(tcTotal < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                         }
                     }
@@ -67,12 +67,12 @@ struct TagDetailView: View {
                                             .background(AppTheme.Colors.accent.opacity(0.12), in: Capsule())
                                             .foregroundStyle(AppTheme.Colors.accent)
                                     }
-                                    Text(tx.date.formatted(date: .abbreviated, time: .omitted))
+                                    Text(tx.date, format: Date.FormatStyle(date: .abbreviated, time: .omitted))
                                         .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                                 }
                             }
                             Spacer()
-                            Text(tx.amount.formatted(.currency(code: "EUR")))
+                            Text(tx.amount, format: .currency(code: "EUR"))
                                 .font(.subheadline).fontWeight(.semibold)
                                 .foregroundStyle(tx.amount < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                         }
@@ -94,7 +94,7 @@ struct TagDetailView: View {
                                         .padding(.horizontal, 6).padding(.vertical, 2)
                                         .background(tag.displayColor.opacity(0.12), in: Capsule())
                                         .foregroundStyle(tag.displayColor)
-                                    Text(entry.date.formatted(date: .abbreviated, time: .omitted))
+                                    Text(entry.date, format: Date.FormatStyle(date: .abbreviated, time: .omitted))
                                         .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                                 }
                             }
@@ -103,20 +103,20 @@ struct TagDetailView: View {
                                 if entry.needsConversion {
                                     // Pas de taux disponible : afficher en devise originale avec indicateur
                                     let rawSigned = entry.isExpense ? -entry.myShare : entry.myShare
-                                    Text(rawSigned.formatted(.currency(code: entry.currency)))
+                                    Text(rawSigned, format: .currency(code: entry.currency))
                                         .font(.subheadline).fontWeight(.semibold)
                                         .foregroundStyle(AppTheme.Colors.warning)
                                     Text("non converti")
                                         .font(.caption2).foregroundStyle(AppTheme.Colors.warning)
                                 } else {
                                     // Montant en EUR (signé : négatif si dépense, positif si revenu)
-                                    Text(entry.signedAmount.formatted(.currency(code: "EUR")))
+                                    Text(entry.signedAmount, format: .currency(code: "EUR"))
                                         .font(.subheadline).fontWeight(.semibold)
                                         .foregroundStyle(entry.isExpense ? AppTheme.Colors.danger : AppTheme.Colors.success)
                                     // Montant original si devise étrangère convertie
                                     if entry.isConverted {
                                         let rawSigned = entry.isExpense ? -entry.myShare : entry.myShare
-                                        Text(rawSigned.formatted(.currency(code: entry.currency)))
+                                        Text(rawSigned, format: .currency(code: entry.currency))
                                             .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
                                     }
                                 }

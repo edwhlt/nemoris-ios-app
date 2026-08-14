@@ -23,7 +23,7 @@ struct AISettingsView: View {
     @State private var choices: [AIFeature: AIBackendChoice] = [:]
     @State private var appleStatus: AppleIntelligenceStatus = .iosTooOld
 
-    // Serveur local (AXE T)
+    // Serveur local
     @State private var localBaseURL = ""
     @State private var localModel = ""
     @State private var localAPIKey = ""
@@ -36,12 +36,76 @@ struct AISettingsView: View {
     @State private var testError: String?
     @State private var isTesting = false
 
+    /// `nil` sur iOS (le `NavigationLink` qui pousse cet écran fournit déjà
+    /// son bouton retour natif). Sur macOS, fourni par l'appelant
+    /// (`SettingsView.settingsSectionPage`) — cet écran REMPLACE le contenu
+    /// du parent (pas un push), donc `dismiss()` seul n'a rien à fermer.
+    /// Même doctrine que `ModulesSettingsView.onBack` : superposer ICI un
+    /// second bouton retour générique en plus de celui-ci fusionnait les deux
+    /// `.toolbar` en deux chevrons empilés.
+    var onBack: (() -> Void)? = nil
+
+    /// Écran « Sources avancées » ouvert par-dessus la liste par fonctionnalité.
+    ///
+    /// ⚠️ Navigation par ÉTAT, pas `NavigationLink` : sur macOS, `AISettingsView`
+    /// est déjà atteinte par REMPLACEMENT de contenu depuis `SettingsView`
+    /// (`pushedSection`), sans `NavigationStack` à cet endroit — un
+    /// `NavigationLink` posé ici n'aurait aucune pile où s'empiler et resterait
+    /// inerte au tap. Même mécanisme sur iOS plutôt que deux chemins à faire
+    /// diverger ; le retour est un bouton manuel, pas un swipe-back.
+    @State private var showAdvanced = false
+
     var body: some View {
+        Group {
+            if showAdvanced {
+                advancedBody
+            } else {
+                mainBody
+            }
+        }
+        .onAppear(perform: load)
+    }
+
+    /// Écran principal : les cinq réglages par fonctionnalité seulement — la
+    /// configuration des sources qu'elles partagent (Apple Intelligence,
+    /// serveur local, clés cloud) vit derrière « Sources avancées », pour ne
+    /// pas noyer le choix simple (Automatique/Désactivée) sous des champs que
+    /// la plupart des utilisateurs n'ouvriront jamais.
+    private var mainBody: some View {
         // Form (pas List) : contenu statique de type réglages → rendu identique
         // sur iOS et boxes arrondies natives sur macOS via nemorisFormStyle().
         // Pas de ZStack+Color (hauteur infinie sur macOS) : fond via .background.
         Form {
             featuresSection
+            advancedLinkSection
+        }
+        .scrollContentBackground(.hidden)
+        .nemorisFormStyle()
+        .background(AppTheme.Colors.background.ignoresSafeArea())
+        .tint(AppTheme.Colors.accent)
+        .navigationTitle("Intelligence artificielle")
+        .navigationBarTitleDisplayMode(.inline)
+        #if os(macOS)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    onBack?()
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .help("Réglages")
+                .accessibilityLabel("Réglages")
+            }
+        }
+        #endif
+    }
+
+    /// Statut Apple Intelligence, configuration du serveur local, clés des
+    /// fournisseurs cloud, test de connexion — tout ce qui se configure UNE
+    /// fois et sert à plusieurs fonctionnalités, regroupé pour ne pas répéter
+    /// ces champs cinq fois ni les afficher à plat sur l'écran principal.
+    private var advancedBody: some View {
+        Form {
             appleSection
             localServerSection
             ForEach(AICloudProvider.allCases, id: \.self) { provider in
@@ -53,9 +117,41 @@ struct AISettingsView: View {
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
         .tint(AppTheme.Colors.accent)
-        .navigationTitle("Intelligence artificielle")
+        .navigationTitle("Sources avancées")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: load)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    showAdvanced = false
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .help("Intelligence artificielle")
+                .accessibilityLabel("Intelligence artificielle")
+            }
+        }
+    }
+
+    /// Ligne d'accès à « Sources avancées », même style que les liens de
+    /// `SettingsView.settingsLink`.
+    private var advancedLinkSection: some View {
+        Section {
+            Button {
+                showAdvanced = true
+            } label: {
+                HStack {
+                    Label("Sources avancées", systemImage: "gearshape.2")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } footer: {
+            Text("Statut d'Apple Intelligence, adresse du serveur local, clés API Claude et OpenAI, test de connexion.")
+        }
     }
 
     // MARK: - Fonctionnalités
@@ -99,6 +195,13 @@ struct AISettingsView: View {
                         .font(.caption2)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+
+                    if showsConsumptionHint(for: feature) {
+                        Text(LocalizedStringKey("Consommation estimée : \(feature.consumptionHint)"))
+                            .font(.caption2)
+                            .foregroundStyle(AppTheme.Colors.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .padding(.vertical, 2)
             }
@@ -115,7 +218,11 @@ struct AISettingsView: View {
     private func statusLine(for feature: AIFeature) -> String {
         if let reason = AIEnrichmentBackend.unavailabilityReason(for: feature) { return reason }
         var line = effectiveLabel(for: feature)
-        if (choices[feature] ?? .automatic).leavesDevice {
+        // ⚠️ Sur le backend RÉSOLU, pas le choix brut : « Automatique » qui
+        // retombe sur le cloud fait sortir les données tout autant qu'un choix
+        // `.cloud` explicite — `(choices[feature] ?? .automatic).leavesDevice`
+        // valait toujours `false` pour `.automatic` et ratait ce cas.
+        if AIEnrichmentBackend.resolved(for: feature)?.leavesDevice == true {
             line += " · ⚠️ les données quittent l'appareil"
         }
         if feature.benefitsFromImage, !AIEnrichmentBackend.supportsImageInput(for: feature) {
@@ -124,6 +231,16 @@ struct AISettingsView: View {
             line += " · captures océrisées (pas de lecture d'image)"
         }
         return line
+    }
+
+    /// Vrai quand le backend résolu n'est pas 100 % sur l'appareil — c'est là
+    /// que la consommation (réseau, calcul, facture API) devient pertinente à
+    /// signaler. Apple Intelligence et « aucune IA » n'affichent rien.
+    private func showsConsumptionHint(for feature: AIFeature) -> Bool {
+        switch AIEnrichmentBackend.resolved(for: feature) {
+        case .localServer, .cloud: return true
+        default: return false
+        }
     }
 
     /// Ce qui sera RÉELLEMENT utilisé, pas seulement ce qui est demandé.

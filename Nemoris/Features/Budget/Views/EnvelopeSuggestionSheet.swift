@@ -3,11 +3,11 @@ import SwiftUI
 // MARK: - EnvelopeSuggestionSheet
 //
 // Sheet déclenchée depuis BudgetView → "Suggérer des enveloppes". Présente
-// les suggestions calculées par `EnvelopeSuggestionService`, l'user toggle
+// les suggestions calculées par `EnvelopeSuggestionService`, l'utilisateur toggle
 // celles qu'il veut créer, ajuste le montant inline si besoin, puis valide.
 //
 // **UX cible** : que la création de 4-5 enveloppes d'un coup prenne 30 s
-// max — sinon l'user va à la pêche aux montants à la main et abandonne.
+// max — sinon l'utilisateur va à la pêche aux montants à la main et abandonne.
 
 struct EnvelopeSuggestionSheet: View {
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
@@ -111,7 +111,7 @@ struct EnvelopeSuggestionSheet: View {
                     Text(sug.categoryName)
                         .font(AppTheme.Typography.titleSmall)
                         .foregroundStyle(AppTheme.Colors.textPrimary)
-                    Text("\(sug.transactionCount) tx · moyenne \(sug.averageMonthly.formatted(.currency(code: "EUR").presentation(.narrow)))/mois")
+                    (Text("\(sug.transactionCount) tx · moyenne ") + Text(sug.averageMonthly, format: .currency(code: "EUR").presentation(.narrow)) + Text("/mois"))
                         .font(AppTheme.Typography.bodySmall)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
@@ -188,7 +188,7 @@ struct EnvelopeSuggestionSheet: View {
             )
         }.value
         suggestions = result
-        // Pré-sélectionne les 5 plus impactantes — friction minimale pour l'user
+        // Pré-sélectionne les 5 plus impactantes — friction minimale pour l'utilisateur
         // qui n'a qu'à valider.
         selected = Set(result.prefix(5).map(\.categoryId))
         isLoading = false

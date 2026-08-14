@@ -19,6 +19,10 @@ enum AppConstants {
         static let monthlyID  = "fr.hedwin.nemoris.subscription.monthly"
         static let yearlyID   = "fr.hedwin.nemoris.subscription.yearly"
         static let lifetimeID = "fr.hedwin.nemoris.lifetime"
+
+        /// Page "Abonnements" des Réglages Apple — seul endroit pour résilier ou
+        /// changer de moyen de paiement (StoreKit ne l'expose pas en interne).
+        static let manageSubscriptionsURL = URL(string: "itms-apps://apps.apple.com/account/subscriptions")!
     }
 
     enum Legal {

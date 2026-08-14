@@ -13,6 +13,7 @@ import SwiftUI
 
 struct PatrimoineView: View {
     @Environment(AppState.self) private var appState
+    @Environment(PurchaseManager.self) private var store
     @State private var vm = PatrimoineViewModel()
 
     // Sheets — actifs
@@ -108,7 +109,14 @@ struct PatrimoineView: View {
                     immobilierListSection
                     pretsListSection
                 }
+                #if os(macOS)
+                // macOS : .plain = base neutre pour les cartes custom dessinées par
+                // macGroupedRow (coins arrondis first/last, inset, séparateurs
+                // internes). iOS garde son insetGrouped natif — macGroupedRow n'y
+                // pose que le listRowBackground (cf. TransactionsView, même pattern).
                 .listStyle(.plain)
+                .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+                #endif
                 .scrollContentBackground(.hidden)
                 .background(AppTheme.Colors.background)
             }
@@ -371,6 +379,9 @@ struct PatrimoineView: View {
                         Text("Projection à 5 ans")
                             .font(AppTheme.Typography.labelLarge)
                         Spacer()
+                        if !store.isUnlocked(.patrimoineProjection) {
+                            ProBadge()
+                        }
                         Image(systemName: "chevron.right")
                             .font(.system(size: 11, weight: .semibold))
                     }
@@ -470,7 +481,7 @@ struct PatrimoineView: View {
     /// Bannière warning au sommet de la List quand au moins 1 asset lié a perdu son
     /// compte source (le compte a été supprimé). L'asset reste affiché avec sa
     /// `lastKnownValue` mais ne se met plus à jour. Le tap ouvre le premier asset
-    /// concerné pour que l'user puisse relier ou repasser en manuel.
+    /// concerné pour que l'utilisateur puisse relier ou repasser en manuel.
     @ViewBuilder private var brokenLinksBanner: some View {
         let count = vm.brokenLinkAssetIds.count
         let firstBroken = vm.assets.first(where: { vm.brokenLinkAssetIds.contains($0.id) })
@@ -538,7 +549,7 @@ struct PatrimoineView: View {
 
     /// Construit les slices pour le donut. On regroupe Mobilier (tous les assets,
     /// quelle que soit leur kind) et Immobilier en 2 grosses catégories pour ne
-    /// pas saturer le donut. Plus tard on pourra splitter par AssetKind si l'user
+    /// pas saturer le donut. Plus tard on pourra splitter par AssetKind si l'utilisateur
     /// le souhaite (toggle dans la card).
     private var allocationSlices: [AllocationSlice] {
         var slices: [AllocationSlice] = []
@@ -559,7 +570,7 @@ struct PatrimoineView: View {
                 Circle()
                     .fill(AppTheme.Colors.accent.opacity(0.12))
                     .frame(width: 88, height: 88)
-                Image(systemName: "house.lodge.fill")
+                Image(systemName: "house.fill")
                     .font(.system(size: 36, weight: .light))
                     .foregroundStyle(AppTheme.Colors.accent)
             }
@@ -605,17 +616,6 @@ struct PatrimoineView: View {
         .padding(.top, AppTheme.Spacing.xxxl)
     }
 
-    // MARK: - List row defaults (helpers)
-
-    /// Insets standard pour les rows de la List Patrimoine — donne la "respiration"
-    /// éditoriale entre rows (4 verticaux + alignement horizontal sur Spacing.lg).
-    private var plainRowInsets: EdgeInsets {
-        EdgeInsets(top: 4,
-                   leading: AppTheme.Spacing.lg,
-                   bottom: 4,
-                   trailing: AppTheme.Spacing.lg)
-    }
-
     /// Header de section uniformisé : eyebrow uppercased + total en `moneyMedium`
     /// (couleur paramétrable pour différencier actifs et passifs) + un complément
     /// optionnel à droite (compte d'items, coût mensuel, gain agrégé).
@@ -625,7 +625,7 @@ struct PatrimoineView: View {
     private func sectionHeader(eyebrow: String,
                                total: Double,
                                accent: Color,
-                               trailingNote: String? = nil,
+                               trailingNote: Text? = nil,
                                gainChip: Double? = nil,
                                hideTotal: Bool = false) -> some View {
         HStack(alignment: .firstTextBaseline) {
@@ -652,7 +652,7 @@ struct PatrimoineView: View {
                 }
                 .foregroundStyle(gain >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
             } else if let note = trailingNote {
-                Text(note)
+                note
                     .font(AppTheme.Typography.labelMedium)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             }
@@ -664,7 +664,7 @@ struct PatrimoineView: View {
     // MARK: - Section Objectifs (Goals)
 
     /// Section "Objectifs" en tête des collections Patrimoine. Visible uniquement
-    /// si l'user a au moins 1 goal — sinon on n'affiche rien (header inclus) pour
+    /// si l'utilisateur a au moins 1 goal — sinon on n'affiche rien (header inclus) pour
     /// rester cohérent avec le pattern des autres sections.
     ///
     /// Le toolbar Menu `+` reste l'entry point unique pour créer.
@@ -681,24 +681,23 @@ struct PatrimoineView: View {
                         // des actifs ou des prêts. iOS scope par section, d'où un
                         // bug invisible sur mobile.
                         .id("goal-\(goal.id)")
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(plainRowInsets)
                         .rowActions(
                             leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingGoal = goal }],
                             trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { goalToDelete = goal }],
                             leadingFullSwipe: false,
                             trailingFullSwipe: false
                         )
+                        .macGroupedRow(first: goal.id == vm.goals.first?.id, last: goal.id == vm.goals.last?.id)
                 }
             } header: {
                 sectionHeader(
                     eyebrow: "OBJECTIFS",
                     total: 0,                                  // Pas de total monétaire pertinent ici
                     accent: AppTheme.Colors.textPrimary,
-                    trailingNote: "\(vm.goals.count) objectif\(vm.goals.count > 1 ? "s" : "")",
+                    trailingNote: Text("\(vm.goals.count) objectif\(vm.goals.count > 1 ? "s" : "")"),
                     hideTotal: true                            // On masque le 0 € — irrelevant
                 )
+                .macGroupedSectionHeader()
             }
         }
     }
@@ -792,15 +791,13 @@ struct PatrimoineView: View {
                     }
                 }
             }
-            .padding(AppTheme.Spacing.md)
-            .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md))
         }
         .buttonStyle(.plain)
     }
 
     /// Sous-titre row goal : kind label + statut deadline + hint contextuel.
     /// Pour debt_payoff à 0% on ajoute une note explicative ("Baseline capturée…")
-    /// pour éviter que l'user pense que c'est cassé.
+    /// pour éviter que l'utilisateur pense que c'est cassé.
     private func goalSubtitle(goal: Goal, progress: GoalProgress?) -> String {
         var parts: [String] = [goal.kind.label]
         if let progress, progress.isCompleted {
@@ -838,9 +835,6 @@ struct PatrimoineView: View {
                         // Identité préfixée — cf. `goalsListSection` (collision d'id
                         // entre collections + recyclage NSTableView sur macOS).
                         .id("asset-\(asset.id)")
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(plainRowInsets)
                         // Actions adaptatives : swipe iOS / clic droit macOS (cf. RowActions).
                         .rowActions(
                             leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingAsset = asset }],
@@ -848,14 +842,16 @@ struct PatrimoineView: View {
                             leadingFullSwipe: false,
                             trailingFullSwipe: false
                         )
+                        .macGroupedRow(first: asset.id == vm.assets.first?.id, last: asset.id == vm.assets.last?.id)
                 }
             } header: {
                 sectionHeader(
                     eyebrow: "MOBILIER & LIQUIDITÉS",
                     total: vm.totalAssetsValue,
                     accent: AppTheme.Colors.textPrimary,
-                    trailingNote: "\(vm.assets.count) actif\(vm.assets.count > 1 ? "s" : "")"
+                    trailingNote: Text("\(vm.assets.count) actif\(vm.assets.count > 1 ? "s" : "")")
                 )
+                .macGroupedSectionHeader()
             }
         }
     }
@@ -869,15 +865,13 @@ struct PatrimoineView: View {
                     realEstateRow(item)
                         // Identité préfixée — cf. `goalsListSection`.
                         .id("realestate-\(item.id)")
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(plainRowInsets)
                         .rowActions(
                             leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingRealEstate = item }],
                             trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { realEstateToDelete = item }],
                             leadingFullSwipe: false,
                             trailingFullSwipe: false
                         )
+                        .macGroupedRow(first: item.id == vm.realEstates.first?.id, last: item.id == vm.realEstates.last?.id)
                 }
             } header: {
                 sectionHeader(
@@ -886,6 +880,7 @@ struct PatrimoineView: View {
                     accent: AppTheme.Colors.textPrimary,
                     gainChip: vm.totalRealEstateCapitalGain == 0 ? nil : vm.totalRealEstateCapitalGain
                 )
+                .macGroupedSectionHeader()
             }
         }
     }
@@ -909,7 +904,7 @@ struct PatrimoineView: View {
                         .font(AppTheme.Typography.titleSmall)
                         .foregroundStyle(AppTheme.Colors.textPrimary)
                         .lineLimit(1)
-                    Text(realEstateSubtitle(item))
+                    realEstateSubtitle(item)
                         .font(AppTheme.Typography.bodySmall)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .lineLimit(1)
@@ -922,7 +917,7 @@ struct PatrimoineView: View {
                         .font(AppTheme.Typography.moneySmall)
                         .foregroundStyle(AppTheme.Colors.textPrimary)
 
-                    // Mini chip plus-value (+X € / +Y%) si l'user a un prix d'achat
+                    // Mini chip plus-value (+X € / +Y%) si l'utilisateur a un prix d'achat
                     // renseigné — sinon on cache (pas pertinent).
                     if item.purchasePrice > 0 {
                         HStack(spacing: 2) {
@@ -939,8 +934,6 @@ struct PatrimoineView: View {
                     }
                 }
             }
-            .padding(AppTheme.Spacing.md)
-            .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md))
         }
         .buttonStyle(.plain)
         // contextMenu retiré au profit des swipeActions natifs (configurés côté
@@ -948,16 +941,22 @@ struct PatrimoineView: View {
     }
 
     /// Sous-titre pédagogique : "Acheté 240 000 € en oct. 2018" + adresse si renseignée.
-    private func realEstateSubtitle(_ item: PatrimoineRealEstate) -> String {
-        let priceText = item.purchasePrice > 0
-            ? item.purchasePrice.formatted(.currency(code: "EUR").presentation(.narrow))
-            : "—"
-        let dateText = item.purchaseDate.formatted(.dateTime.month(.abbreviated).year())
-        let baseLine = "Acheté \(priceText) en \(dateText)"
+    ///
+    /// Retourne un `Text` (pas un `String`) : `.formatted()` appelé directement sur une
+    /// valeur en dehors d'un `Text(_:format:)` ignore le `\.locale` d'environnement forcé
+    /// par l'app et retombe sur la locale RÉELLE de l'appareil — d'où un mélange
+    /// "36 323,38 €" / "€1,041.69" à l'écran quand l'iPhone est en anglais (cf. CLAUDE.md
+    /// "Téléphone en anglais, app FR-first"). `Text(_:format:)` seul respecte l'environnement.
+    private func realEstateSubtitle(_ item: PatrimoineRealEstate) -> Text {
+        let price: Text = item.purchasePrice > 0
+            ? Text(item.purchasePrice, format: .currency(code: "EUR").presentation(.narrow))
+            : Text("—")
+        let date = Text(item.purchaseDate, format: .dateTime.month(.abbreviated).year())
+        let baseLine = Text("Acheté ") + price + Text(" en ") + date
         if let address = item.address, !address.isEmpty {
             // On garde la première ligne d'adresse pour éviter de polluer la row.
             let firstLine = address.split(separator: "\n").first.map(String.init) ?? address
-            return "\(baseLine) · \(firstLine)"
+            return baseLine + Text(" · \(firstLine)")
         }
         return baseLine
     }
@@ -971,15 +970,13 @@ struct PatrimoineView: View {
                     loanRow(loan)
                         // Identité préfixée — cf. `goalsListSection`.
                         .id("loan-\(loan.id)")
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(plainRowInsets)
                         .rowActions(
                             leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingLoan = loan }],
                             trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { loanToDelete = loan }],
                             leadingFullSwipe: false,
                             trailingFullSwipe: false
                         )
+                        .macGroupedRow(first: loan.id == vm.loans.first?.id, last: loan.id == vm.loans.last?.id)
                 }
             } header: {
                 // Header dette : montant en danger (terracotta) + coût mensuel total
@@ -989,9 +986,10 @@ struct PatrimoineView: View {
                     total: vm.totalLoansRemainingCapital,
                     accent: AppTheme.Colors.danger,
                     trailingNote: vm.totalMonthlyLoanCost > 0
-                        ? "\(vm.totalMonthlyLoanCost.formatted(.currency(code: "EUR").presentation(.narrow))) / mois"
-                        : "\(vm.loans.count) prêt\(vm.loans.count > 1 ? "s" : "")"
+                        ? Text(vm.totalMonthlyLoanCost, format: .currency(code: "EUR").presentation(.narrow)) + Text(" / mois")
+                        : Text("\(vm.loans.count) prêt\(vm.loans.count > 1 ? "s" : "")")
                 )
+                .macGroupedSectionHeader()
             }
         }
     }
@@ -1037,11 +1035,11 @@ struct PatrimoineView: View {
                         if let state, !state.isPending && !state.isCompleted {
                             let totalMonthly = state.monthlyPayment + loan.insuranceMonthly
                             if totalMonthly > 0 {
-                                Text("\(totalMonthly.formatted(.currency(code: "EUR").presentation(.narrow))) / mois")
+                                (Text(totalMonthly, format: .currency(code: "EUR").presentation(.narrow)) + Text(" / mois"))
                                     .font(AppTheme.Typography.labelMedium)
                                     .foregroundStyle(AppTheme.Colors.textSecondary)
                                 if loan.insuranceMonthly > 0 {
-                                    Text("dont \(loan.insuranceMonthly.formatted(.currency(code: "EUR").presentation(.narrow))) d'assurance")
+                                    (Text("dont ") + Text(loan.insuranceMonthly, format: .currency(code: "EUR").presentation(.narrow)) + Text(" d'assurance"))
                                         .font(.system(size: 10, weight: .medium))
                                         .foregroundStyle(AppTheme.Colors.warning)
                                 }
@@ -1079,8 +1077,6 @@ struct PatrimoineView: View {
                     }
                 }
             }
-            .padding(AppTheme.Spacing.md)
-            .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md))
         }
         .buttonStyle(.plain)
         // contextMenu retiré au profit des swipeActions natifs (configurés côté
@@ -1148,8 +1144,6 @@ struct PatrimoineView: View {
                     .font(AppTheme.Typography.moneySmall)
                     .foregroundStyle(resolved < 0 ? AppTheme.Colors.danger : AppTheme.Colors.textPrimary)
             }
-            .padding(AppTheme.Spacing.md)
-            .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md))
         }
         .buttonStyle(.plain)
         // contextMenu retiré au profit des swipeActions natifs (configurés côté
@@ -1157,7 +1151,7 @@ struct PatrimoineView: View {
     }
 
     /// Petit pictogramme à droite du nom qui matérialise instantanément la source
-    /// de la valeur (lien actif, manuel, lien rompu). Évite à l'user de lire le
+    /// de la valeur (lien actif, manuel, lien rompu). Évite à l'utilisateur de lire le
     /// sous-titre pour comprendre l'état.
     @ViewBuilder
     private func sourceBadge(_ source: AssetValueSource) -> some View {
@@ -1237,9 +1231,9 @@ private struct AssetDetailPane: View {
 
             Section("Détails") {
                 LabeledContent("Famille", value: asset.assetKind.label)
-                LabeledContent("Valeur", value: resolvedValue.formatted(.currency(code: "EUR")))
+                LabeledContent("Valeur") { Text(resolvedValue, format: .currency(code: "EUR")) }
                 LabeledContent("Source", value: asset.isLinked ? "Compte lié (auto)" : "Saisie manuelle")
-                LabeledContent("Créé le", value: asset.createdAt.formatted(date: .abbreviated, time: .omitted))
+                LabeledContent("Créé le") { Text(asset.createdAt, format: Date.FormatStyle(date: .abbreviated, time: .omitted)) }
             }
 
             if let notes = asset.notes, !notes.isEmpty {
@@ -1248,7 +1242,7 @@ private struct AssetDetailPane: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .nemorisFormStyle()
     }
 }
 
@@ -1283,18 +1277,18 @@ private struct RealEstateDetailPane: View {
             }
 
             Section("Valorisation") {
-                LabeledContent("Prix d'achat", value: item.purchasePrice.formatted(.currency(code: "EUR")))
-                LabeledContent("Valeur actuelle", value: item.currentValue.formatted(.currency(code: "EUR")))
+                LabeledContent("Prix d'achat") { Text(item.purchasePrice, format: .currency(code: "EUR")) }
+                LabeledContent("Valeur actuelle") { Text(item.currentValue, format: .currency(code: "EUR")) }
                 LabeledContent("Plus-value") {
-                    Text("\(item.capitalGain >= 0 ? "+" : "")\(item.capitalGain.formatted(.currency(code: "EUR"))) (\(String(format: "%.1f", item.capitalGainPercent)) %)")
+                    (Text(item.capitalGain >= 0 ? "+" : "") + Text(item.capitalGain, format: .currency(code: "EUR")) + Text(" (\(String(format: "%.1f", item.capitalGainPercent)) %)"))
                         .foregroundStyle(item.capitalGain >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
                 }
             }
 
             Section("Dates") {
-                LabeledContent("Achat", value: item.purchaseDate.formatted(date: .abbreviated, time: .omitted))
+                LabeledContent("Achat") { Text(item.purchaseDate, format: Date.FormatStyle(date: .abbreviated, time: .omitted)) }
                 if let estimated = item.estimatedAt {
-                    LabeledContent("Dernière estimation", value: estimated.formatted(date: .abbreviated, time: .omitted))
+                    LabeledContent("Dernière estimation") { Text(estimated, format: Date.FormatStyle(date: .abbreviated, time: .omitted)) }
                 }
             }
 
@@ -1304,7 +1298,7 @@ private struct RealEstateDetailPane: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .nemorisFormStyle()
     }
 }
 
@@ -1343,19 +1337,19 @@ private struct LoanDetailPane: View {
 
             Section("Conditions") {
                 LabeledContent("Type", value: loan.loanType.label)
-                LabeledContent("Capital emprunté", value: loan.principal.formatted(.currency(code: "EUR")))
+                LabeledContent("Capital emprunté") { Text(loan.principal, format: .currency(code: "EUR")) }
                 LabeledContent("Taux annuel", value: String(format: "%.2f %%", loan.annualRate * 100))
                 LabeledContent("Durée", value: "\(loan.durationMonths) mois")
                 if loan.deferralMonths > 0 {
                     LabeledContent("Différé", value: "\(loan.deferralMonths) mois")
                 }
                 if loan.insuranceMonthly > 0 {
-                    LabeledContent("Assurance", value: "\(loan.insuranceMonthly.formatted(.currency(code: "EUR"))) / mois")
+                    LabeledContent("Assurance") { Text(loan.insuranceMonthly, format: .currency(code: "EUR")) + Text(" / mois") }
                 }
             }
 
             Section("Détails") {
-                LabeledContent("Début", value: loan.startDate.formatted(date: .abbreviated, time: .omitted))
+                LabeledContent("Début") { Text(loan.startDate, format: Date.FormatStyle(date: .abbreviated, time: .omitted)) }
                 if let linkedRealEstateName {
                     LabeledContent("Bien financé", value: linkedRealEstateName)
                 }
@@ -1367,7 +1361,7 @@ private struct LoanDetailPane: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .nemorisFormStyle()
     }
 }
 
@@ -1400,14 +1394,14 @@ private struct GoalDetailPane: View {
 
             Section("Détails") {
                 LabeledContent("Type", value: goal.kind.label)
-                LabeledContent("Objectif", value: goal.targetAmount.formatted(.currency(code: "EUR")))
+                LabeledContent("Objectif") { Text(goal.targetAmount, format: .currency(code: "EUR")) }
                 if goal.kind == .custom {
-                    LabeledContent("Montant atteint", value: goal.customCurrentAmount.formatted(.currency(code: "EUR")))
+                    LabeledContent("Montant atteint") { Text(goal.customCurrentAmount, format: .currency(code: "EUR")) }
                 }
                 if let deadline = goal.deadlineDate {
-                    LabeledContent("Échéance", value: deadline.formatted(date: .abbreviated, time: .omitted))
+                    LabeledContent("Échéance") { Text(deadline, format: Date.FormatStyle(date: .abbreviated, time: .omitted)) }
                 }
-                LabeledContent("Créé le", value: goal.createdAt.formatted(date: .abbreviated, time: .omitted))
+                LabeledContent("Créé le") { Text(goal.createdAt, format: Date.FormatStyle(date: .abbreviated, time: .omitted)) }
             }
 
             if let notes = goal.notes, !notes.isEmpty {
@@ -1416,6 +1410,6 @@ private struct GoalDetailPane: View {
                 }
             }
         }
-        .formStyle(.grouped)
+        .nemorisFormStyle()
     }
 }

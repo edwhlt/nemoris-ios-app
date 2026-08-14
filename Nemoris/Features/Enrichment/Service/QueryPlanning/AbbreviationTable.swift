@@ -1,6 +1,6 @@
 import Foundation
 
-// AXE S — Abréviations et marqueurs des libellés bancaires.
+// Abréviations et marqueurs des libellés bancaires.
 // ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
 //
 // Ce savoir vivait jusqu'ici dans la chaîne de caractères `EnrichmentLLMService.instructions`

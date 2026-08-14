@@ -45,7 +45,7 @@ struct NemorisApp: App {
         Task { @MainActor in
             EngineBootstrap.shared.bootIfNeeded(withEmbeddings: true)
         }
-        // Boot du moteur de sync CloudKit (AXE L) — no-op si l'user n'a pas
+        // Boot du moteur de sync CloudKit — no-op si l'utilisateur n'a pas
         // activé la synchronisation iCloud dans les Settings (opt-in strict).
         Task {
             await CloudSyncEngine.shared.bootIfEnabled()
@@ -76,7 +76,7 @@ struct NemorisApp: App {
                 }
                     .onChange(of: scenePhase) { _, newPhase in
                         if newPhase == .background {
-                            // Sync CloudKit (AXE L) : pousse les écritures locales
+                            // Sync CloudKit : pousse les écritures locales
                             // accumulées pendant la session vers le moteur, qui les
                             // enverra en arrière-plan. No-op si sync désactivée.
                             Task { await CloudSyncEngine.shared.notifyLocalChanges() }
@@ -107,7 +107,7 @@ struct NemorisApp: App {
                             Task.detached(priority: .background) { @MainActor in
                                 BackupService.shared.runAutoBackupIfDue()
                             }
-                            // Relance le monitor de motion (no-op si l'user n'a
+                            // Relance le monitor de motion (no-op si l'utilisateur n'a
                             // pas activé `hideAmountsOnFaceDown`).
                             PrivacyMotionMonitor.shared.resume()
                             // Chantier A — auto-sync investissements (LiveSync
@@ -123,7 +123,7 @@ struct NemorisApp: App {
                                 appState.pendingInvestmentImportURLs = pendingInvest
                                 appState.navigateToTab(.investments)
                             }
-                            // AXE P — relevés déposés par le raccourci "Importer des
+                            // relevés déposés par le raccourci "Importer des
                             // transactions" ou la share extension Transactions :
                             // MainTabView présente ImportEntryView pré-rempli.
                             let pendingTx = PendingImportInbox.consumePendingTransactionImports()
@@ -140,9 +140,16 @@ struct NemorisApp: App {
                         PrivacyMotionMonitor.shared.attach(to: appState)
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .nemorisSyncDidApplyRemoteChanges)) { _ in
-                        // Sync CloudKit (AXE L) : des changements DISTANTS ont
+                        // Sync CloudKit : des changements DISTANTS ont
                         // été appliqués à la base → invalide tous les VMs.
                         appState.dataRefreshToken = UUID()
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .nemorisImportSessionsDidChange)) { _ in
+                        // Le coordinateur d'import a créé ou supprimé une
+                        // session en base → recharger le miroir en mémoire qui
+                        // pilote le bandeau, sans quoi il survit à la ligne
+                        // qu'il représente (bandeau fantôme après un abandon).
+                        appState.reloadActiveImportSession()
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .nemorisInvestmentsDidSync)) { _ in
                         // Chantier A : une passe de sync investissements (auto ou
@@ -161,7 +168,7 @@ struct NemorisApp: App {
             }
         }
         #if os(macOS)
-        // AXE N.1 — raccourcis desktop : ⌘1…⌘9 basculent sur les modules dans
+        // raccourcis desktop : ⌘1…⌘9 basculent sur les modules dans
         // l'ordre de la sidebar. Injectés via des boutons cachés dans une
         // CommandGroup pour piloter appState.selectedTab depuis le menu.
         .commands {

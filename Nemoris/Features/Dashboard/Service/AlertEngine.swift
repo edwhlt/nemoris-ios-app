@@ -18,7 +18,7 @@ import Foundation
 //
 // **Pas de persistance** : les alertes sont **recalculées à chaque load Dashboard**.
 // Pas de "j'ai déjà vu cette alerte" — c'est volontaire pour MVP : un goal en
-// retard reste en retard, l'user le voit jusqu'à action.
+// retard reste en retard, l'utilisateur le voit jusqu'à action.
 
 enum AlertSeverity: Int, Comparable {
     case info     = 0
@@ -104,7 +104,7 @@ enum AlertEngine {
             // au calculator). Pour éviter d'instancier un PatrimoineViewModel
             // juste pour ça, on simplifie : on alerte sur les goals dont la
             // deadline est passée. La fiche détaillée du goal montrera le ratio
-            // exact via le PatrimoineViewModel quand l'user clique.
+            // exact via le PatrimoineViewModel quand l'utilisateur clique.
             // Filtrage des goals "atteints" (custom seulement, calculable
             // localement sans snapshot) :
             if goal.kind == .custom && goal.customCurrentAmount >= goal.targetAmount {
@@ -140,7 +140,9 @@ enum AlertEngine {
                 id: "env_overspent_\(progress.envelope.id)",
                 severity: .critical,
                 title: "Budget dépassé : \(progress.envelope.name)",
-                message: "Dépassement de \(overshoot.formatted(.currency(code: "EUR").presentation(.narrow))) ce mois",
+                // Locale forcée fr_FR : AlertEngine est pur (doctrine du projet), pas d'accès
+                // à l'environnement SwiftUI — cf. commentaire équivalent dans InsightEngine.
+                message: "Dépassement de \(overshoot.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))) ce mois",
                 systemIcon: "chart.bar.fill",
                 route: .budget
             )

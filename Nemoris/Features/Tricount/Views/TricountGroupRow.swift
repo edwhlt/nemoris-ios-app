@@ -16,7 +16,7 @@ struct TricountGroupRow: View {
                 ProgressView().padding(.trailing, 4)
             } else {
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text(group.fetchedAt.formatted(date: .abbreviated, time: .omitted))
+                    Text(group.fetchedAt, format: Date.FormatStyle(date: .abbreviated, time: .omitted))
                         .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                     Text(group.currency).font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
                 }

@@ -24,7 +24,7 @@ extension String {
     }
 }
 
-/// AXE B — Résultat d'un enrichissement (Sirene + Apple Foundation Models + MapKit).
+/// Résultat d'un enrichissement (Sirene + Apple Foundation Models + MapKit).
 ///
 /// Un seul `MerchantEnrichment` représente la fusion (ou la sortie d'une source unique)
 /// des signaux collectés pour un libellé bancaire ou un merchant_id donné.
@@ -65,7 +65,7 @@ struct MerchantEnrichment: Codable, Hashable {
     /// Nil pour les sources non-LLM.
     var searchHint: String? = nil
 
-    // Champs additifs (AXE S). Tous `var x: T? = nil` → `decodeIfPresent` synthétisé,
+    // Champs additifs. Tous `var x: T? = nil` → `decodeIfPresent` synthétisé,
     // donc les fichiers de cache écrits par les versions précédentes se décodent inchangés.
     // Ne jamais transformer l'un d'eux en non-optionnel sans versionner le cache.
 

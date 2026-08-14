@@ -3,7 +3,8 @@ import Foundation
 // MARK: - SearchService
 //
 // Recherche cross-modules : transactions, payees, comptes, catégories, tags,
-// assets Patrimoine, prêts, biens immobiliers, goals.
+// assets Patrimoine, prêts, biens immobiliers, goals, comptes/positions
+// Investissements, enveloppes/récurrents Budget, groupes/entrées Tricount.
 //
 // **Stratégie** : on charge les collections en mémoire (les repos ont des fetch
 // rapides, < 50ms typique pour 5000 transactions) puis on filtre + score en Swift
@@ -17,11 +18,11 @@ import Foundation
 // Le score est ensuite agrégé par catégorie et la catégorie avec le meilleur
 // top-score est listée en premier.
 //
-// **Limit** : 8 résultats par catégorie pour éviter de saturer la UI. Si l'user
+// **Limit** : 8 résultats par catégorie pour éviter de saturer la UI. Si l'utilisateur
 // cherche un truc fréquent (ex : "loyer") il verra les 8 plus pertinents — les
 // autres sont accessibles via les filtres natifs de chaque module.
 
-enum SearchResult: Identifiable, Hashable {
+enum SearchResult: Identifiable {
     case transaction(FinanceTransaction)
     case payee(Tiers)
     case account(Account)
@@ -31,18 +32,30 @@ enum SearchResult: Identifiable, Hashable {
     case loan(PatrimoineLoan)
     case realEstate(PatrimoineRealEstate)
     case goal(Goal)
+    case investmentAccount(InvestmentAccount)
+    case investmentPosition(InvestmentPosition)
+    case budgetEnvelope(BudgetEnvelope)
+    case recurringPattern(RecurringPattern)
+    case tricountGroup(TricountGroup)
+    case tricountEntry(TricountEntry)
 
     var id: String {
         switch self {
-        case .transaction(let t): return "tx_\(t.id)"
-        case .payee(let p):       return "payee_\(p.id)"
-        case .account(let a):     return "account_\(a.id)"
-        case .category(let c):    return "category_\(c.id)"
-        case .tag(let t):         return "tag_\(t.id)"
-        case .asset(let a):       return "asset_\(a.id)"
-        case .loan(let l):        return "loan_\(l.id)"
-        case .realEstate(let r):  return "re_\(r.id)"
-        case .goal(let g):        return "goal_\(g.id)"
+        case .transaction(let t):        return "tx_\(t.id)"
+        case .payee(let p):              return "payee_\(p.id)"
+        case .account(let a):            return "account_\(a.id)"
+        case .category(let c):           return "category_\(c.id)"
+        case .tag(let t):                return "tag_\(t.id)"
+        case .asset(let a):              return "asset_\(a.id)"
+        case .loan(let l):               return "loan_\(l.id)"
+        case .realEstate(let r):         return "re_\(r.id)"
+        case .goal(let g):               return "goal_\(g.id)"
+        case .investmentAccount(let a):  return "invacc_\(a.id)"
+        case .investmentPosition(let p): return "invpos_\(p.id)"
+        case .budgetEnvelope(let e):     return "envelope_\(e.id)"
+        case .recurringPattern(let p):   return "recurring_\(p.id)"
+        case .tricountGroup(let g):      return "tcgroup_\(g.id)"
+        case .tricountEntry(let e):      return "tcentry_\(e.id)"
         }
     }
 
@@ -56,12 +69,26 @@ enum SearchResult: Identifiable, Hashable {
         case .tag:         return .tags
         case .asset, .loan, .realEstate: return .patrimoine
         case .goal:        return .goals
+        case .investmentAccount, .investmentPosition: return .investments
+        case .budgetEnvelope, .recurringPattern: return .budget
+        case .tricountGroup, .tricountEntry: return .tricount
         }
     }
 }
 
+// ⚠️ Conformance MANUELLE, pas synthétisée : `TricountEntry` (et les autres
+// payloads) n'ont pas tous besoin d'être `Hashable` eux-mêmes — l'identité
+// d'un résultat de recherche, c'est son `id` composite (préfixe + id local),
+// pas la valeur entière du modèle. Une synthèse automatique aurait forcé
+// TOUS les cas présents ou futurs à porter `Hashable`, un couplage inutile.
+extension SearchResult: Hashable {
+    static func == (lhs: SearchResult, rhs: SearchResult) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
 enum SearchCategory: String, CaseIterable, Identifiable {
     case transactions, payees, accounts, categories, tags, patrimoine, goals
+    case investments, budget, tricount
 
     var id: String { rawValue }
 
@@ -74,6 +101,9 @@ enum SearchCategory: String, CaseIterable, Identifiable {
         case .tags:         return "TAGS"
         case .patrimoine:   return "PATRIMOINE"
         case .goals:        return "OBJECTIFS"
+        case .investments:  return "INVESTISSEMENTS"
+        case .budget:       return "BUDGET"
+        case .tricount:     return "TRICOUNT"
         }
     }
 
@@ -86,6 +116,9 @@ enum SearchCategory: String, CaseIterable, Identifiable {
         case .tags:         return "number"
         case .patrimoine:   return "house.fill"
         case .goals:        return "target"
+        case .investments:  return "chart.line.uptrend.xyaxis"
+        case .budget:       return "chart.pie.fill"
+        case .tricount:     return "person.2.fill"
         }
     }
 }
@@ -102,6 +135,9 @@ struct SearchService: Sendable {
     private let txRepo: TransactionRepository
     private let patrimoineRepo: PatrimoineRepository
     private let goalRepo: GoalRepository
+    private let investmentRepo: InvestmentRepository
+    private let budgetRepo: BudgetRepository
+    private let tricountRepo: TricountRepository
 
     /// `shared` reste le point d'accès de l'application ; la valeur par défaut
     /// vise sa base. Les tests instancient sur une base temporaire.
@@ -109,6 +145,9 @@ struct SearchService: Sendable {
         txRepo = TransactionRepository(store: store)
         patrimoineRepo = PatrimoineRepository(store: store)
         goalRepo = GoalRepository(store: store)
+        investmentRepo = InvestmentRepository(store: store)
+        budgetRepo = BudgetRepository(store: store)
+        tricountRepo = TricountRepository(store: store)
     }
 
     /// Limite de résultats par catégorie. 8 est un bon compromis : assez pour ne
@@ -118,7 +157,18 @@ struct SearchService: Sendable {
     /// Lance la recherche et retourne les résultats groupés par catégorie + triés
     /// par score décroissant. Aucun side effect. Renvoie `[]` si query < 2 caractères
     /// (évite de tout matcher sur 1 lettre).
-    func search(_ rawQuery: String) -> [SearchResult] {
+    ///
+    /// ⚠️ Les 3 flags de module sont des `Bool` VALEUR (pas une lecture directe
+    /// d'`AppState`, `@MainActor` et non `Sendable`) — l'appelant les capture sur
+    /// le main thread et les passe ici, exécuté hors main (cf. doc de la struct).
+    /// Module désactivé ⇒ pas de requête pour ses tables : cohérent avec le fait
+    /// que l'app le désigne comme "je n'utilise pas cette fonctionnalité", et ça
+    /// évite de faire remonter un résultat vers un onglet que l'utilisateur a
+    /// délibérément masqué.
+    func search(_ rawQuery: String,
+                showInvestments: Bool = true,
+                showBudget: Bool = true,
+                showTricount: Bool = true) -> [SearchResult] {
         let q = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard q.count >= 2 else { return [] }
 
@@ -193,6 +243,55 @@ struct SearchService: Sendable {
         for goal in goalRepo.fetchGoals() {
             let score = scoreFor(field: goal.name, query: q)
             if score > 0 { scored.append((.goal(goal), score)) }
+        }
+
+        // Investissements — comptes + positions. Pas de fetch-all-positions :
+        // on boucle sur les comptes (typiquement < 20) comme le reste de l'app.
+        if showInvestments {
+            let accounts = investmentRepo.fetchAccounts()
+            for account in accounts {
+                let score = scoreFor(field: account.name, query: q)
+                if score > 0 { scored.append((.investmentAccount(account), score)) }
+            }
+            for account in accounts {
+                for position in investmentRepo.fetchPositions(accountId: account.id) {
+                    let score = max(
+                        scoreFor(field: position.assetName, query: q),
+                        scoreFor(field: position.ticker, query: q)
+                    )
+                    if score > 0 { scored.append((.investmentPosition(position), score)) }
+                }
+            }
+        }
+
+        // Budget — enveloppes + motifs récurrents.
+        if showBudget {
+            for envelope in budgetRepo.fetchEnvelopes() {
+                let score = scoreFor(field: envelope.name, query: q)
+                if score > 0 { scored.append((.budgetEnvelope(envelope), score)) }
+            }
+            for pattern in budgetRepo.fetchPatterns() {
+                let score = scoreFor(field: pattern.name, query: q)
+                if score > 0 { scored.append((.recurringPattern(pattern), score)) }
+            }
+        }
+
+        // Tricount — groupes (titre) + entrées (description + qui a payé).
+        if showTricount {
+            let groups = tricountRepo.fetchGroups()
+            for group in groups {
+                let score = scoreFor(field: group.title, query: q)
+                if score > 0 { scored.append((.tricountGroup(group), score)) }
+            }
+            for group in groups {
+                for entry in tricountRepo.fetchEntries(groupId: group.id) {
+                    let score = max(
+                        scoreFor(field: entry.description, query: q),
+                        scoreFor(field: entry.whoPaid, query: q)
+                    )
+                    if score > 0 { scored.append((.tricountEntry(entry), score)) }
+                }
+            }
         }
 
         // Group by category, sort each group by score descending, limit, then flatten

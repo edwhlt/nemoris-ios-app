@@ -43,8 +43,13 @@ struct DashboardPeriod: Hashable, Sendable {
     }
 
     /// Libellé lisible du mois filtré ("juillet 2026"), `nil` si pas de filtre.
+    ///
+    /// Locale forcée en dur (fr_FR) : ce type est un struct pur sans accès à
+    /// l'environnement SwiftUI (doctrine du projet), donc `.formatted()` retomberait
+    /// sinon sur la locale RÉELLE de l'appareil au lieu du français — même
+    /// précédent que `PatrimoineView.swift`.
     var monthLabel: String? {
-        monthStart?.formatted(.dateTime.month(.wide).year())
+        monthStart?.formatted(.dateTime.month(.wide).year().locale(Locale(identifier: "fr_FR")))
     }
 
     private var monthStart: Date? {

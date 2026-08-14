@@ -1,6 +1,6 @@
 import SwiftUI
 
-// AXE N — Port macOS natif.
+// Port macOS natif.
 //
 // Couche de compatibilité : reproduit côté macOS les signatures des APIs
 // iOS-only utilisées dans ~47 vues (no-op ou équivalent AppKit), pour que le

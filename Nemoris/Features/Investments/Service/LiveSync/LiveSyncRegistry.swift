@@ -63,7 +63,7 @@ final class LiveSyncRegistry {
         do {
             // AXE I Couche 1-3 : fetch les positions réelles
             let positions = try await providerInstance.fetchPositions(credentials: creds, config: link.config)
-            // AXE I Couche 4 : persistance vers investment_positions.
+            // persistance vers investment_positions.
             // Retourne aussi l'accountId effectif (résolu OU créé par persistPositions)
             // pour le réinjecter dans persistTransactions ci-dessous — sans ça,
             // sur la première sync où le compte est auto-créé, link.accountId
@@ -76,7 +76,7 @@ final class LiveSyncRegistry {
             var linkWithAccount = link
             linkWithAccount.accountId = resolvedAccountId
 
-            // AXE I Couche 1.5 : fetch + persist des transactions/trades.
+            // fetch + persist des transactions/trades.
             // Seulement si le provider supporte (Binance pour l'instant — les wallets
             // blockchain renvoient toujours [] car leurs fetchTransactions sont stubs).
             // Les transactions persistent dans investment_orders avec external_id pour dédup.
@@ -129,7 +129,7 @@ final class LiveSyncRegistry {
     //      - Si trouvée : on update quantity + current_value
     //      - Sinon : on insère (crée un BUY rétroactif via investment_orders pour cohérence)
     //   3. Les positions PRÉCÉDEMMENT syncées mais ABSENTES du nouveau résultat sont
-    //      conservées avec leur quantity à 0 (l'user a vendu sur la source externe).
+    //      conservées avec leur quantity à 0 (l'utilisateur a vendu sur la source externe).
     //      Note : on n'auto-delete pas pour ne pas perdre l'historique d'ordres.
     //
     // Retourne un résumé textuel ("3 positions mises à jour, 2 nouvelles") pour
@@ -141,14 +141,22 @@ final class LiveSyncRegistry {
         providerType: InvestmentLiveSyncProvider.Type
     ) throws -> (summary: String, accountId: Int) {
         // 1. Résoudre / créer le compte cible
+        //
+        // ⚠️ Ce chemin ne devrait normalement plus JAMAIS s'emprunter pour un
+        // lien créé depuis `LiveSyncLinkFormView` : celui-ci
+        // assigne désormais un `accountId` dès la création (compte fourni par
+        // l'appelant ou compte dédié créé à la volée), donc `link.accountId`
+        // est déjà non-nil au premier sync. Ce repli reste nécessaire pour les
+        // liens créés AVANT ce chantier (bases existantes, pas de migration
+        // possible sur une donnée Keychain/hors-schéma) — cf. `autoAccountName`
+        // partagée pour que les deux chemins ne divergent jamais.
         let accountId: Int
         if let existing = link.accountId {
             accountId = existing
         } else {
-            // Auto-création du compte
-            let nameSuffix = link.displayName.isEmpty ? providerType.displayName : link.displayName
-            let chainHint = link.config["chain"].map { " (\($0.capitalized))" } ?? ""
-            let accountName = "\(providerType.displayName)\(chainHint) — \(nameSuffix)"
+            let accountName = Self.autoAccountName(
+                providerType: providerType, displayName: link.displayName, chain: link.config["chain"]
+            )
             let accountType = Self.accountTypeForProvider(providerType.id)
             guard let newAccountId = investmentRepo.addAccountAndGetId(
                 name: accountName,
@@ -179,7 +187,7 @@ final class LiveSyncRegistry {
         //   les exchanges ne fournissent pas le PRU historique).
         // - UPDATE : on ne touche QUE current_value. On ne re-synchronise pas
         //   la qty depuis l'exchange parce que ça nécessiterait de wiper
-        //   les ordres user-saisis. Acceptable pour MVP : l'user qui veut une
+        //   les ordres user-saisis. Acceptable pour MVP : l'utilisateur qui veut une
         //   qty exacte ajoute manuellement les BUY/SELL delta après chaque sync.
         // - DISAPPEARED : juste current_value = 0, on garde l'historique d'ordres.
         let existingPositions = investmentRepo.fetchPositions(accountId: accountId)
@@ -237,7 +245,7 @@ final class LiveSyncRegistry {
         }
 
         // 3. Reset valeur marché à 0 pour positions disparues côté source
-        //    (l'historique d'ordres est conservé — l'user peut ajouter un SELL
+        //    (l'historique d'ordres est conservé — l'utilisateur peut ajouter un SELL
         //    delta manuellement s'il veut tracer la cession).
         let newTickers = Set(positions.map { $0.ticker.uppercased() })
         var zeroedCount = 0
@@ -256,7 +264,11 @@ final class LiveSyncRegistry {
     }
 
     /// Détermine le type de compte à créer selon le provider (pour affichage user).
-    private static func accountTypeForProvider(_ providerId: String) -> String {
+    /// `nonisolated` + non-`private` : appelée aussi bien ici (sync différée,
+    /// lien pré-2026-08-08 sans accountId) que par `LiveSyncLinkFormView.save()`
+    /// (création directe, hors de cet acteur) — fonction pure, aucune raison
+    /// de l'isoler sur MainActor.
+    nonisolated static func accountTypeForProvider(_ providerId: String) -> String {
         switch providerId {
         case "binance":         return "CRYPTO_EXCHANGE"
         case "evm_wallet":      return "CRYPTO_WALLET"
@@ -266,12 +278,25 @@ final class LiveSyncRegistry {
         }
     }
 
+    /// Nom auto-généré pour le compte d'un lien LiveSync — SOURCE UNIQUE,
+    /// utilisée à la fois par la création directe (`LiveSyncLinkFormView.save()`,
+    /// compte assigné immédiatement) et par le repli différé ci-dessus
+    /// (`persistPositions`, liens créés avant ce chantier). Centralisée pour
+    /// que les deux chemins ne divergent jamais silencieusement.
+    nonisolated static func autoAccountName(
+        providerType: InvestmentLiveSyncProvider.Type, displayName: String, chain: String?
+    ) -> String {
+        let nameSuffix = displayName.isEmpty ? providerType.displayName : displayName
+        let chainHint = chain.map { " (\($0.capitalized))" } ?? ""
+        return "\(providerType.displayName)\(chainHint) — \(nameSuffix)"
+    }
+
     // MARK: - AXE I Couche 1.5 — Persistance des transactions vers investment_orders
     //
     // Stratégie :
     //   1. Pour chaque LiveSyncTransaction → on cherche la position correspondante
     //      sur l'account du link (match par ticker, case insensitive)
-    //   2. Si la position n'existe pas → on skip silencieusement (l'user n'a pas
+    //   2. Si la position n'existe pas → on skip silencieusement (l'utilisateur n'a pas
     //      synchronisé les positions, ou le ticker ne match pas un asset connu)
     //   3. Dédup : on vérifie si un ordre avec ce `externalId` existe déjà
     //   4. Sinon INSERT (INSERT OR IGNORE sur UNIQUE INDEX en backup)
@@ -343,7 +368,7 @@ final class LiveSyncRegistry {
         if insertedCount > 0 { parts.append("+\(insertedCount) trades") }
         if skippedDupCount > 0 { parts.append("\(skippedDupCount) déjà connus") }
         if deletedSynthetics > 0 { parts.append("-\(deletedSynthetics) snapshot") }
-        // skippedNoPositionCount n'est pas affiché (verbose pour rien — l'user veut juste savoir
+        // skippedNoPositionCount n'est pas affiché (verbose pour rien — l'utilisateur veut juste savoir
         // si la sync a marché). On garde le compteur en cas de debug futur.
         return parts.joined(separator: ", ")
     }
@@ -448,11 +473,18 @@ struct EvmWalletLiveSyncProvider: InvestmentLiveSyncProvider {
         ),
         LiveSyncCredentialField(
             key: "etherscanApiKey",
-            label: "Clé API Etherscan V2 (optionnel)",
+            label: "Clé API Etherscan V2",
             isSecret: true,
-            placeholder: "Laisser vide pour utiliser sans clé",
-            helpText: "Optionnel. Sans clé : 5 req/s. Avec clé : 100k req/jour. Une clé Etherscan V2 fonctionne sur les 6 chaînes EVM.",
-            validation: .anyString
+            placeholder: "Clé générée sur etherscan.io/apis",
+            // ⚠️ 2026-08-08 : cette clé était documentée "optionnelle" (5 req/s
+            // sans clé) au moment où AXE I a été livré, mais Etherscan a depuis
+            // retiré l'accès anonyme sur le module account/balance de V2 — sans
+            // clé, l'API renvoie `result: "Missing/Invalid API Key"` au lieu
+            // d'un solde, et `EvmAPIClient.fetchNativeBalance` échoue à parser
+            // (constaté en usage réel, pas seulement en doc). Rendue obligatoire
+            // (`.nonEmpty`) pour ne plus créer un lien condamné à échouer.
+            helpText: "Obligatoire depuis Etherscan V2 (l'accès sans clé a été retiré). Créez une clé gratuite sur etherscan.io/apis — elle fonctionne sur les 6 chaînes EVM.",
+            validation: .nonEmpty
         )
     ]
 

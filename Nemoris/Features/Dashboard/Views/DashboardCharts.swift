@@ -215,31 +215,33 @@ struct BalanceTimeChart: View {
     private var selectionHeader: some View {
         if let period = selectedPeriod {
             HStack(spacing: 6) {
-                Text(periodLabel(period.id))
+                periodLabel(period.id)
                     .font(AppTheme.Typography.labelMedium)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
                 Spacer()
                 if period.income > 0.005 {
-                    Label(
-                        period.income.formatted(.currency(code: "EUR").presentation(.narrow)),
-                        systemImage: "arrow.down"
-                    )
+                    Label {
+                        Text(period.income, format: .currency(code: "EUR").presentation(.narrow))
+                    } icon: {
+                        Image(systemName: "arrow.down")
+                    }
                     .font(AppTheme.Typography.labelMedium)
                     .fontWeight(.semibold)
                     .foregroundStyle(AppTheme.Colors.success)
                 }
                 if period.expense < -0.005 {
-                    Label(
-                        abs(period.expense).formatted(.currency(code: "EUR").presentation(.narrow)),
-                        systemImage: "arrow.up"
-                    )
+                    Label {
+                        Text(abs(period.expense), format: .currency(code: "EUR").presentation(.narrow))
+                    } icon: {
+                        Image(systemName: "arrow.up")
+                    }
                     .font(AppTheme.Typography.labelMedium)
                     .fontWeight(.semibold)
                     .foregroundStyle(AppTheme.Colors.danger)
                 }
                 if let bal = selectedBalance {
                     Text("·").font(AppTheme.Typography.labelMedium).foregroundStyle(AppTheme.Colors.textSecondary)
-                    Text(bal.formatted(.currency(code: "EUR").presentation(.narrow)))
+                    Text(bal, format: .currency(code: "EUR").presentation(.narrow))
                         .font(AppTheme.Typography.labelMedium)
                         .fontWeight(.bold)
                         .foregroundStyle(bal >= 0 ? AppTheme.Colors.accent : AppTheme.Colors.warning)
@@ -352,11 +354,11 @@ struct BalanceTimeChart: View {
         selectedBalance = balanceData.filter { $0.id < periodEnd }.max(by: { $0.id < $1.id })?.balance
     }
 
-    private func periodLabel(_ date: Date) -> String {
+    private func periodLabel(_ date: Date) -> Text {
         switch granularity {
-        case .day:   return date.formatted(.dateTime.day().month(.abbreviated).year())
-        case .week:  return "Sem. du \(date.formatted(.dateTime.day().month(.abbreviated).year()))"
-        case .month: return date.formatted(.dateTime.month(.wide).year())
+        case .day:   return Text(date, format: .dateTime.day().month(.abbreviated).year())
+        case .week:  return Text("Sem. du ") + Text(date, format: .dateTime.day().month(.abbreviated).year())
+        case .month: return Text(date, format: .dateTime.month(.wide).year())
         }
     }
 

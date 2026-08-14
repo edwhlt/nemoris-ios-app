@@ -1,194 +1,35 @@
 import SwiftUI
 
-// MARK: - AXE I Couche 0g — Écran de gestion des liens live sync (Settings)
+// MARK: - AXE I Couche 0g → repris 2026-08-08 : gestion des liens live sync
+// intégrée au module Investissements (n'est plus un écran de Settings).
 //
 // 3 niveaux :
-//   1. LiveSyncSettingsView          : liste des liens existants + bouton "+ Ajouter"
-//   2. LiveSyncProviderPickerView    : catalogue des providers disponibles
-//   3. LiveSyncLinkFormView          : form de credentials + config (généré dynamiquement)
+//   1. LiveSyncProviderPickerView: catalogue des providers disponibles
+//   2. LiveSyncLinkFormView: form de credentials + config (généré dynamiquement)
+//   3. LiveSyncLinkDetailView: détail d'UN lien (statut, sync, édition, suppression)
 //
-// Couche 0 = squelette UI fonctionnel. Pas de bouton "Sync now" actif (les providers
-// renvoient providerNotImplemented). Mais la création/suppression de liens et le
-// stockage Keychain marchent réellement.
-
-struct LiveSyncSettingsView: View {
-    @State private var links: [InvestmentLiveSyncLink] = []
-    @State private var showAddSheet = false
-    #if os(macOS)
-    /// macOS : le détail d'un lien s'ouvre dans le panneau, pas un push — un
-    /// `NavigationLink` ici masquerait le panneau "Ajouter une source" s'il
-    /// était déjà ouvert quand l'user clique une row (le panneau est un volet
-    /// latéral non modal, la liste reste cliquable pendant qu'il est affiché).
-    /// Même bug que documenté dans CLAUDE.md AXE N.1 « Panneau macOS masqué
-    /// par du contenu poussé ». `LiveSyncLinkDetailView` est une feuille
-    /// (détail d'UN lien), pas un conteneur → panneau, cohérent avec le reste
-    /// de l'app (Tricount, tiers, comptes Investissements…).
-    @State private var selectedLink: InvestmentLiveSyncLink?
-    #endif
-
-    var body: some View {
-        // Form (pas List) : boxes arrondies natives macOS via nemorisFormStyle,
-        // identique sur iOS. Fond via .background (pas de ZStack+Color, cf. N.1).
-        Form {
-            explanationSection
-            if links.isEmpty {
-                emptyStateSection
-            } else {
-                linksSection
-            }
-        }
-        .scrollContentBackground(.hidden)
-        .nemorisFormStyle()
-        .background(AppTheme.Colors.background.ignoresSafeArea())
-        .navigationTitle("Synchronisation auto")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                PaneToggleButton(label: "Ajouter une source", systemImage: "plus", isOn: $showAddSheet)
-                    .tint(AppTheme.Colors.accent)
-            }
-        }
-        .adaptivePane(isPresented: $showAddSheet, onDismiss: load) {
-            NavigationStack {
-                LiveSyncProviderPickerView()
-            }
-        }
-        #if os(macOS)
-        .adaptivePane(item: $selectedLink, onDismiss: load) { link in
-            LiveSyncLinkDetailView(link: link, onChange: load)
-        }
-        #endif
-        .onAppear(perform: load)
-    }
-
-    // MARK: - Sections
-
-    private var explanationSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Vos clés restent sur cet iPhone", systemImage: "lock.shield.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppTheme.Colors.accent)
-                Text("Les clés API et adresses publiques sont stockées dans le Keychain iOS, chiffrées par le système. Aucune donnée n'est envoyée à un serveur Nemoris — les appels vont directement à Binance, Etherscan, CoinGecko, etc.")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
-            }
-            .padding(.vertical, 4)
-        }
-        .listRowBackground(AppTheme.Colors.surface)
-    }
-
-    private var emptyStateSection: some View {
-        Section {
-            VStack(spacing: AppTheme.Spacing.sm) {
-                Image(systemName: "arrow.triangle.2.circlepath.circle")
-                    .font(.system(size: 36, weight: .light))
-                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
-                Text("Aucune source synchronisée")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(AppTheme.Colors.textPrimary)
-                Text("Touchez + en haut à droite pour lier un exchange ou un wallet.")
-                    .font(.caption)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, AppTheme.Spacing.lg)
-            .listRowBackground(Color.clear)
-        }
-    }
-
-    private var linksSection: some View {
-        Section("Sources synchronisées") {
-            ForEach(links) { link in
-                #if os(macOS)
-                Button {
-                    selectedLink = link
-                } label: {
-                    HStack {
-                        linkRow(link)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                #else
-                NavigationLink {
-                    LiveSyncLinkDetailView(link: link, onChange: load)
-                } label: {
-                    linkRow(link)
-                }
-                #endif
-            }
-        }
-        .listRowBackground(AppTheme.Colors.surface)
-    }
-
-    private func linkRow(_ link: InvestmentLiveSyncLink) -> some View {
-        let providerType = LiveSyncRegistry.provider(for: link.providerId)
-        return HStack(spacing: AppTheme.Spacing.md) {
-            Image(systemName: providerType?.iconName ?? "questionmark.circle")
-                .font(.system(size: 22))
-                .foregroundStyle(AppTheme.Colors.accent)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(link.displayName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(AppTheme.Colors.textPrimary)
-                HStack(spacing: 4) {
-                    Text(providerType?.displayName ?? link.providerId)
-                        .font(.system(size: 11))
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                    if let chain = link.config["chain"] {
-                        Text("·")
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
-                        Text(chain.capitalized)
-                            .font(.system(size: 11))
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
-                    }
-                }
-            }
-            Spacer()
-            statusBadge(link)
-        }
-        .padding(.vertical, 4)
-    }
-
-    @ViewBuilder
-    private func statusBadge(_ link: InvestmentLiveSyncLink) -> some View {
-        if !link.enabled {
-            Text("Désactivé")
-                .font(.system(size: 10, weight: .semibold))
-                .padding(.horizontal, 6).padding(.vertical, 3)
-                .background(AppTheme.Colors.textSecondary.opacity(0.15), in: Capsule())
-                .foregroundStyle(AppTheme.Colors.textSecondary)
-        } else if link.lastSyncStatus == .error {
-            Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(AppTheme.Colors.danger)
-        } else if link.lastSyncStatus == .ok {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(AppTheme.Colors.success)
-        } else {
-            Image(systemName: "circle.dotted")
-                .foregroundStyle(AppTheme.Colors.textSecondary)
-        }
-    }
-
-    // MARK: - Load
-
-    private func load() {
-        links = LiveSyncRepository.shared.fetchLinks()
-    }
-}
+// Points d'entrée (2, tous les deux ouvrent `LiveSyncProviderPickerView`) :
+//   - `InvestmentsView` (toolbar module, "Lier un exchange / wallet") — pas de
+//     compte pré-existant : `accountId: nil`, un compte dédié est créé à la
+//     volée par `LiveSyncLinkFormView.save()`.
+//   - `InvestmentAccountFormView` (fiche "Modifier le compte", section
+//     "Synchronisation") — `accountId: account.id`, le nouveau lien est
+//     rattaché directement à CE compte.
+//
+// Il n'y a plus de liste globale des liens indépendante d'un compte : chaque
+// lien est TOUJOURS visible et gérable depuis la fiche du compte auquel il
+// est rattaché (cf. `InvestmentAccountFormView.linkedSourcesSection`).
 
 // MARK: - Provider picker (catalogue)
 
 struct LiveSyncProviderPickerView: View {
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
     @Environment(\.paneDismiss) private var dismiss
+    /// Compte auquel rattacher le nouveau lien. `nil` = créé depuis le
+    /// catalogue du module (pas de compte pré-existant) : `LiveSyncLinkFormView`
+    /// crée alors un compte dédié à la volée. Non-nil = créé depuis la fiche
+    /// d'un compte existant, le lien lui est directement rattaché.
+    var accountId: Int? = nil
     /// État à la place d'un `NavigationLink` : un push depuis ce contenu, une
     /// fois hébergé dans le panneau macOS, ferait remonter le titre/back-button
     /// du form de credentials dans la barre du MODULE. Sheet niveau 2 à la place.
@@ -230,7 +71,7 @@ struct LiveSyncProviderPickerView: View {
             set: { if !$0 { selectedProviderType = nil } }
         )) {
             if let providerType = selectedProviderType {
-                LiveSyncLinkFormView(providerType: providerType, existingLink: nil)
+                LiveSyncLinkFormView(providerType: providerType, existingLink: nil, accountId: accountId)
             }
         }
         .paneChrome("Ajouter une source", cancelLabel: "Annuler", onCancel: { dismiss() })
@@ -260,14 +101,25 @@ struct LiveSyncProviderPickerView: View {
 
 struct LiveSyncLinkFormView: View {
     @Environment(\.paneDismiss) private var dismiss
+    @Environment(AppState.self) private var appState
 
     let providerType: InvestmentLiveSyncProvider.Type
     let existingLink: InvestmentLiveSyncLink?
+    /// Compte cible pour un NOUVEAU lien. Ignoré en édition (`existingLink`
+    /// porte déjà son propre `accountId`, jamais réassigné ici). `nil` en
+    /// création = aucun compte fourni par l'appelant → `save()` en crée un.
+    var accountId: Int? = nil
 
     @State private var displayName: String = ""
     @State private var credentials: [String: String] = [:]
     @State private var selectedChain: String = ""
     @State private var saveError: String?
+    /// Vrai pendant `save()` (persistance + première synchronisation). Sans ce
+    /// garde, un lien se créait même avec des identifiants invalides (ex. clé
+    /// Etherscan manquante) sans qu'aucun signal n'apparaisse avant le premier
+    /// "Synchroniser maintenant" — un user ne voyant rien se produire au tap
+    /// "Enregistrer" pouvait retenter et créer un doublon local.
+    @State private var isSaving = false
 
     private var isEditing: Bool { existingLink != nil }
 
@@ -309,6 +161,18 @@ struct LiveSyncLinkFormView: View {
                     }
                 }
 
+                if isSaving {
+                    Section {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Enregistrement et première synchronisation…")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.Colors.textSecondary)
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                }
+
                 if let saveError {
                     Section {
                         Text(saveError)
@@ -331,8 +195,8 @@ struct LiveSyncLinkFormView: View {
         .paneChrome(isEditing ? "Modifier la source" : providerType.displayName,
                     cancelLabel: "Annuler", onCancel: { dismiss() },
                     confirmLabel: isEditing ? "Mettre à jour" : "Enregistrer", confirmIcon: "checkmark",
-                    confirmDisabled: !canSave,
-                    onConfirm: { save() })
+                    confirmDisabled: !canSave || isSaving,
+                    onConfirm: { Task { await save() } })
     }
 
     // MARK: - Field renderer (dynamique selon LiveSyncCredentialField)
@@ -376,7 +240,7 @@ struct LiveSyncLinkFormView: View {
 
     private func populate() {
         guard let link = existingLink else {
-            // Suggestion de nom par défaut (l'user peut écraser)
+            // Suggestion de nom par défaut (l'utilisateur peut écraser)
             displayName = suggestedName
             // Chaîne par défaut = première dispo si applicable
             if providerType.supportsChainSelection, let first = providerType.supportedChains.first {
@@ -393,7 +257,7 @@ struct LiveSyncLinkFormView: View {
         }
     }
 
-    private func save() {
+    private func save() async {
         saveError = nil
         // Trim toutes les valeurs avant sauvegarde
         var cleanCreds: [String: String] = [:]
@@ -407,6 +271,10 @@ struct LiveSyncLinkFormView: View {
             config["chain"] = selectedChain
         }
 
+        isSaving = true
+        defer { isSaving = false }
+
+        let linkId: Int
         if let existing = existingLink {
             // UPDATE
             var updated = existing
@@ -424,12 +292,42 @@ struct LiveSyncLinkFormView: View {
                 saveError = "Erreur Keychain : \(error.localizedDescription)"
                 return
             }
+            linkId = existing.id
         } else {
-            // CREATE
+            // CREATE — un compte cible est TOUJOURS assigné dès la création :
+            // celui fourni par l'appelant (fiche compte → "Lier une source à
+            // ce compte") ou, à défaut, un nouveau compte dédié créé ici même
+            // (catalogue du module → aucun compte pré-existant). Avant ce
+            // chantier, un lien créé sans accountId restait invisible tant que
+            // son premier sync manuel n'avait pas réussi (l'auto-création du
+            // compte n'avait lieu que dans `persistPositions`, au moment de la
+            // sync) — désormais le compte existe et apparaît dans la liste des
+            // comptes Investissements dès l'enregistrement, même si la sync
+            // qui suit échoue.
+            let targetAccountId: Int
+            if let accountId {
+                targetAccountId = accountId
+            } else {
+                let accountName = LiveSyncRegistry.autoAccountName(
+                    providerType: providerType, displayName: displayName, chain: config["chain"]
+                )
+                guard let newAccountId = InvestmentRepository().addAccountAndGetId(
+                    name: accountName,
+                    broker: providerType.displayName,
+                    currency: "EUR",
+                    accountType: LiveSyncRegistry.accountTypeForProvider(providerType.id),
+                    openedAt: Date()
+                ) else {
+                    saveError = "Impossible de créer le compte cible."
+                    return
+                }
+                targetAccountId = newAccountId
+            }
+
             guard let newId = LiveSyncRepository.shared.addLink(
                 providerId: providerType.id,
                 displayName: displayName,
-                accountId: nil,
+                accountId: targetAccountId,
                 config: config
             ) else {
                 saveError = "Impossible de créer le lien en base."
@@ -445,6 +343,22 @@ struct LiveSyncLinkFormView: View {
                 saveError = "Erreur Keychain : \(error.localizedDescription)"
                 return
             }
+            linkId = newId
+        }
+
+        // Première synchronisation immédiate (création ET édition) : le compte
+        // existe déjà à ce stade, donc même un échec réseau ici laisse un lien
+        // pleinement visible et gérable depuis la fiche du compte plutôt qu'un
+        // état "en attente" silencieux. Best-effort : on informe par toast mais
+        // on ne bloque jamais la fermeture du formulaire dessus (les
+        // identifiants, eux, sont déjà correctement persistés).
+        if let freshLink = LiveSyncRepository.shared.fetchLink(id: linkId) {
+            if let syncError = await LiveSyncRegistry.shared.syncLink(freshLink) {
+                appState.postToast(.error, "« \(displayName) » enregistré, mais la sync a échoué : \(syncError)")
+            } else {
+                appState.postToast(.success, "« \(displayName) » synchronisé")
+            }
+            NotificationCenter.default.post(name: .nemorisInvestmentsDidSync, object: nil)
         }
         dismiss()
     }
@@ -455,25 +369,22 @@ struct LiveSyncLinkFormView: View {
     }
 }
 
-// MARK: - Detail view (modifier / supprimer)
+// MARK: - Detail view (statut / sync / modifier / supprimer)
 
 struct LiveSyncLinkDetailView: View {
     let link: InvestmentLiveSyncLink
     let onChange: () -> Void
 
-    // dismiss : pop natif (iOS, poussée depuis LiveSyncSettingsView). paneDismiss :
-    // ferme le panneau (macOS, cf. `.adaptivePane(item: $selectedLink)` dans
-    // LiveSyncSettingsView) — no-op de chaque côté hors de son contexte.
-    @Environment(\.dismiss) private var dismiss
+    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS — cette vue
+    // est TOUJOURS présentée via `.adaptivePane` (jamais poussée par
+    // NavigationLink), donc c'est le seul mécanisme de fermeture pertinent ici.
     @Environment(\.paneDismiss) private var paneDismiss
     @Environment(AppState.self) private var appState
     @State private var showDeleteConfirm = false
     /// Remplace l'ancien `NavigationLink` vers le form de credentials : un push
     /// interne depuis cette vue, une fois hébergée dans le panneau macOS (pas
     /// de `NavigationStack` locale dans ce cas), n'aurait aucun contexte de
-    /// navigation où pousser. `.adaptivePane` marche dans les deux contextes,
-    /// cohérent avec `LiveSyncProviderPickerView` qui présente déjà ce même
-    /// `LiveSyncLinkFormView` de cette façon pour la création.
+    /// navigation où pousser. `.adaptivePane` marche dans les deux contextes.
     @State private var showEditForm = false
     @State private var enabledLocal: Bool
     @State private var isSyncing = false
@@ -540,7 +451,7 @@ struct LiveSyncLinkDetailView: View {
             }
             .listRowBackground(AppTheme.Colors.surface)
 
-            // AXE I Couche 1c — Bouton sync now + feedback inline
+            // Bouton sync now + feedback inline
             Section {
                 Button {
                     Task { await syncNow() }
@@ -586,9 +497,9 @@ struct LiveSyncLinkDetailView: View {
         .scrollContentBackground(.hidden)
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        // Chrome adaptatif : NavigationStack+toolbar natifs avec bouton "Fermer"
-        // (iOS poussée / macOS niveau 2) ou barre système du panneau (macOS
-        // niveau 1) — cf. `.paneChrome`.
+        // Toujours présentée en pane/sheet (jamais poussée) → paneChrome
+        // inconditionnel sur les deux plateformes (Fermer / iOS sheet native,
+        // macOS panneau ou sheet niveau 2 selon le contexte d'ouverture).
         .paneChrome(link.displayName, cancelLabel: "Fermer", onCancel: { paneDismiss() })
         .adaptivePane(isPresented: $showEditForm) {
             if let providerType {
@@ -609,7 +520,6 @@ struct LiveSyncLinkDetailView: View {
         InvestmentCredentialStore.shared.delete(linkId: link.id, providerId: link.providerId)
         LiveSyncRepository.shared.deleteLink(id: link.id)
         onChange()
-        dismiss()
         paneDismiss()
     }
 

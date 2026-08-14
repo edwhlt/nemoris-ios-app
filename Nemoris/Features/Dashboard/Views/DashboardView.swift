@@ -140,7 +140,7 @@ struct DashboardView: View {
         // dashboard reste accessible (toolbar propre) pendant qu'un panneau
         // Import/Recherche est ouvert (volet non modal) — un push ici masquait
         // ce panneau derrière l'écran de personnalisation jusqu'au retour à la
-        // racine (AppKit/NavigationStack, cf. CLAUDE.md AXE N.1 « Panneau
+        // racine (AppKit/NavigationStack « Panneau
         // macOS masqué par du contenu poussé »). Même remède que Réglages/
         // Investissements/Tricount.
         if showCustomize {
@@ -234,8 +234,17 @@ struct DashboardView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                // Recherche globale cross-modules (cmd-K style)
+                // Recherche globale cross-modules (cmd-K style).
+                // ⚠️ iOS UNIQUEMENT : sur macOS, la loupe vit
+                // maintenant à côté du toggle de sidebar (`MainTabView`,
+                // toujours visible quel que soit le module affiché) — la
+                // garder ICI AUSSI faisait apparaître DEUX loupes dans la
+                // même fenêtre dès que Dashboard était le module courant.
+                // Sur iOS, Dashboard reste le seul point d'entrée (pas de
+                // sidebar), donc inchangé.
+                #if !os(macOS)
                 PaneToggleButton(label: "Rechercher", systemImage: "magnifyingglass", isOn: $showSearch)
+                #endif
                 // Toggle rapide de masquage — discret mais toujours accessible
                 // depuis le hub principal de l'app. Animation snappy pour confirmer
                 // visuellement que le toggle a bien été pris en compte.

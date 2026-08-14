@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 
-/// AXE L — Sync CloudKit chiffrée (Couche L.0 : instrumentation SQLite).
+/// Sync CloudKit chiffrée (Couche L.0 : instrumentation SQLite).
 ///
 /// Ce composant fournit le socle de dirty-tracking nécessaire à la future
 /// synchronisation CKSyncEngine :

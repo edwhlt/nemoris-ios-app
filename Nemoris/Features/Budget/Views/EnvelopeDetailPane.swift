@@ -34,15 +34,15 @@ struct EnvelopeDetailPane: View {
             }
 
             Section("Détails") {
-                LabeledContent("Plafond", value: envelope.amount.formatted(.currency(code: "EUR")))
+                LabeledContent("Plafond") { Text(envelope.amount, format: .currency(code: "EUR")) }
                 LabeledContent("Période", value: envelope.period.label)
                 if let categoryName {
                     LabeledContent("Catégorie", value: categoryName)
                 }
-                LabeledContent("Début", value: envelope.startDate.formatted(date: .abbreviated, time: .omitted))
+                LabeledContent("Début") { Text(envelope.startDate, format: Date.FormatStyle(date: .abbreviated, time: .omitted)) }
                 LabeledContent("Statut", value: envelope.isActive ? "Active" : "Inactive")
             }
         }
-        .formStyle(.grouped)
+        .nemorisFormStyle()
     }
 }

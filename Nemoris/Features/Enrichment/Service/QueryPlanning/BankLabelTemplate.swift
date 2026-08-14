@@ -1,6 +1,6 @@
 import Foundation
 
-// AXE S — Reconnaissance des gabarits de libellés bancaires à champs fixes.
+// Reconnaissance des gabarits de libellés bancaires à champs fixes.
 // ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
 //
 // POURQUOI CE FICHIER EXISTE

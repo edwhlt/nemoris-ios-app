@@ -9,7 +9,7 @@ import UIKit
 ///
 /// ⚠️ Source statique : si tu ajoutes une migration qui change le schéma, mets à
 /// jour `SchemaDoc.domains` ci-dessous (cf. version courante du schéma dans
-/// `DatabaseManager.migrations` — v44 au moment de l'écriture).
+/// `DatabaseManager.migrations` — v46 au moment de l'écriture).
 ///
 /// Cette doc alimente AUSSI le prompt de l'assistant SQL (`SQLAssistantService.
 /// systemInstructions` → `SchemaDoc.llmSchemaPrompt`) : une colonne listée ici
@@ -375,7 +375,7 @@ enum SchemaDoc {
                 name: "payees",
                 systemImage: "person.crop.circle",
                 summary: "Tiers / commerçants (anciennement « tiers »)",
-                description: "Tous les marchands, contacts P2P et tiers personnalisés. `engine_merchant_id` lie au moteur canonique. `domain` sert au favicon (AXE A).",
+                description: "Tous les marchands, contacts P2P et tiers personnalisés. `engine_merchant_id` lie au moteur canonique. `domain` sert au favicon.",
                 columns: [
                     .init("id",                 "INTEGER", nullable: false, pk: true),
                     .init("name",               "TEXT", "Nom affiché (ex. « Carrefour Market — Oullins »)"),
@@ -389,7 +389,7 @@ enum SchemaDoc {
                     .init("group_id",           "INTEGER", fk: true, "Groupe de marque (toutes les enseignes Carrefour)"),
                     .init("custom",             "INTEGER", nullable: false, "1 = créé par user, pas réassigné auto par moteur"),
                     .init("domain",             "TEXT", "AXE A — pour favicon Google (v20)"),
-                    .init("note",               "TEXT", "AXE C — note libre du user (v21)"),
+                    .init("note",               "TEXT", "AXE C — note libre de l'utilisateur (v21)"),
                     .init("tier_type",          "TEXT", nullable: false, "AXE F (v25) — 'merchant' | 'contact' | 'internal' | 'organization'"),
                     .init("contact_identifier", "TEXT", "AXE F (v25) — CNContact.identifier si tier_type='contact'"),
                 ],
@@ -421,13 +421,13 @@ enum SchemaDoc {
                 name: "transactions",
                 systemImage: "list.bullet.rectangle",
                 summary: "Toutes les transactions financières",
-                description: "Une ligne = une opération bancaire. `libelle_brut` = le libellé original du CSV/banque ; `information` = note libre éditable par le user.",
+                description: "Une ligne = une opération bancaire. `libelle_brut` = le libellé original du CSV/banque ; `information` = note libre éditable par l'utilisateur.",
                 columns: [
                     .init("id",                       "INTEGER", nullable: false, pk: true),
                     .init("account_id",               "INTEGER", fk: true, "Compte d'origine"),
                     .init("payee_id",                 "INTEGER", fk: true, "Tiers (peut être NULL pour opé bancaire interne)"),
                     .init("category_id",              "INTEGER", fk: true, "NULL = non catégorisé"),
-                    .init("payment_type_id",          "INTEGER", fk: true, "CB, Virement, Prélèvement…"),
+                    .init("payment_type_id",          "INTEGER", fk: true, "⚠️ Déprécié (v46) — préfère transaction_metadata_values (clé de rôle 'payment_method')"),
                     .init("information",              "TEXT", "Note libre user"),
                     .init("libelle_brut",             "TEXT", "Libellé bancaire original (depuis v9)"),
                     .init("amount",                   "REAL", "Négatif = dépense, positif = revenu"),
@@ -468,15 +468,55 @@ enum SchemaDoc {
             SchemaTable(
                 name: "payment_types",
                 systemImage: "creditcard.circle",
-                summary: "Moyens de paiement (CB, Virement, etc.)",
-                description: "Référentiel court : CB, Virement, Prélèvement, Espèces, Chèque, AUTRE.",
+                summary: "⚠️ DÉPRÉCIÉ (v46) — moyens de paiement legacy",
+                description: "Remplacé par transaction_metadata_keys/values. Plus semé dans une base neuve — les données existantes restent intactes (doctrine du projet, pas de suppression tant que quelque chose pourrait encore référencer la table). N'écris plus de nouvelle requête sur payment_type_id : passe par la clé de métadonnée qui porte role='payment_method'.",
                 columns: [
                     .init("id",    "INTEGER", nullable: false, pk: true),
                     .init("name",  "TEXT"),
                     .init("regex", "TEXT", "Regex legacy"),
                 ],
-                relations: ["transactions.payment_type_id → payment_types.id"],
+                relations: ["transactions.payment_type_id → payment_types.id (déprécié)"],
                 example: nil
+            ),
+            SchemaTable(
+                name: "transaction_metadata_keys",
+                systemImage: "tag.circle",
+                summary: "Clés de métadonnées libres définies par l'utilisateur (AXE Y, v46)",
+                description: "Remplace payment_types : l'utilisateur crée les clés dont il a l'usage (« Projet », « Pro/Perso », « Compte joint »…) — aucune n'existe par défaut sur une base neuve. `role` optionnel, une seule valeur connue : 'payment_method', la clé que l'import remplit automatiquement depuis ce qu'il déduit du libellé (CB, VIREMENT, PRÉLÈVEMENT…). Un seul rôle exclusif à la fois (index UNIQUE partiel) ; sans clé portant ce rôle, l'indice d'import est simplement ignoré.",
+                columns: [
+                    .init("id",         "INTEGER", nullable: false, pk: true),
+                    .init("name",       "TEXT", nullable: false, "UNIQUE COLLATE NOCASE"),
+                    .init("icon",       "TEXT", "SF Symbol optionnel (ex. « creditcard »)"),
+                    .init("sort_order", "INTEGER", nullable: false),
+                    .init("role",       "TEXT", "NULL = clé libre. Seule valeur connue : 'payment_method'"),
+                    .init("created_at", "TEXT", nullable: false),
+                ],
+                relations: ["transaction_metadata_values.key_id → transaction_metadata_keys.id"],
+                example: .init(
+                    title: "Clés existantes et leur usage",
+                    sql: "SELECT k.name, k.role, COUNT(v.id) AS nb_transactions\nFROM transaction_metadata_keys k\nLEFT JOIN transaction_metadata_values v ON v.key_id = k.id\nGROUP BY k.id\nORDER BY nb_transactions DESC;"
+                )
+            ),
+            SchemaTable(
+                name: "transaction_metadata_values",
+                systemImage: "tag",
+                summary: "Valeurs posées sur une transaction — 0..N par transaction (AXE Y, v46)",
+                description: "Une ligne = une métadonnée posée sur une transaction. Contrairement à payment_type_id (0..1), une transaction peut porter PLUSIEURS métadonnées. `value` est du texte libre : aucune contrainte de valeurs en base, seulement des suggestions côté UI triées par fréquence (`distinctValues`).",
+                columns: [
+                    .init("id",             "INTEGER", nullable: false, pk: true),
+                    .init("transaction_id", "INTEGER", nullable: false, fk: true),
+                    .init("key_id",         "INTEGER", nullable: false, fk: true),
+                    .init("value",          "TEXT", nullable: false, "Texte libre, aucune liste fermée"),
+                ],
+                relations: [
+                    "→ transactions.id (ON DELETE CASCADE)",
+                    "→ transaction_metadata_keys.id (ON DELETE CASCADE)",
+                    "UNIQUE(transaction_id, key_id) — une seule valeur par clé et par transaction"
+                ],
+                example: .init(
+                    title: "Dépenses groupées par valeur d'une métadonnée (ex. mode de paiement)",
+                    sql: "SELECT v.value, SUM(t.amount) AS total, COUNT(*) AS nb\nFROM transaction_metadata_values v\nJOIN transaction_metadata_keys k ON k.id = v.key_id\nJOIN transactions t ON t.id = v.transaction_id\nWHERE k.name = 'Mode de paiement' AND t.amount < 0\nGROUP BY v.value\nORDER BY total ASC;"
+                )
             ),
             SchemaTable(
                 name: "tags",
@@ -522,7 +562,7 @@ enum SchemaDoc {
         ]
     )
 
-    // MARK: Import (AXE D + E + B)
+    // MARK: Import
 
     private static let importDomain = SchemaDomain(
         name: "Import",
@@ -530,17 +570,18 @@ enum SchemaDoc {
             SchemaTable(
                 name: "import_sessions",
                 systemImage: "tray.and.arrow.down",
-                summary: "Sessions d'import CSV en cours / terminées",
-                description: "Stocke l'état complet de la session sous forme de JSON (`rows_json`). Une seule session `active` à la fois. Status : active | completed | cancelled.",
+                summary: "Sessions d'import en cours / terminées (transactions ET investissements)",
+                description: "Stocke l'état complet de la session sous forme de JSON (`rows_json`) — sa forme dépend de `destination` (v45). Une seule session `active` à la fois. Status : active | completed | cancelled.",
                 columns: [
                     .init("id",          "TEXT", nullable: false, pk: true, "UUID"),
                     .init("created_at",  "TEXT", nullable: false),
                     .init("updated_at",  "TEXT", nullable: false),
                     .init("status",      "TEXT", nullable: false),
-                    .init("source_file", "TEXT", "Nom du fichier CSV importé"),
+                    .init("destination", "TEXT", nullable: false, "'transactions' | 'investments' (v45) — discrimine le format de rows_json"),
+                    .init("source_file", "TEXT", "Nom du fichier importé (peut agréger plusieurs sources, ex. « a.csv +2 »)"),
                     .init("account_id",  "INTEGER", fk: true),
                     .init("total_rows",  "INTEGER", nullable: false),
-                    .init("rows_json",   "TEXT", nullable: false, "JSON [ImportSessionRow]"),
+                    .init("rows_json",   "TEXT", nullable: false, "JSON [ImportSessionRow] si destination='transactions', ImportBatchResult si 'investments'"),
                 ],
                 relations: ["import_sessions.account_id → accounts.id"],
                 example: .init(
@@ -668,7 +709,7 @@ enum SchemaDoc {
                 name: "tricount_entries",
                 systemImage: "list.dash",
                 summary: "Entrées d'un Tricount",
-                description: "Type : NORMAL | REIMBURSEMENT. `linked_transaction_id` lie l'entrée à une vraie transaction bancaire si l'user l'a rapprochée.",
+                description: "Type : NORMAL | REIMBURSEMENT. `linked_transaction_id` lie l'entrée à une vraie transaction bancaire si l'utilisateur l'a rapprochée.",
                 columns: [
                     .init("id",                    "INTEGER", nullable: false, pk: true),
                     .init("group_id",              "INTEGER", nullable: false, fk: true),
@@ -955,6 +996,11 @@ enum SchemaDoc {
             title: "Dépenses moyennes par jour de semaine",
             icon: "calendar",
             sql: "SELECT CASE strftime('%w', tx_date)\n         WHEN '0' THEN '7-Dim' WHEN '1' THEN '1-Lun' WHEN '2' THEN '2-Mar'\n         WHEN '3' THEN '3-Mer' WHEN '4' THEN '4-Jeu' WHEN '5' THEN '5-Ven'\n         WHEN '6' THEN '6-Sam'\n       END AS jour,\n       ROUND(AVG(amount), 2) AS moyenne,\n       COUNT(*) AS nb\nFROM transactions\nWHERE amount < 0 AND tx_date >= date('now', '-1 year')\nGROUP BY jour\nORDER BY jour;"
+        ),
+        SchemaRecipe(
+            title: "Répartition par métadonnée (ex. mode de paiement)",
+            icon: "tag.fill",
+            sql: "SELECT k.name AS metadonnee, v.value, SUM(t.amount) AS total, COUNT(*) AS nb\nFROM transaction_metadata_values v\nJOIN transaction_metadata_keys k ON k.id = v.key_id\nJOIN transactions t ON t.id = v.transaction_id\nWHERE t.amount < 0\nGROUP BY k.id, v.value\nORDER BY k.name, total ASC;"
         ),
         SchemaRecipe(
             title: "Patrimoine net (actifs − dettes)",
