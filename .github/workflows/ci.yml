@@ -50,25 +50,21 @@ jobs:
           echo "✅ SwiftUI reste dans Views/, DesignSystem/ et App/"
 
   moteurs:
-    name: Moteurs purs
+    name: Spectre de recherche
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Harnais swiftc
+      - name: Corpus de libellés
         run: |
-          cd Tests
-          echec=0
-          for s in run_*.sh; do
-            # Le corpus mesure un SPECTRE, pas une non-régression : son score
-            # bouge légitimement quand l'extraction s'améliore. Il tourne, mais
-            # ne fait pas échouer la CI.
-            if [ "$s" = "run_merchant_corpus_tests.sh" ]; then
-              ./"$s" || echo "⚠️  spectre sous le plancher — à regarder, non bloquant"
-              continue
-            fi
-            ./"$s" || { echo "❌ $s"; echec=1; }
-          done
-          exit $echec
+          # Ce harnais mesure un SPECTRE — combien de 984 libellés bancaires le
+          # planificateur traite correctement — pas une non-régression. Son
+          # score bouge légitimement quand l'extraction s'améliore, d'où le
+          # `|| true` : il informe, il ne bloque pas.
+          #
+          # Les dix autres harnais ont été portés vers XCTest ; la propriété
+          # qu'ils garantissaient en plus (pureté des moteurs) est désormais
+          # vérifiée explicitement par le travail « Garde-fous ».
+          ./Tests/run_merchant_corpus_tests.sh || echo "⚠️  spectre sous le plancher — à regarder"
 
   build:
     name: Compilation ${{ matrix.plateforme }}

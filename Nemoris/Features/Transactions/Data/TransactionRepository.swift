@@ -574,8 +574,54 @@ struct TransactionRepository {
 
     @discardableResult
     func deleteTransaction(id: Int) -> Bool {
-        writeSingle(sql: "DELETE FROM transactions WHERE id = ?") { stmt in
+        store.write { db in
+            Self.detacherEnfants(db, transactionId: id)
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "DELETE FROM transactions WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK,
+                  let stmt else { return false }
+            defer { sqlite3_finalize(stmt) }
             sqlite3_bind_int(stmt, 1, Int32(id))
+            return sqlite3_step(stmt) == SQLITE_DONE
+        } ?? false
+    }
+
+    /// Supprime tout ce qui pend à une transaction, avant de la supprimer.
+    ///
+    /// Le schéma déclare pourtant `ON DELETE CASCADE` sur les trois premières
+    /// tables. SQLite ignore les clés étrangères tant que
+    /// `PRAGMA foreign_keys = ON` n'a pas été posé, et ce réglage vaut PAR
+    /// CONNEXION : une déclaration de schéma n'est donc jamais une garantie.
+    ///
+    /// ⚠️ Poser ce pragma ici serait pire que le défaut qu'il corrige.
+    /// `tricount_entries.linked_transaction_id` référence `transactions(id)`
+    /// SANS action déclarée, ce qui vaut `NO ACTION` : l'application des clés
+    /// étrangères ferait alors REFUSER la suppression de toute transaction
+    /// rattachée à une dépense Tricount. La cascade explicite obtient le
+    /// nettoyage sans importer ce blocage — c'est le même choix, pour la même
+    /// raison, que celui déjà fait côté investissements.
+    ///
+    /// Sans ce nettoyage, les lignes filles survivent en pointant vers une
+    /// transaction disparue. Elles ne sont pas seulement du poids mort : elles
+    /// portent un `uuid` et un `updated_at`, donc elles partent en
+    /// synchronisation et arrivent sur les autres appareils dans le même état.
+    private static func detacherEnfants(_ db: OpaquePointer, transactionId: Int) {
+        let instructions = [
+            "DELETE FROM transaction_tags WHERE transaction_id = ?;",
+            "DELETE FROM reimbursements WHERE transaction_id = ?;",
+            "DELETE FROM transaction_metadata_values WHERE transaction_id = ?;",
+            // Ces deux-là ne sont pas supprimées mais détachées : la prévision
+            // budgétaire et la dépense Tricount existent indépendamment de la
+            // transaction à laquelle on les avait rapprochées.
+            "UPDATE budget_previsions SET actual_transaction_id = NULL WHERE actual_transaction_id = ?;",
+            "UPDATE tricount_entries SET linked_transaction_id = NULL WHERE linked_transaction_id = ?;"
+        ]
+        for sql in instructions {
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt {
+                sqlite3_bind_int(stmt, 1, Int32(transactionId))
+                sqlite3_step(stmt)
+            }
+            sqlite3_finalize(stmt)
         }
     }
 
@@ -601,6 +647,7 @@ struct TransactionRepository {
 
             var supprimees = 0
             for id in ids {
+                Self.detacherEnfants(db, transactionId: id)
                 sqlite3_reset(stmt)
                 sqlite3_bind_int(stmt, 1, Int32(id))
                 if sqlite3_step(stmt) == SQLITE_DONE {
@@ -835,13 +882,20 @@ struct TransactionRepository {
         )
     }
 
-    /// Supprime un tag et ses liaisons (transaction_tags).
+    /// Supprime un tag et ses liaisons.
+    ///
+    /// Un tag se pose aussi bien sur une transaction que sur une dépense
+    /// Tricount : les DEUX tables de liaison doivent être nettoyées, pas
+    /// seulement celle du module depuis lequel la suppression est déclenchée.
     @discardableResult
     func deleteTag(id: Int) -> Bool {
         deleteAndUnassign(
             table: "tags",
             id: id,
-            unassign: ["DELETE FROM transaction_tags WHERE tag_id = ?;"]
+            unassign: [
+                "DELETE FROM transaction_tags WHERE tag_id = ?;",
+                "DELETE FROM tricount_entry_tags WHERE tag_id = ?;"
+            ]
         )
     }
 
