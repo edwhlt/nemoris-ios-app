@@ -21,7 +21,7 @@ import Foundation
 //     dictionnaire en correspondance exacte ne peut les reconnaître. C'est `geo.api.gouv.fr`
 //     qui les résout (vérifié : « ISSY LES » → Issy-les-Moulineaux, insee 92040).
 //
-//  3. LE MARCHAND EST TRONQUÉ AUSSI : « SC-PHIE VIMES V », « APPLE COM/BILL »,
+//  3. LE MARCHAND EST TRONQUÉ AUSSI : « SC-PHIE NIMES V », « APPLE COM/BILL »,
 //     « SOUNDCLOUD MONTH ». D'où le bonus de préfixe de `MerchantTokenSimilarity`.
 //
 // Un gabarit est une DONNÉE pure et testable : ajouter le format d'une autre banque,
@@ -36,7 +36,7 @@ struct TemplateSlots: Hashable, Sendable {
     /// Indices des tokens formant le nom du marchand.
     let merchantRange: Range<Int>
     /// Code département à 2 chiffres, quand le libellé le porte explicitement
-    /// (« 78 BEAUVAISIN ») — filtre gratuit et non ambigu.
+    /// (« 35 RENNES ») — filtre gratuit et non ambigu.
     let departmentCode: String?
     /// Paiement web : pas de localité physique, donc pas de filtre géo ni de recherche
     /// par proximité.
@@ -118,7 +118,7 @@ extension BankLabelTemplate {
         }
         guard end > cursor else { return nil }
 
-        // --- Département explicite : « 78 BEAUVAISIN », « 91 GIF-SUR-YV »
+        // --- Département explicite : « 35 RENNES », « 91 GIF-SUR-YV »
         var departmentCode: String? = nil
         if cursor < end, tokens[cursor].count == 2, tokens[cursor].allSatisfy(\.isNumber),
            cursor + 1 < end {
@@ -175,7 +175,7 @@ extension BankLabelTemplate {
     /// Combien de tokens la localité occupe réellement en tête du créneau.
     ///
     /// ⚠️ Surtout PAS le maximum disponible. La très grande majorité des communes tiennent
-    /// en UN mot (LYON, VIMES, OULLINS, ROUBAIX, CORK, BERLIN) ; prendre gloutonnement
+    /// en UN mot (LYON, NIMES, OULLINS, ROUBAIX, CORK, BERLIN) ; prendre gloutonnement
     /// trois tokens transformait « AMSTERDAM DOTT SCOOTER RID » en localité
     /// « amsterdam dott scooter » et marchand « rid » — le marchand était mangé par la ville.
     ///

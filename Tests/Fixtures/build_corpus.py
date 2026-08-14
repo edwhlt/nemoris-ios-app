@@ -130,22 +130,22 @@ REGRESSIONS = [
     },
     {
         "id": "reg_template_locality_first_truncated",
-        "label": "PAIEMENT PSC 1803 GIF SUR YVETT SC-X2M SACLAY CARTE 1042 GIR012607803713662",
-        "expect": {"person": False, "name_query": "sc x2m saclay",
-                   "locality": "gif sur yvett", "country": "FR",
-                   "must_not_appear_in_q": ["gif", "yvett", "carte", "1042"]},
+        "label": "PAIEMENT PSC 1803 MONT SUR LOIR SC-X2M VERNON CARTE 1042 GIR012607803713662",
+        "expect": {"person": False, "name_query": "sc x2m vernon",
+                   "locality": "mont sur loir", "country": "FR",
+                   "must_not_appear_in_q": ["mont", "loir", "carte", "1042"]},
         "tags": ["regression", "template"],
         "note": ("Gabarit à champs fixes : la localité est AVANT le marchand et tronquée "
-                 "à ~13 caractères. geo.api.gouv.fr résout « GIF SUR YVETT » → "
-                 "Gif-sur-Yvette, insee 91272."),
+                 "à ~13 caractères. geo.api.gouv.fr résout « MONT SUR LOIR » → "
+                 "Montval-sur-Loir, insee 72071."),
     },
     {
         "id": "reg_template_department_prefix",
-        "label": "PAIEMENT PSC 1903 78 VERSAILLES SELF2 EIFFEL CARTE 1042",
-        "expect": {"person": False, "locality": "versailles",
-                   "must_not_appear_in_q": ["78", "versailles"]},
+        "label": "PAIEMENT PSC 1903 35 RENNES SELF2 EIFFEL CARTE 1042",
+        "expect": {"person": False, "locality": "rennes",
+                   "must_not_appear_in_q": ["35", "rennes"]},
         "tags": ["regression", "template"],
-        "note": "Le préfixe « 78 » est un département : filtre gratuit et non ambigu.",
+        "note": "Le préfixe « 35 » est un département : filtre gratuit et non ambigu.",
     },
     {
         "id": "reg_template_online_payli",
@@ -156,12 +156,12 @@ REGRESSIONS = [
     },
     {
         "id": "reg_template_repeated_locality",
-        "label": "PAIEMENT PSC 1703 MASSY AUCHAN MASSY CARTE 1042",
-        "expect": {"person": False, "name_query": "auchan", "locality": "massy",
-                   "must_not_appear_in_q": ["massy"]},
+        "label": "PAIEMENT PSC 1703 NIMES AUCHAN NIMES CARTE 1042",
+        "expect": {"person": False, "name_query": "auchan", "locality": "nimes",
+                   "must_not_appear_in_q": ["nimes"]},
         "tags": ["regression", "template"],
         "note": ("La ville se répète dans l'enseigne. q=auchan + filtre commune trouve, "
-                 "q=auchan massy ne trouve rien."),
+                 "q=auchan nimes ne trouve rien."),
     },
     {
         "id": "reg_postal_code_in_name",
@@ -228,7 +228,7 @@ def name_variants(full):
 
 # ⚠️ Substitutions MESURÉES : le spectre passe de 87,5 % à 87,1 % et aucun cas
 # de régression ne casse. Les libellés tagués `regression` sont préservés — ils
-# encodent une cohérence réelle (« 78 VERSAILLES » lie un département à sa
+# encodent une cohérence réelle (« 35 RENNES » lie un département à sa
 # commune) et trois noms de communes dans des fixtures n'identifient personne,
 # là où 275 libellés groupés sur un même bassin de vie, si.
 #
@@ -306,7 +306,7 @@ def scrub_identifiers(text):
     les chiffres fait chuter le spectre de 87,5 % à 85,1 % avec trois
     régressions, parce que certains chiffres courts portent du sens —
     une date DDMM (« PSC 1803 ») repère les champs d'un gabarit à champs fixes,
-    un préfixe de département (« 78 VERSAILLES ») résout la localité, un code
+    un préfixe de département (« 35 RENNES ») résout la localité, un code
     postal est un filtre. Avec ce ciblage, le spectre est INCHANGÉ : ces
     identifiants n'aident jamais à reconnaître un commerçant, ils identifient
     une personne ou un compte.

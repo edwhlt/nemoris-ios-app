@@ -197,14 +197,14 @@ struct MerchantQueryPlannerEngineTests {
                "la date DDMM est retirée")
         expectEqual(plan.extraction.countryHint ?? "", "FR", "gabarit FR ⇒ pays FR")
 
-        // Préfixe département explicite : « 78 BEAUVAISIN » → filtre gratuit.
+        // Préfixe département explicite : « 35 RENNES » → filtre gratuit.
         let plan2 = MerchantQueryPlanner.plan(
-            input("PAIEMENT PSC 1903 78 BEAUVAISIN SELF2 EIFFEL CARTE 1042")
+            input("PAIEMENT PSC 1903 35 RENNES SELF2 EIFFEL CARTE 1042")
         )
-        expectEqual(plan2.extraction.departmentHint ?? "", "78",
-                    "le préfixe « 78 » est reconnu comme département")
-        expect(!plan2.extraction.nameQuery.contains("78"), "le département ne reste pas dans q=")
-        expect(registryAttempts(plan2).contains { $0.departement == "78" },
+        expectEqual(plan2.extraction.departmentHint ?? "", "35",
+                    "le préfixe « 35 » est reconnu comme département")
+        expect(!plan2.extraction.nameQuery.contains("35"), "le département ne reste pas dans q=")
+        expect(registryAttempts(plan2).contains { $0.departement == "35" },
                "le département devient un filtre departement=")
         expect(plan2.extraction.nameQuery.contains("self2") || plan2.extraction.nameQuery.contains("eiffel"),
                "le marchand est conservé")
@@ -361,7 +361,7 @@ struct MerchantQueryPlannerEngineTests {
         expect(!cormeilles.extraction.nameQuery.isEmpty, "un nom subsiste")
 
         // Le nom ne doit jamais être entièrement mangé par la localité.
-        for label in ["PAIEMENT PSC 1703 VIMES AUCHAN VIMES CARTE 1042",
+        for label in ["PAIEMENT PSC 1703 NIMES AUCHAN NIMES CARTE 1042",
                       "PAIEMENT PSC 1001 LYON CITADIUM LYON CARTE 1042"] {
             let p = MerchantQueryPlanner.plan(input(label))
             expect(!p.extraction.nameQuery.isEmpty, "« \(label) » garde un nom non vide")
@@ -486,7 +486,7 @@ struct MerchantQueryPlannerEngineTests {
         // Limite assumée : une CONTRACTION n'est pas un préfixe (« phie » ≠ pha…), elle ne
         // matche donc que sur les autres tokens. C'est le rôle du filtre géographique de
         // rattraper ces cas, pas celui de la similarité de noms.
-        let contraction = MerchantTokenSimilarity.score(["phie", "vimes"], ["pharmacie", "vimes"])
+        let contraction = MerchantTokenSimilarity.score(["phie", "nimes"], ["pharmacie", "nimes"])
         expect(contraction >= 0.4 && contraction < 0.7,
                "une contraction ne matche que partiellement (\(String(format: "%.2f", contraction)))")
         let noMatch = MerchantTokenSimilarity.score(["srom"], ["sram"])
@@ -761,9 +761,9 @@ struct MerchantQueryPlannerEngineTests {
                "la référence numérique longue est retirée")
 
         // La ville répétée dans l'enseigne doit sortir de q=.
-        let auchan = MerchantQueryPlanner.plan(input("PAIEMENT PSC 1703 VIMES AUCHAN VIMES CARTE 1042"))
-        expectEqual(auchan.extraction.nameQuery, "auchan", "« VIMES AUCHAN VIMES » → q = auchan")
-        expect(noAttemptMentions(auchan, "vimes"), "la ville répétée ne reste pas dans q=")
+        let auchan = MerchantQueryPlanner.plan(input("PAIEMENT PSC 1703 NIMES AUCHAN NIMES CARTE 1042"))
+        expectEqual(auchan.extraction.nameQuery, "auchan", "« NIMES AUCHAN NIMES » → q = auchan")
+        expect(noAttemptMentions(auchan, "nimes"), "la ville répétée ne reste pas dans q=")
 
         let citadium = MerchantQueryPlanner.plan(input("PAIEMENT PSC 1001 LYON CITADIUM LYON CARTE 1042"))
         expectEqual(citadium.extraction.nameQuery, "citadium", "« LYON CITADIUM LYON » → q = citadium")

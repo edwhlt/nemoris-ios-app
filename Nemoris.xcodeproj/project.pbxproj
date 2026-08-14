@@ -48,6 +48,13 @@
 			remoteGlobalIDString = E826BBFB2FBDA3580095EC62;
 			remoteInfo = LedgerNestWidgetExtension;
 		};
+		E8971B17302F78DE0022F53E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F857318EB357D311B6E85F4F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 486CE5196ED6E967037DE733;
+			remoteInfo = Nemoris;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -85,6 +92,7 @@
 		E881B2132FAC2E0200B58D3C /* fr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = fr; path = Localizable.strings; sourceTree = "<group>"; };
 		E881B2162FAC2E1800B58D3C /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = Localizable.strings; sourceTree = "<group>"; };
 		E881B2452FB62AE600B58D3C /* AuthenticationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AuthenticationServices.framework; path = System/Library/Frameworks/AuthenticationServices.framework; sourceTree = SDKROOT; };
+		E8971B13302F78DE0022F53E /* NemorisUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NemorisUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E8CD647D302369720032E42E /* SMART-IMPORT.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "SMART-IMPORT.md"; sourceTree = "<group>"; };
 		E8E71A842FA9D33600232023 /* GoToMarket.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = GoToMarket.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -163,6 +171,11 @@
 			path = NemorisWidget;
 			sourceTree = "<group>";
 		};
+		E8971B14302F78DE0022F53E /* NemorisUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = NemorisUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -193,6 +206,13 @@
 			files = (
 				E826BBFE2FBDA3580095EC62 /* SwiftUI.framework in Frameworks */,
 				E826BBFD2FBDA3580095EC62 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E8971B10302F78DE0022F53E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -227,6 +247,7 @@
 				5AE0000000000000000000A2 /* NemorisShareTransactions.appex */,
 				5AE0000000000000000000B2 /* NemorisShareInvest.appex */,
 				7E57000000000000000000A2 /* NemorisTests.xctest */,
+				E8971B13302F78DE0022F53E /* NemorisUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -254,6 +275,7 @@
 				E826BBFF2FBDA3580095EC62 /* NemorisWidget */,
 				5AE0000000000000000000A3 /* NemorisShareTransactions */,
 				5AE0000000000000000000B3 /* NemorisShareInvest */,
+				E8971B14302F78DE0022F53E /* NemorisUITests */,
 				E881B2442FB62AE600B58D3C /* Frameworks */,
 				57B630E0BB8EEA70A0C66C02 /* Products */,
 				E8E71A832FA9D31F00232023 /* Docs */,
@@ -427,6 +449,29 @@
 			productReference = E826BBFC2FBDA3580095EC62 /* NemorisWidgetExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		E8971B12302F78DE0022F53E /* NemorisUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E8971B1B302F78DE0022F53E /* Build configuration list for PBXNativeTarget "NemorisUITests" */;
+			buildPhases = (
+				E8971B0F302F78DE0022F53E /* Sources */,
+				E8971B10302F78DE0022F53E /* Frameworks */,
+				E8971B11302F78DE0022F53E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E8971B18302F78DE0022F53E /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				E8971B14302F78DE0022F53E /* NemorisUITests */,
+			);
+			name = NemorisUITests;
+			packageProductDependencies = (
+			);
+			productName = NemorisUITests;
+			productReference = E8971B13302F78DE0022F53E /* NemorisUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -434,7 +479,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastSwiftUpdateCheck = 2640;
+				LastSwiftUpdateCheck = 2700;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					5AE0000000000000000000A1 = {
@@ -445,6 +490,10 @@
 					};
 					E826BBFB2FBDA3580095EC62 = {
 						CreatedOnToolsVersion = 26.4;
+					};
+					E8971B12302F78DE0022F53E = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = 486CE5196ED6E967037DE733;
 					};
 				};
 			};
@@ -471,6 +520,7 @@
 				5AE0000000000000000000A1 /* NemorisShareTransactions */,
 				5AE0000000000000000000B1 /* NemorisShareInvest */,
 				7E57000000000000000000A1 /* NemorisTests */,
+				E8971B12302F78DE0022F53E /* NemorisUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -502,6 +552,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		E826BBFA2FBDA3580095EC62 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E8971B11302F78DE0022F53E /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -568,6 +625,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E8971B0F302F78DE0022F53E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -593,6 +657,11 @@
 			platformFilter = ios;
 			target = E826BBFB2FBDA3580095EC62 /* NemorisWidgetExtension */;
 			targetProxy = E826BC0B2FBDA3590095EC62 /* PBXContainerItemProxy */;
+		};
+		E8971B18302F78DE0022F53E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 486CE5196ED6E967037DE733 /* Nemoris */;
+			targetProxy = E8971B17302F78DE0022F53E /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1075,6 +1144,64 @@
 			};
 			name = Release;
 		};
+		E8971B19302F78DE0022F53E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = P5US3ZM4M3;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = fr.hedwin.nemoris.NemorisUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Nemoris;
+			};
+			name = Debug;
+		};
+		E8971B1A302F78DE0022F53E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = P5US3ZM4M3;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = fr.hedwin.nemoris.NemorisUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Nemoris;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1128,6 +1255,15 @@
 			buildConfigurations = (
 				E826BC0F2FBDA3590095EC62 /* Debug */,
 				E826BC102FBDA3590095EC62 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E8971B1B302F78DE0022F53E /* Build configuration list for PBXNativeTarget "NemorisUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E8971B19302F78DE0022F53E /* Debug */,
+				E8971B1A302F78DE0022F53E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

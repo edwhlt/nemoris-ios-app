@@ -60,7 +60,7 @@ enum AbbreviationTable {
     ]
 
     /// Marqueurs qui TERMINENT le créneau marchand dans les relevés à champs fixes.
-    /// « … AUCHAN VIMES **CARTE** 5974 GIR0100794… » : tout ce qui suit est structurel.
+    /// « … AUCHAN NIMES **CARTE** 1042 GIR0100794… » : tout ce qui suit est structurel.
     static let cardTerminators: Set<String> = ["carte", "payweb", "paywebc"]
 
     /// Codes de référence sans valeur d'identification, à retirer partout.

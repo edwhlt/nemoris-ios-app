@@ -25,7 +25,7 @@ enum LocalityKind: String, Codable, Sendable, Hashable {
     case cityName
     /// Code postal français à 5 chiffres.
     case postalCode
-    /// Code département à 2 chiffres, tel que le préfixe "78" dans « 78 BEAUVAISIN ».
+    /// Code département à 2 chiffres, tel que le préfixe "78" dans « 35 RENNES ».
     case departmentCode
     /// Code pays ISO 3166-1 alpha-2.
     case countryCode
@@ -130,7 +130,7 @@ struct MerchantLabelExtraction: Hashable, Sendable, Codable {
     let localityTokens: [LocalityToken]
     /// Code pays ISO-2 en MAJUSCULES.
     let countryHint: String?
-    /// Code département déduit sans ambiguïté (préfixe « 78 BEAUVAISIN »).
+    /// Code département déduit sans ambiguïté (préfixe « 35 RENNES »).
     let departmentHint: String?
     let droppedTokens: [DroppedToken]
     /// Virement nominatif : on n'interroge JAMAIS un registre d'entreprises pour un

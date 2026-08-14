@@ -22,7 +22,7 @@ enum MerchantTokenSimilarity {
     /// Renvoie 0…1. Symétrique.
     ///
     /// Le bonus de préfixe (jusqu'à +15 %) traite le cas central des relevés bancaires :
-    /// les noms y sont TRONQUÉS en largeur fixe (`SC-PHIE VIMES V`, `APPLE COM/BILL`,
+    /// les noms y sont TRONQUÉS en largeur fixe (`SC-PHIE NIMES V`, `APPLE COM/BILL`,
     /// `SOUNDCLOUD MONTH`). Un token du libellé qui est un préfixe d'un token du candidat
     /// compte comme une correspondance partielle, sans quoi toute enseigne coupée en deux
     /// serait mécaniquement mal classée.

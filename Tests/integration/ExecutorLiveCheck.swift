@@ -73,7 +73,7 @@ do {
 
 print("\n2 · Libellé de relevé réel avec localité tronquée en tête")
 do {
-    let label = "PAIEMENT PSC 1703 VIMES AUCHAN VIMES CARTE 1042 GIP010079487221556"
+    let label = "PAIEMENT PSC 1703 NIMES AUCHAN NIMES CARTE 1042 GIP010079487221556"
     let result = await MerchantQueryExecutor.shared.search(
         input: MerchantQueryPlanner.Input(rawLabel: label),
         budget: .interactive
@@ -84,7 +84,7 @@ do {
           "la ville répétée est retirée du nom",
           "obtenu « \(result.plan.extraction.nameQuery) »")
     check(result.plan.locality?.inseeCode == "91377",
-          "« VIMES » est résolu en Massy (Essonne), pas son homonyme de Seine-Maritime",
+          "« NIMES » est résolu en Massy (Essonne), pas son homonyme de Seine-Maritime",
           "obtenu \(result.plan.locality?.inseeCode ?? "aucun")")
     check(!result.companies.isEmpty, "des entreprises sont trouvées")
 

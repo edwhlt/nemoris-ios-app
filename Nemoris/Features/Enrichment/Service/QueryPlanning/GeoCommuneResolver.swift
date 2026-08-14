@@ -17,7 +17,7 @@ import Foundation
 ///     ROSIERES PRES → Rosières-près-Troyes    insee 10325 · dep 10
 ///     FLANCHES      → []   ← oracle NÉGATIF, tout aussi utile
 ///
-/// Elle désambiguïse aussi par population (`boost=population`) : « VIMES » existe en
+/// Elle désambiguïse aussi par population (`boost=population`) : « NIMES » existe en
 /// Essonne et en Seine-Maritime, on veut la première.
 ///
 /// Un échec de résolution n'est PAS un échec de la recherche : le fragment reste utilisé

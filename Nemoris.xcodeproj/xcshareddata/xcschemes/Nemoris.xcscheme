@@ -41,6 +41,16 @@
                ReferencedContainer = "container:Nemoris.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "E8971B12302F78DE0022F53E"
+               BuildableName = "NemorisUITests.xctest"
+               ReferencedContainer = "container:Nemoris.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
