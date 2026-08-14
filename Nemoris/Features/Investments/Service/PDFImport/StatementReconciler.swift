@@ -190,7 +190,7 @@ enum StatementReconciler {
     }
 
     /// Noms « assez proches » : un relevé écrit « AM.PEA EM.ES.T.ACC » là où un
-    /// modèle rend « Amundi PEA Emerging Markets ». On ne cherche donc pas
+    /// modèle rend « Epargne PEA Emerging Markets ». On ne cherche donc pas
     /// l'égalité, mais l'inclusion d'une forme normalisée dans l'autre.
     private static func similarNames(_ a: String, _ b: String) -> Bool {
         let normalizedA = normalize(a), normalizedB = normalize(b)

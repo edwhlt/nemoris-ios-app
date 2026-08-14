@@ -78,18 +78,18 @@ func dayPoint(_ daysAgo: Int, hour: Int, close: Double, id: String) -> Investmen
 /// Scénario réel : 2 positions d'un même PEA, synchronisées à des heures
 /// DIFFÉRENTES (09h vs 17h) → grilles d'horodatages désalignées.
 ///   Lyxor CAC 40 : 30 parts à ~84 €   → ~2 530 €  (PRU  71 →  2 130 €)
-///   Amundi World : 45 parts à ~40 €   → ~1 818 €  (PRU 250 → 11 250 €)
+///   Epargne World : 45 parts à ~40 €   → ~1 818 €  (PRU 250 → 11 250 €)
 ///   Valeur de marché attendue ≈ 4 350 € ; total au PRU = 13 380 €
 func realisticInputs() -> [PortfolioSeriesInput] {
     var lyxor: [InvestmentPricePoint] = []
-    var amundi: [InvestmentPricePoint] = []
+    var epargne: [InvestmentPricePoint] = []
     for d in stride(from: 89, through: 0, by: -1) {
         lyxor.append(dayPoint(d, hour: 9,  close: 84.0 + Double((89 - d) % 7) * 0.15, id: "CAC.PA"))
-        amundi.append(dayPoint(d, hour: 17, close: 40.0 + Double((89 - d) % 5) * 0.08, id: "EWLD.PA"))
+        epargne.append(dayPoint(d, hour: 17, close: 40.0 + Double((89 - d) % 5) * 0.08, id: "EWLD.PA"))
     }
     return [
         PortfolioSeriesInput(positionId: 1, quantity: 30, history: lyxor),
-        PortfolioSeriesInput(positionId: 2, quantity: 45, history: amundi),
+        PortfolioSeriesInput(positionId: 2, quantity: 45, history: epargne),
     ]
 }
 
@@ -149,7 +149,7 @@ do {
             date: now.addingTimeInterval(-Double(step) * 1800),
             close: 84.0 + Double(47 - step) * 0.01))
     }
-    let dailyOnly = realisticInputs()[1]   // Amundi : quotidien uniquement
+    let dailyOnly = realisticInputs()[1]   // Epargne : quotidien uniquement
     let result = PortfolioEvolutionBuilder.build(
         inputs: [PortfolioSeriesInput(positionId: 1, quantity: 30, history: intraday), dailyOnly],
         range: .oneDay, now: now)

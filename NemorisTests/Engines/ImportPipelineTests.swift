@@ -591,7 +591,7 @@ struct ImportPipelineEngineTests {
 
         // Investissements : ImportBatchResult, sans état de résolution.
         let order = ExtractedStatementOrder(
-            orderType: "BUY", assetName: "Amundi MSCI World", isin: "LU1681043599",
+            orderType: "BUY", assetName: "Epargne MSCI World", isin: "LU1681043599",
             ticker: "CW8", quantity: 2, unitPrice: 485.30, fees: 1.99,
             executedAt: "2026-04-15", currency: "EUR", notes: nil, confidence: 0.9)
         let batch = ImportBatchResult(

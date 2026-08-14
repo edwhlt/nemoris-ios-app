@@ -517,7 +517,7 @@ enum InvestmentStatementExtractor {
 
         // ⚠️ Un nom de valeur porte TOUJOURS une part de majuscules — code
         // court (« AM.PEA EM.ES.T.ACC », « ISHS CO.EURO STOX50 »), raison
-        // sociale (« TOTALENERGIES SE ») ou casse de titre (« Amundi MSCI
+        // sociale (« TOTALENERGIES SE ») ou casse de titre (« Epargne MSCI
         // World UCITS ETF »). Une phrase française tout en minuscules est un
         // INTITULÉ DE CHAMP, pas un titre.
         //

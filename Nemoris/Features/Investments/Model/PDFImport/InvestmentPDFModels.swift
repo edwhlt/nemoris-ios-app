@@ -6,7 +6,7 @@ import Foundation
 struct PDFExtractedOrder: Identifiable, Hashable {
     let id = UUID()
     var orderType: String       // "BUY" | "SELL" | "DIV"
-    var assetName: String       // Nom lisible (ex: "Amundi MSCI World")
+    var assetName: String       // Nom lisible (ex: "Epargne MSCI World")
     var ticker: String          // Ticker / symbole (ex: "CW8")
     var isin: String            // ISIN si détecté (ex: "LU1681043599")
     var quantity: Double
@@ -61,7 +61,7 @@ enum PDFDocumentMode: String, Codable {
 /// courant (qté détenue, PRU, valeur de marché) mais pas l'historique.
 struct PDFExtractedPosition: Identifiable, Hashable {
     let id = UUID()
-    var assetName: String        // Nom lisible (ex: "Amundi MSCI World")
+    var assetName: String        // Nom lisible (ex: "Epargne MSCI World")
     var ticker: String           // Ticker / symbole
     var isin: String             // ISIN si détecté
     var quantity: Double         // Quantité détenue

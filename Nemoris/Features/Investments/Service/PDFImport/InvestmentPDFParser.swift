@@ -779,7 +779,7 @@ final class InvestmentPDFParser: Sendable {
        - Indices : "Dividende", "Dividend", "Coupon", "Distribution", "Détachement de coupon", "Acompte sur dividende"
 
     INFORMATIONS À EXTRAIRE PAR ORDRE :
-    - **asset_name** : le NOM COMPLET ET RÉEL du titre/instrument (ex: "Amundi MSCI World UCITS ETF Acc", "LVMH Moët Hennessy Louis Vuitton SE", "TotalEnergies SE"). JAMAIS un terme générique comme "Action", "ETF", "Fonds", "Titre" — cherche le vrai nom dans le texte de la page.
+    - **asset_name** : le NOM COMPLET ET RÉEL du titre/instrument (ex: "Epargne MSCI World UCITS ETF Acc", "LVMH Moët Hennessy Louis Vuitton SE", "TotalEnergies SE"). JAMAIS un terme générique comme "Action", "ETF", "Fonds", "Titre" — cherche le vrai nom dans le texte de la page.
     - **isin** : code ISIN 12 caractères (commence par 2 lettres pays : FR, LU, IE, US, DE, NL…). Toujours présent sur les avis d'opéré.
     - **ticker** : symbole boursier court (CW8, AAPL, MC, TTE, BNP…). Peut être absent.
     - **quantity** : nombre de parts/actions (peut être décimal pour les ETF/fonds)
@@ -801,7 +801,7 @@ final class InvestmentPDFParser: Sendable {
     - "Avis d'opéré" + "Achat au marché" → BUY
     - "Avis d'opéré" + "Vente au marché" ou "Vente à cours limité" → SELL
     - "Avis de crédit" + "Dividende" → DIV
-    - Le nom du titre est souvent en gras/gros en haut : "AMUNDI MSCI WORLD UCITS ETF - EUR (C)"
+    - Le nom du titre est souvent en gras/gros en haut : "EPARGNE MSCI WORLD UCITS ETF - EUR (C)"
     - L'ISIN est juste en dessous : "Code ISIN : LU1681043599"
     - Quantité : "Quantité exécutée : 2,000" (attention virgule = séparateur décimal FR)
     - Cours : "Cours d'exécution : 485,30 EUR"
@@ -826,7 +826,7 @@ final class InvestmentPDFParser: Sendable {
       "orders": [
         {
           "order_type": "BUY",
-          "asset_name": "Amundi MSCI World UCITS ETF Acc",
+          "asset_name": "Epargne MSCI World UCITS ETF Acc",
           "ticker": "CW8",
           "isin": "LU1681043599",
           "quantity": 2.0,
@@ -848,7 +848,7 @@ final class InvestmentPDFParser: Sendable {
       "orders": [],
       "positions": [
         {
-          "asset_name": "Amundi MSCI World UCITS ETF Acc",
+          "asset_name": "Epargne MSCI World UCITS ETF Acc",
           "isin": "LU1681043599",
           "ticker": "CW8",
           "quantity": 12.0,

@@ -10,14 +10,14 @@ import Foundation
 /// vérifié :
 ///
 ///     GIF-SUR-YVETT → Gif-sur-Yvette          insee 91272 · dep 91 · cp 91190
-///     GIF SUR YVETT → Gif-sur-Yvette          (tirets ou espaces indifférents)
+///     MONT SUR LOIR → Gif-sur-Yvette          (tirets ou espaces indifférents)
 ///     ISSY LES      → Issy-les-Moulineaux     insee 92040 · dep 92 · cp 92130
 ///     CORMEILLES EN → Cormeilles-en-Parisis   insee 95176 · dep 95
 ///     PERROGNEY LES → Perrogney-les-Fontaines insee 52384 · dep 52
 ///     ROSIERES PRES → Rosières-près-Troyes    insee 10325 · dep 10
 ///     FLANCHES      → []   ← oracle NÉGATIF, tout aussi utile
 ///
-/// Elle désambiguïse aussi par population (`boost=population`) : « MASSY » existe en
+/// Elle désambiguïse aussi par population (`boost=population`) : « VIMES » existe en
 /// Essonne et en Seine-Maritime, on veut la première.
 ///
 /// Un échec de résolution n'est PAS un échec de la recherche : le fragment reste utilisé
@@ -145,7 +145,7 @@ actor GeoCommuneResolver: LocalityResolver {
     }
 
     /// Les fragments arrivent en minuscules sans diacritiques, séparateurs variables
-    /// (« GIF-SUR-YVETT » ou « GIF SUR YVETT »). L'API accepte les deux : on normalise
+    /// (« GIF-SUR-YVETT » ou « MONT SUR LOIR »). L'API accepte les deux : on normalise
     /// simplement les espaces.
     private func normalize(_ raw: String) -> String {
         raw.folding(options: .diacriticInsensitive, locale: Locale(identifier: "fr_FR"))

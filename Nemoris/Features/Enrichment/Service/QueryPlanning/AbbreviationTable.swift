@@ -60,7 +60,7 @@ enum AbbreviationTable {
     ]
 
     /// Marqueurs qui TERMINENT le créneau marchand dans les relevés à champs fixes.
-    /// « … AUCHAN MASSY **CARTE** 5974 GIR0100794… » : tout ce qui suit est structurel.
+    /// « … AUCHAN VIMES **CARTE** 5974 GIR0100794… » : tout ce qui suit est structurel.
     static let cardTerminators: Set<String> = ["carte", "payweb", "paywebc"]
 
     /// Codes de référence sans valeur d'identification, à retirer partout.
@@ -101,7 +101,7 @@ enum AbbreviationTable {
         bankPrefixes.contains(token)
     }
 
-    /// « PAYLI2469 », « GIR012607803713662 », « PAYWEB5974 » : un marqueur connu
+    /// « PAYLI2469 », « GIR012607803713662 », « PAYWEB1042 » : un marqueur connu
     /// immédiatement suivi de chiffres.
     static func isReferenceWithDigits(_ token: String) -> Bool {
         for marker in referenceMarkers.union(cardTerminators) where token.hasPrefix(marker) {

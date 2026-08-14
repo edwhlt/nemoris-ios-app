@@ -88,7 +88,7 @@ do {
     let pdf = """
     BOURSORAMA BANQUE
     Avis d'opéré
-    AMUNDI MSCI WORLD UCITS ETF - EUR (C)
+    EPARGNE MSCI WORLD UCITS ETF - EUR (C)
     Code ISIN : LU1681043599
     Nature de l'opération : Achat au marché
     Date d'exécution : 15/03/2024
@@ -106,7 +106,7 @@ do {
         expect(abs(o.unitPrice - 485.30) < 0.001, "cours d'exécution", "\(o.unitPrice)")
         expect(abs(o.fees - 1.99) < 0.001, "commission lue", "\(o.fees)")
         expect(o.executedAt == "2024-03-15", "date dd/MM/yyyy normalisée", o.executedAt)
-        expect(o.assetName.contains("AMUNDI"), "nom du titre", o.assetName)
+        expect(o.assetName.contains("EPARGNE"), "nom du titre", o.assetName)
     }
 }
 
@@ -234,7 +234,7 @@ do {
     expect(orders.isEmpty, "aucune opération inventée", "\(orders.count) extraite(s)")
 
     // Un ISIN présent mais sans nature d'opération ni date ne suffit pas.
-    let partial = "AMUNDI ETF\nLU1681043599\nValorisation au 31/12/2024"
+    let partial = "EPARGNE ETF\nLU1681043599\nValorisation au 31/12/2024"
     expect(InvestmentStatementExtractor.extractOrders(from: partial).isEmpty,
            "ISIN + date sans nature d'opération → ignoré")
 }
@@ -463,13 +463,13 @@ do {
 
     // ⚠️ Deux opérations RÉELLES du même titre le même jour restent deux
     // opérations : l'appariement est un-pour-un, et le montant départage.
-    let det1 = order("BUY", "AMUNDI", "LU1681043599", day: "2025-03-02",
+    let det1 = order("BUY", "EPARGNE", "LU1681043599", day: "2025-03-02",
                      qty: 1, price: 400, confidence: 0.60)
-    let det2 = order("BUY", "AMUNDI", "LU1681043599", day: "2025-03-02",
+    let det2 = order("BUY", "EPARGNE", "LU1681043599", day: "2025-03-02",
                      qty: 1, price: 900, confidence: 0.60)
-    let ai1 = order("BUY", "Amundi", "LU1681043599", day: "2025-03-02",
+    let ai1 = order("BUY", "Epargne", "LU1681043599", day: "2025-03-02",
                     qty: 2, price: 200, confidence: 0.9)
-    let ai2 = order("BUY", "Amundi", "LU1681043599", day: "2025-03-02",
+    let ai2 = order("BUY", "Epargne", "LU1681043599", day: "2025-03-02",
                     qty: 3, price: 300, confidence: 0.9)
     let pair = R.reconcile(ai: [ai2, ai1], deterministic: [det1, det2])
     expect(pair.count == 2, "deux opérations du même titre le même jour restent deux",

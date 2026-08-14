@@ -20,7 +20,7 @@ enum DeterministicQueryRefiner {
     ]
 
     /// Mots qui, dans un virement, désignent une opération interne et NON une personne
-    /// (« VIR LIVRET JEUNE », « VIR AMUNDI ESR ») — ne pas les classer en personne physique.
+    /// (« VIR LIVRET JEUNE », « VIR EPARGNE SAL ») — ne pas les classer en personne physique.
     /// ⚠️ « remboursement » n'en fait PAS partie : rembourser un ami est le cas le plus
     /// courant de virement entre particuliers (« VIR INST WERO M ADAM FOURNIER
     /// REMBOURSEMENT PHILIPPINES »). L'y mettre annulait la détection sur ces lignes-là.
@@ -52,7 +52,7 @@ enum DeterministicQueryRefiner {
 
         // 4) Code pays isolé, UNIQUEMENT en position finale ou avant-dernière.
         //    Sans cette contrainte de position, « CB CARREFOUR » verrait « cb » comme un
-        //    pays, et « SC-X2M SACLAY » ou « JD PARIS » deviendraient n'importe quoi.
+        //    pays, et « SC-X2M VERNON » ou « JD PARIS » deviendraient n'importe quoi.
         if refinement.countryCode == nil {
             for index in working.indices.suffix(2) where index >= 0 {
                 let token = working[index]

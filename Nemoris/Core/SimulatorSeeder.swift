@@ -251,7 +251,7 @@ enum SimulatorSeeder {
         // ces valeurs sont dérivées des investment_orders ci-dessous).
         // (id, account_id, asset_type, asset_name, ticker, current_value, [synthetic BUY order : qty, unit_price, executed_at])
         let positions: [(Int, Int, String, String, String, Double, Double, Double, String)] = [
-            (1, 1, "ETF",    "Amundi MSCI World", "EWLD.PA", 14625.0,  45.0, 250.0,    "2020-03-15"),
+            (1, 1, "ETF",    "Epargne MSCI World", "EWLD.PA", 14625.0,  45.0, 250.0,    "2020-03-15"),
             (2, 1, "ETF",    "Lyxor CAC 40",      "CAC.PA",   3795.50, 30.0,  95.0,    "2020-09-10"),
             (3, 2, "STOCK",  "Apple Inc.",        "AAPL",     1820.0,  10.0, 155.0,    "2021-06-01"),
             (4, 2, "STOCK",  "LVMH",              "MC.PA",    2960.0,   4.0, 700.0,    "2022-03-20"),

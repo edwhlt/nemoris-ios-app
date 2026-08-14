@@ -170,7 +170,7 @@ print("\n5 · Résolution des communes tronquées par la banque")
 do {
     // Ces graphies viennent telles quelles de relevés réels : le champ fait ~13 caractères.
     let cases: [(fragment: String, expectedInsee: String)] = [
-        ("GIF SUR YVETT", "91272"),
+        ("MONT SUR LOIR", "91272"),
         ("ISSY LES", "92040"),
         ("CORMEILLES EN", "95176"),
         ("PERROGNEY LES", "52384"),

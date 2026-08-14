@@ -25,7 +25,7 @@ enum LocalityKind: String, Codable, Sendable, Hashable {
     case cityName
     /// Code postal français à 5 chiffres.
     case postalCode
-    /// Code département à 2 chiffres, tel que le préfixe "78" dans « 78 VERSAILLES ».
+    /// Code département à 2 chiffres, tel que le préfixe "78" dans « 78 BEAUVAISIN ».
     case departmentCode
     /// Code pays ISO 3166-1 alpha-2.
     case countryCode
@@ -84,12 +84,12 @@ struct ResolvedLocality: Hashable, Sendable, Codable {
 /// qui permettent à l'utilisateur de réinjecter un token mal classé.
 enum DropReason: String, Codable, Sendable, Hashable {
     case processorPrefix    // PAIEMENT, CB, PSC, VIR, PRLV, SUMUP, VNPAY…
-    case cardMarker         // CARTE 5974, PAYWEB5974
+    case cardMarker         // CARTE 1042, PAYWEB1042
     case transactionId      // GIR012607803713662, CG3W26063M200769
     case date               // 1803 (DDMM), 19/05
     case currency           // EUR, VND
     case postalCode         // 75011
-    case locality           // GIF SUR YVETT
+    case locality           // MONT SUR LOIR
     case departmentCode     // 78
     case paymentReference   // PAYLI2469, PSC
     case countryCode        // VN, FR
@@ -130,7 +130,7 @@ struct MerchantLabelExtraction: Hashable, Sendable, Codable {
     let localityTokens: [LocalityToken]
     /// Code pays ISO-2 en MAJUSCULES.
     let countryHint: String?
-    /// Code département déduit sans ambiguïté (préfixe « 78 VERSAILLES »).
+    /// Code département déduit sans ambiguïté (préfixe « 78 BEAUVAISIN »).
     let departmentHint: String?
     let droppedTokens: [DroppedToken]
     /// Virement nominatif : on n'interroge JAMAIS un registre d'entreprises pour un

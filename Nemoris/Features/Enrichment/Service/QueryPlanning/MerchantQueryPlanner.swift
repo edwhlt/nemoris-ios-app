@@ -216,7 +216,7 @@ enum MerchantQueryPlanner {
                     : "nom seul",
                 0.6)
             // 5 — nom raccourci : les enseignes sont tronquées en largeur fixe dans les
-            // relevés (« SC-PHIE MASSY V »), le dernier token est souvent coupé.
+            // relevés (« SC-PHIE VIMES V »), le dernier token est souvent coupé.
             //
             // ⚠️ Pas de tentative « nom + localité » ici, même quand la commune n'est pas
             // résolue et que le fragment est ambigu (« SROM **FLANCHES** » est un lieu-dit
@@ -330,10 +330,10 @@ enum MerchantQueryPlanner {
         var nameTokens = Array(tokens[slots.merchantRange])
         // Le créneau marchand peut encore contenir un code postal ou un code pays isolé.
         nameTokens = stripGeoNoise(from: nameTokens, into: &localityTokens, dropped: &dropped)
-        // La ville se répète très souvent dans le nom de l'enseigne : « MASSY AUCHAN MASSY »,
+        // La ville se répète très souvent dans le nom de l'enseigne : « VIMES AUCHAN VIMES »,
         // « LYON CITADIUM LYON », « PARIS VELIZE JD PARIS VELIZE ». La laisser dans `q=`
         // reproduit exactement le bug que cet axe corrige — `q=auchan` + filtre commune
-        // trouve, `q=auchan massy` ne trouve rien.
+        // trouve, `q=auchan vimes` ne trouve rien.
         nameTokens = stripRepeatedLocality(from: nameTokens, localityTokens: localityTokens,
                                            dropped: &dropped)
         nameTokens = joinSpelledAcronyms(nameTokens)

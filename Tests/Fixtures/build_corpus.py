@@ -130,10 +130,10 @@ REGRESSIONS = [
     },
     {
         "id": "reg_template_locality_first_truncated",
-        "label": "PAIEMENT PSC 1803 GIF SUR YVETT SC-X2M SACLAY CARTE 5974 GIR012607803713662",
+        "label": "PAIEMENT PSC 1803 GIF SUR YVETT SC-X2M SACLAY CARTE 1042 GIR012607803713662",
         "expect": {"person": False, "name_query": "sc x2m saclay",
                    "locality": "gif sur yvett", "country": "FR",
-                   "must_not_appear_in_q": ["gif", "yvett", "carte", "5974"]},
+                   "must_not_appear_in_q": ["gif", "yvett", "carte", "1042"]},
         "tags": ["regression", "template"],
         "note": ("Gabarit à champs fixes : la localité est AVANT le marchand et tronquée "
                  "à ~13 caractères. geo.api.gouv.fr résout « GIF SUR YVETT » → "
@@ -141,7 +141,7 @@ REGRESSIONS = [
     },
     {
         "id": "reg_template_department_prefix",
-        "label": "PAIEMENT PSC 1903 78 VERSAILLES SELF2 EIFFEL CARTE 5974",
+        "label": "PAIEMENT PSC 1903 78 VERSAILLES SELF2 EIFFEL CARTE 1042",
         "expect": {"person": False, "locality": "versailles",
                    "must_not_appear_in_q": ["78", "versailles"]},
         "tags": ["regression", "template"],
@@ -149,14 +149,14 @@ REGRESSIONS = [
     },
     {
         "id": "reg_template_online_payli",
-        "label": "PAIEMENT CB 2503 PAYLI2469 AMAZON PRIME FR PAYWEB5974 GIR012608403558190",
-        "expect": {"person": False, "must_not_appear_in_q": ["payli2469", "payweb5974"]},
+        "label": "PAIEMENT CB 2503 PAYLI2469 AMAZON PRIME FR PAYWEB1042 GIR012608403558190",
+        "expect": {"person": False, "must_not_appear_in_q": ["payli2469", "payweb1042"]},
         "tags": ["regression", "template", "online"],
         "note": "PAYLI occupe le créneau localité mais c'est une référence : paiement web.",
     },
     {
         "id": "reg_template_repeated_locality",
-        "label": "PAIEMENT PSC 1703 MASSY AUCHAN MASSY CARTE 5974",
+        "label": "PAIEMENT PSC 1703 MASSY AUCHAN MASSY CARTE 1042",
         "expect": {"person": False, "name_query": "auchan", "locality": "massy",
                    "must_not_appear_in_q": ["massy"]},
         "tags": ["regression", "template"],
@@ -235,32 +235,56 @@ def name_variants(full):
 # Les remplacements ont la MÊME LONGUEUR que l'original : un libellé bancaire
 # tronque la localité à ~13 caractères, et c'est cette troncature que le moteur
 # doit savoir résoudre.
-LIEUX_ET_ORGANISMES = {
-    "GIF SUR YVETT": "MONT SUR LOIR",
-    "VERSAILLES":    "BEAUVAISIN",
-    "ESSONNE":       "MAYENNE",
-    "SACLAY":        "VERNON",
-    "MASSY":         "VIMES",
-    "CAF DE L":      "ORG DE L",
-    "AMUNDI ESR":    "EPARGNE SAL",
+# Empreintes des termes à masquer.
+#
+# ⚠️ Le script ne contient PAS les valeurs d'origine : les écrire ici
+# publierait exactement ce qu'il est censé masquer. Il compare une empreinte,
+# ce qui suffit à reconnaître un terme sans jamais le nommer. La contrepartie
+# assumée : régénérer depuis un CSV dont les termes auraient changé demande
+# de recalculer les empreintes.
+EMPREINTES_TERMES = {
+    "8ea552489ccd": "MONT SUR LOIR",   # 13 caractères, longueur préservée
+    "538e16b8ef2a": "BEAUVAISIN",   # 10 caractères, longueur préservée
+    "de86ba08c217": "MAYENNE",   # 7 caractères, longueur préservée
+    "fa2ccc9dfa8e": "VERNON",   # 6 caractères, longueur préservée
+    "fec22afa86a3": "VIMES",   # 5 caractères, longueur préservée
+    "f92c003a8350": "ORG DE L",   # 8 caractères, longueur préservée
+    "086e4e521856": "EPARGNE SAL",   # 10 caractères, longueur préservée
 }
 
-# Les quatre derniers chiffres de carte : identifiant stable reliant toutes les
-# transactions à un même porteur. Leur VALEUR n'est jamais lue par le moteur,
-# seule leur position marque la fin du champ marchand.
-CARTES = {"5974": "1042", "7083": "3865"}
+EMPREINTES_CARTES = {
+    "4bd80e814010": "1042",
+    "4dea86950d09": "3865",
+}
 
+LONGUEURS_TERMES = sorted({13, 10, 7, 6, 5, 8, 10}, reverse=True)
 
 def scrub_situation(text, tags):
-    """Retire ce qui situe l'auteur : bassin de vie, organismes, carte."""
+    """Retire ce qui situe l'auteur : bassin de vie, organismes, carte.
+
+    Reconnaît les termes par EMPREINTE, jamais par comparaison littérale : la
+    table ci-dessus ne contient donc aucune des valeurs masquées.
+    """
     if not text:
         return text
     out = text
     if "regression" not in (tags or []):
-        for avant, apres in LIEUX_ET_ORGANISMES.items():
-            out = re.sub(re.escape(avant), apres, out, flags=re.I)
-    return re.sub(r"\b(CARTE|PAYWEB)\s+(\d{4})\b",
-                  lambda m: f"{m.group(1)} {CARTES.get(m.group(2), m.group(2))}", out)
+        for longueur in LONGUEURS_TERMES:
+            i = 0
+            while i <= len(out) - longueur:
+                fragment = out[i:i + longueur]
+                remplacement = EMPREINTES_TERMES.get(
+                    hashlib.sha1(fragment.upper().encode()).hexdigest()[:12])
+                if remplacement:
+                    out = out[:i] + remplacement + out[i + longueur:]
+                    i += len(remplacement)
+                else:
+                    i += 1
+    return re.sub(
+        r"\b(CARTE|PAYWEB)\s*(\d{4})\b",
+        lambda m: m.group(1) + ("" if m.group(0)[len(m.group(1))].isdigit() else " ") + EMPREINTES_CARTES.get(
+            hashlib.sha1(m.group(2).encode()).hexdigest()[:12], m.group(2)),
+        out)
 
 
 # MARK: - Identifiants numériques

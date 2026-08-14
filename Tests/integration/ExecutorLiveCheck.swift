@@ -73,7 +73,7 @@ do {
 
 print("\n2 · Libellé de relevé réel avec localité tronquée en tête")
 do {
-    let label = "PAIEMENT PSC 1703 MASSY AUCHAN MASSY CARTE 5974 GIP010079487221556"
+    let label = "PAIEMENT PSC 1703 VIMES AUCHAN VIMES CARTE 1042 GIP010079487221556"
     let result = await MerchantQueryExecutor.shared.search(
         input: MerchantQueryPlanner.Input(rawLabel: label),
         budget: .interactive
@@ -84,7 +84,7 @@ do {
           "la ville répétée est retirée du nom",
           "obtenu « \(result.plan.extraction.nameQuery) »")
     check(result.plan.locality?.inseeCode == "91377",
-          "« MASSY » est résolu en Massy (Essonne), pas son homonyme de Seine-Maritime",
+          "« VIMES » est résolu en Massy (Essonne), pas son homonyme de Seine-Maritime",
           "obtenu \(result.plan.locality?.inseeCode ?? "aucun")")
     check(!result.companies.isEmpty, "des entreprises sont trouvées")
 
@@ -102,14 +102,14 @@ do {
 
 print("\n3 · Localité tronquée par la banque")
 do {
-    let label = "PAIEMENT PSC 1803 GIF SUR YVETT OCT TRADITION CARTE 5974"
+    let label = "PAIEMENT PSC 1803 MONT SUR LOIR OCT TRADITION CARTE 1042"
     let result = await MerchantQueryExecutor.shared.search(
         input: MerchantQueryPlanner.Input(rawLabel: label),
         budget: .interactive
     )
     describe(result)
     check(result.plan.locality?.inseeCode == "91272",
-          "« GIF SUR YVETT » tronqué est résolu en Gif-sur-Yvette (91272)",
+          "« MONT SUR LOIR » tronqué est résolu en Gif-sur-Yvette (91272)",
           "obtenu \(result.plan.locality?.inseeCode ?? "aucun")")
     check(result.plan.attempts.first?.kind.shortName == "registry_commune",
           "la 1re tentative utilise le filtre commune INSEE")

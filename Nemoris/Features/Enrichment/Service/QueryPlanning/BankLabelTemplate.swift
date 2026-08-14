@@ -21,7 +21,7 @@ import Foundation
 //     dictionnaire en correspondance exacte ne peut les reconnaître. C'est `geo.api.gouv.fr`
 //     qui les résout (vérifié : « ISSY LES » → Issy-les-Moulineaux, insee 92040).
 //
-//  3. LE MARCHAND EST TRONQUÉ AUSSI : « SC-PHIE MASSY V », « APPLE COM/BILL »,
+//  3. LE MARCHAND EST TRONQUÉ AUSSI : « SC-PHIE VIMES V », « APPLE COM/BILL »,
 //     « SOUNDCLOUD MONTH ». D'où le bonus de préfixe de `MerchantTokenSimilarity`.
 //
 // Un gabarit est une DONNÉE pure et testable : ajouter le format d'une autre banque,
@@ -36,7 +36,7 @@ struct TemplateSlots: Hashable, Sendable {
     /// Indices des tokens formant le nom du marchand.
     let merchantRange: Range<Int>
     /// Code département à 2 chiffres, quand le libellé le porte explicitement
-    /// (« 78 VERSAILLES ») — filtre gratuit et non ambigu.
+    /// (« 78 BEAUVAISIN ») — filtre gratuit et non ambigu.
     let departmentCode: String?
     /// Paiement web : pas de localité physique, donc pas de filtre géo ni de recherche
     /// par proximité.
@@ -97,20 +97,20 @@ extension BankLabelTemplate {
             end -= 1
         }
 
-        // --- Terminateur : CARTE NNNN  |  PAYWEB NNNN  |  PAYWEB5974 (collé)
+        // --- Terminateur : CARTE NNNN  |  PAYWEB NNNN  |  PAYWEB1042 (collé)
         var isOnline = false
         if end > cursor {
             let last = tokens[end - 1]
             if last.allSatisfy(\.isNumber), end - 1 > cursor,
                AbbreviationTable.cardTerminators.contains(tokens[end - 2]) {
-                // « CARTE 5974 » / « PAYWEB 5974 »
+                // « CARTE 1042 » / « PAYWEB 1042 »
                 isOnline = tokens[end - 2].hasPrefix("payweb")
                 dropped.append(DroppedToken(value: tokens[end - 2], reason: .cardMarker))
                 dropped.append(DroppedToken(value: last, reason: .cardMarker))
                 end -= 2
             } else if AbbreviationTable.cardTerminators.contains(where: { last.hasPrefix($0) }),
                       AbbreviationTable.isReferenceWithDigits(last) {
-                // « PAYWEB5974 » collé
+                // « PAYWEB1042 » collé
                 isOnline = last.hasPrefix("payweb")
                 dropped.append(DroppedToken(value: last, reason: .cardMarker))
                 end -= 1
@@ -118,7 +118,7 @@ extension BankLabelTemplate {
         }
         guard end > cursor else { return nil }
 
-        // --- Département explicite : « 78 VERSAILLES », « 91 GIF-SUR-YV »
+        // --- Département explicite : « 78 BEAUVAISIN », « 91 GIF-SUR-YV »
         var departmentCode: String? = nil
         if cursor < end, tokens[cursor].count == 2, tokens[cursor].allSatisfy(\.isNumber),
            cursor + 1 < end {
@@ -175,7 +175,7 @@ extension BankLabelTemplate {
     /// Combien de tokens la localité occupe réellement en tête du créneau.
     ///
     /// ⚠️ Surtout PAS le maximum disponible. La très grande majorité des communes tiennent
-    /// en UN mot (LYON, MASSY, OULLINS, ROUBAIX, CORK, BERLIN) ; prendre gloutonnement
+    /// en UN mot (LYON, VIMES, OULLINS, ROUBAIX, CORK, BERLIN) ; prendre gloutonnement
     /// trois tokens transformait « AMSTERDAM DOTT SCOOTER RID » en localité
     /// « amsterdam dott scooter » et marchand « rid » — le marchand était mangé par la ville.
     ///
@@ -206,7 +206,7 @@ extension BankLabelTemplate {
     }
 
     /// Le champ localité des relevés fait ~13 caractères, ce qui plafonne en pratique
-    /// à 3 mots (« GIF SUR YVETT », « PARIS LA DEFE », « CORMEILLES EN »).
+    /// à 3 mots (« MONT SUR LOIR », « PARIS LA DEFE », « CORMEILLES EN »).
     private static let maxLocalityTokens = 3
 
     /// Particules qui prolongent un nom de commune français.
