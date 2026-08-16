@@ -25,8 +25,8 @@ struct Account: Identifiable, Hashable {
 }
 
 extension Array where Element == Account {
-    /// Comptes groupés par type (Courant → Épargne → Différé → Autre),
-    /// triés alphabétiquement au sein de chaque groupe. Groupes vides omis.
+    /// Accounts grouped by type (Checking → Savings → Deferred → Other),
+    /// sorted alphabetically within each group. Empty groups are omitted.
     var groupedByType: [(type: AccountType, accounts: [Account])] {
         AccountType.allCases.compactMap { type in
             let group = self.filter { $0.accountType == type }
@@ -74,12 +74,11 @@ struct Category: Identifiable, Hashable {
 }
 
 extension Array where Element == Category {
-    /// Liste à plat triée hiérarchiquement : chaque parente est immédiatement
-    /// suivie de ses sous-catégories. Les sous-cats portent un préfixe `↳ ` pour
-    /// matérialiser la hiérarchie dans les Pickers (qui n'ont pas de notion
-    /// native d'indentation).
+    /// Flat list sorted hierarchically: each parent is immediately followed
+    /// by its subcategories. Subcategories carry a `↳ ` prefix to convey the
+    /// hierarchy in Pickers (which have no native notion of indentation).
     ///
-    /// Tri alphabétique au sein de chaque niveau pour stabilité.
+    /// Alphabetical sort within each level, for stability.
     var hierarchicallySorted: [(category: Category, indentedName: String)] {
         let parents = self.filter { $0.parentId == nil }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -92,8 +91,8 @@ extension Array where Element == Category {
                 result.append((child, "↳ \(child.name)"))
             }
         }
-        // Catégories orphelines (parent_id non-nil mais parent introuvable) :
-        // ne pas les perdre — on les ajoute à la fin sans indentation.
+        // Orphan categories (parent_id non-nil but parent not found): not
+        // dropped — appended at the end without indentation.
         let knownIds = Set(parents.map(\.id))
         let orphans = self.filter { c in
             guard let pid = c.parentId else { return false }
@@ -107,7 +106,7 @@ extension Array where Element == Category {
     }
 }
 
-/// Nœud de l'arbre des catégories, construit en mémoire depuis la liste plate.
+/// Node of the category tree, built in memory from the flat list.
 struct CategoryNode: Identifiable {
     let category: Category
     var children: [CategoryNode]
@@ -115,21 +114,21 @@ struct CategoryNode: Identifiable {
     var id: Int { category.id }
     var isLeaf: Bool { children.isEmpty }
 
-    /// Critère de tri des catégories dans l'arbre.
+    /// Sort criterion for categories in the tree.
     enum SortMode {
-        /// Ordre alphabétique (insensible à la casse) à chaque niveau.
+        /// Alphabetical order (case-insensitive) at each level.
         case alphabetical
-        /// Ordre de création (id croissant) à chaque niveau.
+        /// Creation order (ascending id) at each level.
         case creation
     }
 
-    /// Construit la forêt (liste de racines) depuis une liste plate de Category.
+    /// Builds the forest (list of roots) from a flat list of Category.
     static func buildForest(from flat: [Category], sort: SortMode = .alphabetical) -> [CategoryNode] {
         var nodeMap: [Int: CategoryNode] = [:]
         for cat in flat {
             nodeMap[cat.id] = CategoryNode(category: cat, children: [])
         }
-        // Passe 1 : assigner tous les enfants dans nodeMap
+        // Pass 1: assign all children into nodeMap
         for cat in flat {
             guard let parentId = cat.parentId else { continue }
             let child = nodeMap[cat.id]!
@@ -138,7 +137,7 @@ struct CategoryNode: Identifiable {
                 nodeMap[parentId] = parent
             }
         }
-        // Passe 2 : collecter les racines APRÈS que tous les enfants ont été assignés
+        // Pass 2: collect roots AFTER all children have been assigned
         let roots = flat
             .filter { $0.parentId == nil }
             .compactMap { nodeMap[$0.id] }
@@ -161,7 +160,7 @@ struct CategoryNode: Identifiable {
         }
     }
 
-    /// Retourne tous les IDs de la sous-arborescence (self + descendants).
+    /// Returns all IDs in the subtree (self + descendants).
     func allIds() -> [Int] {
         [category.id] + children.flatMap { $0.allIds() }
     }
@@ -170,15 +169,15 @@ struct CategoryNode: Identifiable {
 struct Tag: Identifiable, Hashable {
     let id: Int
     var name: String
-    var color: String?  // Hex sans # ex: "8B5CF6", nil = violet par défaut
+    var color: String?  // Hex without #, e.g. "8B5CF6"; nil = default purple
 }
 
-/// Type d'un tier — permet d'adapter l'UI et le routage moteur.
+/// Type of a tier — drives UI adaptation and engine routing.
 enum TierType: String, Codable, CaseIterable, Identifiable {
-    case merchant        // Commerce (Carrefour, Apple, etc.)
-    case contact         // Personne physique (P2P, "Papa", "Marie")
-    case `internal`      // Virement entre comptes propres
-    case organization    // CAF, CPAM, employeur, école
+    case merchant        // Business (Carrefour, Apple, etc.)
+    case contact         // Individual (P2P, "Dad", "Marie")
+    case `internal`      // Transfer between the user's own accounts
+    case organization    // CAF, CPAM, employer, school
 
     var id: String { rawValue }
 
@@ -207,24 +206,26 @@ struct Tiers: Identifiable, Hashable {
     var regex: String?
     var categoryId: Int? = nil
     var linkedCompteId: Int? = nil
-    /// ID canonique côté NemorisEngine (ex: "carrefour"). Nil pour les tiers custom.
+    /// Canonical ID on the NemorisEngine side (e.g. "carrefour"). Nil for custom tiers.
     var engineMerchantId: String? = nil
-    /// Domaine web utilisé pour récupérer le favicon. Nullable — résolu dynamiquement via le seed engine si vide.
+    /// Web domain used to fetch the favicon. Nullable — resolved dynamically
+    /// via the engine seed when empty.
     var domain: String? = nil
-    // champs d'édition complète exposés à l'utilisateur.
+    // Full-editing fields exposed to the user.
     var address: String? = nil
     var city: String? = nil
-    /// Code pays ISO 3166-1 alpha-2 (ex "FR").
+    /// ISO 3166-1 alpha-2 country code (e.g. "FR").
     var country: String? = nil
     var groupId: Int? = nil
-    /// 1 = créé manuellement par l'utilisateur (pas de lien moteur attendu).
+    /// 1 = manually created by the user (no engine link expected).
     var custom: Bool = false
-    /// Note libre saisie par l'utilisateur.
+    /// Free-form note entered by the user.
     var note: String? = nil
-    /// Type du tier (commerce / contact / interne / organisation) — v25.
+    /// Type of the tier (merchant / contact / internal / organization).
     var tierType: TierType = .merchant
-    /// Identifiant local CNContact (carnet de contacts iOS) si tier de type .contact
-    /// et lié explicitement par l'utilisateur. Permet de récupérer la photo locale.
+    /// Local CNContact identifier (iOS contacts book) if the tier is of type
+    /// .contact and was explicitly linked by the user. Used to fetch the
+    /// local photo.
     var contactIdentifier: String? = nil
 }
 
@@ -253,7 +254,7 @@ struct FinanceTransaction: Identifiable, Hashable {
     let paymentTypeName: String
     let remboursementTiersName: String
     let information: String
-    /// Libellé brut bancaire (rempli à l'import, nil pour les transactions saisies manuellement).
+    /// Raw bank label (filled in on import, nil for manually entered transactions).
     let libelleBrut: String?
     let amount: Double
     let date: Date
@@ -264,11 +265,11 @@ enum TransactionTypePicker: String, CaseIterable {
     case income
 }
 
-/// État tri-state d'un tag dans un contexte de sélection multiple.
+/// Tri-state of a tag within a multi-selection context.
 enum TagSelectionState {
-    case all    // tous les éléments sélectionnés ont ce tag
-    case some   // seulement certains éléments ont ce tag (indéterminé)
-    case none   // aucun élément sélectionné n'a ce tag
+    case all    // every selected item has this tag
+    case some   // only some selected items have this tag (indeterminate)
+    case none   // no selected item has this tag
 
     mutating func toggle() {
         switch self {
@@ -285,7 +286,7 @@ struct TransactionEditDraft: Identifiable {
     var paymentTypeId: Int?
     var remboursementTiersId: Int?
     var information: String
-    /// Libellé brut bancaire — lecture seule, non modifiable par l'utilisateur.
+    /// Raw bank label — read-only, not editable by the user.
     let libelleBrut: String?
     var amount: Double
     var type: TransactionTypePicker
@@ -305,7 +306,7 @@ struct TransactionEditDraft: Identifiable {
     }
 }
 
-/// Statut d'un remboursement — v44.
+/// Status of a reimbursement.
 enum ReimbursementStatus: String, Codable, CaseIterable, Identifiable {
     case pending  = "PENDING"
     case received = "RECEIVED"
@@ -327,10 +328,9 @@ enum ReimbursementStatus: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// Un remboursement attendu — rattaché à une transaction simple OU une entrée
-/// Tricount (jamais les deux, CHECK XOR en base, v44). Remplace
-/// `transactions.reimbursement_payee_id` (0..1 payee) et `tricount_reimbursements`
-/// (0..N payees).
+/// An expected reimbursement — attached to either a plain transaction OR a
+/// Tricount entry (never both, enforced by a CHECK XOR constraint in the
+/// database).
 struct Reimbursement: Identifiable {
     let id: Int
     let transactionId: Int?
@@ -340,28 +340,29 @@ struct Reimbursement: Identifiable {
     var status: ReimbursementStatus
     let updatedAt: Date
 
-    /// Montant signé dans la devise d'origine (négatif = dépense, le cas
-    /// courant) — déjà signé par la requête : montant tel quel pour une
-    /// transaction, part personnelle signée selon le type de l'entrée liée
-    /// pour un remboursement Tricount.
+    /// Signed amount in the original currency (negative = expense, the
+    /// common case) — already signed by the query: the raw amount for a
+    /// transaction, the personal share signed according to the linked
+    /// entry's type for a Tricount reimbursement.
     let amount: Double
     let currency: String
-    /// Équivalent EUR signé (nil si conversion indisponible ou déjà en EUR).
+    /// Signed EUR equivalent (nil if conversion is unavailable or already in EUR).
     let eurAmount: Double?
 
     let originDescription: String
     let originDate: Date
 
-    /// Catégorie de la transaction/entrée d'origine — nil si non catégorisée.
-    /// Ajoutés en fin de liste avec valeurs par défaut pour ne pas casser les
-    /// sites de construction existants qui n'ont pas cette info (remboursements
-    /// Tricount seuls, par ex.).
+    /// Category of the originating transaction/entry — nil if uncategorized.
+    /// Appended at the end with default values so existing construction
+    /// sites that don't have this information (Tricount-only reimbursements,
+    /// for instance) remain unaffected.
     var categoryId: Int? = nil
     var categoryName: String = ""
-    /// Payee PRINCIPAL de la transaction d'origine (ex. "Netflix") — distinct
-    /// de `payeeName` qui est celui qui REMBOURSE. Vide côté Tricount (pas
-    /// d'équivalent). Sert de repli d'affichage quand `originDescription` est
-    /// vide (fréquent : c'est un champ de note libre, souvent jamais rempli).
+    /// PRIMARY payee of the originating transaction (e.g. "Netflix") —
+    /// distinct from `payeeName`, which is the one DOING the reimbursing.
+    /// Empty on the Tricount side (no equivalent). Used as a display
+    /// fallback when `originDescription` is empty (common, since it's a
+    /// free-form note field that's often never filled in).
     var originPayeeName: String = ""
 
     var isTricountOrigin: Bool { tricountEntryId != nil }
@@ -370,11 +371,11 @@ struct Reimbursement: Identifiable {
     var needsConversion: Bool { currency != "EUR" && currency != "" && eurAmount == nil }
 }
 
-/// Remboursements groupés par catégorie de dépense d'origine — vue
-/// complémentaire au groupement par payee dans `ReimbursementsSheet`.
+/// Reimbursements grouped by the originating expense's category — a view
+/// complementary to the payee grouping in `ReimbursementsSheet`.
 struct CategoryReimbursementGroup: Identifiable {
     let categoryId: Int?
-    let categoryName: String   // "Non catégorisé" si categoryId == nil
+    let categoryName: String   // "Non catégorisé" if categoryId == nil
     let items: [Reimbursement]
     var id: Int { categoryId ?? -1 }
     var total: Double { items.reduce(0) { $0 + $1.effectiveEurAmount } }
@@ -382,7 +383,7 @@ struct CategoryReimbursementGroup: Identifiable {
     var tricountCount: Int { items.filter { $0.isTricountOrigin }.count }
 }
 
-/// Remboursements groupés par payee — transactions simples et Tricount confondus.
+/// Reimbursements grouped by payee — plain transactions and Tricount entries combined.
 struct ReimbursementGroup: Identifiable {
     let payeeId: Int
     let payeeName: String
@@ -401,7 +402,7 @@ struct MonthlyTotals {
 
 struct CategoryTotal {
     let category: String
-    let parentCategory: String?   // nil si pas de catégorie parente
+    let parentCategory: String?   // nil if there's no parent category
     let total: Double
 }
 
@@ -471,12 +472,11 @@ struct TransactionImportFailure: Identifiable, Hashable {
 struct TransactionImportResult {
     let insertedCount: Int
     let failures: [TransactionImportFailure]
-    /// Identifiant créé pour chaque ligne source (n° de ligne → id transaction).
+    /// Created ID for each source row (row number → transaction id).
     ///
-    /// Nécessaire pour rattacher des données APRÈS l'insert — les métadonnées
-    /// libres (v46) en particulier, qui référencent `transactions(id)`. Défaut
-    /// vide pour que les sites d'appel qui n'en ont pas besoin restent
-    /// inchangés.
+    /// Needed to attach data AFTER the insert — free-form metadata in
+    /// particular, which references `transactions(id)`. Defaults to empty
+    /// so call sites that don't need it are unaffected.
     var insertedIds: [Int: Int] = [:]
 }
 
@@ -516,35 +516,35 @@ struct TricountEntry: Identifiable {
     let linkedTransactionId: Int?
 }
 
-/// Résumé des dépenses pour un tag (transactions + entrées Tricount)
+/// Expense summary for a tag (transactions + Tricount entries)
 struct TagExpenseSummary: Identifiable {
     let tag: Tag
-    let transactionTotal: Double   // somme des montants de transactions
-    let tricountTotal: Double      // somme des totaux d'entrées Tricount (en valeur absolue)
+    let transactionTotal: Double   // sum of transaction amounts
+    let tricountTotal: Double      // sum of Tricount entry totals (absolute value)
     var total: Double { transactionTotal + tricountTotal }
     var id: Int { tag.id }
 }
 
-/// Entrée Tricount taguée, pour l'affichage dans TagDetailView
+/// A tagged Tricount entry, for display in TagDetailView
 struct TaggedTricountEntry: Identifiable {
     let id: Int
     let description: String
-    let myShare: Double         // part de l'utilisateur dans la devise du groupe
-    let currency: String        // devise du groupe (ex. "VND")
-    let eurShare: Double?       // équivalent EUR de myShare (nil si taux inconnu)
+    let myShare: Double         // the user's share, in the group's currency
+    let currency: String        // the group's currency (e.g. "VND")
+    let eurShare: Double?       // EUR equivalent of myShare (nil if the rate is unknown)
     let date: Date
     let whoPaid: String
     let groupTitle: String
     let typeTransaction: String // "NORMAL", "INCOME", "BALANCE", "TRANSFER"
 
-    /// Montant à utiliser pour les cumuls : EUR si disponible, sinon devise d'origine.
+    /// Amount to use for totals: EUR if available, otherwise the original currency.
     var effectiveEurAmount: Double { eurShare ?? myShare }
     var isConverted: Bool { eurShare != nil && currency != "EUR" }
-    /// Vrai si l'entrée est en devise étrangère SANS taux disponible → montant non convertible.
+    /// True if the entry is in a foreign currency WITHOUT an available rate → amount not convertible.
     var needsConversion: Bool { currency != "EUR" && currency != "" && eurShare == nil }
-    /// Vrai si l'entrée est une dépense (NORMAL) → signe négatif dans les cumuls.
+    /// True if the entry is an expense (NORMAL) → negative sign in totals.
     var isExpense: Bool { typeTransaction.uppercased() == "NORMAL" }
-    /// Montant signé pour les cumuls : négatif si dépense, positif si revenu/remboursement.
+    /// Signed amount for totals: negative if an expense, positive if income/reimbursement.
     var signedAmount: Double { isExpense ? -effectiveEurAmount : effectiveEurAmount }
 }
 
@@ -607,16 +607,16 @@ struct InvestmentAccount: Identifiable, Hashable {
     var broker: String
     var currency: String
     var accountType: String
-    var currentValue: Double       // Σ positions.current_value (dérivé)
-    var investedAmount: Double     // Σ qty × PRU (dérivé)
+    var currentValue: Double       // Σ positions.current_value (derived)
+    var investedAmount: Double     // Σ qty × average buy price (derived)
     var openedAt: Date
-    /// v34 — trésorerie disponible sur le compte (dividendes pas réinvestis,
-    /// ventes en attente, dépôts récents). Persistée directement sur la row,
-    /// éditable par l'utilisateur dans le form compte.
+    /// Cash available on the account (dividends not reinvested, pending
+    /// sales, recent deposits). Persisted directly on the row, editable by
+    /// the user in the account form.
     var cashBalance: Double = 0
 
-    /// Valorisation totale du compte = valeur des positions + trésorerie.
-    /// C'est ce qu'on veut afficher comme "vrai" capital du compte.
+    /// Total account valuation = value of the positions + cash.
+    /// This is what should be shown as the account's "real" capital.
     var totalValuation: Double { currentValue + cashBalance }
 }
 
@@ -626,33 +626,33 @@ struct InvestmentPosition: Identifiable, Hashable {
     var assetType: String
     var assetName: String
     var ticker: String
-    var isin: String = ""          // v31 : ISIN 12 chars (FR0000121329) — préféré pour sync via OpenFIGI
-    var quantity: Double           // DÉRIVÉE des ordres (Σ BUY - Σ SELL)
-    var averageBuyPrice: Double    // DÉRIVÉE des ordres (PRU pondéré des BUY)
+    var isin: String = ""          // 12-char ISIN (FR0000121329) — preferred for sync via OpenFIGI
+    var quantity: Double           // DERIVED from orders (Σ BUY - Σ SELL)
+    var averageBuyPrice: Double    // DERIVED from orders (weighted average price of the BUYs)
     var currentValue: Double
-    var purchaseDate: Date         // date du PREMIER BUY chronologiquement
+    var purchaseDate: Date         // date of the FIRST BUY chronologically
 
     var investedAmount: Double { quantity * averageBuyPrice }
     var pnl: Double { currentValue - investedAmount }
 
-    /// Identifiant à privilégier pour la sync : ISIN > ticker. L'ISIN résout
-    /// universellement vers le bon symbole tradable via OpenFIGI.
+    /// Identifier to prefer for sync: ISIN > ticker. The ISIN resolves
+    /// universally to the right tradable symbol via OpenFIGI.
     var bestSyncIdentifier: String {
         !isin.isEmpty ? isin : ticker
     }
 
-    /// True si la position est une crypto. Permet à la couche sync Yahoo de
-    /// l'exclure (Yahoo cote des actions qui partagent les mêmes tickers que
-    /// les cryptos : FET = action, BTC = ETF BlackRock, ETH = stock, etc.,
-    /// ce qui corromprait les current_value obtenus via LiveSync/CoinGecko).
+    /// True if the position is a crypto asset. Lets the Yahoo sync layer
+    /// exclude it (Yahoo also quotes stocks that share the same tickers as
+    /// cryptos: FET = a stock, BTC = a BlackRock ETF, ETH = a stock, etc.,
+    /// which would corrupt the current_value obtained via LiveSync/CoinGecko).
     var isCryptoAsset: Bool {
         assetType.uppercased() == "CRYPTO"
     }
 }
 
-// MARK: - Ordres d'investissement (multi-ordres par position)
+// MARK: - Investment orders (multiple orders per position)
 
-/// Type d'un ordre. MVP : achat, vente, dividende. Splits/fusions hors scope.
+/// Type of an order. MVP: buy, sell, dividend. Splits/mergers are out of scope.
 enum InvestmentOrderType: String, CaseIterable, Identifiable {
     case buy = "BUY"
     case sell = "SELL"
@@ -677,23 +677,23 @@ enum InvestmentOrderType: String, CaseIterable, Identifiable {
     }
 }
 
-/// Un ordre d'investissement = une opération sur une position à une date donnée.
-/// Plusieurs ordres composent une position (qty et PRU sont dérivés à la volée).
+/// An investment order = one operation on a position at a given date.
+/// Several orders compose a position (qty and average price are derived on the fly).
 struct InvestmentOrder: Identifiable, Hashable {
     let id: Int
     let positionId: Int
     var orderType: InvestmentOrderType
-    var quantity: Double        // Toujours positive ; le signe est porté par orderType
-    var unitPrice: Double       // Prix unitaire à l'exécution (devise du compte)
-    var fees: Double            // Frais de courtage (0 si pas connus)
+    var quantity: Double        // Always positive; the sign is carried by orderType
+    var unitPrice: Double       // Unit price at execution (account currency)
+    var fees: Double            // Brokerage fees (0 if unknown)
     var executedAt: Date
     var notes: String?
-    /// ID externe stable retourné par le provider (Binance tradeId,
-    /// blockchain txHash). Permet la dédup entre syncs via UNIQUE INDEX SQL.
-    /// nil pour les ordres saisis manuellement par l'utilisateur.
+    /// Stable external ID returned by the provider (Binance tradeId,
+    /// blockchain txHash). Enables dedup across syncs via a SQL UNIQUE INDEX.
+    /// nil for orders entered manually by the user.
     var externalId: String? = nil
 
-    /// Coût total brut (qty × prix + frais). Pour BUY = sortie cash, pour SELL = entrée cash.
+    /// Total gross cost (qty × price + fees). For BUY = cash outflow, for SELL = cash inflow.
     var totalCost: Double { quantity * unitPrice + fees }
 }
 
@@ -718,20 +718,20 @@ struct InvestmentPricePoint: Identifiable, Hashable, Codable {
     let identifier: String
     let date: Date
     let close: Double
-    /// Cours d'OUVERTURE du pas de temps (la bougie : jour en `.daily`, tranche
-    /// de 30 min en `.intraday30m`). C'est le « prix d'entrée » du point, que
-    /// Yahoo et Stooq fournissent déjà à côté du close.
+    /// OPENING price of the time step (the candle: a day in `.daily`, a
+    /// 30-minute slice in `.intraday30m`). This is the point's "entry
+    /// price", which Yahoo and Stooq already provide alongside the close.
     ///
-    /// Optionnel pour deux raisons :
-    ///   - les séries déjà en cache disque n'ont pas la clé (le décodage Codable
-    ///     synthétisé utilise `decodeIfPresent` pour un Optional → les caches
-    ///     existants restent lisibles, sinon TOUT l'historique serait jeté au
-    ///     premier décodage) ;
-    ///   - CoinGecko `market_chart` ne renvoie que des prix ponctuels, pas d'OHLC.
+    /// Optional for two reasons:
+    ///   - series already in the disk cache don't have this key (the
+    ///     synthesized Codable decoding uses `decodeIfPresent` for an
+    ///     Optional → existing caches stay readable, otherwise the ENTIRE
+    ///     history would be discarded on first decode);
+    ///   - CoinGecko's `market_chart` only returns point prices, no OHLC.
     let open: Double?
 
-    /// Init explicite : avec `open` en `let` sans valeur par défaut, l'init
-    /// mémberwise synthétisé l'exigerait sur les ~6 sites de construction.
+    /// Explicit init: with `open` as a `let` with no default value, the
+    /// synthesized memberwise init would require it at all ~6 construction sites.
     init(id: String, identifier: String, date: Date, close: Double, open: Double? = nil) {
         self.id = id
         self.identifier = identifier

@@ -7,34 +7,34 @@ import os
 
 // MARK: - PrivacyMotionMonitor
 //
-// Surveille l'orientation physique du téléphone via CoreMotion. **Le geste
-// "retourner face cachée" agit comme un toggle** sur `AppState.amountsHidden` —
-// pas un état miroir.
+// Monitors the phone's physical orientation via CoreMotion. **The "flip
+// face down" gesture acts as a toggle** on `AppState.amountsHidden` — not a
+// mirrored state.
 //
-// **Comportement** :
-//   - User pose le téléphone face cachée (gravity.z passe de < 0.5 à > 0.8)
-//     → on TOGGLE `amountsHidden` (1ère fois → masque, 2e fois → réaffiche)
-//   - User relève le téléphone (gravity.z repasse < 0.5) → on NE FAIT RIEN
-//     (l'état choisi par l'utilisateur est conservé jusqu'à ce qu'il refasse le geste)
+// **Behavior**:
+//   - User places the phone face down (gravity.z goes from < 0.5 to > 0.8)
+//     → TOGGLES `amountsHidden` (1st time → hides, 2nd time → reveals again)
+//   - User picks the phone back up (gravity.z drops back below 0.5) → NOTHING
+//     HAPPENS (the state the user chose is kept until they repeat the gesture)
 //
-// Cette sémantique est plus intuitive que le miroir continu :
-//   - Un collègue arrive → tu poses le téléphone face cachée pour cacher les
-//     montants. Tu remets face visible normalement pour utiliser l'app,
-//     les montants restent masqués (l'écran reste protégé).
-//   - Tu réposes face cachée pour les ré-afficher quand t'es seul.
+// This semantics is more intuitive than a continuous mirror:
+//   - A colleague walks up → the phone is placed face down to hide amounts.
+//     Picking it back up to use the app normally keeps amounts hidden (the
+//     screen stays protected).
+//   - Placing it face down again reveals them once alone.
 //
-// **Hystérésis** : 2 seuils (0.80 entrer, 0.50 sortir) pour détecter proprement
-// les transitions sans clignotement quand le téléphone est en transition.
+// **Hysteresis**: 2 thresholds (0.80 to enter, 0.50 to exit) to cleanly
+// detect transitions without flickering while the phone is mid-transition.
 //
-// **Énergie** : CMMotionManager à 4 Hz (intervalle 0.25s) — négligeable sur la
-// batterie. Suspend en background.
+// **Power**: CMMotionManager at 4 Hz (0.25s interval) — negligible battery
+// impact. Suspended in background.
 //
-// **Activation** : pilotée par `appState.hideAmountsOnFaceDown`. Si OFF, le
-// monitor reste en idle (zéro impact).
+// **Activation**: driven by `appState.hideAmountsOnFaceDown`. If OFF, the
+// monitor stays idle (zero impact).
 
 #if os(macOS)
-/// Pas de CoreMotion sur Mac (le geste "poser face cachée" n'a pas de sens
-/// pour un ordinateur) : façade no-op, même API.
+/// No CoreMotion on Mac (the "place face down" gesture makes no sense for a
+/// computer): no-op facade, same API.
 @MainActor
 final class PrivacyMotionMonitor {
     static let shared = PrivacyMotionMonitor()
@@ -53,52 +53,53 @@ final class PrivacyMotionMonitor {
     private let manager = CMMotionManager()
     private weak var appState: AppState?
 
-    /// Seuil pour BASCULER en mode masqué — gravity.z > 0.80 ≈ écran à 37° du sol
-    /// vers le bas. Assez tolérant pour fonctionner si le téléphone est légèrement
-    /// incliné (canapé, poche).
+    /// Threshold to SWITCH into masked mode — gravity.z > 0.80 ≈ screen at
+    /// 37° from facing straight down. Tolerant enough to still trigger if
+    /// the phone is slightly tilted (couch, pocket).
     private let hideThreshold: Double = 0.80
 
-    /// Seuil pour SORTIR du mode masqué — gravity.z < 0.50 ≈ écran à 60° du sol.
-    /// Bande morte de 0.30 entre les 2 seuils = hystérésis qui évite le clignotement.
+    /// Threshold to EXIT masked mode — gravity.z < 0.50 ≈ screen at 60° from
+    /// facing down. The 0.30 dead band between the 2 thresholds is the
+    /// hysteresis that prevents flickering.
     private let revealThreshold: Double = 0.50
 
-    /// État physique courant du téléphone — `true` quand on est en "face cachée".
-    /// On garde la valeur pour détecter les transitions (edges) et déclencher
-    /// le toggle uniquement quand on PASSE de "visible" à "cachée".
-    /// Initialisé à `false` (= face visible) — au pire on rate le tout 1er
-    /// événement si l'utilisateur démarre l'app face cachée, négligeable.
+    /// Current physical state of the phone — `true` when face down.
+    /// Kept around to detect transitions (edges) and trigger the toggle only
+    /// when GOING from "visible" to "face down".
+    /// Initialized to `false` (= face up) — at worst the very first event is
+    /// missed if the user launches the app already face down, negligible.
     private var isCurrentlyFaceDown: Bool = false
 
     // MARK: - Public API
 
-    /// À appeler une fois au launch, après que `AppState` soit prêt. Le monitor
-    /// se synchronise avec le toggle utilisateur et démarre/arrête en conséquence.
+    /// Call once at launch, after `AppState` is ready. The monitor
+    /// synchronizes with the user toggle and starts/stops accordingly.
     func attach(to appState: AppState) {
         self.appState = appState
         syncWithSetting()
     }
 
-    /// À appeler quand l'utilisateur modifie le toggle `hideAmountsOnFaceDown` dans
-    /// Settings — démarre ou arrête le CMMotionManager selon l'état actuel.
+    /// Call when the user changes the `hideAmountsOnFaceDown` toggle in
+    /// Settings — starts or stops the CMMotionManager based on the current state.
     func syncWithSetting() {
         guard let appState else { return }
         if appState.hideAmountsOnFaceDown {
             start()
         } else {
             stop()
-            // Si on désactive le réglage, on ne touche PAS à l'état courant —
-            // l'utilisateur peut vouloir garder les montants masqués manuellement.
+            // Disabling the setting does NOT touch the current state — the
+            // user may want to keep amounts masked manually.
         }
     }
 
-    /// À appeler sur scenePhase == .background — arrête les motion updates.
+    /// Call on scenePhase == .background — stops motion updates.
     func suspend() {
         guard manager.isDeviceMotionActive else { return }
         manager.stopDeviceMotionUpdates()
-        Self.log.debug("Motion suspendu (background)")
+        Self.log.debug("Motion suspended (background)")
     }
 
-    /// À appeler sur scenePhase == .active — redémarre si le réglage est activé.
+    /// Call on scenePhase == .active — restarts if the setting is enabled.
     func resume() {
         syncWithSetting()
     }
@@ -107,48 +108,48 @@ final class PrivacyMotionMonitor {
 
     private func start() {
         guard manager.isDeviceMotionAvailable else {
-            Self.log.warning("Device motion non disponible sur ce device")
+            Self.log.warning("Device motion not available on this device")
             return
         }
         guard !manager.isDeviceMotionActive else { return }
 
-        manager.deviceMotionUpdateInterval = 0.25  // 4 Hz, suffisant pour un toggle
+        manager.deviceMotionUpdateInterval = 0.25  // 4 Hz, enough for a toggle
         manager.startDeviceMotionUpdates(to: .main) { [weak self] motion, error in
             guard let self, let motion, error == nil else { return }
             Task { @MainActor in
                 self.handle(gravityZ: motion.gravity.z)
             }
         }
-        Self.log.debug("Motion monitor démarré")
+        Self.log.debug("Motion monitor started")
     }
 
     private func stop() {
         guard manager.isDeviceMotionActive else { return }
         manager.stopDeviceMotionUpdates()
-        Self.log.debug("Motion monitor arrêté")
+        Self.log.debug("Motion monitor stopped")
     }
 
-    /// Pour iOS : `gravity.z > 0` quand l'écran est tourné vers le bas
-    /// (le vecteur gravité pointe dans la même direction que l'axe Z de l'écran).
-    /// On utilise des seuils larges + hystérésis pour détecter les transitions.
+    /// On iOS: `gravity.z > 0` when the screen faces down (the gravity
+    /// vector points in the same direction as the screen's Z axis).
+    /// Wide thresholds + hysteresis are used to detect transitions cleanly.
     ///
-    /// **Action** : on TOGGLE `amountsHidden` uniquement à la transition
-    /// "visible → cachée". Le retour à "visible" ne fait rien (l'état choisi
-    /// par l'utilisateur est conservé jusqu'au prochain geste).
+    /// **Action**: `amountsHidden` is TOGGLED only on the "visible → face
+    /// down" transition. Returning to "visible" does nothing (the state the
+    /// user chose stays active until the next gesture).
     private func handle(gravityZ: Double) {
         guard let appState else { return }
 
         if !isCurrentlyFaceDown && gravityZ > hideThreshold {
-            // Transition : visible → cachée. Toggle l'état d'affichage.
+            // Transition: visible → face down. Toggle the display state.
             isCurrentlyFaceDown = true
             appState.amountsHidden.toggle()
-            // Tap haptique pour confirmer le geste — utile quand l'écran est
-            // posé face cachée et que l'utilisateur ne voit pas le changement.
+            // Haptic tap to confirm the gesture — useful when the screen is
+            // face down and the user can't see the change.
             HapticService.shared.toggle()
         } else if isCurrentlyFaceDown && gravityZ < revealThreshold {
-            // Transition : cachée → visible. On NE FAIT RIEN — l'état choisi
-            // par l'utilisateur via le geste précédent reste actif. Pour le toggler,
-            // l'utilisateur doit reposer le téléphone face cachée.
+            // Transition: face down → visible. NOTHING HAPPENS — the state
+            // chosen via the previous gesture stays active. To toggle it,
+            // the user must place the phone face down again.
             isCurrentlyFaceDown = false
         }
     }

@@ -1,37 +1,36 @@
 import Foundation
 import SQLite3
 
-/// Pointeur de destructeur exigé par `sqlite3_bind_text` quand la chaîne liée est
-/// temporaire : SQLite en fait alors une copie au lieu de conserver le pointeur.
+/// Destructor pointer required by `sqlite3_bind_text` when the bound string
+/// is temporary: SQLite then makes a copy instead of retaining the pointer.
 let SQLITE_TRANSIENT_STORE = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-/// Accès bas niveau à une base SQLite, indépendant de l'application.
+/// Low-level access to a SQLite database, independent of the application.
 ///
-/// Ce type ne connaît qu'une URL. Il n'importe ni `DatabaseManager` ni quoi que
-/// ce soit du reste de l'app, ce qui permet deux choses :
+/// This type only knows a URL. It imports neither `DatabaseManager` nor
+/// anything else from the rest of the app, which enables two things:
 ///
-/// - le brancher sur une base temporaire dans les tests, alors que les
-///   repositories ouvraient jusqu'ici `DatabaseManager.shared.sqliteURL()` en
-///   dur et n'étaient donc pas testables sans toucher la base réelle ;
-/// - le compiler seul dans un harnais `swiftc`, sans le reste de la cible.
+/// - wiring it to a temporary database in tests, whereas repositories used
+///   to hard-code `DatabaseManager.shared.sqliteURL()` and were therefore
+///   untestable without touching the real database;
+/// - compiling it standalone in a `swiftc` harness, without the rest of the target.
 ///
-/// Le branchement sur la base courante de l'application vit à part, dans
-/// `SQLiteLive.swift` — même séparation que `SyncPayloadStore` et `SyncLive`.
+/// The wiring to the app's current database lives separately, in
+/// `SQLiteLive.swift` — the same split used for `SyncPayloadStore` and `SyncLive`.
 ///
-/// Chaque appel ouvre et referme sa connexion. C'est le comportement qui était
-/// déjà en place dans les repositories ; le mutualiser ici permettra de le
-/// changer en un seul endroit si le besoin s'en fait sentir.
+/// Each call opens and closes its own connection. This is the behavior that
+/// was already in place in the repositories; centralizing it here makes it
+/// possible to change it in a single place if the need arises.
 struct SQLiteStore: Sendable {
 
     let databaseURL: URL
 
-    /// Délai d'attente sur un verrou avant de renvoyer `SQLITE_BUSY`.
+    /// Wait time on a lock before returning `SQLITE_BUSY`.
     ///
-    /// Sans ce réglage, la moindre collision entre un écrivain et un lecteur
-    /// échoue immédiatement. C'est ce qui provoquait les gels de l'interface sur
-    /// macOS pendant l'activité de synchronisation : le correctif n'avait été
-    /// appliqué qu'à `SyncPayloadStore`, laissant sans garde les connexions de
-    /// tous les repositories.
+    /// Without this setting, the slightest collision between a writer and a
+    /// reader fails immediately. This is what caused the UI to freeze on
+    /// macOS during sync activity: the fix had only been applied to
+    /// `SyncPayloadStore`, leaving every repository connection unguarded.
     let busyTimeoutMs: Int32
 
     init(databaseURL: URL, busyTimeoutMs: Int32 = 3000) {
@@ -39,21 +38,21 @@ struct SQLiteStore: Sendable {
         self.busyTimeoutMs = busyTimeoutMs
     }
 
-    /// `false` si le fichier n'existe pas encore — cas normal avant l'onboarding.
+    /// `false` if the file doesn't exist yet — the normal case before onboarding.
     var databaseExists: Bool {
         FileManager.default.fileExists(atPath: databaseURL.path)
     }
 
-    // MARK: - Connexions
+    // MARK: - Connections
 
-    /// Ouvre en lecture seule et exécute `block`. Renvoie `nil` si la base est
-    /// absente ou impossible à ouvrir — jamais une erreur, les appelants
-    /// retombent sur une valeur par défaut.
+    /// Opens read-only and executes `block`. Returns `nil` if the database
+    /// is absent or fails to open — never an error, callers fall back to a
+    /// default value.
     func read<T>(_ block: (OpaquePointer) -> T) -> T? {
         connect(flags: SQLITE_OPEN_READONLY, block)
     }
 
-    /// Ouvre en lecture-écriture et exécute `block`.
+    /// Opens read-write and executes `block`.
     func write<T>(_ block: (OpaquePointer) -> T) -> T? {
         connect(flags: SQLITE_OPEN_READWRITE, block)
     }
@@ -70,17 +69,17 @@ struct SQLiteStore: Sendable {
         return block(db)
     }
 
-    // MARK: - Écriture
+    // MARK: - Writing
 
-    /// Prépare, lie et exécute un unique statement. `true` si SQLite a répondu
-    /// `SQLITE_DONE`.
+    /// Prepares, binds and executes a single statement. `true` if SQLite
+    /// returned `SQLITE_DONE`.
     ///
-    /// En cas d'échec, le détail est écrit sur la console. Le booléen seul ne
-    /// suffit pas à diagnostiquer : un contournement de trigger avait ainsi fait
-    /// échouer silencieusement toute réassignation de créancier, et il a fallu
-    /// une sonde de test dédiée pour obtenir le message qui donnait la cause en
-    /// une ligne. Utiliser `writeSingleReportingFailure` pour récupérer ce
-    /// détail dans le code plutôt que sur la console.
+    /// On failure, the detail is written to the console. The boolean alone
+    /// isn't enough to diagnose problems: a trigger bypass once made a
+    /// creditor reassignment fail silently this way, and it took a dedicated
+    /// test probe to get the one-line message that revealed the cause. Use
+    /// `writeSingleReportingFailure` to retrieve that detail in code instead
+    /// of on the console.
     @discardableResult
     func writeSingle(sql: String, bind: (OpaquePointer) -> Void) -> Bool {
         guard let failure = writeSingleReportingFailure(sql: sql, bind: bind) else { return true }
@@ -88,8 +87,8 @@ struct SQLiteStore: Sendable {
         return false
     }
 
-    /// Même chose, mais rend le détail de l'échec au lieu de le journaliser.
-    /// `nil` signifie que l'écriture a réussi.
+    /// Same thing, but returns the failure detail instead of logging it.
+    /// `nil` means the write succeeded.
     func writeSingleReportingFailure(sql: String,
                                      bind: (OpaquePointer) -> Void) -> SQLiteFailure? {
         guard databaseExists else {
@@ -113,14 +112,13 @@ struct SQLiteStore: Sendable {
     }
 }
 
-// MARK: - Détail d'un échec
+// MARK: - Failure detail
 
-/// Ce que SQLite a répondu quand une écriture a échoué.
+/// What SQLite reported when a write failed.
 ///
-/// Le code étendu est conservé : c'est lui qui distingue par exemple une
-/// violation d'unicité (`SQLITE_CONSTRAINT_UNIQUE`) d'une violation de clé
-/// étrangère, alors que le code de base vaut `SQLITE_CONSTRAINT` dans les deux
-/// cas.
+/// The extended code is kept: it's what distinguishes, for instance, a
+/// uniqueness violation (`SQLITE_CONSTRAINT_UNIQUE`) from a foreign-key
+/// violation, whereas the base code is `SQLITE_CONSTRAINT` in both cases.
 struct SQLiteFailure: Error, CustomStringConvertible, Sendable {
 
     enum Stage: String, Sendable {
@@ -133,7 +131,7 @@ struct SQLiteFailure: Error, CustomStringConvertible, Sendable {
     let code: Int32
     let extendedCode: Int32
     let message: String
-    /// Première ligne significative du SQL, pour situer sans noyer la console.
+    /// First meaningful line of the SQL, to give context without flooding the console.
     let sqlSummary: String
 
     init(stage: Stage, code: Int32, extendedCode: Int32, message: String, sql: String) {
@@ -165,13 +163,14 @@ struct SQLiteFailure: Error, CustomStringConvertible, Sendable {
     }
 }
 
-// MARK: - Lecture de colonnes
+// MARK: - Column reading
 
-/// Lecture d'une colonne texte, chaîne vide si `NULL`.
+/// Reads a text column, empty string if `NULL`.
 ///
-/// Fonction libre et non méthode : les repositories l'appelaient déjà sous ce
-/// nom via une copie privée dans chacun d'eux. La déclarer ainsi supprime cinq
-/// implémentations identiques sans toucher aux centaines de sites d'appel.
+/// A free function rather than a method: repositories already called it
+/// under this name via a private copy in each of them. Declaring it this
+/// way removes five identical implementations without touching the hundreds
+/// of call sites.
 func string(from statement: OpaquePointer?, index: Int32) -> String {
     guard let cString = sqlite3_column_text(statement, index) else { return "" }
     return String(cString: cString)

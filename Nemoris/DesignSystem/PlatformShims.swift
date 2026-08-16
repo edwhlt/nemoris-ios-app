@@ -1,34 +1,34 @@
 import SwiftUI
 
-// Port macOS natif.
+// Native macOS port.
 //
-// Couche de compatibilité : reproduit côté macOS les signatures des APIs
-// iOS-only utilisées dans ~47 vues (no-op ou équivalent AppKit), pour que le
-// code SwiftUI partagé compile TEL QUEL sur les deux plateformes sans
-// saupoudrer 150 `#if os(iOS)` dans les vues.
+// Compatibility layer: reproduces, on macOS, the signatures of iOS-only APIs
+// used across ~47 views (as either a no-op or an AppKit equivalent), so the
+// shared SwiftUI code compiles AS-IS on both platforms without scattering
+// 150 `#if os(iOS)` blocks across the views.
 //
-// Règles :
-//   • Même nom, même syntaxe pointée aux call sites (enums shim locaux).
-//   • no-op quand le concept n'existe pas sur Mac (clavier logiciel,
-//     autocapitalisation, detents de sheet…).
-//   • mapping sémantique quand un équivalent existe (placements toolbar).
+// Rules:
+//   • Same name, same dotted syntax at call sites (local shim enums).
+//   • no-op when the concept doesn't exist on Mac (software keyboard,
+//     autocapitalization, sheet detents…).
+//   • semantic mapping when an equivalent exists (toolbar placements).
 //
-// ⚠️ Fichier compilé UNIQUEMENT côté macOS (tout est sous #if os(macOS)) —
-// aucun impact sur les builds iOS.
+// ⚠️ File compiled ONLY on macOS (everything is under #if os(macOS)) — no
+// impact on iOS builds.
 
 #if os(macOS)
 import AppKit
 
-// MARK: - Ponts UIKit → AppKit
+// MARK: - UIKit → AppKit bridges
 
-/// Les fichiers partagés utilisent UIImage/UIColor/UIFont : sur macOS ce sont
-/// les classes AppKit équivalentes. Les APIs manquantes sont comblées ci-dessous.
+/// Shared files use UIImage/UIColor/UIFont: on macOS these map to the
+/// equivalent AppKit classes. Missing APIs are filled in below.
 typealias UIImage = NSImage
 typealias UIColor = NSColor
 typealias UIFont = NSFont
 
 extension NSColor {
-    /// Équivalents des couleurs sémantiques UIKit utilisées dans le code partagé.
+    /// Equivalents of the UIKit semantic colors used in the shared code.
     static var label: NSColor { .labelColor }
     static var secondarySystemBackground: NSColor { .windowBackgroundColor }
     static var tertiarySystemBackground: NSColor { .underPageBackgroundColor }
@@ -36,29 +36,29 @@ extension NSColor {
 }
 
 extension NSImage {
-    /// Équivalent de la propriété UIImage.cgImage (Vision OCR, logos).
+    /// Equivalent of the UIImage.cgImage property (Vision OCR, logos).
     var cgImage: CGImage? { cgImage(forProposedRect: nil, context: nil, hints: nil) }
 }
 
 extension Image {
-    /// Permet aux call sites `Image(uiImage:)` de compiler tels quels.
+    /// Lets `Image(uiImage:)` call sites compile unchanged.
     init(uiImage: NSImage) { self.init(nsImage: uiImage) }
 }
 
 extension Color {
-    /// Permet aux call sites `Color(uiColor:)` de compiler tels quels.
+    /// Lets `Color(uiColor:)` call sites compile unchanged.
     init(uiColor: NSColor) { self.init(nsColor: uiColor) }
 }
 
 extension NSImage {
-    /// Équivalent de UIImage.pngData() (utilisé par le cache logos).
+    /// Equivalent of UIImage.pngData() (used by the logo cache).
     func pngData() -> Data? {
         guard let tiff = tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff) else { return nil }
         return rep.representation(using: .png, properties: [:])
     }
 
-    /// Équivalent de UIImage.jpegData(compressionQuality:).
+    /// Equivalent of UIImage.jpegData(compressionQuality:).
     func jpegData(compressionQuality: CGFloat) -> Data? {
         guard let tiff = tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff) else { return nil }
@@ -66,16 +66,16 @@ extension NSImage {
     }
 }
 
-// MARK: - Modifiers de navigation iOS-only → no-op
+// MARK: - iOS-only navigation modifiers → no-op
 
 enum NavigationBarTitleDisplayModeShim { case automatic, inline, large }
 
 extension View {
-    /// iOS-only : la barre de titre macOS n'a pas ce concept.
+    /// iOS-only: the macOS title bar has no equivalent concept.
     func navigationBarTitleDisplayMode(_ mode: NavigationBarTitleDisplayModeShim) -> some View { self }
 }
 
-// MARK: - Saisie texte iOS-only → no-op (pas de clavier logiciel sur Mac)
+// MARK: - iOS-only text input → no-op (no software keyboard on Mac)
 
 enum KeyboardTypeShim {
     case `default`, asciiCapable, numbersAndPunctuation, URL, numberPad,
@@ -90,27 +90,27 @@ extension View {
     func textInputAutocapitalization(_ autocapitalization: TextInputAutocapitalizationShim?) -> some View { self }
 }
 
-// NB : presentationDetents / presentationDragIndicator existent nativement
-// sur macOS 13.3+ — pas de shim (il créerait une ambiguïté).
+// NB: presentationDetents / presentationDragIndicator exist natively on
+// macOS 13.3+ — no shim (one would create ambiguity).
 
-// MARK: - Styles de liste iOS-only
+// MARK: - iOS-only list styles
 
 extension ListStyle where Self == InsetListStyle {
-    /// iOS-only : mappé sur .inset, le plus proche visuellement sur Mac.
+    /// iOS-only: mapped to .inset, the closest visual match on Mac.
     static var insetGrouped: InsetListStyle { InsetListStyle() }
 }
 
-// MARK: - TabView paging iOS-only
+// MARK: - iOS-only TabView paging
 
 enum PageIndexDisplayModeShim { case automatic, always, never }
 
 extension TabViewStyle where Self == DefaultTabViewStyle {
-    /// iOS-only (.page) : sur Mac le TabView par défaut fait l'affaire — le
-    /// swipe horizontal de pages n'existe pas au trackpad de toute façon.
+    /// iOS-only (.page): the default TabView is fine on Mac — horizontal
+    /// page-swiping has no trackpad equivalent anyway.
     static func page(indexDisplayMode: PageIndexDisplayModeShim) -> DefaultTabViewStyle { DefaultTabViewStyle() }
 }
 
-// MARK: - Placements toolbar iOS → équivalents sémantiques macOS
+// MARK: - iOS toolbar placements → semantic macOS equivalents
 
 extension ToolbarItemPlacement {
     static var navigationBarLeading: ToolbarItemPlacement { .navigation }
@@ -119,20 +119,21 @@ extension ToolbarItemPlacement {
     static var topBarTrailing: ToolbarItemPlacement { .primaryAction }
 }
 
-// MARK: - Placement searchable iOS-only
+// MARK: - iOS-only searchable placement
 
 enum SearchFieldDisplayModeShim { case always, automatic }
 
 extension SearchFieldPlacement {
-    /// iOS-only : sur Mac le champ de recherche vit dans la toolbar.
+    /// iOS-only: on Mac the search field lives in the toolbar.
     static func navigationBarDrawer(displayMode: SearchFieldDisplayModeShim) -> SearchFieldPlacement { .automatic }
     static var navigationBarDrawer: SearchFieldPlacement { .automatic }
 }
 
-// MARK: - Presse-papiers
+// MARK: - Clipboard
 
-/// Façade minimale compatible avec les call sites `UIPasteboard.general.string = …`.
-/// Struct sans état (Sendable) — tout passe par NSPasteboard.general.
+/// Minimal facade compatible with `UIPasteboard.general.string = …` call
+/// sites. Stateless struct (Sendable) — everything goes through
+/// NSPasteboard.general.
 struct UIPasteboard: Sendable {
     static let general = UIPasteboard()
 

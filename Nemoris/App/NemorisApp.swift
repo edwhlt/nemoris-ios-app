@@ -6,14 +6,15 @@ import TipKit
 struct NemorisApp: App {
     @State private var appState = AppState()
     @State private var purchaseManager = PurchaseManager.shared
-    /// Cache des agrégats du Dashboard. Injecté ici et pas en `@State` dans la vue :
-    /// `DashboardView` est instanciée deux fois (TabView iOS + volet détail de la
-    /// sidebar macOS), et deux caches voudraient dire tout calculer deux fois.
+    /// Dashboard aggregate cache. Injected here rather than as `@State` in the
+    /// view: `DashboardView` is instantiated twice (iOS TabView + macOS
+    /// sidebar detail pane), and two separate caches would mean computing
+    /// everything twice.
     @State private var dashboardStore = DashboardSnapshotStore()
     @State private var hasDatabase: Bool
-    /// État de déverrouillage. Démarre à `false` si le lock est activé ET qu'on
-    /// a une demande d'auth pending (cas typique : reprise depuis background).
-    /// Sinon `true` (lock désactivé OU rien à demander).
+    /// Unlock state. Starts at `false` if the lock is enabled AND there is a
+    /// pending auth request (typical case: resuming from background).
+    /// Otherwise `true` (lock disabled OR nothing to request).
     @State private var isUnlocked: Bool
     @Environment(\.scenePhase) private var scenePhase
 
@@ -24,29 +25,30 @@ struct NemorisApp: App {
         }
         SimulatorSeeder.seedIfNeeded()
         #endif
-        // Applique les migrations en attente sur toute base existante
+        // Applies any pending migrations to an existing database.
         if DatabaseManager.shared.hasDatabase() {
             DatabaseManager.shared.migrateIfNeeded()
         }
         _hasDatabase = State(initialValue: DatabaseManager.shared.hasDatabase())
-        // Au lancement à froid (init), on considère que l'auth est nécessaire si
-        // le lock est activé. C'est plus strict que de regarder `needsAuthentication`
-        // (qui peut avoir été oublié à `false` lors d'un crash) → on relock toujours
-        // au cold-start. Au passage en background, on remettra le flag à true
-        // pour gérer aussi les chauds (cf. scenePhase handler).
+        // On a cold launch (init), auth is considered necessary whenever the
+        // lock is enabled. This is stricter than reading `needsAuthentication`
+        // (which could have been left `false` by a crash) — the app always
+        // relocks on cold start. The flag is set back to true on backgrounding
+        // to also cover warm launches (see the scenePhase handler).
         let lockEnabled = UserDefaults.standard.bool(forKey: "appLockEnabled")
         _isUnlocked = State(initialValue: !lockEnabled)
         try? Tips.configure([
             .datastoreLocation(.applicationDefault),
             .displayFrequency(.immediate)
         ])
-        // Boot NemorisEngine en arrière-plan : ~300 ms (modèle ONNX MiniLM + index merchants).
-        // On précharge ici pour qu'il soit chaud quand l'utilisateur ouvre l'import (import).
+        // Boots NemorisEngine in the background: ~300 ms (ONNX MiniLM model +
+        // merchant index). Preloaded here so it's warm by the time the user
+        // opens the import flow.
         Task { @MainActor in
             EngineBootstrap.shared.bootIfNeeded(withEmbeddings: true)
         }
-        // Boot du moteur de sync CloudKit — no-op si l'utilisateur n'a pas
-        // activé la synchronisation iCloud dans les Settings (opt-in strict).
+        // Boots the CloudKit sync engine — no-op if the user hasn't enabled
+        // iCloud sync in Settings (strict opt-in).
         Task {
             await CloudSyncEngine.shared.bootIfEnabled()
         }
@@ -64,9 +66,9 @@ struct NemorisApp: App {
                         .preferredColorScheme(appState.preferredColorScheme)
                         .tipViewStyle(NemorisTipViewStyle())
 
-                    // Overlay de verrouillage — au-dessus de TOUT le contenu app
-                    // (y compris sheets) tant que `isUnlocked == false`. Transition
-                    // douce pour éviter un cut sec quand on déverrouille.
+                    // Lock overlay — above ALL app content (including sheets)
+                    // as long as `isUnlocked == false`. Smooth transition to
+                    // avoid an abrupt cut when unlocking.
                     if !isUnlocked {
                         AppLockGate(isUnlocked: $isUnlocked)
                             .preferredColorScheme(appState.preferredColorScheme)
@@ -76,56 +78,59 @@ struct NemorisApp: App {
                 }
                     .onChange(of: scenePhase) { _, newPhase in
                         if newPhase == .background {
-                            // Sync CloudKit : pousse les écritures locales
-                            // accumulées pendant la session vers le moteur, qui les
-                            // enverra en arrière-plan. No-op si sync désactivée.
+                            // CloudKit sync: pushes local writes accumulated
+                            // during the session to the engine, which sends
+                            // them in the background. No-op if sync is disabled.
                             Task { await CloudSyncEngine.shared.notifyLocalChanges() }
-                            // Relock immédiat dès que l'app passe en background.
-                            // Politique stricte standard (apps bancaires) : pas de
-                            // grace period pour éviter de leak des données financières
-                            // dans l'app switcher ou si l'écran reste allumé.
+                            // Immediate relock as soon as the app backgrounds.
+                            // Standard strict policy (banking apps): no grace
+                            // period, to avoid leaking financial data in the
+                            // app switcher or if the screen stays on.
                             if AppLockService.shared.isLockEnabled {
                                 AppLockService.shared.markNeedsAuthentication()
                                 isUnlocked = false
                             }
-                            // Suspend le monitor de motion pour ne pas drainer la
-                            // batterie quand l'app n'est pas visible.
+                            // Suspends the motion monitor so it doesn't drain
+                            // the battery while the app isn't visible.
                             PrivacyMotionMonitor.shared.suspend()
                         }
                         if newPhase == .active {
-                            // Rafraîchit les droits à chaque passage en premier plan
-                            // (ex. : abonnement expiré, achat depuis un autre appareil)
+                            // Refreshes entitlements on every foreground
+                            // transition (e.g. subscription expired, purchase
+                            // made from another device).
                             Task { await purchaseManager.refreshEntitlements() }
-                            // Pousse un snapshot frais vers le widget
+                            // Pushes a fresh snapshot to the widget.
                             let prefId = appState.defaultAccountId > 0 ? appState.defaultAccountId : nil
                             Task.detached(priority: .utility) {
                                 WidgetDataStore.refresh(preferredAccountId: prefId)
                             }
-                            // Auto-backup quotidien (gate 24 h interne au service).
-                            // Décalé sur background priority pour ne pas concurrencer
-                            // le démarrage UI ; côté disque c'est une simple copie.
+                            // Daily auto-backup (24h gate internal to the
+                            // service). Deferred to background priority so it
+                            // doesn't compete with UI startup; on disk it's a
+                            // plain copy.
                             Task.detached(priority: .background) { @MainActor in
                                 BackupService.shared.runAutoBackupIfDue()
                             }
-                            // Relance le monitor de motion (no-op si l'utilisateur n'a
-                            // pas activé `hideAmountsOnFaceDown`).
+                            // Resumes the motion monitor (no-op if the user
+                            // hasn't enabled `hideAmountsOnFaceDown`).
                             PrivacyMotionMonitor.shared.resume()
-                            // Chantier A — auto-sync investissements (LiveSync
-                            // exchanges/wallets + cours). Le service se dégage
-                            // seul : feature off, toggle off, déjà en cours,
-                            // ou dernière passe < 4 h.
+                            // Investment auto-sync (LiveSync exchanges/wallets
+                            // + prices). The service bails out on its own:
+                            // feature off, toggle off, already running, or
+                            // last pass < 4h ago.
                             Task { await InvestmentAutoSyncService.shared.autoSyncIfNeeded(trigger: .appActive) }
-                            // Chantier D — document d'investissement déposé par un
-                            // raccourci Siri (ImportInvestmentDocumentIntent) : on le
-                            // consomme et on ouvre l'import intelligent pré-rempli.
+                            // An investment document dropped by a Siri
+                            // shortcut (ImportInvestmentDocumentIntent) is
+                            // consumed here, opening the smart import flow
+                            // pre-filled with it.
                             let pendingInvest = PendingImportInbox.consumePendingInvestmentImports()
                             if !pendingInvest.isEmpty {
                                 appState.pendingInvestmentImportURLs = pendingInvest
                                 appState.navigateToTab(.investments)
                             }
-                            // relevés déposés par le raccourci "Importer des
-                            // transactions" ou la share extension Transactions :
-                            // MainTabView présente ImportEntryView pré-rempli.
+                            // Statements dropped by the "Import transactions"
+                            // shortcut or the Transactions share extension:
+                            // MainTabView presents ImportEntryView pre-filled.
                             let pendingTx = PendingImportInbox.consumePendingTransactionImports()
                             if !pendingTx.isEmpty {
                                 appState.pendingTransactionImportURLs = pendingTx
@@ -134,27 +139,27 @@ struct NemorisApp: App {
                     }
                     .task { await purchaseManager.initialize() }
                     .task {
-                        // Attache le monitor de motion à l'AppState. No-op tant
-                        // que `hideAmountsOnFaceDown == false`. Doit être appelé
-                        // une seule fois au lancement (idempotent).
+                        // Attaches the motion monitor to the AppState. No-op
+                        // as long as `hideAmountsOnFaceDown == false`. Must be
+                        // called exactly once at launch (idempotent).
                         PrivacyMotionMonitor.shared.attach(to: appState)
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .nemorisSyncDidApplyRemoteChanges)) { _ in
-                        // Sync CloudKit : des changements DISTANTS ont
-                        // été appliqués à la base → invalide tous les VMs.
+                        // CloudKit sync: REMOTE changes have been applied to
+                        // the database → invalidate all VMs.
                         appState.dataRefreshToken = UUID()
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .nemorisImportSessionsDidChange)) { _ in
-                        // Le coordinateur d'import a créé ou supprimé une
-                        // session en base → recharger le miroir en mémoire qui
-                        // pilote le bandeau, sans quoi il survit à la ligne
-                        // qu'il représente (bandeau fantôme après un abandon).
+                        // The import coordinator created or deleted a session
+                        // in the database → reload the in-memory mirror that
+                        // drives the banner, so it never survives the row it
+                        // represents (a ghost banner after an aborted import).
                         appState.reloadActiveImportSession()
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .nemorisInvestmentsDidSync)) { _ in
-                        // Chantier A : une passe de sync investissements (auto ou
-                        // manuelle) vient de se terminer → invalide les VMs pour
-                        // que le dashboard reflète les nouvelles valeurs.
+                        // An investment sync pass (automatic or manual) just
+                        // completed → invalidate the VMs so the dashboard
+                        // reflects the new values.
                         appState.dataRefreshToken = UUID()
                     }
             } else {
@@ -168,14 +173,14 @@ struct NemorisApp: App {
             }
         }
         #if os(macOS)
-        // raccourcis desktop : ⌘1…⌘9 basculent sur les modules dans
-        // l'ordre de la sidebar. Injectés via des boutons cachés dans une
-        // CommandGroup pour piloter appState.selectedTab depuis le menu.
+        // Desktop shortcuts: ⌘1…⌘9 switch between modules in sidebar order.
+        // Injected via hidden buttons in a CommandGroup to drive
+        // appState.selectedTab from the menu.
         .commands {
             CommandGroup(after: .sidebar) {
                 Divider()
                 ForEach(Array(appState.mainTabOrder.prefix(9).enumerated()), id: \.element) { index, tab in
-                    Button(tab.title) { appState.navigateToTab(tab) }
+                    Button(LocalizedStringKey(tab.title)) { appState.navigateToTab(tab) }
                         .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
                 }
             }
@@ -184,7 +189,3 @@ struct NemorisApp: App {
         #endif
     }
 }
-
-// (Ancienne struct OnboardingView retirée — remplacée par `OnboardingFlowView`
-//  dans Features/Onboarding/. Refonte 2026-06 : welcome enrichi avec 3 promesses,
-//  step modules opt-in, écran final récap.)

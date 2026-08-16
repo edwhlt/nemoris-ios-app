@@ -2,13 +2,13 @@ import SwiftUI
 
 // MARK: - AppLockGate
 //
-// Écran de verrouillage affiché en overlay tant que l'app n'est pas déverrouillée.
-// Démarrage : auto-trigger de l'authentification après un court délai (200 ms)
-// pour laisser SwiftUI rendre le fond avant que iOS pose sa sheet biometry —
-// évite un flash blanc disgracieux.
+// Lock screen shown as an overlay while the app is not unlocked.
+// Startup: authentication auto-triggers after a short delay (200 ms)
+// so SwiftUI has time to render the background before iOS presents its
+// biometry sheet — otherwise there is a white flash.
 //
-// Si l'utilisateur annule ou échoue, il voit un écran "verrouillé" avec un bouton
-// "Déverrouiller" qu'il peut retaper pour relancer.
+// If the user cancels or fails, they see a "locked" screen with an
+// "Unlock" button they can tap to retry.
 
 struct AppLockGate: View {
     @Binding var isUnlocked: Bool
@@ -18,24 +18,24 @@ struct AppLockGate: View {
     @State private var lastAttemptFailed = false
     @State private var biometryType: AppLockService.BiometryType = .none
 
-    /// Sélectionne l'asset logo en fonction du colorScheme courant.
-    /// Convention assets : `IconLight` (logo pour fond clair) et
-    /// `IconDark` (logo pour fond sombre).
+    /// Selects the logo asset based on the current colorScheme.
+    /// Asset convention: `IconLight` (logo for a light background) and
+    /// `IconDark` (logo for a dark background).
     private var logoAssetName: String {
         colorScheme == .dark ? "LogoLight" : "LogoDark"
     }
 
     var body: some View {
         ZStack {
-            // Fond plein → masque tout le contenu en arrière-plan (les sceens
-            // pre-lock ne doivent JAMAIS leak des montants ou des libellés).
+            // Solid background → hides all underlying content (pre-lock
+            // screens must never leak amounts or labels).
             AppTheme.Colors.background
                 .ignoresSafeArea()
 
             VStack(spacing: AppTheme.Spacing.xxxl) {
                 Spacer()
 
-                // Marque Nemoris — minimaliste, sans afficher de données financières.
+                // Nemoris branding — minimal, displays no financial data.
                 ZStack {
                     RoundedRectangle(cornerRadius: AppTheme.Radius.xl)
                         .fill(AppTheme.Colors.accent.opacity(0.10))
@@ -58,9 +58,9 @@ struct AppLockGate: View {
 
                 Spacer()
 
-                // Bouton principal — apparaît APRÈS l'auto-trigger si échec.
-                // Tant qu'on n'a pas échoué une fois on n'affiche rien (la sheet
-                // iOS prend le focus, pas la peine de doubler).
+                // Primary button — appears AFTER the auto-trigger only on failure.
+                // Nothing is shown before a first failed attempt (the iOS sheet
+                // already has focus, no need to duplicate it).
                 if lastAttemptFailed {
                     Button {
                         Task { await authenticate() }
@@ -90,8 +90,8 @@ struct AppLockGate: View {
         }
         .task {
             biometryType = AppLockService.shared.biometryType
-            // Délai très court pour que SwiftUI ait le temps de poser le fond avant
-            // que iOS affiche la sheet biometry. Sans ça : flash blanc au launch.
+            // Very short delay so SwiftUI has time to lay down the background
+            // before iOS shows the biometry sheet. Without it: white flash on launch.
             try? await Task.sleep(nanoseconds: 200_000_000)
             await authenticate()
         }
@@ -103,7 +103,7 @@ struct AppLockGate: View {
         let success = await AppLockService.shared.authenticate(reason: "Déverrouiller Nemoris")
         if success {
             HapticService.shared.success()
-            // Animation spring pour que la disparition de l'overlay soit douce.
+            // Spring animation so the overlay dismissal is smooth.
             withAnimation(.easeOut(duration: 0.25)) {
                 isUnlocked = true
             }

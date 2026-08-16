@@ -4,17 +4,18 @@ import Contacts
 import UIKit
 #endif
 
-/// Service léger autour du framework `Contacts` d'Apple pour récupérer photos et noms
-/// du carnet local de l'utilisateur, à associer à des tiers de type `.contact`.
+/// Lightweight service around Apple's `Contacts` framework to fetch photos
+/// and names from the user's local address book, for association with tiers
+/// of type `.contact`.
 ///
-/// **Privacy** : 100% local. Aucun appel réseau. Permission iOS demandée **uniquement**
-/// au premier lien explicite (lazy), pas au launch (convention CLAUDE.md §6.7).
+/// **Privacy**: 100% local. No network calls. The iOS permission is
+/// requested **only** on the first explicit link (lazy), not at launch.
 ///
-/// Architecture :
-///   - `requestAccess()` : demande la permission si pas encore décidée. Idempotent.
-///   - `fetchImage(identifier:)` : lit `imageData` ou `thumbnailImageData` du contact.
-///   - `fetchName(identifier:)` : lit le nom formaté (pour vérifier qu'il existe encore).
-///   - Cache RAM des UIImage chargées (limite : 256 entrées via NSCache).
+/// Architecture:
+///   - `requestAccess()`: requests the permission if not yet decided. Idempotent.
+///   - `fetchImage(identifier:)`: reads the contact's `imageData` or `thumbnailImageData`.
+///   - `fetchName(identifier:)`: reads the formatted name (to check the contact still exists).
+///   - RAM cache of loaded UIImages (limit: 256 entries via NSCache).
 @MainActor
 final class ContactsService {
 
@@ -29,30 +30,30 @@ final class ContactsService {
 
     // MARK: - Permission
 
-    /// État actuel de l'autorisation iOS — sans déclencher de prompt.
+    /// Current iOS authorization state — does not trigger a prompt.
     var authorizationStatus: CNAuthorizationStatus {
         CNContactStore.authorizationStatus(for: .contacts)
     }
 
-    /// True si la permission a été accordée (ou limited iOS 18+).
+    /// True if permission has been granted (or limited on iOS 18+).
     var isAuthorized: Bool {
         switch authorizationStatus {
         case .authorized: return true
-        case .limited:    return true  // iOS 18+ — accès partiel mais utilisable
+        case .limited:    return true  // iOS 18+ — partial but usable access
         default:          return false
         }
     }
 
-    /// Demande la permission Contacts à iOS si pas encore décidée.
-    /// Renvoie true si autorisé in fine, false si refusé.
-    /// **À appeler UNIQUEMENT au moment où l'utilisateur tente explicitement de lier un contact.**
+    /// Requests the Contacts permission from iOS if not yet decided.
+    /// Returns true if ultimately authorized, false if denied.
+    /// **Call ONLY when the user explicitly attempts to link a contact.**
     @discardableResult
     func requestAccess() async -> Bool {
         if isAuthorized { return true }
         if authorizationStatus == .denied || authorizationStatus == .restricted {
             return false
         }
-        // .notDetermined — on demande
+        // .notDetermined — request it
         do {
             return try await store.requestAccess(for: .contacts)
         } catch {
@@ -63,8 +64,9 @@ final class ContactsService {
 
     // MARK: - Fetch
 
-    /// Renvoie la photo du contact (thumbnail si dispo, sinon imageData full).
-    /// Cache en RAM. Retourne nil si le contact n'existe plus ou n'a pas de photo.
+    /// Returns the contact's photo (thumbnail if available, otherwise full
+    /// imageData). Cached in RAM. Returns nil if the contact no longer
+    /// exists or has no photo.
     func fetchImage(identifier: String) async -> UIImage? {
         let key = identifier as NSString
         if let cached = imageCache.object(forKey: key) { return cached }
@@ -81,13 +83,13 @@ final class ContactsService {
             imageCache.setObject(image, forKey: key)
             return image
         } catch {
-            // Contact supprimé / inaccessible / partiel sans accès à ce contact
+            // Contact deleted / inaccessible / limited access without this contact
             return nil
         }
     }
 
-    /// Renvoie le nom formaté du contact (givenName + familyName) — utile pour
-    /// vérifier que le contact existe encore et afficher un preview.
+    /// Returns the contact's formatted name (givenName + familyName) —
+    /// useful to check the contact still exists and to show a preview.
     func fetchName(identifier: String) async -> String? {
         guard isAuthorized else { return nil }
         let keysToFetch: [CNKeyDescriptor] = [

@@ -3,11 +3,12 @@ import SwiftUI
 import ContactsUI
 #endif
 
-/// Wrapper SwiftUI autour de `CNContactPickerViewController` (UIKit).
-/// Affiche le carnet de contacts iOS standard, l'utilisateur en choisit un,
-/// on renvoie son `CNContact.identifier` + nom formaté au parent via le callback.
+/// SwiftUI wrapper around `CNContactPickerViewController` (UIKit).
+/// Shows the standard iOS contacts book, the user picks one, and its
+/// `CNContact.identifier` + formatted name are returned to the parent via
+/// the callback.
 ///
-/// Utilisation :
+/// Usage:
 ///     .sheet(isPresented: $show) {
 ///         ContactPickerSheet { contact in
 ///             tier.contactIdentifier = contact.identifier
@@ -15,9 +16,10 @@ import ContactsUI
 ///         }
 ///     }
 #if os(macOS)
-/// macOS : `CNContactPickerViewController` (ContactsUI) n'existe pas sur Mac.
-/// N.1 écrira un picker custom AppKit/SwiftUI (CNContactStore est dispo) —
-/// en attendant, message explicite plutôt qu'un bouton qui ne fait rien.
+/// macOS: `CNContactPickerViewController` (ContactsUI) does not exist on
+/// Mac. `CNContactStore` itself is available, so a custom AppKit/SwiftUI
+/// picker could be built later — for now, an explicit message is shown
+/// instead of a button that does nothing.
 struct ContactPickerSheet: View {
 
     struct PickedContact {
@@ -50,8 +52,8 @@ struct ContactPickerSheet: UIViewControllerRepresentable {
         let name: String
     }
 
-    /// Callback appelé quand l'utilisateur pick un contact (ou nil si annule).
-    /// La sheet se ferme automatiquement après.
+    /// Callback invoked when the user picks a contact (or nil on cancel).
+    /// The sheet closes automatically afterward.
     let onPick: (PickedContact?) -> Void
 
     func makeUIViewController(context: Context) -> CNContactPickerViewController {

@@ -1,63 +1,63 @@
 import SwiftUI
 
-/// Présentation adaptative selon la plateforme, déclarée UNE fois :
-/// - **iOS / iPadOS** : `.sheet` plein écran/detent natif (comportement historique).
-/// - **macOS, niveau 1** : le contenu s'ouvre dans le **panneau latéral droit**,
-///   qui est la troisième colonne du `NavigationSplitView` de `MainTabView`
-///   (redimensionnable, barre d'outils scindée — cf. la doc de
-///   `MainTabView.sidebarSplitView`).
-/// - **macOS, niveau 2+** (pane demandé depuis un contenu déjà dans le panneau ou
-///   dans une sheet) : `.sheet` bornée — les modals par-dessus un modal restent des
+/// Platform-adaptive presentation, declared ONCE:
+/// - **iOS / iPadOS**: native full-screen/detent `.sheet`.
+/// - **macOS, level 1**: the content opens in the **right-hand side pane**,
+///   which is the third column of `MainTabView`'s `NavigationSplitView`
+///   (resizable, split toolbar — see `MainTabView.sidebarSplitView`).
+/// - **macOS, level 2+** (a pane requested from content that's already in
+///   the pane or in a sheet): a bounded `.sheet` — modals over a modal stay
 ///   modals.
 ///
-/// > Historique : une première version présentait un `.inspector` PAR call site.
-/// > Abandonné : on ne peut PAS empiler plusieurs `.inspector` sur une même vue —
-/// > macOS rendait alors TOUTES les toolbars des panneaux dans la barre de fenêtre
-/// > en même temps (boutons Cancel/Save/Close fantômes) et élargissait la fenêtre.
-/// > La correction de fond, toujours en vigueur, est le **slot unique**
-/// > `InspectorPaneCenter` possédé par `MainTabView` : un seul pane actif ⇒ un seul
-/// > jeu de boutons ⇒ plus de fantômes. Seul le CONTENANT a changé depuis
-/// > (`.inspector` → `HStack` custom → colonne de split view).
+/// > An earlier version presented an `.inspector` PER call site. Multiple
+/// > `.inspector` instances CANNOT be stacked on the same view — macOS then
+/// > rendered ALL of the panes' toolbars in the window bar at once (ghost
+/// > Cancel/Save/Close buttons) and widened the window. The fix, still in
+/// > effect, is the **single slot** `InspectorPaneCenter` owned by
+/// > `MainTabView`: one active pane ⇒ one set of buttons ⇒ no more ghosts.
+/// > Only the CONTAINER has changed since (`.inspector` → custom `HStack` →
+/// > split view column).
 ///
-/// Un seul point de bascule ici → les call sites n'ont aucun `#if os`.
+/// A single switch point here means call sites carry no `#if os`.
 ///
-/// ### Contrat pour les vues présentées
-/// - Elles gardent leur `NavigationStack` + `.navigationTitle` + toolbar.
-/// - Elles ferment via `@Environment(\.paneDismiss)` (injecté par le wrapper,
-///   lié à SA présentation). Équivalent à `\.dismiss` pour une sheet, mais
-///   uniforme quelle que soit l'implémentation (sheet OU inspecteur).
-/// - Leurs sous-écrans (pickers) restent des `.sheet` imbriquées, ou des
-///   `.adaptivePane` qui retombent automatiquement en sheet grâce au contexte
-///   `\.paneHostContext` injecté par le wrapper parent.
+/// ### Contract for presented views
+/// - They keep their own `NavigationStack` + `.navigationTitle` + toolbar.
+/// - They dismiss via `@Environment(\.paneDismiss)` (injected by the
+///   wrapper, tied to ITS presentation). Equivalent to `\.dismiss` for a
+///   sheet, but uniform regardless of the underlying implementation (sheet
+///   OR inspector).
+/// - Their sub-screens (pickers) stay nested `.sheet`s, or `.adaptivePane`s
+///   that automatically fall back to a sheet via the `\.paneHostContext`
+///   injected by the parent wrapper.
 
-// MARK: - Environnement : fermeture du panneau adaptatif
+// MARK: - Environment: closing the adaptive pane
 
 private struct PaneDismissKey: EnvironmentKey {
-    // Computed (pas de `static let`) : évite l'erreur Swift 6 "static property
-    // not concurrency-safe" sur un `() -> Void` non-Sendable. Un no-op frais est
-    // renvoyé quand aucun panneau n'injecte de fermeture.
+    // Computed (not `static let`): avoids the Swift 6 "static property
+    // not concurrency-safe" error on a non-Sendable `() -> Void`. A fresh
+    // no-op is returned when no pane has injected a dismiss closure.
     static var defaultValue: () -> Void { {} }
 }
 
 extension EnvironmentValues {
-    /// Ferme la sheet/le pane adaptatif courant. Injecté par `.adaptivePane`.
+    /// Dismisses the current adaptive sheet/pane. Injected by `.adaptivePane`.
     var paneDismiss: () -> Void {
         get { self[PaneDismissKey.self] }
         set { self[PaneDismissKey.self] = newValue }
     }
 }
 
-// MARK: - Environnement : contexte d'hôte (profondeur de présentation)
+// MARK: - Environment: host context (presentation depth)
 
-/// Où se trouve la vue courante dans la hiérarchie de présentation.
-/// Détermine si un `.adaptivePane` demandé ici est de niveau 1 (→ inspecteur
-/// sur macOS) ou de niveau 2+ (→ reste une sheet).
+/// Where the current view sits in the presentation hierarchy.
+/// Determines whether an `.adaptivePane` requested here is level 1 (→
+/// inspector on macOS) or level 2+ (→ stays a sheet).
 enum PaneHostContext {
-    /// À même la fenêtre (aucun modal au-dessus) — un pane ouvert ici est niveau 1.
+    /// At the window level (no modal above) — a pane opened here is level 1.
     case root
-    /// Déjà dans une sheet — les panes enfants restent des sheets.
+    /// Already inside a sheet — child panes stay sheets.
     case modal
-    /// Déjà dans l'inspecteur macOS — les panes enfants deviennent des sheets.
+    /// Already inside the macOS inspector — child panes become sheets.
     case inspector
 }
 
@@ -72,37 +72,37 @@ extension EnvironmentValues {
     }
 }
 
-// MARK: - PaneBarButton (cross-plateforme)
+// MARK: - PaneBarButton (cross-platform)
 
-/// Descripteur d'un bouton de barre de panneau. Utilisé par le chrome custom
-/// macOS (`PaneScaffold`) MAIS AUSSI par `paneChrome` côté iOS (mappé sur des
-/// `ToolbarItem`) — il doit donc vivre HORS du bloc `#if os(macOS)`. Struct pur,
-/// aucune dépendance AppKit.
+/// Descriptor for a pane-bar button. Used by the custom macOS chrome
+/// (`PaneScaffold`) AND by `paneChrome` on iOS (mapped to `ToolbarItem`s) —
+/// so it must live OUTSIDE the `#if os(macOS)` block. Pure struct, no AppKit
+/// dependency.
 struct PaneBarButton: Identifiable, Equatable {
     let id = UUID()
     let label: String
     var systemImage: String? = nil
     var role: ButtonRole? = nil
     var disabled: Bool = false
-    /// Affiche le titre à côté de l'icône (sinon icône seule si `systemImage`).
+    /// Shows the title next to the icon (icon-only otherwise if `systemImage` is set).
     var showsTitle: Bool = true
     let action: () -> Void
 
-    /// Manuelle : `action` (closure) n'est pas `Equatable`. Comparaison sur
-    /// l'état VISUEL — suffisant pour piloter `.onPreferenceChange` (détecter
-    /// un changement de libellé/icône/`disabled` d'un rendu à l'autre).
+    /// Manual conformance: `action` (a closure) isn't `Equatable`. Compares
+    /// VISUAL state only — enough to drive `.onPreferenceChange` (detect a
+    /// label/icon/`disabled` change between renders).
     static func == (lhs: PaneBarButton, rhs: PaneBarButton) -> Bool {
         lhs.label == rhs.label && lhs.systemImage == rhs.systemImage
             && lhs.role == rhs.role && lhs.disabled == rhs.disabled && lhs.showsTitle == rhs.showsTitle
     }
 }
 
-// MARK: - Taille de la sheet macOS
+// MARK: - macOS sheet size
 
 private extension View {
-    /// Borne la sheet sur macOS pour un rendu confortable (no-op sur iOS, où la
-    /// sheet gère sa taille nativement). Ne concerne que la branche sheet — le
-    /// contenu de l'inspecteur est dimensionné par `inspectorColumnWidth`.
+    /// Bounds the sheet on macOS for a comfortable size (no-op on iOS, where
+    /// the sheet sizes itself natively). Only affects the sheet branch — the
+    /// inspector's content is sized by `inspectorColumnWidth`.
     @ViewBuilder func adaptivePaneFrame() -> some View {
         #if os(macOS)
         frame(minWidth: 480, idealWidth: 560, minHeight: 520, idealHeight: 640)
@@ -116,50 +116,52 @@ private extension View {
 
 // MARK: - InspectorPaneCenter (macOS)
 
-/// Slot UNIQUE de présentation pour l'inspecteur global macOS.
-/// Possédé par `MainTabView` (`@State`) et injecté dans l'environnement de tout
-/// le layout — les `.adaptivePane` de niveau 1 y routent leur contenu au lieu
-/// de présenter une sheet.
+/// Single presentation slot for the global macOS inspector. Owned by
+/// `MainTabView` (`@State`) and injected into the environment for the whole
+/// layout — level-1 `.adaptivePane`s route their content here instead of
+/// presenting a sheet.
 ///
-/// Sémantique « remplacement » : présenter un pane pendant qu'un autre est ouvert
-/// remplace le contenu et appelle le `onDismiss` de l'ancien (reset du binding de
-/// son call site). L'`onChange` de l'ancien modifier voit alors un id différent
-/// dans le slot → no-op (pas de double fermeture).
-/// Design B — « barre native en haut » : le contenu du panneau PUBLIE son chrome
-/// (titre + boutons) ici, et `MainTabView` le rend comme de VRAIS `ToolbarItem`
-/// natifs dans la barre système, séparés des outils du module par un
-/// `ToolbarSpacer`. Aucune barre custom dessinée dans le panneau.
+/// Replacement semantics: presenting a pane while another is open replaces
+/// the content and calls the previous one's `onDismiss` (resetting its call
+/// site's binding). The old modifier's `onChange` then sees a different id
+/// in the slot → no-op (no double dismissal).
+/// The pane content PUBLISHES its own chrome (title + buttons) here, and
+/// `MainTabView` renders it as real native `ToolbarItem`s in the system bar,
+/// separated from the module's own tools. No custom bar is drawn inside the
+/// pane itself.
 struct PaneChromeModel: Equatable {
     var title: String
-    /// Bouton de gauche du groupe inspecteur (Fermer / Annuler).
+    /// Left button of the inspector group (Close / Cancel).
     var leading: PaneBarButton?
-    /// Boutons de droite (Supprimer, Modifier / Enregistrer…), ordre visuel.
+    /// Right-hand buttons (Delete, Edit / Save…), in visual order.
     var trailing: [PaneBarButton]
 }
 
 @Observable @MainActor
 final class InspectorPaneCenter {
     struct Pane: Identifiable {
-        /// Identité de RENDU : régénérée à CHAQUE présentation (même call site),
-        /// pour que `.id(pane.id)` recrée le sous-arbre → le `@State` du contenu
-        /// (ex. `MacEntityPane.current`) est ré-amorcé avec la nouvelle donnée.
-        /// Sans ça, cliquer une 2ᵉ transaction ne changeait pas le détail.
+        /// RENDER identity: regenerated on every presentation (even from the
+        /// same call site), so `.id(pane.id)` recreates the subtree and the
+        /// content's `@State` (e.g. `MacEntityPane.current`) re-seeds with
+        /// the new data. Without this, clicking a second row wouldn't change
+        /// the detail shown.
         let id: UUID
-        /// Identité du PROPRIÉTAIRE (call site) : stable tant que le même
-        /// `.adaptivePane` pilote le pane. Sert au dé-doublonnage des fermetures.
+        /// OWNER identity (call site): stable as long as the same
+        /// `.adaptivePane` drives the pane. Used to de-duplicate dismissals.
         let ownerId: UUID
         let content: AnyView
-        /// Reset le binding du call site (isPresented = false / item = nil).
+        /// Resets the call site's binding (isPresented = false / item = nil).
         let onDismiss: () -> Void
     }
 
     private(set) var pane: Pane?
 
-    /// Présente (ou re-présente) le pane d'un call site donné.
-    /// - Même `ownerId` (re-présentation, ex. autre ligne cliquée) : on remplace
-    ///   le contenu avec un `id` de rendu FRAIS, sans fermer (pas de onDismiss).
-    /// - `ownerId` différent (un autre écran ouvre un pane) : on ferme d'abord
-    ///   l'ancien (reset de SON binding) puis on installe le nouveau.
+    /// Presents (or re-presents) a given call site's pane.
+    /// - Same `ownerId` (re-presentation, e.g. a different row clicked):
+    ///   replaces the content with a FRESH render `id`, without dismissing
+    ///   (no onDismiss call).
+    /// - Different `ownerId` (another screen opens a pane): dismisses the
+    ///   previous one first (resetting ITS binding), then installs the new one.
     func present(ownerId: UUID, content: AnyView, onDismiss: @escaping () -> Void) {
         if let current = pane, current.ownerId != ownerId {
             current.onDismiss()
@@ -167,77 +169,75 @@ final class InspectorPaneCenter {
         pane = Pane(id: UUID(), ownerId: ownerId, content: content, onDismiss: onDismiss)
     }
 
-    /// Fermeture initiée par l'inspecteur lui-même (croix, toggle, changement de
-    /// module) : vide le slot PUIS reset le binding du caller.
+    /// Dismissal initiated by the inspector itself (close button, toggle,
+    /// module switch): clears the slot, THEN resets the caller's binding.
     func dismissCurrent() {
         guard let current = pane else { return }
         pane = nil
         current.onDismiss()
     }
 
-    /// Fermeture initiée par le call site (binding passé à false/nil) : le
-    /// binding est déjà reset, on vide juste le slot si c'est bien ce pane.
+    /// Dismissal initiated by the call site (binding set to false/nil): the
+    /// binding is already reset, this just clears the slot if it's still
+    /// this pane.
     func dismissIfCurrent(_ ownerId: UUID) {
         guard pane?.ownerId == ownerId else { return }
         pane = nil
     }
 }
 
-// MARK: - Métriques du panneau (macOS)
+// MARK: - Pane metrics (macOS)
 
-/// Largeurs de la colonne du panneau (`MainTabView.inspectorColumn`), passées à
-/// `.navigationSplitViewColumnWidth(min:ideal:max:)`. L'utilisateur
-/// redimensionne en tirant le séparateur ; AppKit mémorise la largeur choisie,
-/// on n'a donc rien à persister nous-mêmes.
+/// Pane column widths (`MainTabView.inspectorColumn`), passed to
+/// `.navigationSplitViewColumnWidth(min:ideal:max:)`. The user resizes by
+/// dragging the divider; AppKit remembers the chosen width, so nothing needs
+/// to be persisted here.
 ///
-/// `min` doit rester assez large pour que les `Form` du panneau (label + champ
-/// sur une ligne) ne se cassent pas, `max` assez borné pour que la colonne du
-/// module reste utilisable sur un écran de portable.
+/// `min` must stay wide enough that the pane's `Form`s (label + field on one
+/// line) don't break; `max` must stay bounded enough that the module column
+/// remains usable on a laptop screen.
 enum InspectorPaneMetrics {
     static let minWidth: CGFloat = 320
     static let idealWidth: CGFloat = 440
-    /// Borné volontairement : au-delà, le panneau mangerait la fenêtre au lieu
-    /// de laisser la place au module (cf. le compromis documenté sur
-    /// `MainTabView.sidebarSplitView`).
+    /// Deliberately bounded: beyond this the pane would eat the window
+    /// instead of leaving room for the module.
     static let maxWidth: CGFloat = 640
 }
 
-// MARK: - Chrome du panneau → barre système (macOS)
+// MARK: - Pane chrome → system bar (macOS)
 
-/// Déclare la `.toolbar` du contenu du panneau, DEPUIS ce contenu.
+/// Declares the pane content's `.toolbar`, FROM that content.
 ///
-/// Sur macOS toute `.toolbar` de l'arbre remonte dans la barre unifiée de la
-/// fenêtre : le panneau y pose donc ses actions comme n'importe quelle vue, et
-/// elles cohabitent avec celles du module. Deux raisons de le faire ICI plutôt
-/// que de faire transiter un modèle d'actions vers `MainTabView` :
+/// On macOS any `.toolbar` in the tree bubbles up into the window's unified
+/// bar: the pane posts its actions there like any other view, and they sit
+/// alongside the module's own. Two reasons to do it HERE rather than routing
+/// an action model up to `MainTabView`:
 ///
-/// 1. **Fraîcheur** — les closures sont celles du rendu COURANT du contenu.
-///    Router le chrome via un objet observable relu dans un `.toolbar` distant
-///    donnait des boutons figés sur leur premier rendu (Fermer/Supprimer sans
-///    effet, `disabled` jamais réévalué) : SwiftUI ne réévalue pas de façon
-///    fiable un contenu de toolbar sur simple changement observable.
-/// 2. **Groupement** — les items du panneau sont un `ToolbarItemGroup` (le
-///    groupement natif ; `ControlGroup` rendait tantôt une pilule, tantôt des
-///    boutons isolés).
+/// 1. **Freshness** — the closures belong to the CURRENT render of the
+///    content. Routing chrome through an observable object re-read in a
+///    distant `.toolbar` produced buttons frozen at their first render
+///    (Close/Delete with no effect, `disabled` never re-evaluated): SwiftUI
+///    doesn't reliably re-evaluate toolbar content on a plain observable
+///    change.
+/// 2. **Grouping** — the pane's items are a `ToolbarItemGroup` (native
+///    grouping; `ControlGroup` rendered sometimes as a pill, sometimes as
+///    separate buttons).
 ///
-/// ⚠️ Ce qui sépare visuellement les actions du panneau de celles du module,
-/// c'est la STRUCTURE en colonnes du split view (macOS insère un séparateur de
-/// suivi entre les toolbars de deux colonnes). Mesuré : tant que le panneau
-/// n'était pas une colonne, aucun `ToolbarSpacer` ne dissociait les deux
-/// groupes — ni en placement `.automatic`, ni en `.primaryAction` — ils
-/// restaient entassés au bord droit de la fenêtre. Retiré depuis : il n'a
-/// jamais eu d'effet mesurable une fois la colonne en place.
+/// What visually separates the pane's actions from the module's is the split
+/// view's column STRUCTURE (macOS inserts a tracking separator between the
+/// toolbars of two columns). As long as the pane wasn't its own column, no
+/// `ToolbarSpacer` dissociated the two groups — in either `.automatic` or
+/// `.primaryAction` placement — they stayed bunched at the window's trailing
+/// edge.
 ///
-/// ⚠️ **Alignement à gauche du panneau : PAS ACHEVABLE nativement.** Testé
-/// `.primaryAction`, `.cancellationAction`+`.confirmationAction` séparés,
-/// `.navigation` : les trois premiers atterrissent tous à l'identique — bord
-/// TRAILING du segment du panneau (juste avant `.searchable`, s'il y en a un
-/// dans le module). `.navigation` casse le column-scoping et fait apparaître
-/// le groupe dans le segment du MODULE (à côté de son propre titre), pas dans
-/// celui du panneau. Il n'existe pas de placement SwiftUI qui rende un groupe
-/// LEADING dans le segment d'une colonne non-sidebar d'un `NavigationSplitView`
-/// — Mail obtient ce rendu via `NSToolbar` manuel (positionnement item par
-/// item), hors de portée de l'API déclarative `.toolbar`.
+/// **Left-aligning the pane's actions is not achievable natively.**
+/// `.primaryAction`, `.cancellationAction`+`.confirmationAction` separately,
+/// and `.navigation` were all tried: the first two land identically — at the
+/// TRAILING edge of the pane's segment (just before `.searchable`, if the
+/// module has one). `.navigation` breaks column-scoping and puts the group
+/// in the MODULE's segment instead (next to its own title), not the pane's.
+/// There is no SwiftUI placement that renders a group LEADING in the segment
+/// of a non-sidebar column of a `NavigationSplitView`.
 private struct InspectorChromeToolbar: ViewModifier {
     let make: () -> PaneChromeModel
 
@@ -255,15 +255,14 @@ private struct InspectorChromeToolbar: ViewModifier {
         }
     }
 
-    /// Icône seule + tooltip QUAND une icône a été fournie ; **libellé texte
-    /// sinon**.
+    /// Icon-only + tooltip WHEN an icon was provided; text label otherwise.
     ///
-    /// ⚠️ Ne JAMAIS inventer une icône par défaut pour une action qui n'en
-    /// déclare pas. Une version antérieure repliait tout bouton de confirmation
-    /// sur un ✓ : « Tout accepter » (qui crée en masse des récurrents détectés)
-    /// est ainsi devenu un simple ✓, lu comme « OK/fermer » — un clic a créé 157
-    /// récurrents d'un coup. Un libellé explicite est plus long mais ne peut pas
-    /// être confondu.
+    /// Never invent a default icon for an action that doesn't declare one.
+    /// Defaulting every confirmation button to a checkmark makes an action
+    /// like "Accept all" (which bulk-creates detected recurring patterns)
+    /// indistinguishable from a generic "OK/close" — a single tap can then
+    /// trigger a bulk action the user only meant to dismiss. An explicit
+    /// label is longer but unambiguous.
     @ViewBuilder
     private func barButton(_ button: PaneBarButton) -> some View {
         Button(role: button.role, action: button.action) {
@@ -281,8 +280,8 @@ private struct InspectorChromeToolbar: ViewModifier {
 }
 
 extension View {
-    /// Déclare le chrome (titre + actions) de ce contenu de panneau dans la barre
-    /// système macOS. Cf. `InspectorChromeToolbar`.
+    /// Declares this pane content's chrome (title + actions) in the macOS
+    /// system bar. See `InspectorChromeToolbar`.
     func publishesInspectorChrome(_ make: @escaping () -> PaneChromeModel) -> some View {
         modifier(InspectorChromeToolbar(make: make))
     }
@@ -290,11 +289,11 @@ extension View {
 
 // MARK: - Modifiers de routage (macOS)
 
-/// Variante booléenne : route vers l'inspecteur global au niveau 1, sinon sheet.
+/// Boolean variant: routes to the global inspector at level 1, sheet otherwise.
 private struct AdaptivePaneBoolModifier<PaneContent: View>: ViewModifier {
     @Binding var isPresented: Bool
-    /// Équivalent du `onDismiss:` de `.sheet` — appelé à la fermeture du pane,
-    /// quel que soit le chemin (binding, remplacement, changement de module).
+    /// Equivalent of `.sheet`'s `onDismiss:` — called when the pane closes,
+    /// regardless of the path (binding, replacement, module switch).
     let onDismiss: (() -> Void)?
     @ViewBuilder let paneContent: () -> PaneContent
 
@@ -309,28 +308,29 @@ private struct AdaptivePaneBoolModifier<PaneContent: View>: ViewModifier {
                     if newValue {
                         presentPane(center)
                     } else {
-                        // Tous les chemins de fermeture repassent ici (le center
-                        // reset le binding) → un seul point d'appel de onDismiss.
+                        // Every dismissal path routes back through here (the
+                        // center resets the binding) → a single call site for
+                        // onDismiss.
                         center.dismissIfCurrent(paneId)
                         onDismiss?()
                     }
                 }
                 .onAppear {
-                    // Binding déjà true au montage (état restauré, présentation
-                    // programmée avant l'apparition).
+                    // Binding already true at mount time (restored state,
+                    // presentation scheduled before the view appears).
                     if isPresented { presentPane(center) }
                 }
-                // ⚠️ Ferme le panneau quand CE call site disparaît de l'arbre —
-                // retour arrière (`selectedFile = nil`, `pushedSection = nil`…),
-                // changement de module (`.id(selectedTab)` démonte tout le sous-
-                // arbre), pop d'une NavigationStack. Sans ça le panneau reste
-                // affiché avec le contenu d'un écran qui n'existe plus : rien
-                // dans `InspectorPaneCenter` n'est informé qu'on a quitté la vue
-                // qui l'a ouvert, puisque c'est un objet à part, possédé par
-                // `MainTabView`, pas par cette vue. `dismissIfCurrent` (pas
-                // `dismissCurrent`) : le binding de cette vue est de toute façon
-                // sur le point d'être désalloué, pas besoin de le reset via
-                // `onDismiss` — seul le slot du center doit être vidé.
+                // Closes the pane when THIS call site leaves the tree — a
+                // back navigation, a module switch (`.id(selectedTab)`
+                // unmounts the whole subtree), a NavigationStack pop.
+                // Without this the pane would stay visible showing the
+                // content of a screen that no longer exists: nothing in
+                // `InspectorPaneCenter` is otherwise told that the view which
+                // opened it just left, since the center is a separate object
+                // owned by `MainTabView`, not by this view. `dismissIfCurrent`
+                // rather than `dismissCurrent`: this view's binding is about
+                // to be deallocated anyway, so there's no need to reset it via
+                // `onDismiss` — only the center's slot needs clearing.
                 .onDisappear { center.dismissIfCurrent(paneId) }
         } else {
             content.sheet(isPresented: $isPresented, onDismiss: onDismiss) {
@@ -349,10 +349,11 @@ private struct AdaptivePaneBoolModifier<PaneContent: View>: ViewModifier {
                 paneContent()
                     .environment(\.paneDismiss, { isPresented = false })
                     .environment(\.paneHostContext, .inspector)
-                    // ⚠️ Fond peint PAR L'HÔTE, pas laissé au contenu.
-                    // Chaque vue posait (ou oubliait) le sien : le volet
-                    // dépareillait avec le module d'à côté selon l'écran
-                    // présenté. Ici il est uniforme par construction.
+                    // Background painted BY THE HOST, not left to the
+                    // content. Otherwise each view supplies (or forgets) its
+                    // own, and the pane mismatches the module next to it
+                    // depending on which screen is presented. Here it's
+                    // uniform by construction.
                     .background(AppTheme.Colors.background)
             ),
             onDismiss: { isPresented = false }
@@ -360,10 +361,10 @@ private struct AdaptivePaneBoolModifier<PaneContent: View>: ViewModifier {
     }
 }
 
-/// Variante `Identifiable?` : route vers l'inspecteur global au niveau 1, sinon sheet.
+/// `Identifiable?` variant: routes to the global inspector at level 1, sheet otherwise.
 private struct AdaptivePaneItemModifier<Item: Identifiable, PaneContent: View>: ViewModifier {
     @Binding var item: Item?
-    /// Cf. AdaptivePaneBoolModifier.onDismiss.
+    /// See AdaptivePaneBoolModifier.onDismiss.
     let onDismiss: (() -> Void)?
     @ViewBuilder let paneContent: (Item) -> PaneContent
 
@@ -376,7 +377,7 @@ private struct AdaptivePaneItemModifier<Item: Identifiable, PaneContent: View>: 
             content
                 .onChange(of: item?.id) { _, newId in
                     if newId != nil, let value = item {
-                        // Présentation ou re-présentation (item remplacé à chaud).
+                        // Presentation or re-presentation (item swapped live).
                         presentPane(center, value: value)
                     } else {
                         center.dismissIfCurrent(paneId)
@@ -386,8 +387,8 @@ private struct AdaptivePaneItemModifier<Item: Identifiable, PaneContent: View>: 
                 .onAppear {
                     if let value = item { presentPane(center, value: value) }
                 }
-                // Cf. AdaptivePaneBoolModifier — ferme le panneau quand ce call
-                // site quitte l'arbre (retour arrière, changement de module).
+                // See AdaptivePaneBoolModifier — closes the pane when this
+                // call site leaves the tree (back navigation, module switch).
                 .onDisappear { center.dismissIfCurrent(paneId) }
         } else {
             content.sheet(item: $item, onDismiss: onDismiss) { value in
@@ -406,10 +407,11 @@ private struct AdaptivePaneItemModifier<Item: Identifiable, PaneContent: View>: 
                 paneContent(value)
                     .environment(\.paneDismiss, { item = nil })
                     .environment(\.paneHostContext, .inspector)
-                    // ⚠️ Fond peint PAR L'HÔTE, pas laissé au contenu.
-                    // Chaque vue posait (ou oubliait) le sien : le volet
-                    // dépareillait avec le module d'à côté selon l'écran
-                    // présenté. Ici il est uniforme par construction.
+                    // Background painted BY THE HOST, not left to the
+                    // content. Otherwise each view supplies (or forgets) its
+                    // own, and the pane mismatches the module next to it
+                    // depending on which screen is presented. Here it's
+                    // uniform by construction.
                     .background(AppTheme.Colors.background)
             ),
             onDismiss: { item = nil }
@@ -419,26 +421,25 @@ private struct AdaptivePaneItemModifier<Item: Identifiable, PaneContent: View>: 
 
 #endif
 
-// MARK: - EntityDetailEditPane (cross-plateforme) : détail lecture seule ⇄ édition
+// MARK: - EntityDetailEditPane (cross-platform): read-only detail ⇄ edit
 
-/// Conteneur "entité" pour une donnée EXISTANTE, sur **iOS et macOS** : le tap
-/// ouvre d'abord un **détail lecture seule** (Fermer / Supprimer / Modifier),
-/// puis « Modifier » bascule sur le formulaire d'édition existant (Annuler /
-/// Enregistrer). Les DEUX chemins de sortie du formulaire (Annuler comme
-/// post-save) reviennent au détail : le `\.paneDismiss` injecté ré-fetch l'item
-/// via `refresh` — après un save, le détail est donc à jour ; après un cancel,
-/// no-op visuel.
+/// "Entity" container for an EXISTING record, on **iOS and macOS**: tapping
+/// first opens a **read-only detail** (Close / Delete / Edit), then "Edit"
+/// switches to the existing edit form (Cancel / Save). BOTH exit paths from
+/// the form (Cancel and post-save) return to the detail: the injected
+/// `\.paneDismiss` re-fetches the item via `refresh` — so the detail is
+/// up to date after a save, and a visual no-op after a cancel.
 ///
-/// `.paneChrome` sur le détail s'adapte déjà à la plateforme/au contexte
-/// (barre système macOS niveau 1, `NavigationStack`+toolbar natif iOS/sheet) —
-/// ce conteneur n'a donc RIEN de spécifique à macOS.
+/// The detail's `.paneChrome` already adapts to platform/context (macOS
+/// level-1 system bar, native `NavigationStack`+toolbar for iOS/sheet) — so
+/// this container has NOTHING macOS-specific of its own.
 private struct EntityDetailEditPane<Item, DetailContent: View, EditContent: View>: View {
     let title: String
-    /// Re-fetch frais depuis le repository (jamais depuis des arrays capturés).
-    /// nil = l'item n'existe plus (supprimé ailleurs) → on garde le snapshot.
+    /// Fresh re-fetch from the repository (never from a captured array).
+    /// nil = the item no longer exists (deleted elsewhere) → keep the snapshot.
     let refresh: (Item) -> Item?
-    /// Route vers le flux de suppression existant du parent (confirmationDialog
-    /// de la liste, etc.). Le pane se ferme immédiatement après.
+    /// Routes to the parent's existing delete flow (list's confirmationDialog,
+    /// etc.). The pane closes immediately after.
     let onDelete: (Item) -> Void
     @ViewBuilder let detail: (Item) -> DetailContent
     @ViewBuilder let editContent: (Item) -> EditContent
@@ -465,8 +466,9 @@ private struct EntityDetailEditPane<Item, DetailContent: View, EditContent: View
 
     var body: some View {
         if isEditing {
-            // Le formulaire publie SON chrome (Annuler / Enregistrer) via
-            // `.paneChrome`. Annuler ET dismiss post-save reviennent au détail.
+            // The form publishes ITS OWN chrome (Cancel / Save) via
+            // `.paneChrome`. Both Cancel and post-save dismiss return to
+            // the detail.
             editContent(current)
                 .environment(\.paneDismiss, endEditing)
         } else {
@@ -490,19 +492,19 @@ private struct EntityDetailEditPane<Item, DetailContent: View, EditContent: View
     }
 }
 
-// MARK: - paneChrome : chrome adaptatif formulaire/écran
+// MARK: - paneChrome: adaptive form/screen chrome
 
-/// Remplace le couple `NavigationStack { … }.toolbar { Annuler / Enregistrer }`
-/// des formulaires et écrans présentés en pane/sheet :
-/// - **iOS**, et **macOS niveau 2** (sheet, fenêtre séparée) : `NavigationStack`
-///   + `.toolbar` natifs (comportement historique, rendu dans la sheet).
-/// - **macOS niveau 1** (inspecteur) : le contenu est rendu NU et publie son
-///   chrome (Annuler / Enregistrer) vers la barre système (Design B).
+/// Replaces the `NavigationStack { … }.toolbar { Cancel / Save }` pair used
+/// by forms and screens presented in a pane/sheet:
+/// - **iOS**, and **macOS level 2** (sheet, separate window): native
+///   `NavigationStack` + `.toolbar` (historical behavior, rendered in the sheet).
+/// - **macOS level 1** (inspector): the content renders BARE and publishes
+///   its own chrome (Cancel / Save) to the system bar.
 private struct PaneChromeModifier: ViewModifier {
     let title: String
     let cancel: PaneBarButton?
-    /// Bouton destructif optionnel (ex. Supprimer), rendu AVANT `confirm` dans
-    /// le groupe trailing — pour les écrans détail (Fermer / Supprimer / Modifier).
+    /// Optional destructive button (e.g. Delete), rendered BEFORE `confirm`
+    /// in the trailing group — for detail screens (Close / Delete / Edit).
     let destructive: PaneBarButton?
     let confirm: PaneBarButton?
 
@@ -560,22 +562,22 @@ private struct PaneChromeModifier: ViewModifier {
 }
 
 extension View {
-    /// Chrome adaptatif pour un formulaire/écran (cf. `PaneChromeModifier`).
-    /// Appliquer sur le CONTENU (Form/ScrollView) SANS `NavigationStack` ni
-    /// `.toolbar` propres — ce modifier les fournit selon la plateforme/contexte.
-    /// `destructiveLabel`/`onDestructive` : bouton Supprimer optionnel (écrans
-    /// détail Fermer / Supprimer / Modifier).
+    /// Adaptive chrome for a form/screen (see `PaneChromeModifier`).
+    /// Apply to the CONTENT (Form/ScrollView) WITHOUT its own
+    /// `NavigationStack` or `.toolbar` — this modifier supplies them based
+    /// on platform/context.
+    /// `destructiveLabel`/`onDestructive`: optional Delete button (detail
+    /// screens: Close / Delete / Edit).
     ///
-    /// `confirmIcon` : icône SF Symbol pour le bouton de confirmation dans le
-    /// panneau macOS (l'annulation est TOUJOURS "xmark" — sans ambiguïté
-    /// possible, "Fermer"/"Annuler" ne veulent jamais dire autre chose que
-    /// quitter sans agir). Pas de défaut deviné à partir du libellé : sur iOS et
-    /// dans les sheets macOS le bouton reste de toute façon du texte natif
-    /// (`Button(confirm.label, …)`, cf. `navStack`), donc `confirmIcon` ne
-    /// change RIEN hors du panneau macOS — laisser `nil` y garde le texte
-    /// (cf. l'avertissement dans `InspectorChromeToolbar.barButton` : ne
-    /// jamais inventer une icône pour une action qui n'en déclare pas
-    /// explicitement une).
+    /// `confirmIcon`: SF Symbol for the confirmation button in the macOS
+    /// pane (cancellation is ALWAYS "xmark" — unambiguous, since Close/Cancel
+    /// never mean anything other than leaving without acting). No icon is
+    /// guessed from the label: on iOS and in macOS sheets the button stays
+    /// native text either way (`Button(confirm.label, …)`, see `navStack`),
+    /// so `confirmIcon` changes NOTHING outside the macOS pane — leaving it
+    /// `nil` keeps the text there too (see the warning in
+    /// `InspectorChromeToolbar.barButton`: never invent an icon for an
+    /// action that doesn't explicitly declare one).
     func paneChrome(
         _ title: String,
         cancelLabel: String? = nil,
@@ -602,22 +604,22 @@ extension View {
     }
 }
 
-// MARK: - paneChromeInline : variante pour contenu avec push interne
+// MARK: - paneChromeInline: variant for content with internal push navigation
 
-/// Variante de `.paneChrome` pour un contenu qui a BESOIN de garder sa PROPRE
-/// `NavigationStack` (parce qu'il contient un `NavigationLink`/push interne —
-/// un push depuis le panneau macOS sans `NavigationStack` locale n'a pas de
-/// contexte de navigation fiable). Appliquer directement DANS cette
-/// `NavigationStack`, au même niveau que `.navigationTitle`/`.toolbar` (PAS
-/// à l'extérieur — un `.toolbar` posé hors d'une `NavigationStack` ne
-/// s'accroche à rien et disparaît silencieusement).
+/// Variant of `.paneChrome` for content that NEEDS to keep its OWN
+/// `NavigationStack` (because it contains an internal `NavigationLink`/push —
+/// pushing from the macOS pane without a local `NavigationStack` has no
+/// reliable navigation context). Apply directly INSIDE that
+/// `NavigationStack`, at the same level as `.navigationTitle`/`.toolbar`
+/// (NOT outside it — a `.toolbar` placed outside a `NavigationStack` doesn't
+/// attach to anything and disappears silently).
 ///
-/// - iOS, et macOS niveau 2 (sheet) : `.navigationTitle` + `.toolbar` natifs,
-///   exactement comme le pattern historique — la `NavigationStack` locale les
-///   affiche normalement.
-/// - macOS niveau 1 (inspecteur) : AUCUN `.navigationTitle`/`.toolbar` posé ici
-///   (la `NavigationStack` locale reste, nue, pour que le push interne
-///   fonctionne) ; le chrome est publié séparément vers la barre système.
+/// - iOS, and macOS level 2 (sheet): native `.navigationTitle` + `.toolbar`,
+///   exactly like the historical pattern — the local `NavigationStack`
+///   displays them normally.
+/// - macOS level 1 (inspector): NO `.navigationTitle`/`.toolbar` posted here
+///   (the local `NavigationStack` stays, bare, so the internal push works);
+///   the chrome is published separately to the system bar.
 private struct PaneChromeInlineModifier: ViewModifier {
     let title: String
     let cancel: PaneBarButton?
@@ -662,9 +664,9 @@ private struct PaneChromeInlineModifier: ViewModifier {
 }
 
 extension View {
-    /// Cf. `PaneChromeInlineModifier`. Appliquer DANS la `NavigationStack`
-    /// existante (sur son contenu), jamais à l'extérieur. `confirmIcon` : cf.
-    /// `paneChrome` — ne s'applique qu'au panneau macOS, `nil` garde le texte.
+    /// See `PaneChromeInlineModifier`. Apply INSIDE the existing
+    /// `NavigationStack` (on its content), never outside it. `confirmIcon`:
+    /// see `paneChrome` — only applies to the macOS pane, `nil` keeps the text.
     func paneChromeInline(
         _ title: String,
         cancelLabel: String? = nil,
@@ -686,29 +688,29 @@ extension View {
     }
 }
 
-// MARK: - PaneToggleButton : bouton déclencheur toggle
+// MARK: - PaneToggleButton: toggle-style trigger button
 
-/// Bouton de barre d'outils qui OUVRE un `.adaptivePane`, avec sémantique de
-/// TOGGLE plutôt que de simple ouverture : re-cliquer PENDANT que son panneau
-/// est affiché le referme, exactement comme le "Fermer" du panneau lui-même.
+/// Toolbar button that OPENS an `.adaptivePane`, with TOGGLE semantics
+/// rather than plain opening: tapping again WHILE its pane is showing closes
+/// it, exactly like the pane's own Close button.
 ///
-/// Piloter le `Toggle` par la MÊME `Binding<Bool>` que celle passée à
-/// `.adaptivePane(isPresented:)` est ce qui donne tout le reste gratuitement :
-/// - **Fermeture par re-clic** : `Toggle` bascule sa binding à `false` au tap,
-///   ce que `AdaptivePaneBoolModifier.onChange(of: isPresented)` traite déjà
-///   comme n'importe quelle fermeture (dismiss du slot + `onDismiss`).
-/// - **Repasse à "off" si le panneau change de contenu sous lui** : quand un
-///   AUTRE `.adaptivePane` prend le slot (ex. l'utilisateur clique une row
-///   pendant que ce panneau-ci est ouvert), `InspectorPaneCenter.present`
-///   appelle l'`onDismiss` de l'ancien propriétaire — qui repasse SA binding
-///   à `false`. Le toggle, lié à cette même binding, se dépresse tout seul.
-/// - **Repasse à "off" au retour arrière** : `.onDisappear` (cf.
-///   `AdaptivePaneBoolModifier`) vide le slot quand la vue déclenchante
-///   disparaît ; rien à faire ici non plus.
+/// Driving the `Toggle` from the SAME `Binding<Bool>` passed to
+/// `.adaptivePane(isPresented:)` is what makes the rest come for free:
+/// - **Close on re-tap**: `Toggle` flips its binding to `false` on tap,
+///   which `AdaptivePaneBoolModifier.onChange(of: isPresented)` already
+///   handles like any other dismissal (slot dismiss + `onDismiss`).
+/// - **Turns back "off" if the pane's content changes underneath it**: when
+///   ANOTHER `.adaptivePane` takes the slot (e.g. the user clicks a
+///   different row while this pane is open), `InspectorPaneCenter.present`
+///   calls the previous owner's `onDismiss` — which flips ITS binding to
+///   `false`. The toggle, bound to that same value, releases itself.
+/// - **Turns back "off" on back navigation**: `.onDisappear` (see
+///   `AdaptivePaneBoolModifier`) clears the slot when the triggering view
+///   disappears; nothing extra needed here either.
 ///
-/// Sur iOS (`.adaptivePane` → `.sheet`), `isOn` pilote directement
-/// `isPresented` de la sheet — re-taper l'icône pendant que la sheet est
-/// affichée la ferme aussi, cohérent avec le comportement macOS.
+/// On iOS (`.adaptivePane` → `.sheet`), `isOn` directly drives the sheet's
+/// `isPresented` — tapping the icon again while the sheet is showing closes
+/// it too, consistent with the macOS behavior.
 struct PaneToggleButton: View {
     let label: String
     let systemImage: String
@@ -719,16 +721,13 @@ struct PaneToggleButton: View {
             Label(label, systemImage: systemImage)
         }
         .toggleStyle(.button)
-        // ⚠️ `.toggleStyle(.button)` sans `.tint` explicite hérite du
-        // `.tint(AppTheme.Colors.accent)` ambiant posé sur `MainTabView`
-        // (`App/MainTabView.swift`) — donc coloré en accent MÊME À L'ÉTAT
-        // OFF (comportement standard iOS du style bordered pour un bouton
-        // togglable, indépendant de `isOn`). Inoffensif seul, mais à côté
-        // d'icônes de toolbar voisines qui, elles, forcent explicitement
-        // `AppTheme.Colors.textSecondary` (ex. `DashboardView` : œil de
-        // confidentialité, menu ⋯), le bouton de recherche ressortait teinté
-        // alors que rien n'était ouvert — lu comme "actif" à tort (retour
-        // user 2026-08-12). Le tint suit maintenant `isOn`.
+        // `.toggleStyle(.button)` without an explicit `.tint` inherits the
+        // ambient `.tint(AppTheme.Colors.accent)` set on `MainTabView` — so
+        // it's accent-colored even in the OFF state (standard iOS behavior
+        // for a bordered togglable button, independent of `isOn`). Harmless
+        // in isolation, but next to toolbar icons that explicitly force
+        // `AppTheme.Colors.textSecondary`, a button in this state can read
+        // as "active" when nothing is open. The tint now follows `isOn`.
         .tint(isOn ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary)
         .help(label)
         .accessibilityLabel(label)
@@ -738,9 +737,9 @@ struct PaneToggleButton: View {
 // MARK: - API publique
 
 extension View {
-    /// Tap « détail » macOS : ouvre le panneau détail au clic sur une row.
-    /// No-op sur iOS, où les rows gardent leur comportement historique
-    /// (swipe pour éditer/supprimer, pas de tap).
+    /// macOS "detail" tap: opens the detail pane when a row is clicked.
+    /// No-op on iOS, where rows keep their historical behavior (swipe to
+    /// edit/delete, no tap).
     @ViewBuilder
     func macDetailTap(_ action: @escaping () -> Void) -> some View {
         #if os(macOS)
@@ -750,12 +749,12 @@ extension View {
         #endif
     }
 
-    /// Pane "entité" pour une donnée EXISTANTE, UNIFIÉ iOS + macOS : le tap
-    /// ouvre un détail lecture seule (Fermer / Supprimer / Modifier) → « Modifier »
-    /// bascule sur `edit` (Annuler / Enregistrer) → retour au détail rafraîchi
-    /// via `refresh`. Sur macOS niveau 1, le détail vit dans le panneau latéral ;
-    /// sur iOS (et macOS niveau 2), en sheet — même logique, présentation adaptée.
-    /// - `onDelete` doit router vers le flux de suppression existant du parent.
+    /// "Entity" pane for an EXISTING record, UNIFIED across iOS + macOS: tap
+    /// opens a read-only detail (Close / Delete / Edit) → "Edit" switches to
+    /// `edit` (Cancel / Save) → returns to the refreshed detail via
+    /// `refresh`. On macOS level 1, the detail lives in the side pane; on
+    /// iOS (and macOS level 2), in a sheet — same logic, adapted presentation.
+    /// - `onDelete` must route to the parent's existing delete flow.
     @ViewBuilder
     func adaptiveEntityPane<Item: Identifiable, DetailContent: View, EditContent: View>(
         item: Binding<Item?>,
@@ -773,8 +772,8 @@ extension View {
         }
     }
 
-    /// Présente `content` selon un booléen : inspecteur global sur macOS au
-    /// niveau 1, sheet partout ailleurs.
+    /// Presents `content` driven by a boolean: global inspector on macOS at
+    /// level 1, sheet everywhere else.
     @ViewBuilder
     func adaptivePane<PaneContent: View>(
         isPresented: Binding<Bool>,
@@ -793,7 +792,7 @@ extension View {
         #endif
     }
 
-    /// Variante pilotée par un `Identifiable?` (équivalent `.sheet(item:)`).
+    /// Variant driven by an `Identifiable?` (equivalent of `.sheet(item:)`).
     @ViewBuilder
     func adaptivePane<Item: Identifiable, PaneContent: View>(
         item: Binding<Item?>,

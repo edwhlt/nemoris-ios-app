@@ -40,14 +40,14 @@ enum MainTabItem: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Fonctionnalité payante qui verrouille ce module ENTIER, si applicable. `nil` =
-    /// accès libre dès que le toggle des Réglages est actif (Transactions, Patrimoine,
-    /// Investissements, Tricount, Données — seule leur couche avancée reste Pro,
-    /// gatée séparément dans la vue concernée : `.investmentsLiveSync`,
+    /// Paid feature that locks this ENTIRE module, if applicable. `nil` = free
+    /// access as soon as the Settings toggle is on (Transactions, Patrimoine,
+    /// Investments, Tricount, Reference Data — only their advanced layer stays
+    /// Pro, gated separately in the relevant view: `.investmentsLiveSync`,
     /// `.patrimoineProjection`, `.filteredDashboard`).
-    /// Source unique partagée par le paywall (`paywallOverlay`/`proToggle`) et la
-    /// disponibilité des cartes Dashboard (`AppState.isDashboardCardAvailable`) — les
-    /// deux ne doivent jamais diverger sur "quel module est payant".
+    /// Single source shared by the paywall (`paywallOverlay`/`proToggle`) and
+    /// Dashboard card availability (`AppState.isDashboardCardAvailable`) — the
+    /// two must never diverge on "which module is paid".
     var paywallFeature: AppFeature? {
         switch self {
         case .budget:      return .budget
@@ -59,16 +59,17 @@ enum MainTabItem: String, CaseIterable, Identifiable {
 
 @Observable
 final class AppState {
-    /// Tags des entrées "Outils" de la sidebar desktop (macOS/iPad) — ce ne
-    /// sont PAS des `MainTabItem`. Source unique réutilisée par `MainTabView`
-    /// (rendu sidebar) et tout call site qui route vers ces destinations
-    /// (ex : le bouton réglages du Dashboard sur Mac). Évite un literal dupliqué.
+    /// Tags for the desktop sidebar (macOS/iPad) "Tools" entries — these are
+    /// NOT `MainTabItem` values. Single source reused by `MainTabView`
+    /// (sidebar rendering) and any call site that routes to these
+    /// destinations (e.g. the Dashboard settings button on Mac). Avoids a
+    /// duplicated literal.
     static let sidebarImportTag = "sidebar_import"
     static let sidebarSettingsTag = "sidebar_settings"
 
-    // TEMP DEBUG (bissection crash macOS fiche position) — À RETIRER : avec
-    // l'argument -nemorisCrashRepro, ouvre directement l'onglet Investissements
-    // pour une reproduction scriptée sans interaction. Sans l'argument : dashboard.
+    // With the `-nemorisCrashRepro` launch argument, opens the Investments
+    // tab directly for a scripted repro with no interaction. Without the
+    // argument: dashboard.
     var selectedTab: String = CommandLine.arguments.contains("-nemorisCrashRepro")
         ? MainTabItem.investments.rawValue
         : MainTabItem.dashboard.rawValue
@@ -79,159 +80,158 @@ final class AppState {
     var importStatus: String = "Aucun import lance"
     var dataRefreshToken: UUID = UUID()
 
-    /// session d'import active (résumé léger). Pilote l'affichage du bandeau
-    /// "Import en cours" dans MainTabView et le tap pour reprendre.
+    /// Active import session (lightweight summary). Drives the "Import in
+    /// progress" banner in MainTabView and the tap to resume.
     var activeImportSession: ImportSessionSummary? = nil
 
-    /// Toggle UI : si true, l'utilisateur a demandé à voir ImportSessionView depuis le bandeau.
-    /// MainTabView observe ce flag pour présenter la sheet.
+    /// UI toggle: true when the user has requested to see ImportSessionView
+    /// from the banner. MainTabView observes this flag to present the sheet.
     var showImportSessionSheet: Bool = false
 
-    /// Toast global affiché en haut de l'app via le modifier `.appToast(_:)`.
-    /// Setter helper : `postToast(.success, "Texte")`.
+    /// Global toast shown at the top of the app via the `.appToast(_:)`
+    /// modifier. Setter helper: `postToast(.success, "Text")`.
     var currentToast: AppToastMessage? = nil
 
-    /// Post un toast global. Auto-disparait après 3 s.
+    /// Posts a global toast. Auto-dismisses after 3 s.
     func postToast(_ kind: AppToastKind, _ text: String) {
         currentToast = AppToastMessage(kind: kind, text: text)
     }
 
-    /// Rafraîchit `activeImportSession` depuis la DB. À appeler au lancement de l'app
-    /// et après toute action qui peut changer l'état (création, commit, cancel).
-    /// `@MainActor` : recharge au passage le coordinateur d'import, qui l'est.
+    /// Refreshes `activeImportSession` from the DB. Call at app launch and
+    /// after any action that can change the state (create, commit, cancel).
+    /// `@MainActor`: also reloads the import coordinator, which is main-actor.
     @MainActor
     func reloadActiveImportSession() {
         let summary = ImportSessionRepository().fetchActiveSummary()
         activeImportSession = summary
-        // ⚠️ Une session d'INVESTISSEMENTS doit être rechargée dans le
-        // coordinateur ICI, pas au moment d'ouvrir la revue : cette dernière
-        // capture le résultat dans un `@State` à son initialisation, donc une
-        // restauration faite après coup n'aurait plus aucun effet visible.
+        // An INVESTMENTS session must be reloaded into the coordinator HERE,
+        // not when the review screen opens: that screen captures the result
+        // into a `@State` at init, so a restore performed afterward would
+        // have no visible effect.
         if let summary, summary.destination == .investments,
            DocumentImportCoordinator.shared.batch.isEmpty {
             DocumentImportCoordinator.shared.restore(sessionId: summary.id)
         }
     }
 
-    // Persisté : "system" | "light" | "dark"
+    // Persisted: "system" | "light" | "dark"
     var colorSchemeRaw: String = UserDefaults.standard.string(forKey: "appColorScheme") ?? "system" {
         didSet { UserDefaults.standard.set(colorSchemeRaw, forKey: "appColorScheme") }
     }
 
-    /// Module Transactions (liste des opérations + écran Données).
+    /// Transactions module (operations list + Reference Data screen).
     ///
-    /// ⚠️ ACTIVÉ par défaut, contrairement aux autres modules : c'est le cœur
-    /// historique de l'app, le désactiver d'office casserait toutes les
-    /// installations existantes. Mais il DOIT pouvoir l'être — quelqu'un qui ne
-    /// se sert de Nemoris que pour son portefeuille n'a aucune raison de voir
-    /// une liste de transactions vide.
+    /// ON by default, unlike other modules: it is the app's historical core,
+    /// disabling it by default would break every existing installation. But
+    /// it MUST still be toggle-able — someone who only uses Nemoris for their
+    /// portfolio has no reason to see an empty transactions list.
     ///
-    /// `featureTransactions` n'existe pas dans les bases installées, et
-    /// `UserDefaults.bool` rendrait `false` : la clé est donc semée à `true` au
-    /// premier lancement (cf. `seedDefaultFlagsIfNeeded`).
+    /// `featureTransactions` does not exist in already-installed databases,
+    /// and `UserDefaults.bool` would return `false`: the key is therefore
+    /// seeded to `true` on first launch (see `seedDefaultFlagsIfNeeded`).
     var showTransactions: Bool = UserDefaults.standard.bool(forKey: "featureTransactions") {
         didSet { UserDefaults.standard.set(showTransactions, forKey: "featureTransactions") }
     }
 
-    /// Fonctionnalité Tricount activée (opt-in, désactivée par défaut).
+    /// Tricount feature toggle (opt-in, off by default).
     var showTricount: Bool = UserDefaults.standard.bool(forKey: "featureTricount") {
         didSet { UserDefaults.standard.set(showTricount, forKey: "featureTricount") }
     }
 
-    /// Fonctionnalité Investissements (opt-in, désactivée par défaut).
-    /// Comme Tricount/Budget : la valeur persistée est relue à chaque lancement.
-    /// L'accès payant reste verrouillé par `proToggle` (Settings) + `paywallOverlay`
-    /// (InvestmentsView) + filtre `availableTabs` (MainTabView) — un user gratuit
-    /// ne peut donc pas activer le toggle ni voir le contenu.
+    /// Investments feature toggle (opt-in, off by default).
+    /// Like Tricount/Budget: the persisted value is re-read on every launch.
+    /// Paid access stays locked by `proToggle` (Settings) + `paywallOverlay`
+    /// (InvestmentsView) + the `availableTabs` filter (MainTabView) — a free
+    /// user therefore cannot enable the toggle nor see the content.
     var showInvestments: Bool = UserDefaults.standard.bool(forKey: "featureInvestments") {
         didSet { UserDefaults.standard.set(showInvestments, forKey: "featureInvestments") }
     }
 
-    /// Fonctionnalité Budget & Prévisions (opt-in, désactivée par défaut).
+    /// Budget & Forecasts feature toggle (opt-in, off by default).
     var showBudget: Bool = UserDefaults.standard.bool(forKey: "featureBudget") {
         didSet { UserDefaults.standard.set(showBudget, forKey: "featureBudget") }
     }
 
-    /// Fonctionnalité Patrimoine / Net Worth (opt-in, désactivée par défaut).
-    /// Module qui agrège investissements + comptes épargne + immobilier − prêts
-    /// pour donner la valeur nette globale. Lien optionnel vers les comptes
-    /// existants pour éviter la saisie manuelle.
+    /// Patrimoine / Net Worth feature toggle (opt-in, off by default).
+    /// Module that aggregates investments + savings accounts + real estate
+    /// minus loans into a global net worth figure. Optional link to existing
+    /// accounts to avoid manual entry.
     var showPatrimoine: Bool = UserDefaults.standard.bool(forKey: "featurePatrimoine") {
         didSet { UserDefaults.standard.set(showPatrimoine, forKey: "featurePatrimoine") }
     }
 
-    /// Chantier A — synchronisation automatique des investissements (LiveSync
-    /// exchanges/wallets + historique des cours) au passage en premier plan et
-    /// à l'ouverture du module, au plus une fois toutes les 4 h. Activée par
-    /// défaut : la clé ABSENTE vaut true (lue aussi par InvestmentAutoSyncService).
+    /// Automatic investments sync (LiveSync exchanges/wallets + price
+    /// history) on foreground and on opening the module, at most once every
+    /// 4 hours. On by default: an ABSENT key means true (also read by
+    /// InvestmentAutoSyncService).
     var investmentsAutoSyncEnabled: Bool = UserDefaults.standard.object(forKey: "investments.autoSyncEnabled") == nil
         ? true
         : UserDefaults.standard.bool(forKey: "investments.autoSyncEnabled") {
         didSet { UserDefaults.standard.set(investmentsAutoSyncEnabled, forKey: "investments.autoSyncEnabled") }
     }
 
-    // MARK: - Confidentialité (masquage des montants)
+    // MARK: - Privacy (amount masking)
 
-    /// Quand `true`, tous les composants `MoneyText` affichent une chaîne masquée
-    /// (`•• ••• €`) au lieu de la valeur réelle. Volontairement NON persisté —
-    /// c'est un toggle de session, l'état repart à `false` à chaque cold launch
-    /// pour ne pas piéger l'utilisateur (sinon il rouvre l'app et ne comprend pas
-    /// pourquoi rien ne s'affiche). Persistance gérée séparément via le mode
-    /// face-down si l'utilisateur le souhaite.
+    /// When `true`, every `MoneyText` component shows a masked string
+    /// (`•• ••• €`) instead of the real value. Deliberately NOT persisted —
+    /// it is a session toggle, reset to `false` on every cold launch so the
+    /// user is never caught out (otherwise they reopen the app and can't
+    /// tell why nothing shows). Persistence is handled separately by the
+    /// face-down mode if the user opts into it.
     var amountsHidden: Bool = false
 
-    /// Si `true`, le PrivacyMotionMonitor surveille l'orientation du téléphone
-    /// et bascule `amountsHidden` à `true` quand l'iPhone est posé face contre
-    /// la table. Persisté car c'est un réglage permanent, pas un état de session.
+    /// When `true`, PrivacyMotionMonitor watches the phone's orientation and
+    /// flips `amountsHidden` to `true` when the iPhone is placed face down.
+    /// Persisted because it is a permanent setting, not session state.
     var hideAmountsOnFaceDown: Bool = UserDefaults.standard.bool(forKey: "hideAmountsOnFaceDown") {
         didSet { UserDefaults.standard.set(hideAmountsOnFaceDown, forKey: "hideAmountsOnFaceDown") }
     }
 
-    /// Retours haptiques globaux. Default `true` (attente standard d'une app
-    /// moderne). l'utilisateur peut désactiver dans Settings → Confidentialité.
+    /// Global haptic feedback. Defaults to `true` (standard expectation for a
+    /// modern app). The user can disable it in Settings → Privacy.
     var hapticsEnabled: Bool = UserDefaults.standard.object(forKey: "hapticsEnabled") as? Bool ?? true {
         didSet { UserDefaults.standard.set(hapticsEnabled, forKey: "hapticsEnabled") }
     }
 
-    /// Densité d'affichage des rows Transactions. Pilote la taille du logo,
-    /// les paddings verticaux et la prominence des sous-infos. Persisté.
+    /// Display density for Transactions rows. Drives logo size, vertical
+    /// padding, and the prominence of secondary info. Persisted.
     var transactionDensity: TransactionDensity =
         TransactionDensity(rawValue: UserDefaults.standard.string(forKey: "transactionDensity") ?? "") ?? .normal {
         didSet { UserDefaults.standard.set(transactionDensity.rawValue, forKey: "transactionDensity") }
     }
 
-    /// Devise préférée pour l'affichage / conversions ad-hoc. Default EUR.
-    /// **Note** : MVP — la devise n'est pas encore propagée à tous les
-    /// composants MoneyText (qui restent en EUR). Utilisée par le
-    /// CurrencyConverterSheet pour la cible de conversion par défaut.
+    /// Preferred currency for display / ad-hoc conversions. Defaults to EUR.
+    /// **Note**: not yet propagated to every MoneyText component (which stay
+    /// in EUR). Used by CurrencyConverterSheet as the default conversion
+    /// target.
     var preferredCurrency: String = UserDefaults.standard.string(forKey: "preferredCurrency") ?? "EUR" {
         didSet { UserDefaults.standard.set(preferredCurrency, forKey: "preferredCurrency") }
     }
 
-    // MARK: - Navigation programmatique (cross-tab)
+    // MARK: - Programmatic navigation (cross-tab)
 
-    /// Tab à pousser dans MoreView quand la cible de navigation est dans les
-    /// onglets cachés (≥ 5e position du tabOrder). Setté par `navigateToTab(_:)`,
-    /// consommé par MoreView via `.navigationDestination`.
+    /// Tab to push in MoreView when the navigation target is among the
+    /// hidden tabs (≥ 5th position in tabOrder). Set by `navigateToTab(_:)`,
+    /// consumed by MoreView via `.navigationDestination`.
     var pendingMoreDestination: MainTabItem? = nil
 
-    /// Chantier D — document d'investissement déposé par un raccourci Siri
-    /// (`ImportInvestmentDocumentIntent`) ou la share extension Portefeuille,
-    /// à ouvrir dans l'import intelligent.
-    /// Setté par NemorisApp au passage au premier plan (consommation de
-    /// `PendingImportInbox`), consommé par `InvestmentsView` qui présente la sheet.
+    /// Investment document dropped by a Siri shortcut
+    /// (`ImportInvestmentDocumentIntent`) or the Portfolio share extension,
+    /// to be opened in the smart import flow.
+    /// Set by NemorisApp on foreground (consuming `PendingImportInbox`),
+    /// consumed by `InvestmentsView`, which presents the sheet.
     var pendingInvestmentImportURLs: [URL] = []
 
-    /// relevés bancaires déposés par le raccourci `ImportFileIntent` ou
-    /// la share extension Transactions, à ouvrir dans l'import V3 pré-rempli.
-    /// Setté par NemorisApp au passage au premier plan (consommation de
-    /// `PendingImportInbox`), consommé par `MainTabView` qui présente la sheet.
+    /// Bank statements dropped by the `ImportFileIntent` shortcut or the
+    /// Transactions share extension, to be opened in the pre-filled V3
+    /// import flow. Set by NemorisApp on foreground (consuming
+    /// `PendingImportInbox`), consumed by `MainTabView`, which presents the sheet.
     var pendingTransactionImportURLs: [URL] = []
 
-    /// Liste des tabs effectivement actifs (filtrés selon les feature flags
-    /// `showXxx`). Dérivé de `mainTabOrder` + flags. Le **4 premiers** sont
-    /// directement adressables via TabView, les suivants vivent dans MoreView.
-    /// Source unique de vérité pour `MainTabView` ET pour `navigateToTab`.
+    /// List of tabs actually active (filtered by the `showXxx` feature
+    /// flags). Derived from `mainTabOrder` + flags. The first **4** are
+    /// directly addressable via the TabView, the rest live in MoreView.
+    /// Single source of truth for both `MainTabView` and `navigateToTab`.
     var availableTabsResolved: [MainTabItem] {
         mainTabOrder.filter { tab in
             switch tab {
@@ -240,47 +240,48 @@ final class AppState {
             case .budget:      return showBudget
             case .patrimoine:  return showPatrimoine
             case .sqlConsole:  return showSQLConsole
-            // « Données » est le référentiel DES transactions (tiers,
-            // catégories, métadonnées) : il suit le module, sinon on garderait
-            // un écran de gestion pour des données qu'on ne peut plus voir.
+            // "Reference Data" is the reference set FOR transactions (payees,
+            // categories, metadata): it follows the module, otherwise a
+            // management screen would remain for data no longer visible.
             case .transactions, .referenceData: return showTransactions
             default:           return true
             }
         }
     }
 
-    /// Les 4 premiers tabs visibles directement dans la TabView (les autres
-    /// vivent dans MoreView). iOS gère 5 slots max = 4 tabs + bouton "Plus".
+    /// The first 4 tabs shown directly in the TabView (the rest live in
+    /// MoreView). iOS supports a max of 5 slots = 4 tabs + "More" button.
     var visibleTabsResolved: [MainTabItem] {
         Array(availableTabsResolved.prefix(4))
     }
 
-    // MARK: - Mise en page du Dashboard
+    // MARK: - Dashboard layout
 
-    /// Ordre, visibilité et taille des cartes du Dashboard.
+    /// Order, visibility, and size of Dashboard cards.
     ///
-    /// ⚠️ Propriété **stockée** avec `didSet`, et surtout PAS une computed property
-    /// get/set sur UserDefaults comme `mainTabOrder` juste au-dessus : le macro
-    /// `@Observable` n'instrumente que les propriétés stockées, donc muter une
-    /// computed ne notifie aucun observateur. Ça ne se voit pas pour `mainTabOrder`
-    /// parce que son écran de réglages garde une copie `@State` locale, mais ici la
-    /// grille doit se rafraîchir en direct depuis l'écran de personnalisation.
+    /// This is a **stored** property with `didSet`, deliberately not a
+    /// computed get/set over UserDefaults like `mainTabOrder` just above:
+    /// the `@Observable` macro only instruments stored properties, so
+    /// mutating a computed property notifies no observer. This is invisible
+    /// for `mainTabOrder` because its settings screen keeps a local `@State`
+    /// copy, but here the grid must refresh live from the customization screen.
     var dashboardLayout: [DashboardCardPreference] = DashboardLayoutStore.load() {
         didSet { DashboardLayoutStore.save(dashboardLayout) }
     }
 
-    /// Une carte n'est affichable que si son module est actif ET, quand ce module est
-    /// payant, que l'entitlement Pro est toujours valide. On filtre **à la lecture**
-    /// sans jamais toucher à la préférence stockée : désactiver puis réactiver le
-    /// module, ou renouveler l'abonnement, restitue ainsi la position et la taille
-    /// choisies.
+    /// A card is only displayable if its module is active AND, when that
+    /// module is paid, the Pro entitlement is still valid. Filtering happens
+    /// **at read time** without ever touching the stored preference:
+    /// disabling then re-enabling the module, or renewing the subscription,
+    /// therefore restores the chosen position and size.
     ///
-    /// ⚠️ Le flag module (`showBudget`/`showInvestments`, persisté en UserDefaults) et
-    /// `PurchaseManager.accessLevel` (JAMAIS persisté, recalculé à chaque lancement
-    /// depuis StoreKit — cf. PurchaseManager) peuvent diverger : un abonnement qui
-    /// expire laisse le flag à `true`. Sans le check `purchaseManager.isUnlocked`, un
-    /// utilisateur dont le Pro a expiré pouvait encore activer/désactiver — et voir
-    /// le contenu de — la carte d'un module qu'il ne peut plus ouvrir depuis l'onglet.
+    /// The module flag (`showBudget`/`showInvestments`, persisted in
+    /// UserDefaults) and `PurchaseManager.accessLevel` (NEVER persisted,
+    /// recomputed from StoreKit on every launch — see PurchaseManager) can
+    /// diverge: an expired subscription leaves the flag at `true`. Without
+    /// the `purchaseManager.isUnlocked` check, a user whose Pro entitlement
+    /// expired could still toggle — and see the content of — a card for a
+    /// module they can no longer open from the tab bar.
     @MainActor
     func isDashboardCardAvailable(_ card: DashboardCardID, purchaseManager: PurchaseManager) -> Bool {
         guard let module = card.requiredModule else { return true }
@@ -289,22 +290,22 @@ final class AppState {
         return purchaseManager.isUnlocked(feature)
     }
 
-    /// Cartes réellement affichables, dans l'ordre choisi par l'utilisateur.
+    /// Cards that are actually displayable, in the order chosen by the user.
     @MainActor
     func visibleDashboardCards(purchaseManager: PurchaseManager) -> [DashboardCardPreference] {
         dashboardLayout.filter { $0.isVisible && isDashboardCardAvailable($0.card, purchaseManager: purchaseManager) }
     }
 
-    /// Navigation cross-tab depuis n'importe où dans l'app (ex : bandeau
-    /// Dashboard → onglet Patrimoine). Gère les 2 cas :
-    ///   - Tab cible parmi les 4 premiers visibles → simple `selectedTab = …`
-    ///   - Tab cible dans les onglets cachés → bascule sur `more` + set
-    ///     `pendingMoreDestination` pour que MoreView push l'écran cible
+    /// Cross-tab navigation from anywhere in the app (e.g. Dashboard banner
+    /// → Patrimoine tab). Handles 2 cases:
+    ///   - Target tab among the first 4 visible → simple `selectedTab = …`
+    ///   - Target tab among the hidden tabs → switch to `more` + set
+    ///     `pendingMoreDestination` so MoreView pushes the target screen
     func navigateToTab(_ tab: MainTabItem) {
         if visibleTabsResolved.contains(tab) {
             selectedTab = tab.rawValue
-            // S'il y avait une destination pending dans More, on la clear pour
-            // ne pas la dérouler par erreur au prochain switch vers More.
+            // Clear any pending More destination so it isn't mistakenly
+            // consumed on the next switch to More.
             pendingMoreDestination = nil
         } else {
             selectedTab = "more"
@@ -312,41 +313,41 @@ final class AppState {
         }
     }
 
-    /// Demande d'ouverture de l'outil d'importation, avec la destination
-    /// pré-remplie par le module qui l'a demandée.
+    /// Request to open the import tool, with the destination pre-filled by
+    /// the module that requested it.
     ///
-    /// ⚠️ Un module ne présente PAS l'import lui-même : sur desktop, ça
-    /// l'ouvrait dans le volet latéral, à côté du module — alors que l'import
-    /// est un parcours à part entière, avec ses étapes, pas une fiche de détail.
-    /// Il pose une demande, et la navigation racine décide où l'afficher
-    /// (destination de sidebar sur desktop, feuille sur iPhone).
+    /// A module does not present the import flow itself: on desktop, doing
+    /// so opened it in the side pane next to the module — but import is a
+    /// full multi-step flow, not a detail sheet. A module posts a request,
+    /// and the root navigation decides where to show it (sidebar
+    /// destination on desktop, sheet on iPhone).
     var importToolRequest: ImportDestination?
 
     func openImportTool(destination: ImportDestination) {
         importToolRequest = destination
     }
 
-    /// Onglet Console SQL en racine (opt-in Pro, désactivé par défaut).
-    /// L'accès se fait uniquement via cet onglet — plus de raccourci dans Données.
+    /// Root-level SQL Console tab (opt-in Pro, off by default).
+    /// Access is only through this tab — no shortcut from Reference Data anymore.
     var showSQLConsole: Bool = UserDefaults.standard.bool(forKey: "featureSQLConsole") {
         didSet { UserDefaults.standard.set(showSQLConsole, forKey: "featureSQLConsole") }
     }
 
-    /// Affichage de la trésorerie (cash) dans la valorisation totale des heros
-    /// (compte + dashboard global). Quand OFF : hero affiche uniquement la valeur des
-    /// positions, le cash est listé séparément. Quand ON : hero affiche positions + cash
-    /// en grand. ⚠️ Le calcul de PnL/variation% n'utilise JAMAIS le cash, peu importe
-    /// la valeur de ce flag (sinon la perf serait artificiellement gonflée).
+    /// Whether cash is included in the total valuation shown by the heroes
+    /// (account + global dashboard). OFF: hero shows only the positions'
+    /// value, cash is listed separately. ON: hero shows positions + cash
+    /// combined. PnL/variation % never factors in cash, regardless of this
+    /// flag (otherwise performance would be artificially inflated).
     var investmentsIncludeCashInTotal: Bool = UserDefaults.standard.bool(forKey: "investmentsIncludeCashInTotal") {
         didSet { UserDefaults.standard.set(investmentsIncludeCashInTotal, forKey: "investmentsIncludeCashInTotal") }
     }
 
-    /// Compte par défaut sélectionné au démarrage. 0 = aucune préférence (premier compte disponible).
+    /// Default account selected at startup. 0 = no preference (first available account).
     var defaultAccountId: Int = UserDefaults.standard.integer(forKey: "defaultAccountId") {
         didSet { UserDefaults.standard.set(defaultAccountId, forKey: "defaultAccountId") }
     }
 
-    /// Langue de l'interface : "system" | "fr" | "en". Par défaut : système.
+    /// Interface language: "system" | "fr" | "en". Defaults to system.
     var preferredLanguage: String = UserDefaults.standard.string(forKey: "appLanguage") ?? "system" {
         didSet { UserDefaults.standard.set(preferredLanguage, forKey: "appLanguage") }
     }
@@ -382,21 +383,20 @@ final class AppState {
 
     init() {
         Self.seedDefaultFlagsIfNeeded()
-        // Relu APRÈS le semis : la propriété a été initialisée avant, avec la
-        // valeur d'une clé qui n'existait peut-être pas encore.
+        // Re-read AFTER seeding: the property was initialized earlier, with
+        // the value of a key that may not have existed yet.
         showTransactions = UserDefaults.standard.bool(forKey: "featureTransactions")
         mainTabOrder = sanitizeTabOrder(mainTabOrder)
     }
 
-    /// Sème les flags dont le défaut n'est PAS `false`.
+    /// Seeds the flags whose default is NOT `false`.
     ///
-    /// ⚠️ `UserDefaults.bool(forKey:)` rend `false` pour une clé absente. Un
-    /// module activé par défaut ne peut donc pas se contenter de lire sa clé :
-    /// à la première ouverture après mise à jour, `featureTransactions`
-    /// n'existe pas et le module cœur disparaîtrait de la navigation de tout le
-    /// monde. On l'écrit une fois, sous garde, ce qui laisse ensuite
-    /// l'utilisateur libre de le désactiver — un `false` explicite ne sera pas
-    /// réécrit.
+    /// `UserDefaults.bool(forKey:)` returns `false` for a missing key. A
+    /// module that is on by default therefore cannot just read its key:
+    /// on first launch after an update, `featureTransactions` does not exist
+    /// and the core module would disappear from everyone's navigation. It is
+    /// written once, guarded, which then leaves the user free to disable it
+    /// — an explicit `false` is never rewritten.
     private static func seedDefaultFlagsIfNeeded() {
         let defaults = UserDefaults.standard
         let seededKey = "featureFlags.seeded.v1"

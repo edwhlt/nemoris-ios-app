@@ -1,22 +1,23 @@
 import Foundation
 
-// MARK: - Affichage des millésimes
+// MARK: - Year display
 //
-// ⚠️ **Piège SwiftUI** : `Text("Cumul \(year)")` ne fait PAS une interpolation Swift
-// ordinaire. La signature prise est `Text(_ key: LocalizedStringKey)`, et
-// `LocalizedStringKey` formate les `Int` interpolés selon la locale courante — donc
-// avec séparateur de milliers. En français, une année s'affichait « 2 026 ».
+// ⚠️ **SwiftUI trap**: `Text("Cumul \(year)")` does not perform a plain Swift
+// interpolation. It resolves to `Text(_ key: LocalizedStringKey)`, and
+// `LocalizedStringKey` formats interpolated `Int` values according to the
+// current locale — including a thousands separator. In French, a year would
+// render as "2 026".
 //
-// Le même piège s'applique à toutes les API qui prennent un `LocalizedStringKey` :
+// The same trap applies to every API that takes a `LocalizedStringKey`:
 // `navigationTitle`, `Label`, `Section`, `Button`, `Toggle`, `Picker`…
 //
-// Une année est un **identifiant**, pas une quantité : elle ne se groupe jamais.
-// (Une interpolation dans une `String` normale n'a pas le problème — c'est bien la
-// conversion en `LocalizedStringKey` qui déclenche le formatage.)
+// A year is an **identifier**, not a quantity: it should never be grouped.
+// (Interpolating into a plain `String` doesn't have this problem — it's the
+// conversion to `LocalizedStringKey` that triggers the formatting.)
 //
-// Usage : `Text("Cumul \(period.year.yearLabel)")`
+// Usage: `Text("Cumul \(period.year.yearLabel)")`
 
 extension Int {
-    /// Le millésime en texte brut (« 2026 »), sans séparateur de milliers.
+    /// The year as plain text ("2026"), with no thousands separator.
     var yearLabel: String { String(self) }
 }

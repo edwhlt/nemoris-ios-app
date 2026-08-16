@@ -1,18 +1,18 @@
 import Foundation
 
-/// Constantes globales de l'application.
+/// Global application constants.
 enum AppConstants {
 
     // MARK: - Store (StoreKit product IDs)
     //
-    // Ces identifiants doivent correspondre exactement à ceux configurés dans
-    // App Store Connect > Votre app > Achats intégrés.
+    // These identifiers must match exactly what is configured in
+    // App Store Connect > app > In-App Purchases.
     //
-    // Abonnements (groupe "Finance Pro") :
-    //   - monthlyID  → Auto-Renewable Subscription, durée : 1 mois
-    //   - yearlyID   → Auto-Renewable Subscription, durée : 1 an
+    // Subscriptions ("Finance Pro" group):
+    //   - monthlyID  → Auto-Renewable Subscription, duration: 1 month
+    //   - yearlyID   → Auto-Renewable Subscription, duration: 1 year
     //
-    // Achat unique :
+    // One-time purchase:
     //   - lifetimeID → Non-Consumable
 
     enum Store {
@@ -20,8 +20,8 @@ enum AppConstants {
         static let yearlyID   = "fr.hedwin.nemoris.subscription.yearly"
         static let lifetimeID = "fr.hedwin.nemoris.lifetime"
 
-        /// Page "Abonnements" des Réglages Apple — seul endroit pour résilier ou
-        /// changer de moyen de paiement (StoreKit ne l'expose pas en interne).
+        /// Apple Settings "Subscriptions" page — the only place to cancel or
+        /// change payment method (StoreKit does not expose this internally).
         static let manageSubscriptionsURL = URL(string: "itms-apps://apps.apple.com/account/subscriptions")!
     }
 

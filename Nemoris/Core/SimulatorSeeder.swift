@@ -16,7 +16,7 @@ enum SimulatorSeeder {
         defer { sqlite3_close(conn) }
         sqlite3_busy_timeout(conn, 3000)
 
-        // Branche 1 : DB neuve (pas d'accounts) → seed complet, tout est virgin.
+        // Branch 1: fresh DB (no accounts) → full seed, everything is virgin.
         if tableIsEmpty(conn, table: "accounts") {
             exec(conn, "BEGIN;")
             seedAccounts(conn)
@@ -31,24 +31,24 @@ enum SimulatorSeeder {
             return
         }
 
-        // Branche 2 : DB déjà peuplée par l'utilisateur (ou par un seed antérieur).
-        // On ne touche à RIEN sauf au module Patrimoine si ses tables sont vides —
-        // sinon les users existants ne verraient jamais de données de démo Patrimoine.
-        // Garde-fou : on vérifie les 3 tables Patrimoine indépendamment.
+        // Branch 2: DB already populated by the user (or by an earlier
+        // seed). NOTHING is touched except the Patrimoine module if its
+        // tables are empty — otherwise existing users would never see any
+        // Patrimoine demo data. Guard: the 3 Patrimoine tables are checked independently.
         let assetsEmpty = tableIsEmpty(conn, table: "patrimoine_assets")
         let realEstateEmpty = tableIsEmpty(conn, table: "patrimoine_real_estate")
         let loansEmpty = tableIsEmpty(conn, table: "patrimoine_loans")
         if assetsEmpty && realEstateEmpty && loansEmpty {
             exec(conn, "BEGIN;")
-            // Variante standalone-only : tous les actifs en manuel, pas de linkage
-            // hardcodé vers accounts/investment_accounts (dont les IDs sont
-            // inconnus dans une DB déjà peuplée par l'utilisateur).
+            // Standalone-only variant: all assets in manual mode, no
+            // hardcoded linkage to accounts/investment_accounts (whose IDs
+            // are unknown in a DB already populated by the user).
             seedPatrimoineStandalone(conn)
             exec(conn, "COMMIT;")
         }
 
-        // Goals — seed indépendant si la table est vide. Permet aux users qui
-        // ont déjà du Patrimoine mais pas encore d'Objectifs de voir des démos.
+        // Goals — seeded independently if the table is empty. Lets users
+        // who already have Patrimoine data but no Goals yet see demo entries.
         if tableIsEmpty(conn, table: "goals") {
             exec(conn, "BEGIN;")
             seedGoals(conn)
@@ -56,12 +56,12 @@ enum SimulatorSeeder {
         }
     }
 
-    /// Retourne true si la table existe et contient 0 ligne. Tolère les tables
-    /// absentes (cas migrations pas encore appliquées) — renvoie false dans ce cas
-    /// pour ne pas seed sur une base demi-migrée.
+    /// Returns true if the table exists and contains 0 rows. Tolerates
+    /// missing tables (migrations not yet applied) — returns false in that
+    /// case, so seeding never runs against a half-migrated database.
     private static func tableIsEmpty(_ conn: OpaquePointer, table: String) -> Bool {
         var stmt: OpaquePointer?
-        // sqlite_master pour confirmer l'existence avant le SELECT COUNT
+        // sqlite_master confirms existence before the SELECT COUNT
         let existsSQL = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='\(table)';"
         guard sqlite3_prepare_v2(conn, existsSQL, -1, &stmt, nil) == SQLITE_OK else { return false }
         let exists = sqlite3_step(stmt) == SQLITE_ROW
@@ -241,14 +241,14 @@ enum SimulatorSeeder {
     // MARK: - Investments
 
     private static func seedInvestments(_ db: OpaquePointer) {
-        // Investment accounts (depuis v30 : pas de current_value / invested_amount,
-        // ces valeurs sont dérivées des positions/ordres et calculées au fetch).
+        // Investment accounts (since v30: no current_value / invested_amount
+        // columns — these values are derived from positions/orders and computed on fetch).
         exec(db, "INSERT OR IGNORE INTO investment_accounts (id, name, broker, currency, account_type, opened_at) VALUES (1, 'PEA Boursorama', 'Boursorama', 'EUR', 'PEA', '2020-03-15');")
         exec(db, "INSERT OR IGNORE INTO investment_accounts (id, name, broker, currency, account_type, opened_at) VALUES (2, 'CTO Degiro', 'Degiro', 'EUR', 'CTO', '2021-06-01');")
         exec(db, "INSERT OR IGNORE INTO investment_accounts (id, name, broker, currency, account_type, opened_at) VALUES (3, 'Crypto Coinbase', 'Coinbase', 'EUR', 'CRYPTO', '2022-01-10');")
 
-        // Positions (depuis v30 : pas de quantity / average_buy_price / purchase_date,
-        // ces valeurs sont dérivées des investment_orders ci-dessous).
+        // Positions (since v30: no quantity / average_buy_price / purchase_date
+        // columns — these values are derived from the investment_orders below).
         // (id, account_id, asset_type, asset_name, ticker, current_value, [synthetic BUY order : qty, unit_price, executed_at])
         let positions: [(Int, Int, String, String, String, Double, Double, Double, String)] = [
             (1, 1, "ETF",    "Epargne MSCI World", "EWLD.PA", 14625.0,  45.0, 250.0,    "2020-03-15"),
@@ -262,14 +262,14 @@ enum SimulatorSeeder {
         for (id, accId, aType, aName, ticker, curVal, _, _, _) in positions {
             exec(db, "INSERT OR IGNORE INTO investment_positions (id, account_id, asset_type, asset_name, ticker, current_value) VALUES (\(id), \(accId), '\(aType)', '\(aName)', '\(ticker)', \(curVal));")
         }
-        // Ordres BUY synthétiques pour matérialiser qty/PRU/firstBuyDate au fetch.
-        // 1 ordre par position = équivalent du backfill v28 sur des positions neuves.
+        // Synthetic BUY orders to materialize qty/average price/firstBuyDate on fetch.
+        // 1 order per position = equivalent of the v28 backfill, applied to new positions.
         for (posId, _, _, _, _, _, qty, unitPrice, execDate) in positions {
             exec(db, "INSERT OR IGNORE INTO investment_orders (position_id, order_type, quantity, unit_price, fees, executed_at) VALUES (\(posId), 'BUY', \(qty), \(unitPrice), 0, '\(execDate)');")
         }
 
-        // Price history for main ETF (last 90 days) — depuis v35, le cache n'est
-        // plus en SQL mais dans Library/Caches via PriceHistoryCache.
+        // Price history for main ETF (last 90 days) — since v35, this cache
+        // lives in Library/Caches via PriceHistoryCache rather than in SQL.
         let cal = Calendar.current; let today = Date()
         var price = 310.0
         var fakePoints: [InvestmentPricePoint] = []
@@ -395,19 +395,19 @@ enum SimulatorSeeder {
 
     // MARK: - Patrimoine
 
-    /// Seed du module Patrimoine — démontre les 3 catégories (assets liés/manuels,
-    /// immobilier, prêts) ainsi que les 5 types de prêts pour que l'utilisateur voie
-    /// immédiatement à quoi ressemble chaque cas.
+    /// Seed for the Patrimoine (net worth) module — demonstrates the 3
+    /// categories (linked/manual assets, real estate, loans) as well as the
+    /// 5 loan types, so the user immediately sees what each case looks like.
     private static func seedPatrimoine(_ db: OpaquePointer) {
         let createdAt = "datetime('now')"
 
         // ── Assets ──────────────────────────────────────────────────
-        // Mix de liens vers les comptes seedés (Livret A = account id 2, PEA = invest 1)
-        // + cash manuel pour montrer le mode standalone.
-        //   Livret A → lié au compte EPARGNE id=2 (solde résolu dynamiquement par VM)
-        //   PEA → lié au compte invest id=1
-        //   Cash → manuel
-        //   Or physique → manuel (cas "actif divers" pas couvert par les comptes)
+        // Mix of links to the seeded accounts (Livret A = account id 2, PEA
+        // = investment account 1) + a manual cash entry to show standalone mode.
+        //   Livret A → linked to the SAVINGS account id=2 (balance resolved dynamically by the VM)
+        //   PEA → linked to investment account id=1
+        //   Cash → manual
+        //   Physical gold → manual (a "misc asset" case not covered by any account)
         exec(db, """
         INSERT OR IGNORE INTO patrimoine_assets
             (name, asset_kind, linked_account_id, linked_investment_account_id,
@@ -419,7 +419,7 @@ enum SimulatorSeeder {
             ('Lingot d''or 50g', 'OTHER',      NULL, NULL, 3850,  3850,  'Acheté en 2020', \(createdAt));
         """)
 
-        // ── Biens immobiliers ───────────────────────────────────────
+        // ── Real estate ─────────────────────────────────────────────
         exec(db, """
         INSERT OR IGNORE INTO patrimoine_real_estate
             (name, purchase_price, purchase_date, current_value, estimated_at, address, notes, created_at)
@@ -428,16 +428,16 @@ enum SimulatorSeeder {
             ('Résidence secondaire Bretagne', 165000, '2022-06-01', 175000, NULL, 'Lieu-dit Kerverhuel\n29170 Fouesnant', 'Maison 4 pièces, jardin 600 m²', \(createdAt));
         """)
 
-        // ── Prêts ───────────────────────────────────────────────────
-        // 4 prêts pour démontrer 4 types différents :
-        //   1) Amortissable classique sur l'appart Paris (le plus fréquent)
-        //   2) In fine sur la Bretagne
-        //   3) Différé partiel (étudiant typique)
-        //   4) Revolving (réserve d'argent)
-        // Pas de DEFERRED_TOTAL en seed — moins courant et déjà couvert par
-        // DEFERRED_PARTIAL en démonstration de la logique de différé.
+        // ── Loans ───────────────────────────────────────────────────
+        // 4 loans to demonstrate 4 different types:
+        //   1) Classic amortizing loan on the Paris apartment (the most common case)
+        //   2) Interest-only ("in fine") on the Brittany property
+        //   3) Partial deferral (typical student loan)
+        //   4) Revolving credit
+        // No DEFERRED_TOTAL in the seed — less common, and the deferral
+        // logic is already demonstrated by DEFERRED_PARTIAL.
 
-        // Prêt 1 : amortissable, 230 000€ sur 25 ans à 1.85%, démarré nov 2018, assurance 38€/mois
+        // Loan 1: amortizing, €230,000 over 25 years at 1.85%, started Nov 2018, insurance €38.50/month
         exec(db, """
         INSERT OR IGNORE INTO patrimoine_loans
             (name, loan_type, principal, annual_rate, duration_months, deferral_months,
@@ -446,7 +446,7 @@ enum SimulatorSeeder {
             ('Prêt immo Paris', 'AMORT', 230000, 0.0185, 300, 0, '2018-11-01', 1, NULL, \(createdAt), 38.50);
         """)
 
-        // Prêt 2 : in fine 120 000€ sur 15 ans à 2.30%, démarré juin 2022, assurance 28€/mois
+        // Loan 2: interest-only, €120,000 over 15 years at 2.30%, started June 2022, insurance €28/month
         exec(db, """
         INSERT OR IGNORE INTO patrimoine_loans
             (name, loan_type, principal, annual_rate, duration_months, deferral_months,
@@ -455,9 +455,9 @@ enum SimulatorSeeder {
             ('Prêt in fine Bretagne', 'IN_FINE', 120000, 0.0230, 180, 0, '2022-06-01', 2, 'Adossé à une assurance-vie qui garantit le remboursement final', \(createdAt), 28.00);
         """)
 
-        // Prêt 3 : différé partiel étudiant, 25 000€ sur 8 ans à 1.20%, différé 24 mois,
-        // démarré sept 2020 (a fini son différé, est maintenant en amortissement).
-        // Pas d'assurance sur les prêts étudiants typiquement.
+        // Loan 3: partial deferral student loan, €25,000 over 8 years at
+        // 1.20%, 24-month deferral, started Sept 2020 (its deferral period
+        // has ended, now amortizing). Typically no insurance on student loans.
         exec(db, """
         INSERT OR IGNORE INTO patrimoine_loans
             (name, loan_type, principal, annual_rate, duration_months, deferral_months,
@@ -466,7 +466,7 @@ enum SimulatorSeeder {
             ('Prêt étudiant', 'DEFERRED_PARTIAL', 25000, 0.0120, 96, 24, '2020-09-01', NULL, 'Différé partiel pendant la dernière année d''école', \(createdAt), 0);
         """)
 
-        // Prêt 4 : revolving (carte renouvelable), capital restant saisi manuellement.
+        // Loan 4: revolving credit (renewable card), remaining principal entered manually.
         exec(db, """
         INSERT OR IGNORE INTO patrimoine_loans
             (name, loan_type, principal, annual_rate, duration_months, deferral_months,
@@ -478,12 +478,12 @@ enum SimulatorSeeder {
         seedGoals(db)
     }
 
-    /// Seed des objectifs financiers (table `goals`, migration v39). 4 goals
-    /// couvrant les 4 types pour démontrer chaque mode de calcul :
-    ///   - SAVINGS  → fonds d'urgence (cible 6000 €)
-    ///   - NETWORTH → patrimoine de 500k€
-    ///   - DEBT_PAYOFF → rembourser toutes les dettes
-    ///   - CUSTOM → cagnotte voyage (saisie manuelle)
+    /// Seed for financial goals (table `goals`, migration v39). 4 goals
+    /// covering the 4 types, to demonstrate each calculation mode:
+    ///   - SAVINGS  → emergency fund (target €6,000)
+    ///   - NETWORTH → €500k net worth
+    ///   - DEBT_PAYOFF → pay off all debts
+    ///   - CUSTOM → travel fund (manually entered)
     private static func seedGoals(_ db: OpaquePointer) {
         let createdAt = "datetime('now')"
         exec(db, """
@@ -497,14 +497,14 @@ enum SimulatorSeeder {
         """)
     }
 
-    /// Variante de `seedPatrimoine` pour la branche "DB existante" : aucun lien
-    /// hardcodé vers accounts/investment_accounts (leurs IDs sont inconnus dans
-    /// une DB déjà peuplée par l'utilisateur). Tous les actifs sont en mode standalone
-    /// (valeur manuelle). l'utilisateur peut ensuite les relier via le form si besoin.
+    /// Variant of `seedPatrimoine` for the "existing DB" branch: no hardcoded
+    /// link to accounts/investment_accounts (their IDs are unknown in a DB
+    /// already populated by the user). All assets are in standalone mode
+    /// (manual value). The user can link them later via the form if needed.
     private static func seedPatrimoineStandalone(_ db: OpaquePointer) {
         let createdAt = "datetime('now')"
 
-        // ── Assets (tous en manuel) ─────────────────────────────────
+        // ── Assets (all manual) ─────────────────────────────────────
         exec(db, """
         INSERT OR IGNORE INTO patrimoine_assets
             (name, asset_kind, linked_account_id, linked_investment_account_id,
@@ -516,7 +516,7 @@ enum SimulatorSeeder {
             ('Lingot d''or 50g',  'OTHER',      NULL, NULL, 3850,  3850,  'Acheté en 2020', \(createdAt));
         """)
 
-        // ── Biens immobiliers (idem que seedPatrimoine, pas de FK risquée) ──
+        // ── Real estate (same as seedPatrimoine, no risky FK) ───────
         exec(db, """
         INSERT OR IGNORE INTO patrimoine_real_estate
             (name, purchase_price, purchase_date, current_value, estimated_at, address, notes, created_at)
@@ -525,10 +525,10 @@ enum SimulatorSeeder {
             ('Résidence secondaire Bretagne', 165000, '2022-06-01', 175000, NULL, 'Lieu-dit Kerverhuel\n29170 Fouesnant', 'Maison 4 pièces, jardin 600 m²', \(createdAt));
         """)
 
-        // ── Prêts (linked_real_estate_id reste valide ici car on vient juste
-        //   d'insérer les real_estate au-dessus dans la même transaction —
-        //   leurs IDs auto-incrémentés dépendent de l'historique de la DB user,
-        //   donc on les retrouve par sous-requête sur le nom) ───────────────
+        // ── Loans (linked_real_estate_id stays valid here since the real
+        //   estate rows were just inserted above in the same transaction —
+        //   their auto-incremented IDs depend on the user's DB history, so
+        //   they're looked up by a name subquery instead) ─────────────────
         exec(db, """
         INSERT OR IGNORE INTO patrimoine_loans
             (name, loan_type, principal, annual_rate, duration_months, deferral_months,
@@ -580,7 +580,7 @@ enum SimulatorSeeder {
 
 extension Double {
     fileprivate func rounded(toPlaces places: Int) -> Double {
-        // 10^places via boucle simple (places est petit, <10 typiquement).
+        // 10^places via a simple loop (places is small, typically <10).
         var d: Double = 1
         for _ in 0..<places { d *= 10 }
         return (self * d).rounded() / d

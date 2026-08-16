@@ -1,13 +1,13 @@
 import Foundation
 
-/// Pont entre `SQLiteStore` et la base courante de l'application.
+/// Bridge between `SQLiteStore` and the app's current database.
 ///
-/// Séparé de `SQLiteStore.swift` pour que ce dernier reste compilable seul, sans
-/// tirer `DatabaseManager` ni le reste de la cible — c'est ce qui permet aux
-/// harnais de tests de le compiler avec `swiftc`. Même découpage que
-/// `SyncPayloadStore` et `SyncLive`.
+/// Kept separate from `SQLiteStore.swift` so the latter stays independently
+/// compilable, without pulling in `DatabaseManager` or the rest of the
+/// target — this is what lets test harnesses compile it with `swiftc`. Same
+/// split as `SyncPayloadStore` and `SyncLive`.
 extension SQLiteStore {
-    /// Store branché sur la base de l'application.
+    /// Store wired to the app's database.
     init() {
         self.init(databaseURL: DatabaseManager.shared.sqliteURL())
     }

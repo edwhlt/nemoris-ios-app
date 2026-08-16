@@ -62,7 +62,7 @@ struct TricountReimbursementTip: Tip {
     var image: Image? { Image(systemName: "arrow.uturn.left.circle") }
 }
 
-// MARK: - Données de référence
+// MARK: - Reference data
 
 struct TiersRegexTip: Tip {
     var title: Text { Text("Regex de détection") }
@@ -90,7 +90,7 @@ struct BudgetEnvelopeTip: Tip {
     var image: Image? { Image(systemName: "envelope.open") }
 }
 
-// MARK: - Investissements
+// MARK: - Investments
 
 struct InvestmentsOverviewTip: Tip {
     var title: Text { Text("Suivi de portefeuille") }
@@ -110,7 +110,7 @@ struct TricountBalanceTip: Tip {
     var image: Image? { Image(systemName: "scalemass") }
 }
 
-// MARK: - Console SQL
+// MARK: - SQL console
 
 struct SQLConsoleTip: Tip {
     var title: Text { Text("Console SQL — Utilisateurs avancés") }

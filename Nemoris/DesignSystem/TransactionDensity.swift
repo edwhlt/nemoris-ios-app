@@ -3,17 +3,17 @@ import CoreGraphics
 
 // MARK: - TransactionDensity
 //
-// Réglage utilisateur de la densité d'affichage des rows Transactions.
-// 3 paliers pour s'adapter aux préférences (compact pour voir plus d'items à
-// l'écran, confortable pour réduire la fatigue visuelle).
+// User setting for the display density of Transaction rows.
+// 3 levels to adapt to preferences (compact to see more items on screen,
+// comfortable to reduce visual fatigue).
 //
-// **Valeurs appliquées** :
-//   - logo : taille du MerchantLogo (50% / 100% / 130% de la baseline 52pt)
-//   - verticalPadding : padding `.vertical(_:)` du row
-//   - rowMinHeight : hauteur minimale du row (= taille du logo, pour le centrage)
-//   - showLogo : compact masque le logo pour gagner ~36pt
-//   - showSecondaryInfo : compact masque le sous-titre (info user/cat) pour
-//     condenser à 1 ligne
+// **Applied values**:
+//   - logo: MerchantLogo size (50% / 100% / 130% of the 52pt baseline)
+//   - verticalPadding: row `.vertical(_:)` padding
+//   - rowMinHeight: minimum row height (= logo size, for centering)
+//   - showLogo: compact hides the logo to save ~36pt
+//   - showSecondaryInfo: compact hides the subtitle (user/category info) to
+//     condense to a single line
 
 enum TransactionDensity: String, CaseIterable, Identifiable {
     case compact
@@ -46,10 +46,10 @@ enum TransactionDensity: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Taille du logo en points. 0 quand le logo n'est pas affiché.
+    /// Logo size in points. 0 when the logo is not shown.
     var logoSize: CGFloat {
         switch self {
-        case .compact:     return 0   // pas de logo
+        case .compact:     return 0   // no logo
         case .normal:      return 52  // baseline
         case .comfortable: return 64
         }
@@ -63,8 +63,8 @@ enum TransactionDensity: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Hauteur minimale du row (utilisée pour le centrage vertical par
-    /// rapport au logo). En compact on laisse SwiftUI calculer.
+    /// Minimum row height (used for vertical centering relative to the
+    /// logo). In compact, SwiftUI is left to compute it.
     var rowMinHeight: CGFloat {
         switch self {
         case .compact:     return 28
@@ -75,8 +75,8 @@ enum TransactionDensity: String, CaseIterable, Identifiable {
 
     var showLogo: Bool { self != .compact }
 
-    /// En compact on supprime la 2e ligne (info user + balance courante) pour
-    /// avoir un row strictement à 1 ligne dense. l'utilisateur peut tap pour voir
-    /// les détails.
+    /// In compact, the 2nd line (user info + running balance) is removed to
+    /// get a strictly single-line dense row. The user can tap to see the
+    /// details.
     var showSecondaryInfo: Bool { self != .compact }
 }

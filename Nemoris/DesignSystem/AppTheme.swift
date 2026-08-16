@@ -57,26 +57,26 @@ enum AppTheme {
 
     // MARK: Colors — Nemoris palette
     enum Colors {
-        // Graphite noir (dark) / Ivoire doux (light)
+        // Black graphite (dark) / Soft ivory (light)
         static let background       = Color(uiColor: adaptiveUIColor(dark: 0x111315, light: 0xF3F0EA))
-        // Surface avec légère teinte forêt en dark
+        // Surface with a slight forest tint in dark mode
         static let surface          = Color(uiColor: adaptiveUIColor(dark: 0x191D1B, light: 0xFFFFFF))
         static let surfaceSecondary = Color(uiColor: adaptiveUIColor(dark: 0x222826, light: 0xE8E4DC))
 
-        // Vert forêt adaptatif : profond sur ivoire, médium sur graphite
+        // Adaptive forest green: deep on ivory, medium on graphite
         static let accent           = Color(uiColor: adaptiveUIColor(dark: 0x52B896, light: 0x1D3A32))
-        // Cuivre discret — même dans les deux modes
+        // Discreet copper — fixed across both modes
         static let accentSecondary  = Color(hex: "B07A4F")
-        // Vert naturel pour les recettes / positif
+        // Natural green for income / positive values
         static let success          = Color(hex: "3DAA82")
-        // Ambre chaud pour les alertes
+        // Warm amber for alerts
         static let warning          = Color(hex: "C49A5A")
-        // Terracotta doux pour les dépenses / négatif
+        // Soft terracotta for expenses / negative values
         static let danger           = Color(hex: "C25A46")
 
-        // Ivoire chaud (dark) / Graphite (light)
+        // Warm ivory (dark) / Graphite (light)
         static let textPrimary   = Color(uiColor: adaptiveUIColor(dark: 0xF0EDE6, light: 0x111315))
-        // Gris pierre adaptatif — lisible dans les deux modes (≥ WCAG AA)
+        // Adaptive stone gray — readable in both modes (≥ WCAG AA)
         static let textSecondary = Color(uiColor: adaptiveUIColor(dark: 0xA8AFAC, light: 0x4F5654))
 
         static let accentGradient = LinearGradient(
@@ -93,7 +93,7 @@ enum AppTheme {
         )
     }
 
-    // MARK: Typography — SF Pro Display, sobre et raffiné
+    // MARK: Typography — SF Pro Display, understated and refined
     enum Typography {
         static let displayLarge  = Font.system(size: 34, weight: .bold,     design: .default)
         static let displayMedium = Font.system(size: 28, weight: .bold,     design: .default)
@@ -107,7 +107,7 @@ enum AppTheme {
         static let labelLarge    = Font.system(size: 13, weight: .medium,   design: .default)
         static let labelMedium   = Font.system(size: 11, weight: .medium,   design: .default)
         static let labelSmall    = Font.system(size: 10, weight: .semibold, design: .default)
-        // Chiffres financiers en SF Pro — lisibles et sobres
+        // Financial figures in SF Pro — legible and understated
         static let moneyLarge    = Font.system(size: 36, weight: .semibold, design: .default)
         static let moneyMedium   = Font.system(size: 24, weight: .semibold, design: .default)
         static let moneySmall    = Font.system(size: 17, weight: .medium,   design: .default)

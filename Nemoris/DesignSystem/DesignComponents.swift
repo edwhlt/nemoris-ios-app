@@ -16,10 +16,10 @@ struct AppCard<Content: View>: View {
 // MARK: - SectionHeader
 
 struct SectionHeader: View {
-    let title: String
-    var subtitle: String? = nil
+    let title: LocalizedStringKey
+    var subtitle: LocalizedStringKey? = nil
     var action: (() -> Void)? = nil
-    var actionLabel: String = "Voir tout"
+    var actionLabel: LocalizedStringKey = "Voir tout"
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
@@ -46,7 +46,7 @@ struct SectionHeader: View {
 // MARK: - StatBadge
 
 struct StatBadge: View {
-    let label: String
+    let label: LocalizedStringKey
     let value: String
     var valueColor: Color = AppTheme.Colors.textPrimary
     var icon: String? = nil
@@ -91,8 +91,8 @@ struct AnimatedNumberText: View {
 // MARK: - AppChartCard
 
 struct AppChartCard<Content: View>: View {
-    let title: String
-    var subtitle: String? = nil
+    let title: LocalizedStringKey
+    var subtitle: LocalizedStringKey? = nil
     var accentColor: Color = AppTheme.Colors.accent
     @ViewBuilder let content: () -> Content
 
@@ -245,8 +245,23 @@ struct InfoBadge: View {
 
 struct EmptyStateView: View {
     let icon: String
-    let title: String
-    let message: String
+    let title: LocalizedStringKey
+    private let message: Text
+
+    /// Static, translatable message (the common case).
+    init(icon: String, title: LocalizedStringKey, message: LocalizedStringKey) {
+        self.icon = icon
+        self.title = title
+        self.message = Text(message)
+    }
+
+    /// Runtime-computed message (e.g. a caught error) that must be shown
+    /// verbatim rather than looked up in Localizable.strings.
+    init(icon: String, title: LocalizedStringKey, verbatimMessage: String) {
+        self.icon = icon
+        self.title = title
+        self.message = Text(verbatimMessage)
+    }
 
     var body: some View {
         VStack(spacing: AppTheme.Spacing.xl) {
@@ -257,7 +272,7 @@ struct EmptyStateView: View {
                 Text(title)
                     .font(AppTheme.Typography.titleMedium)
                     .foregroundStyle(AppTheme.Colors.textPrimary)
-                Text(message)
+                message
                     .font(AppTheme.Typography.bodySmall)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
@@ -358,7 +373,7 @@ struct NemorisTipViewStyle: TipViewStyle {
 
 // MARK: - AppToast (reusable feedback banner)
 
-/// Niveau sémantique d'un toast — pilote l'icône et la couleur d'accent.
+/// Semantic level of a toast — drives its icon and accent color.
 enum AppToastKind {
     case success, info, warning, error
 
@@ -381,8 +396,8 @@ enum AppToastKind {
     }
 }
 
-/// Modèle léger pour un toast affiché par `ToastCenter`.
-/// `id` UUID → SwiftUI peut détecter un nouveau toast même si message identique.
+/// Lightweight model for a toast displayed by `ToastCenter`.
+/// `id` is a UUID so SwiftUI can detect a new toast even with identical text.
 struct AppToastMessage: Identifiable, Equatable {
     let id = UUID()
     let kind: AppToastKind
@@ -393,7 +408,7 @@ struct AppToastMessage: Identifiable, Equatable {
     }
 }
 
-/// Bannière flottante temporaire — utilisable via le modifier `.appToast(_:)`.
+/// Temporary floating banner — used via the `.appToast(_:)` modifier.
 struct AppToast: View {
     let message: AppToastMessage
 
@@ -435,7 +450,7 @@ private struct AppToastModifier: ViewModifier {
             .animation(AppTheme.Animations.spring, value: message?.id)
             .onChange(of: message?.id) { _, newId in
                 guard let newId else { return }
-                // Auto-dismiss après 3 secondes.
+                // Auto-dismiss after 3 seconds.
                 Task {
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     if message?.id == newId {
@@ -447,8 +462,8 @@ private struct AppToastModifier: ViewModifier {
 }
 
 extension View {
-    /// Affiche un toast temporaire (3 s) en haut de la vue.
-    /// Mettre `message = nil` pour le retirer manuellement.
+    /// Shows a temporary toast (3 s) at the top of the view.
+    /// Set `message = nil` to dismiss it manually.
     func appToast(_ message: Binding<AppToastMessage?>) -> some View {
         modifier(AppToastModifier(message: message))
     }

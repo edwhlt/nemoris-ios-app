@@ -3,91 +3,91 @@ import os
 
 // MARK: - BackupService
 //
-// Service de sauvegarde locale + iCloud de la base SQLite. Stratégie : snapshots
-// fichiers (.sqlite) copiés à un instant T — PAS de live-sync de la DB courante.
-// La live-sync iCloud d'une base SQLite avec WAL est risquée (corruption,
-// conflits multi-device), donc on en reste à des points de restauration discrets.
+// Local + iCloud backup service for the SQLite database. Strategy: file
+// snapshots (.sqlite) copied at a point in time — NOT a live sync of the
+// current DB. Live-syncing a WAL-mode SQLite database over iCloud is risky
+// (corruption, multi-device conflicts), so this sticks to discrete restore points.
 //
-// **Emplacements** :
+// **Locations**:
 //   • Local  : Documents/Backups/nemoris-backup-YYYY-MM-DD-HHmmss.sqlite
-//   • iCloud : <UbiquityContainer>/Documents/Backups/<même nom>
+//   • iCloud : <UbiquityContainer>/Documents/Backups/<same name>
 //
-// Local est toujours dispo (cas iCloud absent / désactivé / hors-ligne).
-// iCloud est best-effort : si le container est nil ou inaccessible, on continue
-// en local uniquement avec un message d'erreur clair propagé via `lastSyncError`.
+// Local is always available (covers iCloud absent / disabled / offline).
+// iCloud is best-effort: if the container is nil or inaccessible, the local
+// copy still proceeds, with a clear error message surfaced via `lastSyncError`.
 //
-// **Rotation** : on conserve `maxSnapshots` snapshots (30 par défaut). Au-delà,
-// le plus ancien est supprimé. Pruning identique côté local + iCloud.
+// **Rotation**: `maxSnapshots` snapshots are kept (30 by default). Beyond
+// that, the oldest is deleted. Pruning is identical on the local and iCloud sides.
 //
-// **Auto-backup** : `runAutoBackupIfDue()` à appeler au launch — crée un snapshot
-// seulement si > 24h depuis le dernier. Pilotable via toggle UserDefaults.
+// **Auto-backup**: `runAutoBackupIfDue()` is called at launch — creates a
+// snapshot only if > 24h since the last one. Controlled via a UserDefaults toggle.
 //
-// **Restore** : `restore(snapshot:)` fait une sauvegarde de sécurité de la DB
-// actuelle (suffixée `-pre-restore`) avant de l'écraser. L'appelant doit ensuite
-// invalider tous les VMs via `AppState.dataRefreshToken = UUID()`.
+// **Restore**: `restore(snapshot:)` makes a safety backup of the current DB
+// (suffixed `-pre-restore`) before overwriting it. The caller must then
+// invalidate all VMs via `AppState.dataRefreshToken = UUID()`.
 
 @MainActor
 final class BackupService {
 
     static let shared = BackupService()
 
-    /// Nombre max de snapshots conservés (local + iCloud séparément). 30 = un mois
-    /// de backup quotidien — suffisant pour récupérer d'une corruption récente.
+    /// Max number of snapshots kept (local + iCloud counted separately). 30 =
+    /// a month of daily backups — enough to recover from a recent corruption.
     var maxSnapshots: Int = 30
 
-    /// Container iCloud par défaut — `nil` quand l'utilisateur n'a pas iCloud configuré
-    /// ou que l'entitlement n'a pas été activé côté Xcode. Recalculé à chaque accès
-    /// pour suivre les changements d'état (login/logout iCloud).
+    /// Default iCloud container — `nil` when the user hasn't configured
+    /// iCloud, or the entitlement hasn't been enabled in Xcode. Recomputed
+    /// on every access to track state changes (iCloud login/logout).
     private var iCloudContainerURL: URL? {
-        // Container par défaut associé au bundle ID. Renvoie nil si :
-        //   - l'utilisateur n'est pas connecté à iCloud
-        //   - L'entitlement iCloud Documents n'est pas activé
-        //   - L'app vient juste de lancer (le container met parfois quelques
-        //     secondes à devenir disponible — d'où l'absence de cache)
+        // Default container associated with the bundle ID. Returns nil if:
+        //   - the user isn't signed into iCloud
+        //   - the iCloud Documents entitlement isn't enabled
+        //   - the app just launched (the container can take a few seconds
+        //     to become available — hence no caching here)
         FileManager.default.url(forUbiquityContainerIdentifier: nil)
     }
 
-    // MARK: - User-facing config (persistée UserDefaults)
+    // MARK: - User-facing config (persisted in UserDefaults)
 
-    /// Auto-backup activé. Par défaut : true (sauf si l'utilisateur désactive).
+    /// Whether auto-backup is enabled. Defaults to true (unless the user disables it).
     var autoBackupEnabled: Bool {
         get { UserDefaults.standard.object(forKey: "backupAutoEnabled") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "backupAutoEnabled") }
     }
 
-    /// Date du dernier snapshot créé (local ou iCloud, peu importe).
-    /// `nil` au premier launch.
+    /// Date of the last snapshot created (local or iCloud, either counts).
+    /// `nil` on first launch.
     var lastBackupDate: Date? {
         get { UserDefaults.standard.object(forKey: "backupLastDate") as? Date }
         set { UserDefaults.standard.set(newValue, forKey: "backupLastDate") }
     }
 
-    /// Dernière erreur rencontrée lors d'une opération iCloud. Affichée dans
-    /// Settings pour informer l'utilisateur sans bloquer l'opération locale.
+    /// Last error encountered during an iCloud operation. Shown in Settings
+    /// to inform the user without blocking the local operation.
     var lastSyncError: String? {
         get { UserDefaults.standard.string(forKey: "backupLastSyncError") }
         set { UserDefaults.standard.set(newValue, forKey: "backupLastSyncError") }
     }
 
-    /// `true` si iCloud est actuellement disponible (container accessible).
-    /// Calculé à la volée — peut changer entre 2 appels (réseau, login).
+    /// `true` if iCloud is currently available (container accessible).
+    /// Computed on the fly — can change between 2 calls (network, login state).
     var isICloudAvailable: Bool { iCloudContainerURL != nil }
 
     // MARK: - Snapshot model
 
-    /// Un snapshot disponible pour restauration. Provient soit du dossier local,
-    /// soit du container iCloud (les 2 sources sont mélangées dans la liste UI,
-    /// dédupliquées par nom de fichier — un même nom dans les 2 endroits = même
-    /// backup propagé par iCloud).
+    /// A snapshot available for restoration. Comes from either the local
+    /// folder or the iCloud container (the 2 sources are merged in the UI
+    /// list, deduplicated by filename — the same name in both places means
+    /// the same backup, propagated by iCloud).
     struct Snapshot: Identifiable, Hashable {
-        let id: String       // = filename (unique car timestamp inclus)
+        let id: String       // = filename (unique since it includes the timestamp)
         let url: URL
         let createdAt: Date
         let sizeBytes: Int64
         let isICloud: Bool
-        /// `true` pour une sauvegarde de sécurité auto-créée juste avant une
-        /// restauration (préfixe `nemoris-pre-restore-`) — pas déclenchée par
-        /// l'utilisateur, mais restaurable/supprimable comme n'importe quel snapshot.
+        /// `true` for a safety backup auto-created right before a restore
+        /// (prefix `nemoris-pre-restore-`) — not triggered by the user, but
+        /// restorable/deletable like any other snapshot.
         let isPreRestore: Bool
 
         var displayName: String {
@@ -105,8 +105,9 @@ final class BackupService {
 
     // MARK: - Public API
 
-    /// Crée un snapshot local + (tentative) iCloud. Retourne la liste des emplacements
-    /// où l'écriture a réussi. Throw uniquement si l'écriture locale échoue (cas critique).
+    /// Creates a local snapshot + (attempted) iCloud snapshot. Returns the
+    /// list of locations where the write succeeded. Only throws if the
+    /// local write fails (a critical case).
     @discardableResult
     func createSnapshot() throws -> [URL] {
         let dbURL = DatabaseManager.shared.sqliteURL()
@@ -114,20 +115,20 @@ final class BackupService {
             throw BackupError.noDatabase
         }
 
-        // Nom timestampé — yyyy-MM-dd-HHmmss en POSIX pour un tri lexicographique
-        // qui suit l'ordre chronologique.
+        // Timestamped name — yyyy-MM-dd-HHmmss in POSIX so lexicographic
+        // sorting follows chronological order.
         let filename = "nemoris-backup-\(Self.filenameTimestampFormatter.string(from: Date())).sqlite"
 
         var createdURLs: [URL] = []
 
-        // 1) Snapshot local — obligatoire. Si on n'arrive pas à écrire ici, on throw.
+        // 1) Local snapshot — mandatory. Throws if this write fails.
         let localDir = try ensureLocalBackupDir()
         let localDest = localDir.appendingPathComponent(filename)
         try copyDatabase(from: dbURL, to: localDest)
         createdURLs.append(localDest)
 
-        // 2) Snapshot iCloud — best-effort. Si échec, on garde le local mais on
-        //    note l'erreur pour l'afficher dans Settings.
+        // 2) iCloud snapshot — best-effort. On failure, the local copy is
+        //    kept and the error is recorded for display in Settings.
         if let cloudDir = try? ensureICloudBackupDir() {
             let cloudDest = cloudDir.appendingPathComponent(filename)
             do {
@@ -138,11 +139,11 @@ final class BackupService {
                 lastSyncError = "Sauvegarde iCloud échouée : \(error.localizedDescription)"
             }
         } else {
-            // iCloud indisponible — pas une erreur fatale, juste un état à signaler.
+            // iCloud unavailable — not a fatal error, just a state to report.
             lastSyncError = "iCloud indisponible (pas connecté ou entitlement manquant)"
         }
 
-        // Pruning : on garde les N plus récents, tout le reste dégage.
+        // Pruning: keep the N most recent, everything else goes.
         pruneOldSnapshots()
 
         lastBackupDate = Date()
@@ -150,21 +151,21 @@ final class BackupService {
         return createdURLs
     }
 
-    /// Liste tous les snapshots disponibles (local + iCloud), dédupliqués par
-    /// filename, triés du plus récent au plus ancien.
+    /// Lists all available snapshots (local + iCloud), deduplicated by
+    /// filename, sorted from most to least recent.
     func listSnapshots() -> [Snapshot] {
         var byFilename: [String: Snapshot] = [:]
 
-        // Snapshots locaux
+        // Local snapshots
         if let localDir = try? ensureLocalBackupDir() {
             for snap in snapshotsIn(directory: localDir, isICloud: false) {
                 byFilename[snap.id] = snap
             }
         }
 
-        // Snapshots iCloud — peuvent écraser les locaux du même nom (ils représentent
-        // le même contenu propagé). On préfère l'URL iCloud car elle survit au reset
-        // de l'app sur ce device.
+        // iCloud snapshots — may overwrite locals of the same name (they
+        // represent the same content, propagated). The iCloud URL is
+        // preferred since it survives an app reset on this device.
         if let cloudDir = try? ensureICloudBackupDir() {
             for snap in snapshotsIn(directory: cloudDir, isICloud: true) {
                 byFilename[snap.id] = snap
@@ -174,14 +175,14 @@ final class BackupService {
         return byFilename.values.sorted { $0.createdAt > $1.createdAt }
     }
 
-    /// Restaure le snapshot donné. Crée d'abord une sauvegarde de sécurité de la
-    /// DB courante (suffixe `-pre-restore-<timestamp>`) — l'utilisateur peut toujours
-    /// revenir en arrière si la restauration le laisse dans un état non-désiré.
-    /// L'appelant doit ensuite invalider tous les VMs (cf. AppState.dataRefreshToken).
+    /// Restores the given snapshot. First creates a safety backup of the
+    /// current DB (suffix `-pre-restore-<timestamp>`) — the user can always
+    /// roll back if the restore leaves them in an unwanted state. The
+    /// caller must then invalidate all VMs (see AppState.dataRefreshToken).
     func restore(snapshot: Snapshot) throws {
         let dbURL = DatabaseManager.shared.sqliteURL()
 
-        // 1) Sauvegarde de sécurité de la DB courante AVANT toute opération.
+        // 1) Safety backup of the current DB BEFORE any other operation.
         if FileManager.default.fileExists(atPath: dbURL.path) {
             let safetyDir = try ensureLocalBackupDir()
             let safetyName = "nemoris-pre-restore-\(Self.filenameTimestampFormatter.string(from: Date())).sqlite"
@@ -190,42 +191,42 @@ final class BackupService {
             Self.log.info("Sauvegarde de sécurité créée : \(safetyName)")
         }
 
-        // 2) Pour iCloud : forcer le téléchargement du fichier si pas encore présent
-        //    en local (sinon copyItem va échouer).
+        // 2) For iCloud: force the file to download if it isn't present
+        //    locally yet (otherwise copyItem would fail).
         if snapshot.isICloud, !FileManager.default.fileExists(atPath: snapshot.url.path) {
             try FileManager.default.startDownloadingUbiquitousItem(at: snapshot.url)
-            // On attend que le téléchargement aboutisse (timeout 30s). Pour MVP
-            // on bloque le main thread quelques secondes — acceptable car l'utilisateur
-            // a explicitement tapé "Restaurer" et voit un spinner.
+            // Waits for the download to complete (30s timeout). This blocks
+            // the main thread for a few seconds — acceptable since the user
+            // explicitly tapped "Restore" and sees a spinner.
             try waitForFile(at: snapshot.url, timeout: 30)
         }
 
-        // 3) Remplace la DB courante par le snapshot.
+        // 3) Replaces the current DB with the snapshot.
         try? FileManager.default.removeItem(at: dbURL)
         try FileManager.default.copyItem(at: snapshot.url, to: dbURL)
 
-        // 4) Réapplique les migrations (cas snapshot fait avec version antérieure).
-        //    Les migrations sont idempotentes par design.
+        // 4) Re-applies migrations (covers a snapshot made on an older
+        //    version). Migrations are idempotent by design.
         DatabaseManager.shared.migrateIfNeeded()
 
         Self.log.info("Restauration OK depuis \(snapshot.id)")
     }
 
-    /// Supprime un snapshot (local ou iCloud).
+    /// Deletes a snapshot (local or iCloud).
     func deleteSnapshot(_ snapshot: Snapshot) throws {
         try FileManager.default.removeItem(at: snapshot.url)
     }
 
-    /// Crée un snapshot uniquement si > 24h depuis le dernier ET auto-backup activé.
-    /// Appelé au launch — silencieux, ne throw jamais (logué uniquement).
+    /// Creates a snapshot only if > 24h since the last one AND auto-backup
+    /// is enabled. Called at launch — silent, never throws (logs only).
     func runAutoBackupIfDue() {
         guard autoBackupEnabled else { return }
-        // Garde-fou base vide : ne jamais snapshoter une base sans transaction
-        // (base fraîchement créée / en cours d'onboarding / rejoint iCloud pas
-        // encore descendu). Sinon ce backup quasi-vide occupe un slot des 30 et
-        // finit par pousser un vrai snapshot hors rotation. Dès la 1re
-        // transaction (import, saisie, ou descente CloudKit), les backups
-        // reprennent normalement.
+        // Empty-database guard: never snapshot a database with no
+        // transactions (freshly created / mid-onboarding / joined iCloud
+        // but not yet synced down). Otherwise this near-empty backup would
+        // occupy one of the 30 rotation slots and eventually push out a
+        // real snapshot. Backups resume normally from the 1st transaction
+        // (import, manual entry, or CloudKit sync).
         guard DatabaseManager.shared.transactionCount() > 0 else {
             Self.log.info("Auto-backup sauté : base sans transaction.")
             return
@@ -258,26 +259,25 @@ final class BackupService {
         guard let container = iCloudContainerURL else {
             throw BackupError.iCloudUnavailable
         }
-        // Le sous-dossier `Documents` est obligatoire dans un container iCloud
-        // pour être visible côté Files app de l'utilisateur.
+        // The `Documents` subfolder is required inside an iCloud container
+        // for it to be visible in the user's Files app.
         let documentsURL = container.appendingPathComponent("Documents", isDirectory: true)
         let backupDir = documentsURL.appendingPathComponent("Backups", isDirectory: true)
         try FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
         return backupDir
     }
 
-    /// Copie SQLite : avant la copie on s'assure qu'aucun WAL/SHM n'est en cours
-    /// d'écriture en faisant un checkpoint. Pour MVP on copie directement (l'app
-    /// utilise des connexions à la demande, pas de connexion persistante).
-    /// Si on rencontre des corruptions, on ajoutera un VACUUM INTO ici.
+    /// SQLite copy: the database uses on-demand connections rather than a
+    /// persistent one, so no explicit WAL checkpoint is needed before
+    /// copying — a plain file copy is used directly.
     private func copyDatabase(from src: URL, to dest: URL) throws {
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.copyItem(at: src, to: dest)
     }
 
-    /// Format des noms de fichiers (`nemoris-backup-yyyy-MM-dd-HHmmss.sqlite`,
-    /// `nemoris-pre-restore-yyyy-MM-dd-HHmmss.sqlite`) — partagé par la génération
-    /// du nom ET le parsing pour l'affichage (cf. `dateFromFilename`).
+    /// Filename format (`nemoris-backup-yyyy-MM-dd-HHmmss.sqlite`,
+    /// `nemoris-pre-restore-yyyy-MM-dd-HHmmss.sqlite`) — shared by both name
+    /// generation AND parsing for display (see `dateFromFilename`).
     private static let filenameTimestampFormatter: DateFormatter = {
         let fmt = DateFormatter()
         fmt.locale = Locale(identifier: "en_US_POSIX")
@@ -285,19 +285,20 @@ final class BackupService {
         return fmt
     }()
 
-    /// Date réelle du snapshot, extraite du nom de fichier plutôt que de
-    /// l'attribut `.creationDate` : `FileManager.copyItem` préserve le birthtime
-    /// du fichier SOURCE (la base live, quasi jamais recréée en usage normal —
-    /// écritures SQLite en place) au lieu de dater la copie. Sans ce fix, tous
-    /// les snapshots héritent de la même date figée, ce qui fausse l'affichage,
-    /// le tri chronologique ET la rotation des `maxSnapshots` plus récents.
+    /// Actual snapshot date, extracted from the filename rather than the
+    /// `.creationDate` attribute: `FileManager.copyItem` preserves the
+    /// SOURCE file's birthtime (the live database, almost never recreated
+    /// in normal use since SQLite writes happen in place) instead of dating
+    /// the copy. Relying on `.creationDate` would make every snapshot
+    /// inherit the same frozen date, which would break the display, the
+    /// chronological sort, AND the rotation of the `maxSnapshots` most recent ones.
     private static func dateFromFilename(_ filename: String) -> Date? {
         let name = (filename as NSString).deletingPathExtension
         guard name.count >= 17 else { return nil }
         return filenameTimestampFormatter.date(from: String(name.suffix(17)))
     }
 
-    /// Énumère les fichiers `.sqlite` dans un dossier et les transforme en Snapshots.
+    /// Enumerates `.sqlite` files in a folder and turns them into Snapshots.
     private func snapshotsIn(directory: URL, isICloud: Bool) -> [Snapshot] {
         let urls = (try? FileManager.default.contentsOfDirectory(
             at: directory,
@@ -311,9 +312,9 @@ final class BackupService {
             guard url.pathExtension == "sqlite",
                   isPreRestore || name.hasPrefix("nemoris-backup-") else { return nil }
             let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
-            // iCloud fichiers pas encore téléchargés : `.fileSize` peut être 0 ou nil
-            // mais la métadata système contient la vraie taille. On accepte 0 si rien
-            // d'autre — l'utilisateur voit "0 octets" et comprend que c'est en attente.
+            // iCloud files not yet downloaded: `.fileSize` can be 0 or nil,
+            // but the system metadata holds the real size. 0 is accepted as
+            // a last resort — the user sees "0 bytes" and understands it's pending.
             let size = (attrs?[.size] as? Int64) ?? 0
             let date = Self.dateFromFilename(name) ?? (attrs?[.creationDate] as? Date) ?? Date()
             return Snapshot(
@@ -327,8 +328,8 @@ final class BackupService {
         }
     }
 
-    /// Supprime les snapshots au-delà de `maxSnapshots` (le plus ancien d'abord).
-    /// Appliqué local + iCloud séparément.
+    /// Deletes snapshots beyond `maxSnapshots` (oldest first).
+    /// Applied separately for local + iCloud.
     private func pruneOldSnapshots() {
         for dir in [try? ensureLocalBackupDir(), try? ensureICloudBackupDir()].compactMap({ $0 }) {
             let snaps = snapshotsIn(directory: dir, isICloud: false)
@@ -340,8 +341,8 @@ final class BackupService {
         }
     }
 
-    /// Attend que le fichier iCloud soit téléchargé localement (bloquant, timeout).
-    /// Polling toutes les 0.3s — simple et suffisant pour des fichiers <50 MB.
+    /// Waits for the iCloud file to be downloaded locally (blocking, with a timeout).
+    /// Polls every 0.3s — simple and sufficient for files <50 MB.
     private func waitForFile(at url: URL, timeout: TimeInterval) throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {

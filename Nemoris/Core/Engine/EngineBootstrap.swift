@@ -1,16 +1,16 @@
 import Foundation
 import NemorisEngine
 
-/// Singleton qui gère le cycle de vie du TransactionEngine côté app.
+/// Singleton managing the app-side lifecycle of the TransactionEngine.
 ///
-/// Choix techniques :
-/// - `engine.sqlite` vit dans Application Support (séparé du finance.sqlite utilisateur)
-/// - Le seed JSON + modèle ONNX sont bundlés via le SPM NemorisEngine (Bundle.module)
-/// - Boot paresseux : `shared.engine` n'instancie qu'au premier accès
-/// - Embeddings activés par défaut (≈300 ms de warm-up acceptable au lancement)
+/// Technical choices:
+/// - `engine.sqlite` lives in Application Support (separate from the user's finance.sqlite)
+/// - The JSON seed + ONNX model are bundled via the NemorisEngine SPM package (Bundle.module)
+/// - Lazy boot: `shared.engine` only instantiates on first access
+/// - Embeddings enabled by default (~300 ms warm-up acceptable at launch)
 ///
-/// La donnée utilisateur (tiers, transactions, payee_groups) reste dans finance.sqlite,
-/// gérée par l'app via raw SQLite C API. Aucun mélange des deux schémas.
+/// User data (tiers, transactions, payee_groups) stays in finance.sqlite,
+/// managed by the app through the raw SQLite C API. The two schemas never mix.
 @MainActor
 @Observable
 final class EngineBootstrap {
@@ -24,13 +24,14 @@ final class EngineBootstrap {
 
     private init() {}
 
-    /// À appeler depuis NemorisApp au lancement. Idempotent : un second appel renvoie
-    /// immédiatement.
+    /// Call from NemorisApp at launch. Idempotent: a second call returns
+    /// immediately.
     ///
-    /// **Perf** : le boot lourd (chargement du modèle ONNX MiniLM ~22 MB + seed JSON
-    /// + construction de l'index embeddings) tourne dans un `Task.detached` → main
-    /// thread libre pour rendre l'UI. Le moteur n'est exposé via `engine` qu'une fois
-    /// le boot terminé (peut prendre 1-15s au cold start selon le device).
+    /// **Perf**: the heavy boot work (loading the ~22 MB ONNX MiniLM model +
+    /// JSON seed + building the embeddings index) runs in a `Task.detached`,
+    /// keeping the main thread free to render the UI. The engine is only
+    /// exposed via `engine` once boot completes (can take 1-15s on cold
+    /// start depending on the device).
     func bootIfNeeded(withEmbeddings: Bool = true) {
         guard engine == nil, bootError == nil, bootTask == nil else { return }
         let path = engineDatabaseURL().path
@@ -46,7 +47,7 @@ final class EngineBootstrap {
                 }
             }.value
 
-            // Retour sur MainActor (héritage de l'isolation du Task parent).
+            // Back on the MainActor (inherited from the parent Task's isolation).
             guard let self else { return }
             switch outcome {
             case .success(let e):
@@ -61,7 +62,7 @@ final class EngineBootstrap {
         }
     }
 
-    /// Réinitialise le moteur (utile pour les outils debug / réimport seed).
+    /// Resets the engine (useful for debug tools / seed re-import).
     func reset() {
         bootTask?.cancel()
         bootTask = nil
@@ -70,9 +71,10 @@ final class EngineBootstrap {
         bootTimeMs = nil
     }
 
-    /// Path persistant pour la base moteur (apprentissage local : merchants 'learned', contacts).
-    /// Le seed canonique est rechargé depuis le bundle à chaque boot, donc supprimer ce fichier
-    /// est non destructif tant que l'utilisateur n'a pas validé de tiers personnalisés.
+    /// Persistent path for the engine database (local learning: 'learned'
+    /// merchants, contacts). The canonical seed is reloaded from the bundle
+    /// on every boot, so deleting this file is non-destructive as long as
+    /// the user hasn't validated any custom tiers.
     private func engineDatabaseURL() -> URL {
         let support = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)

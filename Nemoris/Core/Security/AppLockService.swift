@@ -4,23 +4,25 @@ import os
 
 // MARK: - AppLockService
 //
-// Verrouillage à l'ouverture de l'app via Face ID / Touch ID / code iOS.
-// Pas de code custom Nemoris : on délègue intégralement à LocalAuthentication →
-// on hérite de tous les comportements iOS (fallback code, lockout après échecs
-// répétés, gestion de l'absence de biometry sur Mac Catalyst, etc.).
+// Locks the app on open via Face ID / Touch ID / iOS passcode.
+// No custom Nemoris code: authentication is delegated entirely to
+// LocalAuthentication, inheriting all of iOS's behaviors (passcode fallback,
+// lockout after repeated failures, handling the absence of biometry on Mac
+// Catalyst, etc.).
 //
-// **Politique** : `.deviceOwnerAuthentication` (biometry + fallback code iOS).
-// Plus accessible que `.deviceOwnerAuthenticationWithBiometrics` (biometry only)
-// — un user qui n'arrive plus avec Face ID peut toujours rentrer via son code.
+// **Policy**: `.deviceOwnerAuthentication` (biometry + iOS passcode
+// fallback). More accessible than `.deviceOwnerAuthenticationWithBiometrics`
+// (biometry only) — a user who can no longer get in with Face ID can still
+// enter via their passcode.
 //
-// **Quand relock ?** Immédiatement au passage en background (cf. NemorisApp).
-// Aucun grace period : pour une app finance, c'est l'attente standard et ça
-// évite la surface d'attaque "écran allumé sans surveillance".
+// **When to relock?** Immediately on backgrounding (see NemorisApp). No
+// grace period: for a finance app this is the standard expectation, and it
+// avoids the attack surface of an unlocked, unattended screen.
 //
-// **Activation** : l'utilisateur doit s'authentifier UNE fois pour activer le toggle
-// dans Settings (preuve de propriété du device). Pareil pour le désactiver
-// (sinon n'importe qui qui prend le téléphone déverrouillé pourrait désactiver
-// le lock à l'insu du propriétaire).
+// **Activation**: the user must authenticate ONCE to turn the toggle on in
+// Settings (proof of device ownership). Same to turn it off (otherwise
+// anyone who picks up the unlocked phone could disable the lock without the
+// owner's knowledge).
 
 @MainActor
 final class AppLockService {
@@ -29,15 +31,16 @@ final class AppLockService {
 
     // MARK: - UserDefaults-backed state
 
-    /// Verrouillage activé. Si `false`, l'app démarre sans demander d'authentification.
-    /// Modifiable uniquement après auth réussie (cf. `setEnabled(_:)`).
+    /// Whether the lock is enabled. If `false`, the app starts without
+    /// requesting authentication. Only mutable after a successful auth
+    /// (see `setEnabled(_:)`).
     var isLockEnabled: Bool {
         UserDefaults.standard.bool(forKey: "appLockEnabled")
     }
 
-    /// `true` si on doit ré-authentifier à la prochaine entrée foreground.
-    /// Mis à `true` au passage `.background` par `NemorisApp` ; remis à `false`
-    /// après auth réussie.
+    /// `true` if re-authentication is required on the next foreground entry.
+    /// Set to `true` on `.background` by `NemorisApp`; reset to `false`
+    /// after a successful auth.
     var needsAuthentication: Bool {
         get { UserDefaults.standard.bool(forKey: "appLockNeedsAuth") }
         set { UserDefaults.standard.set(newValue, forKey: "appLockNeedsAuth") }
@@ -45,32 +48,32 @@ final class AppLockService {
 
     // MARK: - Biometry detection
 
-    /// Type de biometry disponible sur le device courant.
-    /// Renvoie `.none` si pas de biometry, ou si pas de code iOS configuré (cas
-    /// rare mais possible — un user sans aucun code de verrouillage ne peut PAS
-    /// activer notre lock, on n'aurait aucun moyen de l'authentifier).
+    /// Biometry type available on the current device.
+    /// Returns `.none` if there's no biometry, or no iOS passcode configured
+    /// (a rare but possible case — a user with no lock method at all cannot
+    /// enable our lock, since there would be no way to authenticate them).
     var biometryType: BiometryType {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            // Si même le code iOS n'est pas configuré, on retourne `.none` ET
-            // on force le toggle à false dans `setEnabled` pour éviter un état
-            // bloquant.
-            Self.log.warning("Auth indisponible : \(error?.localizedDescription ?? "raison inconnue")")
+            // If even the iOS passcode isn't configured, `.none` is returned
+            // AND `setEnabled` forces the toggle back to false to avoid a
+            // blocking state.
+            Self.log.warning("Auth unavailable: \(error?.localizedDescription ?? "unknown reason")")
             return .none
         }
         switch context.biometryType {
         case .faceID:  return .faceID
         case .touchID: return .touchID
         case .opticID: return .opticID  // iOS 17 Vision Pro
-        case .none:    return .passcode // pas de biometry mais code iOS dispo
+        case .none:    return .passcode // no biometry but an iOS passcode is available
         @unknown default: return .passcode
         }
     }
 
     enum BiometryType {
-        case none      // ni biometry ni code iOS → lock impossible
-        case passcode  // pas de biometry mais code iOS configuré
+        case none      // neither biometry nor iOS passcode → locking is impossible
+        case passcode  // no biometry but an iOS passcode is configured
         case faceID
         case touchID
         case opticID
@@ -100,22 +103,23 @@ final class AppLockService {
 
     // MARK: - Public API
 
-    /// Lance une authentification biometry/code iOS. Bloque le caller jusqu'à
-    /// décision produit (réussite, échec, annulation). Retourne `true` si auth OK.
+    /// Starts a biometry/iOS-passcode authentication. Blocks the caller
+    /// until a product decision is reached (success, failure, cancellation).
+    /// Returns `true` if auth succeeded.
     ///
-    /// `reason` est affichée par iOS dans la sheet Face ID — DOIT être courte et
-    /// claire ("Déverrouiller Nemoris" et pas "Veuillez vous authentifier pour
-    /// continuer parce que…").
+    /// `reason` is displayed by iOS in the Face ID sheet — it MUST be short
+    /// and clear ("Unlock Nemoris", not "Please authenticate to continue
+    /// because…").
     func authenticate(reason: String = "Déverrouiller Nemoris") async -> Bool {
         let context = LAContext()
         context.localizedFallbackTitle = "Utiliser le code"
         context.localizedCancelTitle = "Annuler"
 
-        // Pré-check : si on ne peut pas évaluer, on échoue tôt sans afficher de
-        // sheet (évite un flash UI peu pro).
+        // Pre-check: if evaluation isn't possible, fail early without
+        // showing a sheet (avoids an unpolished UI flash).
         var policyError: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &policyError) else {
-            Self.log.error("canEvaluatePolicy false : \(policyError?.localizedDescription ?? "?")")
+            Self.log.error("canEvaluatePolicy false: \(policyError?.localizedDescription ?? "?")")
             return false
         }
 
@@ -126,26 +130,27 @@ final class AppLockService {
             )
             if success {
                 needsAuthentication = false
-                Self.log.info("Auth réussie")
+                Self.log.info("Auth succeeded")
             }
             return success
         } catch {
-            Self.log.warning("Auth échouée : \(error.localizedDescription)")
+            Self.log.warning("Auth failed: \(error.localizedDescription)")
             return false
         }
     }
 
-    /// Active ou désactive le lock. **Demande auth d'abord** pour les 2 sens :
-    ///   - Activer : preuve que l'utilisateur est bien le propriétaire (sinon n'importe
-    ///     qui peut activer et "verrouiller" le téléphone du propriétaire légitime).
-    ///   - Désactiver : preuve aussi — sinon une personne qui choperait l'app
-    ///     déverrouillée pourrait désactiver le lock à l'insu du propriétaire.
+    /// Enables or disables the lock. **Requests auth first** in both
+    /// directions:
+    ///   - Enabling: proof that the user is really the owner (otherwise
+    ///     anyone could enable it and "lock" the legitimate owner's phone).
+    ///   - Disabling: proof as well — otherwise someone who got hold of the
+    ///     unlocked app could disable the lock without the owner's knowledge.
     ///
-    /// Retourne `true` si le changement a été appliqué.
+    /// Returns `true` if the change was applied.
     @discardableResult
     func setEnabled(_ enabled: Bool) async -> Bool {
-        // Cas dégénéré : pas de biometry NI code iOS → on ne peut pas authentifier.
-        // Inutile d'essayer (et `evaluatePolicy` renverrait une erreur).
+        // Degenerate case: no biometry AND no iOS passcode → authentication
+        // is impossible. No point trying (`evaluatePolicy` would just error).
         guard biometryType.canLock else {
             UserDefaults.standard.set(false, forKey: "appLockEnabled")
             return false
@@ -158,15 +163,15 @@ final class AppLockService {
         guard success else { return false }
 
         UserDefaults.standard.set(enabled, forKey: "appLockEnabled")
-        // Quand on active, on considère que l'utilisateur vient d'authentifier → pas de
-        // re-prompt immédiat. Quand on désactive, on clear le flag aussi.
+        // When enabling, the user is considered to have just authenticated →
+        // no immediate re-prompt. When disabling, the flag is cleared too.
         needsAuthentication = false
-        Self.log.info("Lock \(enabled ? "activé" : "désactivé")")
+        Self.log.info("Lock \(enabled ? "enabled" : "disabled")")
         return true
     }
 
-    /// Marque l'app comme "doit se ré-authentifier" — appelé au passage en background.
-    /// Idempotent : safe à appeler même si lock désactivé (no-op dans ce cas).
+    /// Marks the app as "needs to re-authenticate" — called on backgrounding.
+    /// Idempotent: safe to call even if the lock is disabled (no-op in that case).
     func markNeedsAuthentication() {
         guard isLockEnabled else { return }
         needsAuthentication = true

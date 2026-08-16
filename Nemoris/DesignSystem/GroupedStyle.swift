@@ -1,47 +1,47 @@
 import SwiftUI
 
-// MARK: - Style standard des conteneurs groupés
+// MARK: - Standard grouped-container style
 //
-// macOS n'a pas d'équivalent natif du `.insetGrouped` iOS pour `List` — d'où
-// des écrans "bruts" (rows bord-à-bord, sections plates) sur desktop alors que
-// l'app est en cartes arrondies sur iOS. Deux outils pour homogénéiser :
+// macOS has no native equivalent of iOS's `.insetGrouped` for `List` — this
+// produces "raw" screens (edge-to-edge rows, flat sections) on desktop while
+// the app uses rounded cards on iOS. Two tools bridge that gap:
 //
-// 1. `nemorisFormStyle()` — pour tout `Form` : boxes arrondies natives macOS
-//    (`.formStyle(.grouped)`, look System Settings) peintes dans la palette
-//    via les `.listRowBackground` existants. No-op sur iOS (Form y est déjà
-//    rendu insetGrouped).
-// 2. `macGroupedRow(first:last:background:)` — pour les `List` dynamiques qui
-//    ne peuvent pas devenir des Form (rowActions, pagination, refreshable…) :
-//    dessine la carte par row via `.listRowBackground` (coins arrondis sur la
-//    première/dernière row du groupe, séparateur interne façon insetGrouped).
-//    La List doit être en `.listStyle(.plain)` sur macOS (base neutre).
+// 1. `nemorisFormStyle()` — for any `Form`: native macOS rounded boxes
+//    (`.formStyle(.grouped)`, System Settings look) painted with the app's
+//    palette via the existing `.listRowBackground` calls. No-op on iOS
+//    (Form there is already rendered insetGrouped).
+// 2. `macGroupedRow(first:last:background:)` — for dynamic `List`s that
+//    cannot become Forms (rowActions, pagination, refreshable…): draws the
+//    per-row card via `.listRowBackground` (rounded corners on the group's
+//    first/last row, internal divider like insetGrouped).
+//    The List must be `.listStyle(.plain)` on macOS (neutral base).
 //
-// ⚠️ Conventions :
-// - Tout nouveau `Form` doit recevoir `.nemorisFormStyle()`.
-// - Ne jamais combiner `ZStack { Color.ignoresSafeArea(); Form }` (hauteur
-//   infinie sur macOS) — `Form { … }.background(…)`.
+// ⚠️ Conventions:
+// - Every new `Form` must receive `.nemorisFormStyle()`.
+// - Never combine `ZStack { Color.ignoresSafeArea(); Form }` (infinite
+//   height on macOS) — use `Form { … }.background(…)`.
 
 extension View {
-    /// Style standard des `Form` : grouped natif macOS (boxes arrondies),
-    /// remplissage du volet détail (sans quoi le Form macOS prend sa largeur
-    /// intrinsèque étroite), ET le fond de l'app.
+    /// Standard `Form` style: native macOS grouped look (rounded boxes),
+    /// fills the detail pane (otherwise the macOS Form takes its narrow
+    /// intrinsic width), AND applies the app's background.
     ///
-    /// ⚠️ Le FOND EST INCLUS ICI, délibérément.
+    /// ⚠️ The BACKGROUND IS INCLUDED HERE, deliberately.
     ///
-    /// Il était auparavant à la charge de chaque vue
-    /// (`.scrollContentBackground(.hidden)` + `.background(…)`, trois lignes à
-    /// recopier). Résultat : les écrans qui y pensaient affichaient le noir
-    /// profond de la palette, les autres le gris par défaut du système — d'où
-    /// des fonds unis différents d'un écran à l'autre, très visibles entre un
-    /// module et le volet latéral.
+    /// Leaving it to each view (`.scrollContentBackground(.hidden)` +
+    /// `.background(…)`, three lines to duplicate) means screens that
+    /// remembered it showed the palette's deep black while others fell back
+    /// to the system's default gray — producing different flat backgrounds
+    /// from one screen to the next, most visible between a module and the
+    /// side pane.
     ///
-    /// Le porter dans le style rend la règle auto-appliquée : tout `Form` qui
-    /// reçoit `nemorisFormStyle()` est cohérent, sans que personne ait à y
-    /// penser. Poser en plus un `.background` sur la vue reste sans effet
-    /// néfaste (le dernier gagne, et c'est la même couleur).
+    /// Baking it into the style makes the rule self-applying: any `Form`
+    /// that receives `nemorisFormStyle()` is consistent, without anyone
+    /// having to remember. Adding an extra `.background` on the view has no
+    /// adverse effect (the last one wins, and it's the same color).
     ///
-    /// ⚠️ Ne jamais remplacer par `ZStack { Color.ignoresSafeArea(); Form }` :
-    /// hauteur infinie sur macOS ().
+    /// ⚠️ Never replace with `ZStack { Color.ignoresSafeArea(); Form }`:
+    /// produces infinite height on macOS.
     func nemorisFormStyle() -> some View {
         #if os(macOS)
         return self
@@ -56,17 +56,18 @@ extension View {
         #endif
     }
 
-    /// Carte arrondie par row pour les `List` qui restent des `List`.
-    /// Sur iOS : applique simplement `.listRowBackground(background)` (le
-    /// `.insetGrouped` natif dessine les cartes). Sur macOS : coins arrondis
-    /// first/last + inset horizontal + séparateur interne + respiration entre
-    /// groupes.
+    /// Rounded per-row card for `List`s that stay `List`s.
+    /// On iOS: simply applies `.listRowBackground(background)` (the native
+    /// `.insetGrouped` draws the cards). On macOS: rounded first/last
+    /// corners + horizontal inset + internal divider + spacing between
+    /// groups.
     ///
-    /// ⚠️ Implémentation macOS : la carte est le fond DU CONTENU (`.background`
-    /// sur la row), PAS un `.listRowBackground`. Le placement du row background
-    /// vis-à-vis des `listRowInsets` n'est pas fiable sur macOS (padding bas
-    /// asymétrique constaté) — en attachant le fond au contenu, la géométrie
-    /// est déterministe : la carte enveloppe exactement contenu + paddings.
+    /// ⚠️ macOS implementation: the card is the background OF THE CONTENT
+    /// (`.background` on the row), NOT a `.listRowBackground`. The row
+    /// background's placement relative to `listRowInsets` is not reliable on
+    /// macOS (asymmetric bottom padding observed) — attaching the background
+    /// to the content instead makes the geometry deterministic: the card
+    /// exactly wraps content + paddings.
     func macGroupedRow<Bg: View>(
         first: Bool = true,
         last: Bool = true,
@@ -75,7 +76,7 @@ extension View {
         #if os(macOS)
         return self
             .frame(maxWidth: .infinity, alignment: .leading)
-            // Padding interne de la carte (symétrique haut/bas par construction).
+            // Card's internal padding (top/bottom symmetric by construction).
             .padding(.horizontal, AppTheme.Spacing.lg)
             .padding(.top, first ? AppTheme.Spacing.sm : AppTheme.Spacing.xs)
             .padding(.bottom, last ? AppTheme.Spacing.sm : AppTheme.Spacing.xs)
@@ -94,10 +95,10 @@ extension View {
                         .padding(.horizontal, AppTheme.Spacing.lg)
                 }
             }
-            // Marges HORS carte via PADDING RÉEL (toujours appliqué), et NON via
-            // `listRowInsets` dont l'honoration est incertaine sur macOS `.plain`
-            // — c'est ce qui laissait les cartes "collées aux bords" malgré la
-            // valeur d'inset. Inset latéral + respiration après le dernier row.
+            // Margins OUTSIDE the card use REAL PADDING (always applied),
+            // never `listRowInsets` — whether macOS `.plain` honors those is
+            // unreliable, which left cards "stuck to the edges" despite the
+            // inset value. Horizontal inset + spacing after the last row.
             .padding(.horizontal, AppTheme.Spacing.xl)
             .padding(.bottom, last ? AppTheme.Spacing.md : 0)
             .listRowSeparator(.hidden)
@@ -108,17 +109,17 @@ extension View {
         #endif
     }
 
-    /// Variante avec fond `surface` standard.
+    /// Variant with the standard `surface` background.
     func macGroupedRow(first: Bool = true, last: Bool = true) -> some View {
         macGroupedRow(first: first, last: last) { AppTheme.Colors.surface }
     }
 
-    /// Aligne un header de section sur le bord gauche des cartes
-    /// `macGroupedRow`. No-op sur iOS.
+    /// Aligns a section header with the left edge of `macGroupedRow` cards.
+    /// No-op on iOS.
     func macGroupedSectionHeader() -> some View {
         #if os(macOS)
-        // Aligné sur le bord gauche des cartes (même marge latérale que le
-        // padding hors-carte de `macGroupedRow`).
+        // Aligned with the left edge of the cards (same lateral margin as
+        // the outside-the-card padding of `macGroupedRow`).
         return self.padding(.leading, AppTheme.Spacing.xl)
         #else
         return self

@@ -3,46 +3,44 @@ import SQLite3
 
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-/// Couche L.1 : accès SQLite du moteur de sync.
+/// SQLite access layer for the sync engine.
 ///
-/// Fait le pont entre les rows locales (int PK/FK) et les payloads qui
-/// voyagent (uuid partout). Format du payload JSON (chiffré côté CloudKit
-/// via `encryptedValues`, voir `CloudSyncEngine`) :
+/// Bridges local rows (int PK/FK) and the payloads that travel over the wire
+/// (uuid everywhere). JSON payload format (encrypted on the CloudKit side
+/// via `encryptedValues`, see `CloudSyncEngine`):
 ///
 /// ```json
 /// {
-///   "u": "<uuid de la row>",
-///   "t": "<updated_at ISO8601>",             // résolution de conflits LWW
-///   "v": { "name": "Carrefour", ... },       // colonnes scalaires
-///   "r": { "payee_id": "<uuid>", ... },      // FK sérialisées en uuid
-///   "g": ["<uuid tag>", ...]                 // transactions uniquement : liens tags
+///   "u": "<row uuid>",
+///   "t": "<updated_at ISO8601>",             // LWW conflict resolution
+///   "v": { "name": "Carrefour", ... },       // scalar columns
+///   "r": { "payee_id": "<uuid>", ... },      // FKs serialized as uuid
+///   "g": ["<tag uuid>", ...]                 // transactions only: tag links
 /// }
 /// ```
 ///
-/// Le schéma CloudKit ne bouge donc jamais quand une colonne SQLite est
-/// ajoutée : les colonnes inconnues d'un appareil pas encore à jour sont
-/// ignorées à l'application (intersection avec PRAGMA table_info).
+/// The CloudKit schema therefore never changes when a SQLite column is
+/// added: columns unknown to a device that isn't yet up to date are ignored
+/// on apply (intersected against PRAGMA table_info).
 struct SyncPayloadStore: Sendable {
 
-    /// Chemin de la base SQLite. Injectable pour les tests (harness standalone
-    /// dans NemorisApp/Tests/) — l'init sans argument, qui pointe sur la base
-    /// de l'app via DatabaseManager, vit dans SyncLive.swift pour que ce
-    /// fichier reste compilable hors du target (aucune dépendance app).
+    /// SQLite database path. Injectable for tests — the argument-less init,
+    /// which points at the app's database via DatabaseManager, lives in
+    /// SyncLive.swift so this file stays free of any app-target dependency.
     let databaseURL: URL
 
     init(databaseURL: URL) {
         self.databaseURL = databaseURL
     }
 
-    // MARK: - Configuration des tables
+    // MARK: - Table configuration
 
-    /// Ordre d'application des changements distants (tables référencées
-    /// d'abord) — source unique : SyncSchema.syncedTables.
+    /// Application order for remote changes (referenced tables first) —
+    /// single source of truth: SyncSchema.syncedTables.
     static let tableOrder: [String] = SyncSchema.syncedTables
 
-    /// FK synchronisées : colonne → table cible. Toute colonne absente d'ici
-    /// est sérialisée telle quelle dans "v". Les FK sortent en uuid dans "r",
-    /// jamais en int id.
+    /// Synced FKs: column → target table. Any column absent from here is
+    /// serialized as-is in "v". FKs go out as uuid in "r", never as an int id.
     static let foreignKeys: [String: [String: String]] = [
         "transactions": [
             "account_id": "accounts",
@@ -58,17 +56,17 @@ struct SyncPayloadStore: Sendable {
         "categories": [
             "parent_id": "categories",
         ],
-        // — Métadonnées de transaction (v46)
-        // ⚠️ Les DEUX FK sont NOT NULL : une valeur orpheline n'aurait aucun
-        // sens. Un record arrivé avant sa transaction ou sa clé est donc mis de
-        // côté puis rejoué par `sync_deferred_rows` (v43), au lieu d'échouer
-        // à l'INSERT et d'être perdu — CloudKit ne re-livre pas un record
-        // fetché non appliqué.
+        // — Transaction metadata
+        // Both FKs are NOT NULL: an orphaned value would be meaningless. A
+        // record arriving before its transaction or its key is therefore set
+        // aside and replayed by `sync_deferred_rows`, instead of failing the
+        // INSERT and being lost — CloudKit never redelivers a fetched record
+        // that wasn't applied.
         "transaction_metadata_values": [
             "transaction_id": "transactions",
             "key_id": "transaction_metadata_keys",
         ],
-        // — Budget (L.3)
+        // — Budget
         "recurring_patterns": [
             "category_id": "categories",
             "payee_id": "payees",
@@ -80,14 +78,14 @@ struct SyncPayloadStore: Sendable {
             "recurring_pattern_id": "recurring_patterns",
             "actual_transaction_id": "transactions",
         ],
-        // — Investissements (L.3)
+        // — Investments
         "investment_positions": [
             "account_id": "investment_accounts",
         ],
         "investment_orders": [
             "position_id": "investment_positions",
         ],
-        // — Patrimoine (L.3)
+        // — Net worth
         "patrimoine_loans": [
             "linked_real_estate_id": "patrimoine_real_estate",
         ],
@@ -95,7 +93,7 @@ struct SyncPayloadStore: Sendable {
             "linked_account_id": "accounts",
             "linked_investment_account_id": "investment_accounts",
         ],
-        // — Tricount (L.3)
+        // — Tricount
         "tricount_entries": [
             "group_id": "tricount_groups",
             "user_category_id": "categories",
@@ -104,7 +102,7 @@ struct SyncPayloadStore: Sendable {
         "tricount_shares": [
             "entry_id": "tricount_entries",
         ],
-        // — Remboursement unifié
+        // — Unified reimbursements
         "reimbursements": [
             "transaction_id": "transactions",
             "tricount_entry_id": "tricount_entries",
@@ -114,7 +112,7 @@ struct SyncPayloadStore: Sendable {
 
     private static let nowSQL = "strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 
-    // MARK: - Connexion
+    // MARK: - Connection
 
     private func openDB(readonly: Bool = false) -> OpaquePointer? {
         guard FileManager.default.fileExists(atPath: databaseURL.path) else { return nil }
@@ -124,10 +122,11 @@ struct SyncPayloadStore: Sendable {
             sqlite3_close(db)
             return nil
         }
-        // Le moteur de sync écrit en concurrence avec les lectures UI (repos).
-        // Sans busy_timeout, toute collision de verrou = SQLITE_BUSY immédiat
-        // → données manquantes côté sync ou contention visible côté UI. 3s
-        // d'attente polie couvrent largement la plus longue transaction batch.
+        // The sync engine writes concurrently with UI reads (repositories).
+        // Without busy_timeout, any lock collision is an immediate
+        // SQLITE_BUSY — missing data on the sync side, or visible contention
+        // on the UI side. A polite 3s wait comfortably covers the longest
+        // batch transaction.
         sqlite3_busy_timeout(db, 3000)
         return db
     }
@@ -174,7 +173,7 @@ struct SyncPayloadStore: Sendable {
         sqlite3_step(stmt)
     }
 
-    // MARK: - Queue pending / tombstones
+    // MARK: - Pending queue / tombstones
 
     struct PendingRow: Sendable {
         let table: String
@@ -188,8 +187,8 @@ struct SyncPayloadStore: Sendable {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "SELECT table_name, row_uuid, queued_at FROM sync_pending ORDER BY queued_at LIMIT ?;", -1, &stmt, nil) == SQLITE_OK, let stmt else { return [] }
         defer { sqlite3_finalize(stmt) }
-        // -1 = illimité côté SQLite. Clamp pour éviter tout overflow Int32
-        // (ex: limit = Int.max passé pour "tout pousser").
+        // -1 = unlimited on the SQLite side. Clamped to avoid an Int32
+        // overflow (e.g. limit = Int.max passed to mean "push everything").
         sqlite3_bind_int(stmt, 1, limit >= Int(Int32.max) ? -1 : Int32(limit))
         var out: [PendingRow] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -208,7 +207,7 @@ struct SyncPayloadStore: Sendable {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "SELECT table_name, row_uuid, deleted_at FROM sync_tombstones ORDER BY deleted_at LIMIT ?;", -1, &stmt, nil) == SQLITE_OK, let stmt else { return [] }
         defer { sqlite3_finalize(stmt) }
-        // -1 = illimité côté SQLite. Clamp pour éviter tout overflow Int32.
+        // -1 = unlimited on the SQLite side. Clamped to avoid an Int32 overflow.
         sqlite3_bind_int(stmt, 1, limit >= Int(Int32.max) ? -1 : Int32(limit))
         var out: [PendingRow] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -221,9 +220,9 @@ struct SyncPayloadStore: Sendable {
         return out
     }
 
-    /// Retire une entrée pending SEULEMENT si elle n'a pas été re-queueée
-    /// depuis la construction du batch (l'utilisateur a pu rééditer la row pendant
-    /// l'upload — dans ce cas la nouvelle version doit repartir).
+    /// Removes a pending entry ONLY if it hasn't been re-queued since the
+    /// batch was built (the user may have edited the row again during the
+    /// upload — in that case the new version must go out too).
     func clearPending(table: String, uuid: String, queuedAtNotAfter: String) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
@@ -247,9 +246,9 @@ struct SyncPayloadStore: Sendable {
         sqlite3_step(stmt)
     }
 
-    /// Retire les catégories / modes de paiement « usine » d'une base vierge
-    /// (zéro transaction) avant le scan initial CloudKit. Retourne le nombre
-    /// de rows supprimées. No-op si l'utilisateur a déjà commencé à saisir.
+    /// Removes the factory categories / payment methods of a blank database
+    /// (zero transactions) ahead of the initial CloudKit scan. Returns the
+    /// number of rows removed. No-op if the user has already started entering data.
     func purgeVirginSeedReferenceData() -> Int {
         guard let db = openDB() else { return 0 }
         defer { sqlite3_close(db) }
@@ -272,7 +271,7 @@ struct SyncPayloadStore: Sendable {
 
         let categoryRefChecks = Self.categoryReferenceChecks(db)
 
-        // Sous-catégories d'abord (FK parent_id), puis catégories racines.
+        // Subcategories first (parent_id FK), then root categories.
         for name in SyncSchema.defaultSeedCategoryNames {
             purged += Self.deleteSeedRowIfUnreferenced(
                 db, table: "categories", name: name,
@@ -291,26 +290,26 @@ struct SyncPayloadStore: Sendable {
         return purged
     }
 
-    // MARK: - Réparation des doublons de référence (one-shot au boot)
+    // MARK: - Reference duplicate repair (one-shot at boot)
 
-    /// Fusionne les doublons de categories / payment_types créés par les
-    /// premières activations sync (avant l'adoption déterministe) : chaque
-    /// appareil avait uploadé son seed usine → 2 jeux d'uuids pour les mêmes
-    /// entités, présents partout.
+    /// Merges categories / payment_types duplicates created by early sync
+    /// activations (before deterministic identity adoption existed): each
+    /// device had uploaded its own factory seed, producing 2 uuid sets for
+    /// the same entities, present everywhere.
     ///
-    /// Règle de fusion (identique sur tous les appareils → convergence) :
-    ///   - groupes : payment_types par nom (NOCASE) ; categories par
-    ///     (nom NOCASE, nom du parent NOCASE) — deux "Autre" sous des parents
-    ///     différents ne sont PAS fusionnés.
-    ///   - keeper = le PLUS PETIT uuid du groupe (même règle que l'adoption).
-    ///   - toutes les FK des doublons sont remappées vers le keeper AVANT le
-    ///     DELETE (aucune perte de rattachement).
-    ///   - exécuté avec les triggers ACTIFS : le DELETE crée la tombstone qui
-    ///     propage la suppression au coffre et aux autres appareils, les rows
-    ///     remappées repartent en sync_pending.
+    /// Merge rule (identical on every device → convergence):
+    ///   - groups: payment_types by name (NOCASE); categories by
+    ///     (name NOCASE, parent name NOCASE) — two "Other" entries under
+    ///     different parents are NOT merged.
+    ///   - keeper = the SMALLEST uuid in the group (same rule as identity adoption).
+    ///   - all duplicate FKs are remapped to the keeper BEFORE the DELETE
+    ///     (no dangling reference).
+    ///   - runs with triggers ACTIVE: the DELETE creates a tombstone that
+    ///     propagates the removal to the vault and other devices, and the
+    ///     remapped rows go back into sync_pending.
     ///
-    /// Appelé par DatabaseManager.migrateIfNeeded (gate sync_meta
-    /// 'ref_dedup_v1_done'). Retourne le nombre de doublons fusionnés.
+    /// Called by DatabaseManager.migrateIfNeeded (gated by sync_meta
+    /// 'ref_dedup_v1_done'). Returns the number of duplicates merged.
     static func dedupReferenceDuplicates(_ db: OpaquePointer) -> Int {
         var merged = 0
         merged += dedupTable(
@@ -336,7 +335,7 @@ struct SyncPayloadStore: Sendable {
     private static func dedupTable(_ db: OpaquePointer, table: String,
                                    groupIncludesParent: Bool,
                                    referenceRemaps: [(table: String, column: String)]) -> Int {
-        // Charge (id, uuid, clé de groupe).
+        // Load (id, uuid, group key).
         let sql = groupIncludesParent
             ? "SELECT c.id, c.uuid, lower(c.name) || '|' || COALESCE(lower((SELECT p.name FROM \(table) p WHERE p.id = c.parent_id)), '') FROM \(table) c WHERE c.uuid IS NOT NULL;"
             : "SELECT c.id, c.uuid, lower(c.name) FROM \(table) c WHERE c.uuid IS NOT NULL;"
@@ -362,10 +361,10 @@ struct SyncPayloadStore: Sendable {
                 }
                 _ = execBind(db, "DELETE FROM sync_record_meta WHERE table_name = ? AND row_uuid = ?;",
                              values: [table, dupe.uuid])
-                // DELETE sous triggers actifs → tombstone automatique.
+                // DELETE with triggers active → automatic tombstone.
                 _ = execBind(db, "DELETE FROM \(table) WHERE id = ?;", values: [dupe.id])
                 merged += 1
-                print("[SyncPayloadStore] Dédup \(table) : \(dupe.uuid) fusionné dans \(keeper.uuid)")
+                print("[SyncPayloadStore] Dedup \(table): \(dupe.uuid) merged into \(keeper.uuid)")
             }
         }
         return merged
@@ -389,8 +388,8 @@ struct SyncPayloadStore: Sendable {
         return checks
     }
 
-    /// Scan initial à l'activation de la sync : met TOUTES les rows des tables
-    /// synchronisées dans la queue d'upload.
+    /// Initial scan when sync is activated: puts ALL rows of every synced
+    /// table into the upload queue.
     func enqueueAllRows() {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
@@ -412,8 +411,8 @@ struct SyncPayloadStore: Sendable {
         return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
     }
 
-    /// Désactivation : purge tout l'état sync local (queue, tombstones, state
-    /// moteur, system fields). Ne touche PAS aux données métier ni aux uuid.
+    /// Deactivation: purges all local sync state (queue, tombstones, engine
+    /// state, system fields). Does NOT touch business data or uuids.
     func clearAllSyncState() {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
@@ -429,7 +428,7 @@ struct SyncPayloadStore: Sendable {
         }
     }
 
-    // MARK: - System fields CKRecord
+    // MARK: - CKRecord system fields
 
     func recordSystemFields(table: String, uuid: String) -> Data? {
         guard let db = openDB(readonly: true) else { return nil }
@@ -468,10 +467,10 @@ struct SyncPayloadStore: Sendable {
         sqlite3_step(stmt)
     }
 
-    // MARK: - Sérialisation : row locale → payload JSON
+    // MARK: - Serialization: local row → JSON payload
 
-    /// Payload JSON de la row, ou nil si la row n'existe plus (supprimée
-    /// entre le queue et l'upload).
+    /// The row's JSON payload, or nil if the row no longer exists (deleted
+    /// between queueing and upload).
     func payloadJSON(table: String, uuid: String) -> Data? {
         guard let db = openDB(readonly: true) else { return nil }
         defer { sqlite3_close(db) }
@@ -500,11 +499,11 @@ struct SyncPayloadStore: Sendable {
                 if type != SQLITE_NULL { updatedAt = String(cString: sqlite3_column_text(stmt, i)) }
                 continue
             }
-            if type == SQLITE_NULL { continue }   // NULL = absent du payload
+            if type == SQLITE_NULL { continue }   // NULL = absent from the payload
 
             if let targetTable = fkMap[name] {
-                // FK → uuid de la row cible. Cible sans uuid (impossible en
-                // pratique après v40) ou disparue → FK omise (NULL en face).
+                // FK → target row's uuid. Target with no uuid (not possible
+                // in practice past v40) or gone → FK omitted (NULL on the other end).
                 let targetId = sqlite3_column_int64(stmt, i)
                 if let targetUuid = Self.uuidForId(db, table: targetTable, id: targetId) {
                     refs[name] = targetUuid
@@ -517,8 +516,8 @@ struct SyncPayloadStore: Sendable {
             case SQLITE_FLOAT: values[name] = sqlite3_column_double(stmt, i)
             case SQLITE_TEXT: values[name] = String(cString: sqlite3_column_text(stmt, i))
             case SQLITE_BLOB:
-                // Aucune colonne BLOB dans les tables synchronisées — encodage
-                // base64 par sécurité si ça arrive un jour.
+                // No BLOB column exists in the synced tables — base64
+                // encoding as a safeguard in case one ever does.
                 if let blob = sqlite3_column_blob(stmt, i) {
                     values[name] = Data(bytes: blob, count: Int(sqlite3_column_bytes(stmt, i))).base64EncodedString()
                 }
@@ -529,8 +528,8 @@ struct SyncPayloadStore: Sendable {
         var payload: [String: Any] = ["u": uuid, "t": updatedAt, "v": values]
         if !refs.isEmpty { payload["r"] = refs }
 
-        // Liens tags embarqués dans le payload de la row propriétaire
-        // (transactions et tricount_entries).
+        // Tag links embedded in the owning row's payload (transactions and
+        // tricount_entries).
         if let link = SyncSchema.tagLinks.first(where: { $0.ownerTable == table }) {
             let tagUuids = Self.tagUuids(db, link: link, ownerId: localId)
             if !tagUuids.isEmpty { payload["g"] = tagUuids }
@@ -539,41 +538,41 @@ struct SyncPayloadStore: Sendable {
         return try? JSONSerialization.data(withJSONObject: payload)
     }
 
-    // MARK: - Application : payload distant → row locale
+    // MARK: - Apply: remote payload → local row
 
     enum ApplyResult: Sendable {
         case applied
-        case skippedLocalNewer   // LWW : la version locale gagne, elle est déjà en pending
+        case skippedLocalNewer   // LWW: the local version wins, already in pending
         case failed
     }
 
-    /// Tables portant une contrainte UNIQUE métier (hors uuid). Quand deux
-    /// appareils créent indépendamment "la même" entité (tag 'vacances' des
-    /// deux côtés, même trade Binance importé 2×), les uuids diffèrent et
-    /// l'INSERT du record distant viole la contrainte. Résolution : ADOPTION —
-    /// la row locale prend l'uuid distant (identités fusionnées, les FK int
-    /// locales ne bougent pas), et l'ancien uuid part en tombstone pour
-    /// nettoyer l'éventuel doublon déjà uploadé côté serveur.
+    /// Tables carrying a business UNIQUE constraint (other than uuid). When
+    /// two devices independently create "the same" entity (a 'vacation' tag
+    /// on both, the same Binance trade imported twice), the uuids differ and
+    /// the remote record's INSERT violates the constraint. Resolution:
+    /// ADOPTION — the local row takes on the remote uuid (identities merge,
+    /// local int FKs don't move), and the old uuid is tombstoned to clean up
+    /// any duplicate already uploaded to the server.
     static let uniqueAdoptionKeys: [String: String] = [
         "tags": "name",                      // UNIQUE COLLATE NOCASE
-        "investment_orders": "external_id",  // UNIQUE partiel (L.3)
-        // ⚠️ Deux appareils qui créent « Projet » chacun de leur côté
-        // produisent deux uuids pour la MÊME clé, et l'index UNIQUE sur `name`
-        // fait échouer l'apply. L'adoption d'identité (min(uuid) gagne) les
-        // fusionne au lieu de laisser un record en échec permanent.
-        "transaction_metadata_keys": "name",  // UNIQUE COLLATE NOCASE (v46)
+        "investment_orders": "external_id",  // partial UNIQUE
+        // Two devices each creating "Project" independently produce two
+        // uuids for the SAME key, and the UNIQUE index on `name` makes the
+        // apply fail. Identity adoption (min(uuid) wins) merges them instead
+        // of leaving a permanently failing record.
+        "transaction_metadata_keys": "name",  // UNIQUE COLLATE NOCASE
     ]
 
-    /// Tables de référence où une collision par `name` (COLLATE NOCASE)
-    /// signifie « la même entité » — fusion d'identités avant INSERT.
-    /// Couvre le seed local vs données distantes (catégories, moyens de paiement).
+    /// Reference tables where a collision on `name` (COLLATE NOCASE) means
+    /// "the same entity" — identities are merged before INSERT. Covers the
+    /// local seed vs. remote data (categories, payment methods).
     private static let nameAdoptionTables: Set<String> = [
         "categories",
         "payment_types",
     ]
 
-    /// Applique un record distant. LE FLAG suppress_triggers DOIT ÊTRE POSÉ
-    /// par l'appelant (batch-level, cf. CloudSyncEngine.applyBatch).
+    /// Applies a remote record. The suppress_triggers flag MUST be set by
+    /// the caller (batch-level, see CloudSyncEngine.applyBatch).
     func applyRemoteRecord(table: String, payloadData: Data) -> ApplyResult {
         guard Self.tableOrder.contains(table) else { return .failed }
         guard let obj = try? JSONSerialization.jsonObject(with: payloadData),
@@ -590,8 +589,8 @@ struct SyncPayloadStore: Sendable {
         guard let uuid = payload["u"] as? String,
               let remoteUpdatedAt = payload["t"] as? String else { return .failed }
 
-        // LWW : si la row locale est plus récente ou égale, on garde la locale
-        // (elle est en sync_pending et repartira vers le serveur).
+        // LWW: if the local row is newer or equal, keep the local one (it's
+        // in sync_pending and will go back out to the server).
         var localId: Int64?
         if let (id, localUpdatedAt) = localRow(db, table: table, uuid: uuid) {
             if localUpdatedAt >= remoteUpdatedAt { return .skippedLocalNewer }
@@ -603,14 +602,14 @@ struct SyncPayloadStore: Sendable {
         let refs = (payload["r"] as? [String: String]) ?? [:]
         let fkMap = foreignKeys[table] ?? [:]
 
-        // Assemble colonnes → valeurs à écrire (intersection avec le schéma
-        // local : les colonnes d'une version plus récente de l'app sont
-        // ignorées, les colonnes locales absentes du payload → NULL).
+        // Assemble columns → values to write (intersected with the local
+        // schema: columns from a newer app version are ignored, local
+        // columns absent from the payload become NULL).
         var assignments: [(column: String, value: Any?)] = []
-        // Vrai si au moins une FK du payload pointe une cible pas encore
-        // arrivée. Si l'écriture échoue ensuite sur une contrainte (colonne
-        // FK NOT NULL, ex : investment_orders.position_id), le payload est
-        // DIFFÉRÉ au lieu d'être perdu (cf. sync_deferred_rows).
+        // True if at least one FK in the payload points at a target that
+        // hasn't arrived yet. If the write then fails on a constraint (a
+        // NOT NULL FK column, e.g. investment_orders.position_id), the
+        // payload is DEFERRED instead of lost (see sync_deferred_rows).
         var hadMissingRef = false
         for column in columns where column != "id" && column != "uuid" && column != "updated_at" {
             if let targetTable = fkMap[column] {
@@ -618,7 +617,7 @@ struct SyncPayloadStore: Sendable {
                     if let targetId = idForUuid(db, table: targetTable, uuid: targetUuid) {
                         assignments.append((column, targetId))
                     } else {
-                        // Cible pas encore arrivée → NULL + ref en attente.
+                        // Target hasn't arrived yet → NULL + a pending ref.
                         assignments.append((column, nil))
                         hadMissingRef = true
                         storeUnresolvedRef(db, table: table, uuid: uuid, column: column,
@@ -637,24 +636,24 @@ struct SyncPayloadStore: Sendable {
             let setClause = assignments.map { "\($0.column) = ?" }.joined(separator: ", ")
             if !execBind(db, "UPDATE \(table) SET \(setClause) WHERE id = \(localId);",
                          values: assignments.map(\.value)) {
-                // Échec probable : NULL sur une FK NOT NULL dont la cible
-                // n'est pas arrivée → on garde le payload pour le rejouer.
+                // Likely cause: NULL on a NOT NULL FK whose target hasn't
+                // arrived — keep the payload to replay it later.
                 if hadMissingRef { storeDeferredRow(db, table: table, uuid: uuid, payload: payload) }
                 return .failed
             }
         } else {
-            // Fusion PROACTIVE par nom (categories, payment_types — tables de
-            // référence SANS contrainte UNIQUE) : une row locale homonyme =
-            // même entité. Sans ce check, le seed usine de deux appareils
-            // coexisterait en DOUBLONS silencieux.
+            // PROACTIVE merge by name (categories, payment_types — reference
+            // tables WITHOUT a UNIQUE constraint): a local row with the same
+            // name is the same entity. Without this check, two devices'
+            // factory seeds would coexist as silent duplicates.
             //
-            // ⚠️ Déterminisme anti ping-pong : le PLUS PETIT uuid gagne, sur
-            // TOUS les appareils (sinon chaque côté adopte l'uuid de l'autre
-            // et tombstone celui que l'autre vient d'adopter → perte de row).
-            //   - remote < local → le local adopte l'uuid distant, ré-apply.
-            //   - local <= remote → on n'insère PAS le doublon distant ; il
-            //     sera tombstoné par l'appareil d'en face quand il recevra
-            //     NOTRE record et adoptera notre uuid.
+            // Deterministic to avoid ping-pong: the SMALLEST uuid wins, on
+            // EVERY device (otherwise each side adopts the other's uuid and
+            // tombstones the one the other side just adopted → row loss).
+            //   - remote < local → the local row adopts the remote uuid, re-applied.
+            //   - local <= remote → the remote duplicate is NOT inserted; it
+            //     will be tombstoned by the other device once it receives
+            //     OUR record and adopts our uuid.
             if allowAdoption, nameAdoptionTables.contains(table),
                let name = values["name"] as? String,
                let local = findRow(db, table: table, column: "name", value: name, caseInsensitive: true) {
@@ -670,8 +669,8 @@ struct SyncPayloadStore: Sendable {
             let rc = execBindRC(db, "INSERT INTO \(table) (\(cols.joined(separator: ", "))) VALUES (\(placeholders));",
                                 values: [uuid] + assignments.map(\.value))
             if rc != SQLITE_DONE {
-                // Violation d'unicité métier (tags.name, external_id…) →
-                // adoption d'identité, même règle déterministe min(uuid).
+                // Business uniqueness violation (tags.name, external_id…) →
+                // identity adoption, same deterministic min(uuid) rule.
                 let isConstraint = (rc & 0xFF) == SQLITE_CONSTRAINT
                 if isConstraint, allowAdoption,
                    let uniqueColumn = uniqueAdoptionKeys[table],
@@ -679,26 +678,26 @@ struct SyncPayloadStore: Sendable {
                    let local = findRow(db, table: table, column: uniqueColumn, value: uniqueValue, caseInsensitive: false),
                    uuid < local.uuid,
                    adoptIdentity(db, table: table, localId: local.id, oldUuid: local.uuid, remoteUuid: uuid) {
-                    // Ré-application : la row adoptée porte maintenant
-                    // l'uuid distant → chemin UPDATE + LWW standard.
+                    // Re-apply: the adopted row now carries the remote uuid →
+                    // standard UPDATE + LWW path.
                     return apply(db, table: table, payload: payload, allowAdoption: false)
                 }
-                // FK NOT NULL dont la cible n'est pas encore descendue (les
-                // batchs CloudKit n'ont pas d'ordre garanti) : le payload est
-                // mis de côté et rejoué quand la cible arrive — sinon le
-                // record serait PERDU définitivement (pas de re-livraison).
+                // A NOT NULL FK whose target hasn't arrived yet (CloudKit
+                // batches carry no guaranteed order): the payload is set
+                // aside and replayed once the target arrives — otherwise the
+                // record would be PERMANENTLY lost (no redelivery).
                 if isConstraint, hadMissingRef {
                     storeDeferredRow(db, table: table, uuid: uuid, payload: payload)
                     return .failed
                 }
-                // Local uuid <= distant : record distant ignoré — il sera
-                // tombstoné par l'appareil qui le porte (pas de retry : un
-                // record fetché non appliqué ne revient que s'il re-change).
+                // Local uuid <= remote: the remote record is ignored — it
+                // will be tombstoned by the device that owns it (no retry: a
+                // fetched but unapplied record only comes back if it changes again).
                 return .failed
             }
         }
 
-        // Liens tags de la row propriétaire : remplacement intégral.
+        // Owning row's tag links: full replacement.
         if let link = SyncSchema.tagLinks.first(where: { $0.ownerTable == table }),
            let ownerId = idForUuid(db, table: table, uuid: uuid) {
             let tagUuids = (payload["g"] as? [String]) ?? []
@@ -708,7 +707,7 @@ struct SyncPayloadStore: Sendable {
         return .applied
     }
 
-    /// Row (id, uuid) portant `value` dans `column`, ou nil.
+    /// Row (id, uuid) carrying `value` in `column`, or nil.
     private static func findRow(_ db: OpaquePointer, table: String, column: String,
                                 value: Any, caseInsensitive: Bool) -> (id: Int64, uuid: String)? {
         var stmt: OpaquePointer?
@@ -725,26 +724,26 @@ struct SyncPayloadStore: Sendable {
         return (sqlite3_column_int64(stmt, 0), String(cString: uuidC))
     }
 
-    /// Fusion d'identités : la row locale adopte l'uuid distant. Les PK/FK
-    /// int locales ne changent pas ; l'ancien uuid est tombstoné pour
-    /// supprimer le doublon éventuel côté serveur. L'appelant a DÉJÀ vérifié
-    /// la règle déterministe (remoteUuid < oldUuid).
+    /// Identity merge: the local row adopts the remote uuid. Local int
+    /// PK/FKs don't change; the old uuid is tombstoned to remove any
+    /// duplicate already on the server. The caller has ALREADY checked the
+    /// deterministic rule (remoteUuid < oldUuid).
     private static func adoptIdentity(_ db: OpaquePointer, table: String,
                                       localId: Int64, oldUuid: String,
                                       remoteUuid: String) -> Bool {
         guard oldUuid != remoteUuid else { return false }
         guard execBind(db, "UPDATE \(table) SET uuid = ? WHERE id = \(localId);", values: [remoteUuid]) else { return false }
-        // L'ancien uuid ne doit plus être uploadé…
+        // The old uuid must no longer be uploaded…
         _ = execBind(db, "DELETE FROM sync_pending WHERE table_name = ? AND row_uuid = ?;", values: [table, oldUuid])
         _ = execBind(db, "DELETE FROM sync_record_meta WHERE table_name = ? AND row_uuid = ?;", values: [table, oldUuid])
-        // …et son record serveur (s'il a déjà été poussé) doit disparaître.
+        // …and its server record (if already pushed) must disappear.
         _ = execBind(db, "INSERT OR REPLACE INTO sync_tombstones (table_name, row_uuid, deleted_at) VALUES (?, ?, \(nowSQL));",
                      values: [table, oldUuid])
-        print("[SyncPayloadStore] Adoption \(table) : \(oldUuid) → \(remoteUuid)")
+        print("[SyncPayloadStore] Adoption \(table): \(oldUuid) → \(remoteUuid)")
         return true
     }
 
-    /// True si la row a une modification locale pas encore envoyée.
+    /// True if the row has a local modification not yet sent.
     func hasPendingChange(table: String, uuid: String) -> Bool {
         guard let db = openDB(readonly: true) else { return false }
         defer { sqlite3_close(db) }
@@ -756,15 +755,15 @@ struct SyncPayloadStore: Sendable {
         return sqlite3_step(stmt) == SQLITE_ROW
     }
 
-    /// Suppression distante. Suppose suppress_triggers posé par l'appelant.
+    /// Remote deletion. Assumes suppress_triggers is set by the caller.
     ///
-    /// Règle delete-vs-update (L.2) : si la row locale porte une modification
-    /// PENDING (éditée ici, pas encore envoyée), la suppression distante est
-    /// IGNORÉE — une édition n'est jamais détruite par le delete d'un autre
-    /// appareil. Notre save pending recréera le record côté serveur
-    /// (.unknownItem → resurrection) et l'appareil qui a supprimé récupérera
-    /// la row au prochain fetch. Si la row est "propre" (déjà synchronisée),
-    /// la suppression s'applique : le delete est l'action la plus récente.
+    /// Delete-vs-update rule: if the local row carries a PENDING modification
+    /// (edited here, not sent yet), the remote deletion is IGNORED — an edit
+    /// is never destroyed by another device's delete. Our pending save
+    /// recreates the record server-side (.unknownItem → resurrection) and
+    /// the device that deleted it picks the row back up on its next fetch.
+    /// If the row is "clean" (already synced), the deletion applies: the
+    /// delete is the most recent action.
     func applyRemoteDeletion(table: String, uuid: String) {
         guard Self.tableOrder.contains(table), let db = openDB() else { return }
         defer { sqlite3_close(db) }
@@ -779,13 +778,13 @@ struct SyncPayloadStore: Sendable {
             let pending = sqlite3_step(stmt) == SQLITE_ROW
             sqlite3_finalize(stmt)
             if pending {
-                print("[SyncPayloadStore] Delete distant ignoré (édition locale pending) : \(table)/\(uuid)")
+                print("[SyncPayloadStore] Remote delete ignored (pending local edit): \(table)/\(uuid)")
                 return
             }
         }
 
-        // FK non enforced sur cette connexion (pragma foreign_keys OFF par
-        // défaut) : nettoyage manuel des liens tags avant le DELETE.
+        // FKs aren't enforced on this connection (foreign_keys pragma OFF by
+        // default): tag links are cleaned up manually before the DELETE.
         if let link = SyncSchema.tagLinks.first(where: { $0.ownerTable == table }),
            let ownerId = idForUuid(db, table: table, uuid: uuid) {
             sqlite3_exec(db, "DELETE FROM \(link.linkTable) WHERE \(link.ownerFK) = \(ownerId);", nil, nil, nil)
@@ -797,11 +796,11 @@ struct SyncPayloadStore: Sendable {
         sqlite3_step(delStmt)
 
         _ = execBind(db, "DELETE FROM sync_unresolved_refs WHERE table_name = ? AND row_uuid = ?;", values: [table, uuid])
-        // Une row différée qui reçoit sa tombstone n'a plus lieu d'être rejouée.
+        // A deferred row that receives its tombstone no longer needs replaying.
         _ = execBind(db, "DELETE FROM sync_deferred_rows WHERE table_name = ? AND row_uuid = ?;", values: [table, uuid])
     }
 
-    // MARK: - Application par batch (perf)
+    // MARK: - Batch apply (perf)
 
     struct RemoteModification: Sendable {
         let table: String
@@ -815,18 +814,18 @@ struct SyncPayloadStore: Sendable {
         let uuid: String
     }
 
-    /// Applique un batch CloudKit ENTIER dans UNE connexion + UNE transaction.
+    /// Applies an ENTIRE CloudKit batch in ONE connection + ONE transaction.
     ///
-    /// Raison d'être (fix freezes Mac) : la version par-record ouvrait une
-    /// connexion et une micro-transaction par row — sur la descente initiale
-    /// (~6000 records), des milliers de cycles verrou/déverrou en rafale qui
-    /// affamaient les lectures UI (aucun busy_timeout côté repos). Ici :
-    /// 1 BEGIN IMMEDIATE … COMMIT court par batch (~200 records CloudKit).
+    /// Applying record-by-record instead would open a connection and a
+    /// micro-transaction per row — on the initial download (~6000 records),
+    /// thousands of rapid-fire lock/unlock cycles would starve UI reads (no
+    /// busy_timeout on the repository side). Here: 1 short
+    /// BEGIN IMMEDIATE … COMMIT per batch (~200 CloudKit records).
     ///
-    /// Le flag suppress_triggers est posé/retiré DANS la transaction : les
-    /// triggers (même connexion) le voient immédiatement, et il n'est jamais
-    /// visible des autres connexions — la fenêtre "écriture app concurrente
-    /// non trackée" de l'ancienne version disparaît.
+    /// The suppress_triggers flag is set/cleared INSIDE the transaction: the
+    /// triggers (same connection) see it immediately, and it's never visible
+    /// to other connections — there's no window where a concurrent app write
+    /// goes untracked.
     func applyRemoteBatch(modifications: [RemoteModification], deletions: [RemoteDeletion]) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
@@ -834,10 +833,10 @@ struct SyncPayloadStore: Sendable {
         sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
         _ = Self.execBind(db, "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('suppress_triggers', '1');", values: [])
 
-        // Référencées d'abord (ordre de tableOrder) : un batch contenant à la
-        // fois comptes, positions et ordres s'applique dans le bon sens — la
-        // plupart des FK NOT NULL se résolvent inline, sans passer par la
-        // file des différés (qui couvre le cas inter-batchs).
+        // Referenced tables first (tableOrder): a batch containing accounts,
+        // positions, and orders together applies in the right order — most
+        // NOT NULL FKs resolve inline, without going through the deferred
+        // queue (which covers the cross-batch case).
         let ordered = modifications.sorted {
             (Self.tableOrder.firstIndex(of: $0.table) ?? Int.max)
                 < (Self.tableOrder.firstIndex(of: $1.table) ?? Int.max)
@@ -850,17 +849,17 @@ struct SyncPayloadStore: Sendable {
 
             switch Self.apply(db, table: mod.table, payload: payload, allowAdoption: true) {
             case .applied, .skippedLocalNewer:
-                // Dans les 2 cas on retient les system fields : la prochaine
-                // save locale doit repartir de la version serveur courante.
+                // Either way, keep the system fields: the next local save
+                // must start from the current server version.
                 _ = Self.execBind(db, "INSERT OR REPLACE INTO sync_record_meta (table_name, row_uuid, system_fields) VALUES (?, ?, ?);",
                                   values: [mod.table, mod.uuid, mod.systemFields])
             case .failed:
-                // Si apply() vient de DIFFÉRER le record (FK NOT NULL dont la
-                // cible manque), on attache ses system fields : le rejeu devra
-                // repartir de la version serveur courante lui aussi.
+                // If apply() just DEFERRED the record (a NOT NULL FK missing
+                // its target), attach its system fields too: the replay must
+                // also start from the current server version.
                 _ = Self.execBind(db, "UPDATE sync_deferred_rows SET system_fields = ? WHERE table_name = ? AND row_uuid = ?;",
                                   values: [mod.systemFields, mod.table, mod.uuid])
-                print("[SyncPayloadStore] Application échouée : \(mod.table)/\(mod.uuid)")
+                print("[SyncPayloadStore] Apply failed: \(mod.table)/\(mod.uuid)")
             }
         }
 
@@ -871,20 +870,19 @@ struct SyncPayloadStore: Sendable {
             _ = Self.execBind(db, "DELETE FROM sync_tombstones WHERE table_name = ? AND row_uuid = ?;", values: [del.table, del.uuid])
         }
 
-        // Les FK dont la cible vient d'arriver dans ce batch.
+        // FKs whose target just arrived in this batch.
         Self.resolveUnresolvedRefs(db)
 
-        // Les records DIFFÉRÉS (FK NOT NULL) dont les cibles existent
-        // désormais : ordres qui attendaient leurs positions, positions qui
-        // attendaient leur compte…
+        // DEFERRED records (NOT NULL FK) whose targets now exist: orders
+        // that were waiting on their positions, positions waiting on their account…
         Self.applyDeferredRows(db)
 
         _ = Self.execBind(db, "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('suppress_triggers', '0');", values: [])
         sqlite3_exec(db, "COMMIT;", nil, nil, nil)
     }
 
-    /// Re-tente la résolution des FK en attente (cibles arrivées dans un batch
-    /// ultérieur). Appelé après chaque batch appliqué, suppress posé.
+    /// Retries resolving pending FKs (targets that arrived in a later
+    /// batch). Called after every applied batch, with suppress set.
     func resolveUnresolvedRefs() {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
@@ -909,7 +907,7 @@ struct SyncPayloadStore: Sendable {
         for ref in pending {
             guard let targetId = Self.idForUuid(db, table: ref.targetTable, uuid: ref.targetUuid) else { continue }
             if ref.column.hasPrefix("__tag__") {
-                // Lien tag en attente — la table de lien dépend du propriétaire.
+                // Pending tag link — the link table depends on the owner.
                 if let link = SyncSchema.tagLinks.first(where: { $0.ownerTable == ref.table }),
                    let ownerId = Self.idForUuid(db, table: ref.table, uuid: ref.uuid) {
                     sqlite3_exec(db, "INSERT OR IGNORE INTO \(link.linkTable) (\(link.ownerFK), tag_id) VALUES (\(ownerId), \(targetId));", nil, nil, nil)
@@ -923,11 +921,11 @@ struct SyncPayloadStore: Sendable {
         }
     }
 
-    // MARK: - Records différés (FK NOT NULL en attente de cible)
+    // MARK: - Deferred records (NOT NULL FK awaiting its target)
 
-    /// Met de côté un payload distant refusé parce qu'une FK NOT NULL n'est
-    /// pas encore résoluble. `INSERT OR REPLACE` : re-différer la même row
-    /// écrase l'entrée (le payload le plus récent gagne).
+    /// Sets aside a remote payload that was rejected because a NOT NULL FK
+    /// isn't resolvable yet. `INSERT OR REPLACE`: deferring the same row
+    /// again overwrites the entry (the most recent payload wins).
     private static func storeDeferredRow(_ db: OpaquePointer, table: String,
                                          uuid: String, payload: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
@@ -937,10 +935,10 @@ struct SyncPayloadStore: Sendable {
             """, values: [table, uuid, data])
     }
 
-    /// Rejoue les payloads différés. Boucle jusqu'à stabilité (appliquer une
-    /// row peut en débloquer d'autres : compte → position → ordre), cap de
-    /// sécurité à 5 passes. Une row toujours bloquée est re-différée par
-    /// apply() et retentera au prochain batch.
+    /// Replays deferred payloads. Loops until stable (applying one row can
+    /// unblock others: account → position → order), capped at 5 passes for
+    /// safety. A row still blocked is re-deferred by apply() and retried on
+    /// the next batch.
     static func applyDeferredRows(_ db: OpaquePointer) {
         for _ in 0..<5 {
             var rows: [(table: String, uuid: String, payload: Data, systemFields: Data?)] = []
@@ -962,7 +960,7 @@ struct SyncPayloadStore: Sendable {
             sqlite3_finalize(stmt)
             if rows.isEmpty { return }
 
-            // Référencées d'abord, comme les batchs.
+            // Referenced tables first, same as batches.
             rows.sort {
                 (tableOrder.firstIndex(of: $0.table) ?? Int.max)
                     < (tableOrder.firstIndex(of: $1.table) ?? Int.max)
@@ -975,8 +973,8 @@ struct SyncPayloadStore: Sendable {
                     _ = execBind(db, "DELETE FROM sync_deferred_rows WHERE table_name = ? AND row_uuid = ?;", values: [row.table, row.uuid])
                     continue
                 }
-                // Retirer AVANT le ré-apply : si la cible manque toujours,
-                // apply() ré-écrit l'entrée ; sinon elle est soldée.
+                // Remove BEFORE re-applying: if the target is still missing,
+                // apply() rewrites the entry; otherwise it stays cleared.
                 _ = execBind(db, "DELETE FROM sync_deferred_rows WHERE table_name = ? AND row_uuid = ?;", values: [row.table, row.uuid])
                 switch apply(db, table: row.table, payload: payload, allowAdoption: true) {
                 case .applied, .skippedLocalNewer:
@@ -986,9 +984,9 @@ struct SyncPayloadStore: Sendable {
                                      values: [row.table, row.uuid, sf])
                     }
                 case .failed:
-                    // Re-différée par apply() si FK toujours manquante :
-                    // ré-attacher les system fields (storeDeferredRow ne les
-                    // connaît pas).
+                    // Re-deferred by apply() if the FK is still missing:
+                    // re-attach the system fields (storeDeferredRow doesn't
+                    // know them).
                     if let sf = row.systemFields {
                         _ = execBind(db, "UPDATE sync_deferred_rows SET system_fields = ? WHERE table_name = ? AND row_uuid = ?;",
                                      values: [sf, row.table, row.uuid])
@@ -999,14 +997,14 @@ struct SyncPayloadStore: Sendable {
         }
     }
 
-    /// Variante hors batch (tests, réparations) : ouvre sa propre connexion.
+    /// Off-batch variant (tests, repairs): opens its own connection.
     func retryDeferredRows() {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
         Self.applyDeferredRows(db)
     }
 
-    // MARK: - Helpers privés
+    // MARK: - Private helpers
 
     private static func scalarInt(_ db: OpaquePointer, _ sql: String) -> Int {
         var stmt: OpaquePointer?
@@ -1016,7 +1014,7 @@ struct SyncPayloadStore: Sendable {
         return Int(sqlite3_column_int(stmt, 0))
     }
 
-    /// Supprime une row seed par nom si elle n'est référencée nulle part.
+    /// Removes a seed row by name if it isn't referenced anywhere.
     @discardableResult
     private static func deleteSeedRowIfUnreferenced(
         _ db: OpaquePointer,
@@ -1119,7 +1117,7 @@ struct SyncPayloadStore: Sendable {
             if let tagId = idForUuid(db, table: "tags", uuid: tagUuid) {
                 sqlite3_exec(db, "INSERT OR IGNORE INTO \(link.linkTable) (\(link.ownerFK), tag_id) VALUES (\(ownerId), \(tagId));", nil, nil, nil)
             } else {
-                // Tag pas encore arrivé → lien en attente (résolu post-batch).
+                // Tag hasn't arrived yet → pending link (resolved post-batch).
                 storeUnresolvedRef(db, table: link.ownerTable, uuid: ownerUuid,
                                    column: "__tag__\(tagUuid)", targetTable: "tags", targetUuid: tagUuid)
             }
@@ -1132,21 +1130,21 @@ struct SyncPayloadStore: Sendable {
                      values: [table, uuid, column, targetTable, targetUuid])
     }
 
-    /// Exécute un statement avec binds hétérogènes (String / Int64 / Double / nil).
+    /// Executes a statement with heterogeneous binds (String / Int64 / Double / nil).
     private static func execBind(_ db: OpaquePointer, _ sql: String, values: [Any?]) -> Bool {
         let rc = execBindRC(db, sql, values: values)
         return rc == SQLITE_DONE || rc == SQLITE_ROW
     }
 
-    /// Variante qui expose le code résultat SQLite brut — nécessaire pour
-    /// discriminer une violation de contrainte (adoption d'identité) d'une
-    /// vraie erreur. `(rc & 0xFF) == SQLITE_CONSTRAINT` couvre les codes
-    /// étendus (SQLITE_CONSTRAINT_UNIQUE = 2067, etc.).
+    /// Variant that exposes the raw SQLite result code — needed to
+    /// discriminate a constraint violation (identity adoption) from a real
+    /// error. `(rc & 0xFF) == SQLITE_CONSTRAINT` covers the extended codes
+    /// (SQLITE_CONSTRAINT_UNIQUE = 2067, etc.).
     private static func execBindRC(_ db: OpaquePointer, _ sql: String, values: [Any?]) -> Int32 {
         var stmt: OpaquePointer?
         let prep = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)
         guard prep == SQLITE_OK, let stmt else {
-            print("[SyncPayloadStore] prepare KO : \(String(cString: sqlite3_errmsg(db)))")
+            print("[SyncPayloadStore] prepare failed: \(String(cString: sqlite3_errmsg(db)))")
             return prep == SQLITE_OK ? SQLITE_ERROR : prep
         }
         defer { sqlite3_finalize(stmt) }
@@ -1158,13 +1156,12 @@ struct SyncPayloadStore: Sendable {
             case let v as Int: sqlite3_bind_int64(stmt, idx, Int64(v))
             case let v as Double: sqlite3_bind_double(stmt, idx, v)
             case let v as NSNumber:
-                // JSONSerialization produit des NSNumber : discrimine int/double.
+                // JSONSerialization produces NSNumber: discriminate int/double.
                 if CFNumberIsFloatType(v) { sqlite3_bind_double(stmt, idx, v.doubleValue) }
                 else { sqlite3_bind_int64(stmt, idx, v.int64Value) }
             case let v as Data:
-                // BLOB (payloads différés, system fields CKRecord). Sans ce
-                // case, Data tombait dans `default:` → bindé NULL en silence
-                // (les system_fields du chemin batch n'étaient JAMAIS stockés).
+                // BLOB (deferred payloads, CKRecord system fields). Without
+                // this case, Data falls into `default:` and binds NULL silently.
                 if v.isEmpty {
                     sqlite3_bind_zeroblob(stmt, idx, 0)
                 } else {
@@ -1178,7 +1175,7 @@ struct SyncPayloadStore: Sendable {
         }
         let rc = sqlite3_step(stmt)
         if rc != SQLITE_DONE && rc != SQLITE_ROW && (rc & 0xFF) != SQLITE_CONSTRAINT {
-            print("[SyncPayloadStore] step KO : \(String(cString: sqlite3_errmsg(db)))")
+            print("[SyncPayloadStore] step failed: \(String(cString: sqlite3_errmsg(db)))")
         }
         return rc
     }

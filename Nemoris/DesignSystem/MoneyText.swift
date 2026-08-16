@@ -2,26 +2,22 @@ import SwiftUI
 
 // MARK: - MoneyText
 //
-// Composant centralisé pour afficher un montant monétaire qui **respecte le
-// toggle de masquage global** (`AppState.amountsHidden`). Quand masqué, affiche
-// une chaîne placeholder ("•• ••• €") au lieu de la valeur réelle.
+// Centralized component for displaying a monetary amount that **honors the
+// global masking toggle** (`AppState.amountsHidden`). When masked, it shows a
+// placeholder string ("•• ••• €") instead of the real value.
 //
-// **Pourquoi un composant dédié et pas un `String.maskedAmount`** ?
-//   - On veut que SwiftUI redessine **automatiquement** quand `amountsHidden`
-//     change. Via Environment(AppState), le composant observe le flag.
-//   - L'animation de transition entre les 2 états est fluide grâce à `.id()`
-//     qui force une re-création quand l'état change.
+// **Why a dedicated component instead of a `String.maskedAmount`?**
+//   - SwiftUI needs to redraw **automatically** when `amountsHidden` changes.
+//     Via Environment(AppState), the component observes the flag.
+//   - The transition animation between the 2 states is smooth thanks to
+//     `.id()`, which forces a re-creation when the state changes.
 //
-// **Usage** :
+// **Usage**:
 //   ```swift
 //   MoneyText(123.45)
 //   MoneyText(123.45, font: AppTheme.Typography.moneyLarge, color: .green)
 //   MoneyText(123.45, currency: "USD")
 //   ```
-//
-// **Migration** : on remplace les `Text(amount, format: .currency(code: "EUR")...)`
-// existants progressivement. Pas tout d'un coup — seules les zones où la
-// confidentialité importe vraiment (heros, bandeaux, rows transactions).
 
 struct MoneyText: View {
     @Environment(AppState.self) private var appState
@@ -30,29 +26,29 @@ struct MoneyText: View {
     var currency: String = "EUR"
     var font: Font = AppTheme.Typography.moneySmall
     var color: Color = AppTheme.Colors.textPrimary
-    /// Variation cosmétique : valeur masquée affichée avec un nombre de bullets
-    /// proportionnel à la taille d'origine. Permet de garder une largeur cohérente
-    /// pour ne pas faire sauter le layout (un montant masqué ressemble à un montant
-    /// "moyen" de l'app — pas un short ni un trop long).
+    /// Cosmetic detail: the masked value is displayed with a number of bullets
+    /// proportional to the original size, keeping a consistent width so the
+    /// layout doesn't jump (a masked amount reads as a "typical" amount for
+    /// the app — neither too short nor too long).
     var maskedPlaceholder: String = "•• ••• €"
 
-    /// Style de présentation `.narrow` par défaut (cohérent avec le reste de l'app
-    /// qui utilise `.currency(code:).presentation(.narrow)`).
+    /// Defaults to `.narrow` presentation (consistent with the rest of the app,
+    /// which uses `.currency(code:).presentation(.narrow)`).
     var presentation: Decimal.FormatStyle.Currency.Configuration.Presentation = .narrow
 
     var body: some View {
         Group {
             if appState.amountsHidden {
                 Text(maskedPlaceholder)
-                    .monospacedDigit()  // évite le sautillement entre les chiffres et les bullets
+                    .monospacedDigit()  // avoids jitter between digits and bullets
             } else {
                 Text(amount, format: .currency(code: currency).presentation(presentation))
             }
         }
         .font(font)
         .foregroundStyle(color)
-        // Transition douce quand on toggle. `.opacity` plutôt qu'un slide
-        // pour ne pas perturber la lecture des autres infos autour.
+        // Smooth transition on toggle. `.opacity` rather than a slide, so it
+        // doesn't disturb the reading of the surrounding information.
         .contentTransition(.opacity)
         .animation(.easeInOut(duration: 0.2), value: appState.amountsHidden)
     }

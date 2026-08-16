@@ -1,15 +1,10 @@
 import SwiftUI
 
-/// Action de ligne déclarée UNE seule fois, rendue selon la plateforme :
-/// - **iOS** : `.swipeActions` (geste natif Mail/Messages, teinte conservée).
-/// - **macOS** : `.contextMenu` (clic droit) — le swipe n'existe pas à la souris.
+/// Row action declared ONCE, rendered per platform:
+/// - **iOS**: `.swipeActions` (native Mail/Messages gesture, tint preserved).
+/// - **macOS**: `.contextMenu` (right click) — swipe has no mouse equivalent.
 ///
-/// Remplace l'ancien composant `SwipeableRow` (supprimé) : celui-ci ne couvrait
-/// que nos `VStack`-in-`AppCard` et n'était plus instancié nulle part, alors que
-/// ~42 lignes de `List` utilisaient `.swipeActions` SANS aucune alternative
-/// souris sur Mac (édition/suppression inatteignables au clic).
-///
-/// Usage :
+/// Usage:
 /// ```
 /// .rowActions(
 ///     leading:  [RowAction("Modifier", systemImage: "pencil", tint: .accent) { edit() }],
@@ -21,8 +16,8 @@ struct RowAction: Identifiable {
     let title: String
     let systemImage: String
     var role: ButtonRole? = nil
-    /// Teinte du bouton de swipe iOS (ignorée par le menu contextuel macOS,
-    /// dont les items ne sont pas colorables).
+    /// Tint of the iOS swipe button (ignored by the macOS context menu,
+    /// whose items cannot be tinted).
     var tint: Color? = nil
     let action: () -> Void
 
@@ -40,13 +35,13 @@ struct RowAction: Identifiable {
 }
 
 extension View {
-    /// Actions de ligne adaptatives (swipe iOS / menu contextuel macOS).
-    /// À appliquer sur une row de `List`. Sur macOS, `leading` puis `trailing`
-    /// sont fusionnés dans le clic droit (séparés par un `Divider`).
+    /// Adaptive row actions (iOS swipe / macOS context menu).
+    /// Apply to a `List` row. On macOS, `leading` then `trailing` are merged
+    /// into the right-click menu (separated by a `Divider`).
     ///
-    /// `leadingFullSwipe`/`trailingFullSwipe` reprennent le paramètre natif
-    /// `allowsFullSwipe` (défaut `true` comme SwiftUI) — passer `false` pour un
-    /// bord dont l'action ne doit pas se déclencher au swipe complet.
+    /// `leadingFullSwipe`/`trailingFullSwipe` mirror the native
+    /// `allowsFullSwipe` parameter (defaults to `true`, as in SwiftUI) — pass
+    /// `false` for an edge whose action should not trigger on a full swipe.
     func rowActions(leading: [RowAction] = [],
                     trailing: [RowAction] = [],
                     leadingFullSwipe: Bool = true,

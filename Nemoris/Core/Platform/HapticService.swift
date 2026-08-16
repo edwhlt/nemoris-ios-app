@@ -5,28 +5,28 @@ import UIKit
 
 // MARK: - HapticService
 //
-// Service centralisé pour les retours haptiques. Désactivable globalement via
-// `appState.hapticsEnabled` (toggle Settings). Utilise les générateurs UIKit
-// natifs (UIImpactFeedbackGenerator, UINotificationFeedbackGenerator,
-// UISelectionFeedbackGenerator) — pas de dépendance externe.
+// Centralized service for haptic feedback. Globally toggleable via
+// `appState.hapticsEnabled` (Settings toggle). Uses the native UIKit
+// generators (UIImpactFeedbackGenerator, UINotificationFeedbackGenerator,
+// UISelectionFeedbackGenerator) — no external dependency.
 //
-// **Usage typique** :
-//   - `HapticService.shared.tap()`         → action discrète (toggle, tap row)
-//   - `HapticService.shared.selection()`   → changement de sélection (picker)
+// **Typical usage**:
+//   - `HapticService.shared.tap()`         → discreet action (toggle, row tap)
+//   - `HapticService.shared.selection()`   → selection change (picker)
 //   - `HapticService.shared.success()`     → validation (save form, restore)
-//   - `HapticService.shared.warning()`     → confirmation requise (delete)
-//   - `HapticService.shared.error()`       → échec (auth refusée, save raté)
+//   - `HapticService.shared.warning()`     → confirmation required (delete)
+//   - `HapticService.shared.error()`       → failure (auth denied, save failed)
 //
-// **Pourquoi un singleton** : les générateurs UIKit aiment être préparés avant
-// l'usage (`prepare()` réveille le moteur Taptic). Le singleton permet de garder
-// les générateurs en mémoire et de les pré-warmer une fois.
+// **Why a singleton**: UIKit generators benefit from being prepared before
+// use (`prepare()` wakes up the Taptic engine). The singleton keeps the
+// generators alive in memory and pre-warms them once.
 //
-// **Pas de dépendance directe à AppState** dans le service : on lit la prefs
-// UserDefaults au moment du fire, ce qui évite un couplage circulaire.
+// **No direct dependency on AppState** in the service: the preference is
+// read from UserDefaults at fire time, avoiding a circular coupling.
 
 #if os(macOS)
-/// Pas de moteur haptique sur Mac (hors trackpad force touch, non pertinent
-/// ici) : façade no-op, même API — les ~60 call sites compilent tels quels.
+/// No haptic engine on Mac (force-touch trackpad aside, not relevant here):
+/// no-op facade with the same API, so the ~60 call sites compile unchanged.
 @MainActor
 final class HapticService {
     static let shared = HapticService()
@@ -45,8 +45,8 @@ final class HapticService {
 
     static let shared = HapticService()
 
-    // Pré-instanciés pour éviter la latence du 1er fire. UIKit recommande
-    // explicitement `prepare()` ou de garder le générateur vivant.
+    // Pre-instantiated to avoid the latency of the first fire. UIKit
+    // explicitly recommends `prepare()` or keeping the generator alive.
     private let lightImpact  = UIImpactFeedbackGenerator(style: .light)
     private let mediumImpact = UIImpactFeedbackGenerator(style: .medium)
     private let rigidImpact  = UIImpactFeedbackGenerator(style: .rigid)
@@ -54,7 +54,7 @@ final class HapticService {
     private let selectionGen = UISelectionFeedbackGenerator()
 
     private init() {
-        // Pré-warm tous les générateurs au launch pour éviter le délai du 1er fire.
+        // Pre-warms all generators at launch to avoid the delay of the first fire.
         lightImpact.prepare()
         mediumImpact.prepare()
         rigidImpact.prepare()
@@ -62,60 +62,60 @@ final class HapticService {
         selectionGen.prepare()
     }
 
-    /// Lecture du toggle global. Source de vérité = UserDefaults pour éviter
-    /// le couplage AppState (le service est instancié avant l'AppState peut-être).
+    /// Reads the global toggle. Source of truth = UserDefaults, to avoid
+    /// coupling to AppState (the service may be instantiated before AppState).
     private var enabled: Bool {
-        // Default true — c'est l'attente standard d'une app moderne. l'utilisateur
-        // peut désactiver explicitement dans Settings s'il préfère.
+        // Default true — the standard expectation for a modern app. The
+        // user can explicitly disable it in Settings if preferred.
         UserDefaults.standard.object(forKey: "hapticsEnabled") as? Bool ?? true
     }
 
-    /// Tap léger (action discrète). Toggle, like, tap de row.
+    /// Light tap (discreet action). Toggle, like, row tap.
     func tap() {
         guard enabled else { return }
         lightImpact.impactOccurred()
         lightImpact.prepare()
     }
 
-    /// Sélection (changement dans un picker, toggle qui CHANGE d'état).
+    /// Selection (change in a picker, a toggle that CHANGES state).
     func selection() {
         guard enabled else { return }
         selectionGen.selectionChanged()
         selectionGen.prepare()
     }
 
-    /// Validation réussie (sauvegarde, restauration, action confirmée).
+    /// Successful validation (save, restore, confirmed action).
     func success() {
         guard enabled else { return }
         notification.notificationOccurred(.success)
         notification.prepare()
     }
 
-    /// Avertissement (confirmation requise, action destructive imminente).
+    /// Warning (confirmation required, imminent destructive action).
     func warning() {
         guard enabled else { return }
         notification.notificationOccurred(.warning)
         notification.prepare()
     }
 
-    /// Erreur (auth refusée, save échoué, validation bloquée).
+    /// Error (auth denied, save failed, validation blocked).
     func error() {
         guard enabled else { return }
         notification.notificationOccurred(.error)
         notification.prepare()
     }
 
-    /// Impact moyen — pour actions à mi-chemin entre tap et success (swipe
-    /// completion, drag-drop, etc.). Plus présent qu'un tap mais sans la
-    /// connotation "réussi" du success.
+    /// Medium impact — for actions halfway between a tap and a success
+    /// (swipe completion, drag-drop, etc.). More noticeable than a tap but
+    /// without the "succeeded" connotation of success.
     func impact() {
         guard enabled else { return }
         mediumImpact.impactOccurred()
         mediumImpact.prepare()
     }
 
-    /// Impact rigide — sec, mécanique. Pour le mode masquage (eye/eye.slash)
-    /// ou pour matérialiser un "click" physique d'un toggle.
+    /// Rigid impact — sharp, mechanical. For the masking mode (eye/eye.slash)
+    /// or to convey the physical "click" of a toggle.
     func toggle() {
         guard enabled else { return }
         rigidImpact.impactOccurred()

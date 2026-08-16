@@ -1,26 +1,26 @@
 import Foundation
 
-/// Cache disque générique stocké dans `Library/Caches/nemoris/{name}.json`.
+/// Generic disk cache stored at `Library/Caches/nemoris/{name}.json`.
 ///
-/// Pourquoi `Library/Caches/` plutôt qu'un cluster SQLite ?
-///   - iOS peut purger ce dossier automatiquement si manque d'espace (acceptable
-///     car le contenu est toujours re-récupérable via les APIs sources).
-///   - Jamais inclus dans iCloud / dossier sync utilisateur → la base SQLite
-///     représente VRAIMENT les données utilisateur (positions, ordres, transactions),
-///     pas un mélange data + cache HTTP.
-///   - Pas de migration SQL à maintenir.
-///   - Backup système plus léger.
+/// Why `Library/Caches/` rather than a SQLite table?
+///   - iOS can automatically purge this folder under storage pressure
+///     (acceptable, since the content is always re-fetchable from its source APIs).
+///   - Never included in iCloud / the user's sync folder → the SQLite
+///     database TRULY represents user data (positions, orders, transactions),
+///     not a mix of data and HTTP cache.
+///   - No SQL migration to maintain.
+///   - Lighter system backup.
 ///
-/// Implémentation :
-///   - Hydrate-once à la première lecture (lecture disque synchrone, max ~50ms
-///     pour un cache de quelques MB → acceptable hors écran de boot).
-///   - Lectures suivantes : RAM uniquement.
-///   - Écritures : debouncing 200 ms via `Task.detached`. Plusieurs `set()`
-///     consécutifs ne déclenchent qu'une seule écriture disque.
+/// Implementation:
+///   - Hydrate-once on first read (synchronous disk read, up to ~50ms for a
+///     cache of a few MB → acceptable outside the boot screen).
+///   - Subsequent reads: RAM only.
+///   - Writes: 200 ms debounce via `Task.detached`. Several consecutive
+///     `set()` calls trigger only one disk write.
 ///
-/// Concurrence :
-///   - `@MainActor` pour simplicité (toutes les lectures viennent de l'UI).
-///   - Lectures/écritures sur disque dispatched off-main via `Task.detached`.
+/// Concurrency:
+///   - `@MainActor` for simplicity (all reads come from the UI).
+///   - Disk reads/writes are dispatched off-main via `Task.detached`.
 @MainActor
 final class JSONFileCache<Value: Codable & Sendable> {
 
@@ -33,7 +33,7 @@ final class JSONFileCache<Value: Codable & Sendable> {
 
     // MARK: - Init
 
-    /// `name` est le nom du fichier (sans extension). Le fichier final est
+    /// `name` is the file name (without extension). The final file is
     /// `Library/Caches/nemoris/{name}.json`.
     init(name: String) {
         let base = FileManager.default
@@ -46,8 +46,8 @@ final class JSONFileCache<Value: Codable & Sendable> {
 
     // MARK: - Hydration
 
-    /// Lecture disque synchrone au premier appel. Si le fichier n'existe pas
-    /// ou est corrompu, démarre avec un dict vide.
+    /// Synchronous disk read on the first call. If the file doesn't exist or
+    /// is corrupted, starts with an empty dictionary.
     private func hydrateIfNeeded() {
         guard !hydrated else { return }
         hydrated = true
@@ -61,40 +61,40 @@ final class JSONFileCache<Value: Codable & Sendable> {
 
     // MARK: - Public API
 
-    /// Retourne la valeur stockée pour `key`, ou `nil`.
+    /// Returns the stored value for `key`, or `nil`.
     func get(_ key: String) -> Value? {
         hydrateIfNeeded()
         return memory[key]
     }
 
-    /// Stocke `value` pour `key`. Écriture disque debouncée 200 ms.
+    /// Stores `value` for `key`. Disk write is debounced 200 ms.
     func set(_ key: String, value: Value) {
         hydrateIfNeeded()
         memory[key] = value
         scheduleWrite()
     }
 
-    /// Retire la valeur pour `key`.
+    /// Removes the value for `key`.
     func remove(_ key: String) {
         hydrateIfNeeded()
         memory[key] = nil
         scheduleWrite()
     }
 
-    /// Vide le cache (RAM + disque).
+    /// Clears the cache (RAM + disk).
     func clear() {
         memory.removeAll()
         hydrated = true
         scheduleWrite()
     }
 
-    /// Toutes les clés présentes dans le cache.
+    /// All keys present in the cache.
     func allKeys() -> [String] {
         hydrateIfNeeded()
         return Array(memory.keys)
     }
 
-    /// Nombre d'entrées en cache.
+    /// Number of cached entries.
     var count: Int {
         hydrateIfNeeded()
         return memory.count

@@ -1,62 +1,62 @@
 import Foundation
 import SQLite3
 
-/// Sync CloudKit chiffrée (Couche L.0 : instrumentation SQLite).
+/// Encrypted CloudKit sync — SQLite instrumentation layer.
 ///
-/// Ce composant fournit le socle de dirty-tracking nécessaire à la future
-/// synchronisation CKSyncEngine :
+/// This component provides the dirty-tracking foundation required by
+/// CKSyncEngine-based synchronization:
 ///
-///   • `uuid`        : identité stable multi-appareils de chaque row (les INTEGER
-///                     AUTOINCREMENT restent les PK locales et les FK — ils ne
-///                     sortent JAMAIS de l'appareil).
-///   • `updated_at`  : horodatage ISO8601 UTC de la dernière modification,
-///                     utilisé pour la résolution de conflits last-writer-wins.
-///   • `sync_pending`    : file des rows modifiées localement à uploader.
-///   • `sync_tombstones` : suppressions à propager (le DELETE local ne suffit
-///                     pas — il faut dire au serveur "cette row n'existe plus").
-///   • `sync_meta`       : clé/valeur interne (flag suppress_triggers, et plus
-///                     tard le state sérialisé de CKSyncEngine, tokens, etc.).
+///   • `uuid`        : stable cross-device identity for each row (the INTEGER
+///                     AUTOINCREMENT values remain local PKs and FKs — they
+///                     NEVER leave the device).
+///   • `updated_at`  : ISO8601 UTC timestamp of the last modification, used
+///                     for last-writer-wins conflict resolution.
+///   • `sync_pending`    : queue of locally modified rows to upload.
+///   • `sync_tombstones` : deletions to propagate (a local DELETE isn't
+///                     enough — the server must be told "this row no longer exists").
+///   • `sync_meta`       : internal key/value store (suppress_triggers flag,
+///                     and later the serialized CKSyncEngine state, tokens, etc.).
 ///
-/// Le tracking est fait par TRIGGERS SQLite (pas par la couche repository) :
-/// toute écriture est capturée, y compris la console SQL et les batchs d'import.
-/// Les triggers sont (ré)installés à chaque boot par `installTriggers` — ils ne
-/// font PAS partie des migrations et peuvent donc évoluer librement.
+/// Tracking is done via SQLite TRIGGERS (not the repository layer): every
+/// write is captured, including the SQL console and import batches. Triggers
+/// are (re)installed on every boot by `installTriggers` — they are NOT part
+/// of the migrations and can therefore evolve freely.
 ///
-/// ⚠️ Le futur applicateur de changements distants (Couche L.1) devra poser
-/// `sync_meta['suppress_triggers'] = '1'` avant d'écrire les rows venues du
-/// serveur, puis le remettre à '0' — sinon chaque sync descendante remarquerait
-/// les rows comme dirty et créerait une boucle d'écho upload/download.
+/// ⚠️ The remote-change applier must set `sync_meta['suppress_triggers'] = '1'`
+/// before writing rows that came from the server, then reset it to '0' —
+/// otherwise every downstream sync would mark those rows as dirty again,
+/// creating an upload/download echo loop.
 ///
-/// ⚠️ Les triggers `trg_sync_*_update` supposent `PRAGMA recursive_triggers`
-/// à OFF (le défaut SQLite, jamais modifié dans l'app) : le UPDATE de
-/// `updated_at` dans le corps du trigger ne doit pas se re-déclencher lui-même.
+/// ⚠️ The `trg_sync_*_update` triggers assume `PRAGMA recursive_triggers` is
+/// OFF (SQLite's default, never changed in the app): the `updated_at` UPDATE
+/// inside the trigger body must not re-trigger itself.
 enum SyncSchema {
 
-    /// Expression SQL de l'horodatage courant (ISO8601 UTC, précision ms).
-    /// Format lexicographiquement comparable : "2026-07-16T14:03:21.417Z".
+    /// SQL expression for the current timestamp (ISO8601 UTC, ms precision).
+    /// Format is lexicographically comparable: "2026-07-16T14:03:21.417Z".
     private static let nowSQL = "strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 
-    /// Garde commune : les triggers sont inertes quand l'applicateur de
-    /// changements distants a posé le flag suppress_triggers.
+    /// Shared guard: triggers are inert while the remote-change applier has
+    /// set the suppress_triggers flag.
     private static let guardSQL =
         "COALESCE((SELECT value FROM sync_meta WHERE key = 'suppress_triggers'), '0') <> '1'"
 
-    /// Tables synchronisées — TOUTES ont `id INTEGER PRIMARY KEY AUTOINCREMENT`.
-    /// Les tables de liens à PK composite (`transaction_tags`,
-    /// `tricount_entry_tags`) sont traitées à part via `tagLinks` : les liens
-    /// sont embarqués dans le payload JSON de la row propriétaire (champ "g"),
-    /// leurs triggers marquent la row propriétaire dirty.
+    /// Synced tables — ALL of them have `id INTEGER PRIMARY KEY AUTOINCREMENT`.
+    /// Composite-PK link tables (`transaction_tags`, `tricount_entry_tags`)
+    /// are handled separately via `tagLinks`: the links are embedded in the
+    /// owning row's JSON payload (field "g"), and their triggers mark the
+    /// owning row dirty.
     ///
-    /// ⚠️ L'ORDRE COMPTE : tables référencées avant tables référençantes —
-    /// c'est l'ordre d'application des batchs distants (minimise les FK non
-    /// résolues). `SyncPayloadStore.tableOrder` pointe sur cette liste.
+    /// ⚠️ ORDER MATTERS: referenced tables before referencing tables — this
+    /// is the order remote batches are applied in (minimizes unresolved
+    /// FKs). `SyncPayloadStore.tableOrder` points at this list.
     ///
-    /// Volontairement JAMAIS synchronisées : `investment_live_sync` +
-    /// credentials Keychain (par design), `currency_rates` (cache re-fetchable),
-    /// `csv_mappings` / `import_sessions` (état de workflow local device),
-    /// caches disque (hors DB depuis v35/v36).
+    /// Deliberately NEVER synced: `investment_live_sync` + Keychain
+    /// credentials (by design), `currency_rates` (re-fetchable cache),
+    /// `csv_mappings` / `import_sessions` (local device workflow state),
+    /// disk caches (out of the DB entirely).
     static let syncedTables: [String] = [
-        // — Cœur ledger (v40)
+        // — Core ledger
         "accounts",
         "payment_types",
         "categories",
@@ -64,35 +64,35 @@ enum SyncSchema {
         "tags",
         "payees",
         "transactions",
-        // — Budget (v42)
+        // — Budget
         "recurring_patterns",
         "budget_envelopes",
         "budget_previsions",
-        // — Investissements (v42)
+        // — Investments
         "investment_accounts",
         "investment_positions",
         "investment_orders",
-        // — Patrimoine (v42)
+        // — Real estate / assets
         "patrimoine_real_estate",
         "patrimoine_loans",
         "patrimoine_assets",
-        // — Objectifs (v42)
+        // — Goals
         "goals",
-        // — Tricount (v42)
+        // — Tricount (shared expenses)
         "tricount_groups",
         "tricount_entries",
         "tricount_shares",
-        // — Remboursement unifié (v44) — remplace tricount_reimbursements
+        // — Unified reimbursements — replaces tricount_reimbursements
         "reimbursements",
-        // — Métadonnées de transaction libres (v46) — remplacent payment_type_id
-        // ⚠️ Les clés AVANT les valeurs : ces dernières les référencent.
+        // — Free-form transaction metadata — replaces payment_type_id
+        // ⚠️ Keys BEFORE values: the latter reference the former.
         "transaction_metadata_keys",
         "transaction_metadata_values",
     ]
 
-    /// Tables ajoutées par la migration v42 (L.3) — NE JAMAIS MODIFIER après
-    /// ship (la migration v42 itère cette liste ; ajouter une table = nouvelle
-    /// liste + nouvelle migration).
+    /// Tables added by migration v42 — NEVER MODIFY after ship (migration
+    /// v42 iterates this exact list; adding a table means a new list + a new
+    /// migration).
     static let secondaryTablesV42: [String] = [
         "recurring_patterns", "budget_envelopes", "budget_previsions",
         "investment_accounts", "investment_positions", "investment_orders",
@@ -101,8 +101,8 @@ enum SyncSchema {
         "tricount_groups", "tricount_entries", "tricount_shares", "tricount_reimbursements",
     ]
 
-    /// Tables de liens tags (PK composite) : pas de records CloudKit propres,
-    /// liens embarqués dans le payload "g" de la row propriétaire.
+    /// Tag link tables (composite PK): no CloudKit records of their own,
+    /// links are embedded in the owning row's "g" payload field.
     struct TagLink {
         let linkTable: String
         let ownerTable: String
@@ -114,14 +114,14 @@ enum SyncSchema {
         TagLink(linkTable: "tricount_entry_tags", ownerTable: "tricount_entries", ownerFK: "entry_id"),
     ]
 
-    // MARK: - Statements de migration
+    // MARK: - Migration statements
 
-    /// Statements d'ajout des colonnes sync pour une table.
+    /// Statements that add the sync columns for a table.
     ///
-    /// ⚠️ La migration v40 dépend de la sortie de cette fonction pour les
-    /// 7 tables cœur : ne JAMAIS en modifier la sortie pour un input donné
-    /// (convention "ne jamais modifier une migration existante"). Pour un
-    /// changement de stratégie, écrire une nouvelle fonction versionnée.
+    /// ⚠️ Migration v40 depends on this function's output for the 7 core
+    /// tables: NEVER change its output for a given input (an existing
+    /// migration must never be modified). For a change in strategy, write a
+    /// new, separately versioned function.
     static func columnStatements(table t: String) -> [String] {
         [
             "ALTER TABLE \(t) ADD COLUMN uuid TEXT;",
@@ -132,9 +132,9 @@ enum SyncSchema {
         ]
     }
 
-    /// Tables d'état CKSyncEngine (créées par la migration v41 — DDL répliqué
-    /// ici en CREATE IF NOT EXISTS idempotent pour le harness de tests
-    /// NemorisApp/Tests/, la migration shippée ne devant plus être modifiée).
+    /// CKSyncEngine state tables (created by migration v41 — DDL replicated
+    /// here as an idempotent CREATE IF NOT EXISTS for the NemorisApp/Tests/
+    /// harness, since the shipped migration must no longer be modified).
     static let engineStateStatements: [String] = [
         """
         CREATE TABLE IF NOT EXISTS sync_record_meta (
@@ -156,7 +156,7 @@ enum SyncSchema {
         """,
     ]
 
-    /// Tables d'infrastructure sync (créées par la migration v40).
+    /// Sync infrastructure tables (created by migration v40).
     static let infrastructureStatements: [String] = [
         """
         CREATE TABLE IF NOT EXISTS sync_meta (
@@ -184,19 +184,18 @@ enum SyncSchema {
 
     // MARK: - Triggers
 
-    /// (Ré)installe tous les triggers de dirty-tracking. Appelé à la fin de
-    /// `DatabaseManager.migrateIfNeeded()` — uniquement si user_version >= 40
-    /// (les colonnes uuid/updated_at doivent exister).
+    /// (Re)installs all dirty-tracking triggers. Called at the end of
+    /// `DatabaseManager.migrateIfNeeded()` — only if user_version >= 40 (the
+    /// uuid/updated_at columns must exist).
     ///
-    /// DROP + CREATE systématique : idempotent, et permet de faire évoluer le
-    /// corps des triggers sans migration.
-    /// v43 — file des payloads distants DIFFÉRÉS : records dont une FK
-    /// NOT NULL n'est pas encore résoluble (cible pas arrivée — les batchs
-    /// CloudKit n'ont aucun ordre garanti). Avant ce fix, l'INSERT violait la
-    /// contrainte et le record était PERDU définitivement (un record fetché
-    /// non appliqué n'est jamais re-livré). Cas réel : 683 investment_orders
-    /// arrivés avant leurs investment_positions à la descente initiale Mac.
-    /// ⚠️ Utilisée par la migration v43 : ne jamais en modifier la sortie.
+    /// Systematic DROP + CREATE: idempotent, and lets the trigger bodies
+    /// evolve without a migration.
+    /// v43 — queue for DEFERRED remote payloads: records whose NOT NULL FK
+    /// isn't resolvable yet (target hasn't arrived — CloudKit batches carry
+    /// no ordering guarantee). Without this, the INSERT would violate the
+    /// constraint and the record would be LOST for good (a fetched record
+    /// that fails to apply is never re-delivered).
+    /// ⚠️ Used by migration v43: never change its output.
     static let deferredRowsDDL: [String] = [
         """
         CREATE TABLE IF NOT EXISTS sync_deferred_rows (
@@ -212,10 +211,10 @@ enum SyncSchema {
 
     static func installTriggers(_ db: OpaquePointer) {
         var statements: [String] = []
-        // Garde d'existence : un device dont la migration v42 a échoué (version
-        // restée à 40/41) ne doit pas générer d'erreurs de triggers sur les
-        // tables pas encore instrumentées ; même garde pour le harness de tests
-        // qui ne crée qu'un sous-ensemble du schéma.
+        // Existence guard: a device whose migration v42 failed (version
+        // stuck at 40/41) must not generate trigger errors on tables that
+        // aren't instrumented yet; the same guard also covers the test
+        // harness, which only creates a subset of the schema.
         for t in syncedTables where tableExists(db, t) {
             statements += triggerStatements(table: t)
         }
@@ -239,25 +238,20 @@ enum SyncSchema {
         return sqlite3_step(stmt) == SQLITE_ROW
     }
 
-    /// Triggers standard pour une table à PK `id`.
+    /// Standard triggers for a table with PK `id`.
     ///
-    /// ⚠️ La mise en file dans `sync_pending` se fait par DELETE puis INSERT, et
-    /// surtout PAS par `INSERT OR REPLACE`.
+    /// ⚠️ Queuing into `sync_pending` is done via DELETE then INSERT, and
+    /// specifically NOT via `INSERT OR REPLACE`.
     ///
-    /// SQLite documente que si l'instruction qui déclenche le trigger porte
-    /// elle-même une clause `ON CONFLICT`, la politique de résolution de cette
-    /// instruction externe REMPLACE celle écrite dans le corps du trigger. Un
-    /// `INSERT OR REPLACE` y perd donc son `OR REPLACE` et échoue sur la
-    /// contrainte d'unicité de `sync_pending`.
+    /// SQLite documents that when the statement that fires the trigger
+    /// itself carries an `ON CONFLICT` clause, that outer statement's
+    /// conflict-resolution policy REPLACES the one written in the trigger
+    /// body. An `INSERT OR REPLACE` inside the trigger therefore loses its
+    /// `OR REPLACE` and fails on `sync_pending`'s uniqueness constraint
+    /// whenever the outer statement is a plain UPSERT.
     ///
-    /// Conséquence observée avant correctif : tout UPSERT sur une table
-    /// synchronisée échouait dès la deuxième écriture sur la même ligne, une
-    /// entrée `sync_pending` existant alors déjà. Concrètement, changer le
-    /// créancier d'un remboursement ne faisait rien — sans message, le booléen
-    /// de retour étant ignoré par les appelants.
-    ///
-    /// DELETE puis INSERT n'implique aucune résolution de conflit, donc rien
-    /// que l'instruction externe puisse écraser.
+    /// DELETE then INSERT implies no conflict resolution of its own, so
+    /// there is nothing for the outer statement to override.
     private static func triggerStatements(table t: String) -> [String] {
         [
             "DROP TRIGGER IF EXISTS trg_sync_\(t)_insert;",
@@ -303,11 +297,11 @@ enum SyncSchema {
         ]
     }
 
-    /// Tables de liens tags : pas de records CloudKit propres — un changement
-    /// de lien bump le `updated_at` de la row propriétaire, ce qui déclenche
-    /// son trigger update (queue + horodatage en un seul endroit).
-    /// Lors d'un DELETE CASCADE (propriétaire supprimé), le UPDATE ne matche
-    /// aucune row → no-op, la tombstone du propriétaire suffit.
+    /// Tag link tables: no CloudKit records of their own — a link change
+    /// bumps the owning row's `updated_at`, which fires its own update
+    /// trigger (queuing + timestamping in a single place).
+    /// On a CASCADE DELETE (owner deleted), the UPDATE matches no row →
+    /// no-op, the owner's tombstone is sufficient on its own.
     private static func tagLinkTriggerStatements(_ link: TagLink) -> [String] {
         [
             "DROP TRIGGER IF EXISTS trg_sync_\(link.linkTable)_insert;",
@@ -330,11 +324,11 @@ enum SyncSchema {
         ]
     }
 
-    // MARK: - Données de référence par défaut (seed DatabaseManager)
+    // MARK: - Default reference data (DatabaseManager seed)
 
-    /// Noms des catégories insérées par `seedNewDatabase()`. Utilisés pour
-    /// purger les doublons avant la première activation CloudKit sur un
-    /// appareil neuf (Mac/iPhone) et pour la fusion par nom à la réception.
+    /// Category names inserted by `seedNewDatabase()`. Used to purge
+    /// duplicates before the first CloudKit activation on a fresh device
+    /// (Mac/iPhone), and for name-based merging on receipt.
     static let defaultSeedCategoryNames: Set<String> = [
         "Alimentation", "Transport", "Logement", "Santé", "Loisirs & Culture",
         "Vêtements & Shopping", "Voyages", "Revenus", "Banque & Finance",
@@ -344,7 +338,7 @@ enum SyncSchema {
         "Remboursements reçus",
     ]
 
-    /// Noms des moyens de paiement insérés par `seedNewDatabase()`.
+    /// Payment method names inserted by `seedNewDatabase()`.
     static let defaultSeedPaymentTypeNames: Set<String> = [
         "Carte bancaire", "Virement", "Prélèvement", "Espèces", "Chèque", "AUTRE",
     ]

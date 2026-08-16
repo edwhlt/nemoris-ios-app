@@ -1,10 +1,11 @@
 import Foundation
 
-/// Pont app ↔ store de sync. Séparé de SyncPayloadStore.swift pour que ce
-/// dernier reste compilable standalone (harness de tests NemorisApp/Tests/
-/// via swiftc, sans tirer DatabaseManager ni le reste du target).
+/// App ↔ sync store bridge. Kept separate from SyncPayloadStore.swift so
+/// that file stays free of any dependency on DatabaseManager or the rest
+/// of the app target, and can be constructed against an arbitrary
+/// database URL in tests.
 extension SyncPayloadStore {
-    /// Store branché sur la base courante de l'app.
+    /// Store bound to the app's current database.
     init() {
         self.init(databaseURL: DatabaseManager.shared.sqliteURL())
     }
