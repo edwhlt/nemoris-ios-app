@@ -1,20 +1,19 @@
 import SwiftUI
 
-/// Gestion des groupes de tiers (`payee_groups`) : ajouter, renommer,
-/// supprimer, fusionner, et consulter les tiers d'un groupe. Distinct de
-/// `PayeeGroupPickerView`, qui ne fait que CHOISIR un groupe pour un tiers
-/// donné (et créer à la volée au passage).
+/// Payee group management (`payee_groups`): add, rename, delete, merge, and
+/// review a group's payees. Distinct from `PayeeGroupPickerView`, which only
+/// PICKS a group for a given payee (creating one on the fly along the way).
 ///
-/// Rows en `List` + `.rowActions` (swipe iOS / clic droit macOS) — même
-/// convention que le reste de l'écran (`accountRow`, `flatCategoryRow`,
-/// `tiersTabContent`) plutôt que des boutons icône toujours visibles dans la
-/// row (retour d'usage : "quelque chose de plus natif").
+/// Rows in a `List` + `.rowActions` (iOS swipe / macOS right-click) — same
+/// convention as the rest of the screen (`accountRow`, `flatCategoryRow`,
+/// `tiersTabContent`) rather than icon buttons permanently visible in the
+/// row.
 struct PayeeGroupManagerView: View {
     @Environment(\.paneDismiss) private var dismiss
     var onChange: () -> Void = {}
-    /// Ferme ce panneau et bascule l'onglet Tiers sur un filtre par groupe —
-    /// "voir la liste des tiers de ce groupe" est la même question que le
-    /// filtre `TiersFilterSheet` sait déjà poser, pas un écran séparé.
+    /// Closes this pane and switches the Payees tab to a group filter —
+    /// "see this group's payees" is the same question `TiersFilterSheet`
+    /// already knows how to ask, not a separate screen.
     var onSelectGroup: (PayeeGroup) -> Void = { _ in }
 
     @State private var groups: [PayeeGroup] = []
@@ -24,7 +23,7 @@ struct PayeeGroupManagerView: View {
     @State private var showCreateForm = false
     @State private var renameTarget: PayeeGroup?
     @State private var deleteTarget: PayeeGroup?
-    /// Groupe source d'une fusion — présente le picker de groupe CIBLE.
+    /// A merge's source group — presents the TARGET group picker.
     @State private var mergeSource: PayeeGroup?
 
     private let repository = TransactionRepository()
@@ -59,8 +58,8 @@ struct PayeeGroupManagerView: View {
             }
         }
         #if os(macOS)
-        // Même politique que les autres listes de cet écran : `.plain` = base
-        // neutre pour les cartes custom dessinées par `macGroupedRow`.
+        // Same policy as the other lists on this screen: `.plain` = neutral
+        // base for the custom cards drawn by `macGroupedRow`.
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .frame(maxWidth: .infinity, minHeight: 520, maxHeight: .infinity)
@@ -134,11 +133,10 @@ struct PayeeGroupManagerView: View {
             onSelectGroup(group)
         } label: {
             HStack(spacing: 10) {
-                // ⚠️ `engineMerchantId` n'est écrit nulle part dans l'app —
-                // `addPayeeGroup` n'est jamais appelé avec un id moteur, ce
-                // champ est toujours `nil` en pratique aujourd'hui (retour
-                // d'usage : "est-ce vraiment utile ?"). Icône constante,
-                // plutôt qu'une branche qui ne se déclenche jamais.
+                // `engineMerchantId` is written nowhere in the app —
+                // `addPayeeGroup` is never called with an engine id, so this
+                // field is always `nil` in practice. A constant icon, rather
+                // than a branch that never fires.
                 Image(systemName: "building.2")
                     .foregroundStyle(AppTheme.Colors.accent)
                     .frame(width: 22)
@@ -152,9 +150,9 @@ struct PayeeGroupManagerView: View {
                     .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
             }
         }
-        // Même correctif que `accountRow` : sans lui, macOS applique son
-        // propre chrome de bouton (teinté accent) par-dessus la carte déjà
-        // colorée par `macGroupedRow`.
+        // Same fix as `accountRow`: without it, macOS paints its own button
+        // chrome (accent-tinted) over the card already colored by
+        // `macGroupedRow`.
         .buttonStyle(.plain)
         .rowActions(
             leading: [RowAction("Renommer", systemImage: "pencil", tint: AppTheme.Colors.accent) { renameTarget = group }],
@@ -175,8 +173,8 @@ struct PayeeGroupManagerView: View {
     }
 }
 
-/// Formulaire à un champ, partagé par la création ET le renommage — même
-/// question ("quel nom pour ce groupe ?"), une seule vue.
+/// Single-field form, shared by creation AND renaming — same question
+/// ("what name for this group?"), one view.
 private struct PayeeGroupFormSheet: View {
     @Environment(\.paneDismiss) private var dismiss
     let title: String
@@ -218,10 +216,10 @@ private struct PayeeGroupFormSheet: View {
     }
 }
 
-/// Sous-écran de fusion : choisit le groupe CIBLE parmi les autres groupes.
-/// Tous les tiers de `source` rejoignent le groupe choisi, puis `source` est
-/// supprimé. Niveau 2 (`.adaptivePane(item:)` depuis `PayeeGroupManagerView`,
-/// elle-même niveau 1) — bascule automatiquement en sheet bornée sur macOS.
+/// Merge sub-screen: picks the TARGET group among the other groups. All of
+/// `source`'s payees join the chosen group, then `source` is deleted. Level 2
+/// (`.adaptivePane(item:)` from `PayeeGroupManagerView`, itself level 1) —
+/// automatically falls back to a bounded sheet on macOS.
 private struct PayeeGroupMergeTargetPicker: View {
     let source: PayeeGroup
     let otherGroups: [PayeeGroup]
@@ -266,9 +264,9 @@ private struct PayeeGroupMergeTargetPicker: View {
             }
         }
         #if os(macOS)
-        // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS celui du
-        // panneau hôte — sans ce modificateur, le bureau de l'utilisateur
-        // transparaît. Même correctif que `PayeeGroupPickerView`.
+        // On macOS, `List` paints ITS OWN system background OVER the host
+        // pane's — without this modifier the user's desktop shows through.
+        // Same fix as `PayeeGroupPickerView`.
         .scrollContentBackground(.hidden)
         .frame(maxWidth: .infinity, minHeight: 520, maxHeight: .infinity)
         #endif

@@ -1,9 +1,10 @@
 import Foundation
 
-/// Fenêtre calendaire sur laquelle le cumul des dépenses Apple Pay en attente
-/// est comparé au seuil configuré. Ancrée sur le calendrier (début de
-/// jour/semaine/mois), pas une fenêtre glissante — ce qui rend "déjà notifié
-/// pour cette période" trivial à mémoriser (une simple date de début à comparer).
+/// Calendar window over which the running total of pending Apple Pay
+/// spending is compared to the configured threshold. Anchored on the
+/// calendar (start of day/week/month), not a sliding window — which makes
+/// "already notified for this period" trivial to remember (a single start
+/// date to compare).
 enum ApplePayAlertPeriod: String, CaseIterable, Codable {
     case day
     case week
@@ -25,73 +26,71 @@ enum ApplePayAlertPeriod: String, CaseIterable, Codable {
         }
     }
 
-    /// Début de la période courante contenant `now`.
+    /// Start of the current period containing `now`.
     ///
-    /// ⚠️ Le paramètre `calendar` par défaut est FIXE (`.applePayWeek`, ISO
-    /// 8601 — lundi premier jour), jamais `Calendar.current` : le premier
-    /// jour de semaine dépend de la région, et `.weekOfYear` était calculé à
-    /// deux endroits différents (ici, et — avant cette correction —
-    /// directement dans `PendingApplePayListView` avec `Calendar.current`
-    /// ambiant). Cette dernière tourne dans le process AU PREMIER PLAN,
-    /// tandis que cette fonction est appelée par `ApplePayAlertService`
-    /// depuis l'exécution EN ARRIÈRE-PLAN de l'automatisation Raccourcis
+    /// The default `calendar` parameter is FIXED (`.applePayWeek`, ISO 8601 —
+    /// Monday first), never `Calendar.current`: the first weekday depends on
+    /// the region, and `.weekOfYear` must not be computed in two places with
+    /// two different calendars. The list view runs in the FOREGROUND
+    /// process, while this function is also called by `ApplePayAlertService`
+    /// from the BACKGROUND execution of the Shortcuts automation
     /// (`ImportTransactionApplePayEntityIntent`, `openAppWhenRun = false`) —
-    /// deux contextes système séparés, sans garantie qu'un `Calendar.current`
-    /// ambiant y résolve identiquement le premier jour de semaine. Fixer le
-    /// calendrier élimine la question plutôt que de compter sur une
-    /// coïncidence. `PendingApplePayListView` appelle maintenant CETTE MÊME
-    /// fonction pour son groupement — plus qu'une seule définition de
-    /// "semaine" dans tout le flux Apple Pay.
+    /// two separate system contexts, with no guarantee that an ambient
+    /// `Calendar.current` resolves the first weekday identically in both.
+    /// Fixing the calendar removes the question rather than relying on a
+    /// coincidence. `PendingApplePayListView` calls THIS SAME function for
+    /// its grouping — a single definition of "week" across the whole Apple
+    /// Pay flow.
     func start(from now: Date, calendar: Calendar = .applePayWeek) -> Date {
         calendar.dateInterval(of: calendarComponent, for: now)?.start ?? now
     }
 }
 
 extension Calendar {
-    /// Calendrier FIXE (ISO 8601 : semaine lundi-dimanche, fuseau de
-    /// l'appareil) utilisé pour tout calcul de "début de semaine/jour/mois"
-    /// lié à Apple Pay. Jamais `Calendar.current` ici : ses réglages
-    /// (premier jour de semaine notamment) dépendent de la région ET
-    /// peuvent différer entre le process de l'app au premier plan et celui,
-    /// séparé, de l'automatisation Raccourcis en arrière-plan.
+    /// FIXED calendar (ISO 8601: Monday-to-Sunday week, device time zone)
+    /// used for every "start of week/day/month" computation tied to Apple
+    /// Pay. Never `Calendar.current` here: its settings (the first weekday
+    /// in particular) depend on the region AND can differ between the app's
+    /// foreground process and the separate background process of the
+    /// Shortcuts automation.
     static let applePayWeek: Calendar = {
         var cal = Calendar(identifier: .iso8601)
         cal.timeZone = .current
-        // Vérifié : `.iso8601` seul résout déjà `firstWeekday = 2` /
-        // `minimumDaysInFirstWeek = 4` sur ce toolchain — mais posés
-        // EXPLICITEMENT quand même, pour ne dépendre d'aucune version d'OS
-        // ni d'un héritage silencieux de la locale du process.
+        // `.iso8601` alone already resolves `firstWeekday = 2` /
+        // `minimumDaysInFirstWeek = 4` on this toolchain — but they are set
+        // EXPLICITLY anyway, so nothing depends on an OS version or on a
+        // silent inheritance from the process locale.
         cal.firstWeekday = 2
         cal.minimumDaysInFirstWeek = 4
         return cal
     }()
 }
 
-/// Réglages de l'alerte "dépenses Apple Pay en attente" — lus/écrits
-/// directement dans `UserDefaults.standard`, PAS via `AppState` : ils doivent
-/// être lisibles depuis `ImportTransactionApplePayEntityIntent.perform()`,
-/// qui s'exécute en arrière-plan (`openAppWhenRun = false`) sans accès à
-/// l'environnement SwiftUI de l'app (même doctrine que `AIFeatureSettings`/
-/// `AppLocalization`). L'écran de config (`ApplePayAlertSettingsView`) lit et
-/// écrit ces mêmes clés depuis son propre `@State` local, sans passer par
-/// `AppState` non plus — rien d'autre dans l'app n'a besoin de réagir en
-/// direct à ce réglage.
+/// Settings for the "pending Apple Pay spending" alert — read from and
+/// written to `UserDefaults.standard` directly, NOT through `AppState`: they
+/// must be readable from `ImportTransactionApplePayEntityIntent.perform()`,
+/// which runs in the background (`openAppWhenRun = false`) with no access to
+/// the app's SwiftUI environment (same doctrine as `AIFeatureSettings` /
+/// `AppLocalization`). The settings screen (`ApplePayAlertSettingsView`)
+/// reads and writes those same keys from its own local `@State`, also
+/// without going through `AppState` — nothing else in the app needs to react
+/// live to this setting.
 enum ApplePayAlertSettings {
     private static let enabledKey = "applePay.alert.enabled"
     private static let thresholdKey = "applePay.alert.threshold"
     private static let periodKey = "applePay.alert.period"
     private static let lastNotifiedPeriodKey = "applePay.alert.lastNotifiedPeriodStart"
 
-    /// Désactivée par défaut : contrairement au reste des notifications de
-    /// l'app, celle-ci porte sur un flux (Apple Pay) que l'utilisateur vient
-    /// d'activer explicitement en configurant son automatisation — pas de
-    /// bruit tant qu'il n'a pas choisi un seuil.
+    /// Disabled by default: unlike the app's other notifications, this one
+    /// concerns a flow (Apple Pay) the user has only just enabled explicitly
+    /// by configuring their automation — no noise until they've chosen a
+    /// threshold.
     static var isEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: enabledKey) }
         set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
     }
 
-    /// Seuil en euros. 100 € par défaut si jamais configuré.
+    /// Threshold in euros. €100 by default when never configured.
     static var threshold: Double {
         get {
             let stored = UserDefaults.standard.double(forKey: thresholdKey)
@@ -105,9 +104,9 @@ enum ApplePayAlertSettings {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: periodKey) }
     }
 
-    /// Début (ISO8601) de la dernière période pour laquelle une notification a
-    /// déjà été envoyée. Évite de renotifier à chaque nouvelle dépense tant
-    /// qu'on reste dans la même période.
+    /// Start (ISO8601) of the last period for which a notification was
+    /// already sent. Avoids re-notifying on every new expense while still
+    /// inside the same period.
     static var lastNotifiedPeriodStart: String? {
         get { UserDefaults.standard.string(forKey: lastNotifiedPeriodKey) }
         set { UserDefaults.standard.set(newValue, forKey: lastNotifiedPeriodKey) }

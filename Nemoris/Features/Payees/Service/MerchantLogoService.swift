@@ -5,20 +5,20 @@ import UIKit
 import CryptoKit
 import NemorisEngine
 
-/// Récupère et cache les favicons de marchands depuis Google.
+/// Fetches and caches merchant favicons from Google.
 ///
-/// Stratégie :
-///   - Le domaine vient en priorité de `payees.domain` (rempli au fil de l'usage).
-///   - Si vide, on tente le seed engine `MerchantDomains.map[engine_merchant_id]`.
-///   - Si toujours rien → renvoie nil → l'UI affiche le fallback SF Symbol.
+/// Strategy:
+///   - The domain comes first from `payees.domain` (filled in over time).
+///   - If empty, the engine seed `MerchantDomains.map[engine_merchant_id]` is tried.
+///   - If still nothing → returns nil → the UI shows the SF Symbol fallback.
 ///
-/// Cache :
-///   - Image décodée en RAM (NSCache, limité par défaut iOS).
-///   - PNG sur disque dans `Library/Caches/Logos/<sha1(domain)>.png`.
-///   - Domaines qui ont rendu 404 sont stockés dans UserDefaults
-///     (`logo.failed.domains`) pour éviter un nouvel appel réseau pendant la session.
+/// Caching:
+///   - Decoded image in RAM (NSCache, bounded by the iOS default).
+///   - PNG on disk under `Library/Caches/Logos/<sha1(domain)>.png`.
+///   - Domains that returned 404 are stored in UserDefaults
+///     (`logo.failed.domains`) to avoid another network call during the session.
 ///
-/// Concurrence : un sémaphore limite à 4 téléchargements simultanés.
+/// Concurrency: a semaphore caps concurrent downloads at 4.
 actor MerchantLogoService {
     static let shared = MerchantLogoService()
 
@@ -52,8 +52,8 @@ actor MerchantLogoService {
 
     // MARK: Public API
 
-    /// Résout le domaine effectif pour un payee.
-    /// Synchrone, sans réseau : juste les colonnes locales + le seed engine.
+    /// Resolves the effective domain for a payee.
+    /// Synchronous, no network: just the local columns plus the engine seed.
     nonisolated static func resolveDomain(payeeDomain: String?, engineMerchantId: String?) -> String? {
         if let d = payeeDomain?.trimmingCharacters(in: .whitespaces), !d.isEmpty { return d }
         if let id = engineMerchantId?.trimmingCharacters(in: .whitespaces), !id.isEmpty {
@@ -62,14 +62,14 @@ actor MerchantLogoService {
         return nil
     }
 
-    /// Renvoie le logo en cache RAM si présent, sans toucher au disque ni au réseau.
-    /// Sert au premier rendu pour éviter un flash placeholder.
+    /// Returns the RAM-cached logo when present, touching neither disk nor
+    /// network. Used on first render to avoid a placeholder flash.
     func cachedLogo(forDomain domain: String) -> UIImage? {
         memoryCache.object(forKey: domain as NSString)
     }
 
-    /// Récupère le logo : RAM → disque → réseau.
-    /// Renvoie nil si tout échoue (404, pas de réseau, etc.).
+    /// Fetches the logo: RAM → disk → network.
+    /// Returns nil if everything fails (404, no network, etc.).
     func logo(forDomain domain: String) async -> UIImage? {
         let key = domain.lowercased()
 
@@ -119,9 +119,9 @@ actor MerchantLogoService {
                 markFailed(domain)
                 return nil
             }
-            // Google renvoie un favicon par défaut générique pour les domaines inexistants
-            // (16x16 quasi-vide). Si l'image est suspectement petite, on la considère
-            // comme un fallback et on marque le domaine comme failed.
+            // Google returns a generic default favicon for non-existent
+            // domains (a near-empty 16x16). If the image is suspiciously
+            // small, treat it as that fallback and mark the domain failed.
             if image.size.width < 24 || image.size.height < 24 {
                 markFailed(domain)
                 return nil

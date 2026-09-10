@@ -2,35 +2,39 @@ import Foundation
 
 // MARK: - CoachPrompt
 //
-// Moteur PUR : construit les consignes envoyées au modèle. Isolé du service
-// pour être relisible et testable sans appareil — c'est le fichier qui
-// détermine la QUALITÉ des recommandations, donc celui qu'on itère le plus.
+// PURE engine: builds the instructions sent to the model. Kept apart from the
+// service so it stays readable and testable without a device — this is the
+// file that determines the QUALITY of the recommendations, so it's the one
+// iterated on most.
 //
-// ─── Ce qui distingue un conseil d'un slogan ───────────────────────────────
+// ─── What separates advice from a slogan ───────────────────────────────────
 //
-// Le reproche fait à la version précédente n'était pas « c'est faux », mais
-// « ce n'est pas pertinent » : 5 détecteurs à seuils fixes produisaient
-// toujours les mêmes 5 phrases. Les consignes ci-dessous visent donc surtout
-// à INTERDIRE le conseil générique — « faites un budget », « surveillez vos
-// dépenses » — que tout modèle produit spontanément et qui n'apporte rien à
-// quelqu'un qui utilise déjà une app de finances.
+// The shortcoming of the previous version wasn't "it's wrong" but "it isn't
+// relevant": 5 fixed-threshold detectors always produced the same 5
+// sentences. The instructions below therefore aim above all to FORBID the
+// generic advice — "make a budget", "watch your spending" — that any model
+// produces spontaneously and that brings nothing to someone already using a
+// finance app.
 //
-// D'où les trois règles dures : chaque recommandation doit (1) citer un
-// chiffre du dossier, (2) être exécutable cette semaine, (3) admettre son
-// incertitude plutôt que d'inventer.
+// Hence the three hard rules: every recommendation must (1) cite a figure
+// from the briefing, (2) be actionable this week, (3) admit its uncertainty
+// rather than invent.
+//
+// The prompt text itself stays in French: the model is asked to address the
+// user in their own language, so it is functional content, not commentary.
 
 enum CoachPrompt {
 
-    /// La consigne pour le champ "profile" — la SEULE partie du prompt qui
-    /// varie avec `budget`. Elle reste courte en `.compact` (Apple
-    /// Intelligence, fenêtre fixe non négociable) : le profil est écrit EN
-    /// DERNIER dans le JSON précisément pour qu'il soit ce qui saute en
-    /// premier si la réponse est coupée — un profil plus long y coûterait sa
-    /// propre lisibilité sans rien apporter d'autre. En `.generous` (serveur
-    /// local / cloud), le contexte encaisse largement plus : on demande
-    /// explicitement le détail que l'utilisateur attend d'un consultant —
-    /// type de profil, habitudes, erreurs récurrentes — plutôt que deux
-    /// phrases qui ne servaient qu'à ménager un budget qui, ici, n'existe pas.
+    /// The instruction for the "profile" field — the ONLY part of the prompt
+    /// that varies with `budget`. It stays short under `.compact` (Apple
+    /// Intelligence, fixed non-negotiable window): the profile is written
+    /// LAST in the JSON precisely so it's the first thing to go if the
+    /// response is cut — a longer profile there would cost its own
+    /// readability without bringing anything else. Under `.generous` (local
+    /// server / cloud) the context takes far more: the detail a user expects
+    /// from a consultant is requested explicitly — profile type, habits,
+    /// recurring mistakes — rather than two sentences that only existed to
+    /// spare a budget which, here, doesn't apply.
     private static func profileInstruction(_ budget: CoachContextBudget) -> String {
         switch budget {
         case .compact:
@@ -129,7 +133,7 @@ enum CoachPrompt {
         """
     }
 
-    /// Le message utilisateur : le dossier, tel quel.
+    /// The user message: the briefing, as-is.
     static func user(briefing: String) -> String {
         """
         Voici le dossier.
@@ -138,16 +142,16 @@ enum CoachPrompt {
         """
     }
 
-    // MARK: - Analyse découpée en passes
+    // MARK: - Pass-split analysis
 
-    /// Consignes d'une passe PARTIELLE (fenêtre de contexte étroite).
+    /// Instructions for a PARTIAL pass (narrow context window).
     ///
-    /// Volontairement plus courtes que `system(for:budget:)` : chaque token de
-    /// consigne est pris sur celui qui reste pour écrire la réponse, et c'est
-    /// exactement le budget qui manquait. On garde donc les règles qui font la
-    /// différence entre un conseil et un slogan, et on retire tout le reste —
-    /// dont le champ "profile", demandé une seule fois à la fin plutôt qu'à
-    /// chaque passe.
+    /// Deliberately shorter than `system(for:budget:)`: every instruction
+    /// token is taken from what remains to write the answer, and that is
+    /// exactly the budget that was missing. So the rules that make the
+    /// difference between advice and a slogan are kept, and everything else
+    /// is dropped — including the "profile" field, requested once at the end
+    /// rather than on every pass.
     static func partialSystem(for domain: CoachDomain, pass: CoachAnalysisPass) -> String {
         let role = domain == .transactions
             ? "un conseiller budgétaire expérimenté"
@@ -186,11 +190,11 @@ enum CoachPrompt {
         """
     }
 
-    /// Consignes de la passe FINALE, qui ne produit que le profil.
+    /// Instructions for the FINAL pass, which produces only the profile.
     ///
-    /// Séparée pour la même raison : sur une fenêtre étroite, demander le
-    /// profil en même temps que les recommandations, c'est demander au modèle
-    /// d'arbitrer entre les deux — et c'est le profil qui sautait.
+    /// Separated for the same reason: on a narrow window, asking for the
+    /// profile alongside the recommendations asks the model to arbitrate
+    /// between the two — and the profile was what got dropped.
     static func profileSystem(for domain: CoachDomain) -> String {
         let subject = domain == .transactions
             ? "sa gestion de budget"
@@ -210,7 +214,7 @@ enum CoachPrompt {
         """
     }
 
-    /// Le message de la passe finale : chiffres clés + ce qui a été retenu.
+    /// The final pass's message: key figures + what was kept.
     static func profileUser(header: String, titles: [String]) -> String {
         let list = titles.isEmpty
             ? "(aucun conseil retenu)"

@@ -1,32 +1,32 @@
 import SwiftUI
 
-/// Menu de configuration Apple Pay : installation du raccourci, alerte de
-/// seuil, nettoyage des anciennes entrées.
+/// Apple Pay configuration menu: installing the shortcut, the threshold
+/// alert, cleaning up old entries.
 ///
-/// État local uniquement (`@State`, pas `AppState`) : ce réglage n'a besoin
-/// d'être lu qu'ici et par `ApplePayAlertService`, qui relit
-/// `ApplePayAlertSettings` (UserDefaults) directement à chaque déclenchement
-/// — même doctrine que `AISettingsView`.
+/// Local state only (`@State`, not `AppState`): this setting only needs to be
+/// read here and by `ApplePayAlertService`, which re-reads
+/// `ApplePayAlertSettings` (UserDefaults) directly on every trigger — same
+/// doctrine as `AISettingsView`.
 ///
-/// ⚠️ La résolution automatique à l'ouverture de l'app (moteur → promotion
-/// silencieuse en transaction) a été retirée (`ApplePayResolutionService`/
-/// `ApplePayResolutionSettings` supprimés) — à revoir plus tard. Seul le
-/// nettoyage manuel reste comme moyen d'éviter l'accumulation.
+/// Automatic resolution at app launch (engine → silent promotion to a
+/// transaction) is not implemented; manual cleanup is the only way to avoid
+/// accumulation.
 struct ApplePayAlertSettingsView: View {
     @Environment(\.paneDismiss) private var paneDismiss
 
-    /// `true` (défaut) : vue ouverte en pane depuis le Dashboard — porte son
-    /// propre `.paneChrome` (bouton "Fermer"). `false` : atteinte en
-    /// navigation standard depuis Réglages (`SettingsSection.applePay`), le
-    /// wrapper générique de `SettingsView` fournit déjà titre + retour —
-    /// ajouter `.paneChrome` ici superposerait un second bouton/titre
-    /// (même classe de bug que `.modules`/`.ai`, cf. `SettingsView.settingsSectionPage`).
+    /// `true` (default): the view is opened as a pane from the Dashboard —
+    /// it carries its own `.paneChrome` (a "Close" button). `false`: reached
+    /// through standard navigation from Settings
+    /// (`SettingsSection.applePay`), where `SettingsView`'s generic wrapper
+    /// already supplies a title and a back button — adding `.paneChrome`
+    /// here would stack a second button and title (same class of bug as
+    /// `.modules`/`.ai`, see `SettingsView.settingsSectionPage`).
     var isPane: Bool = true
-    /// Masqué depuis le Dashboard (défaut `false` là-bas) : si le bandeau
-    /// "en attente" est visible, le raccourci a forcément déjà tourné au
-    /// moins une fois pour déposer cette entrée — proposer son installation
-    /// à cet endroit n'a pas de sens. Toujours visible depuis Réglages
-    /// (`true`, défaut), qui est le point d'entrée pour une 1ère configuration.
+    /// Hidden from the Dashboard (`false` there): if the "pending" banner
+    /// is visible, the shortcut has necessarily already run at least once to
+    /// drop that entry off — offering to install it there makes no sense.
+    /// Always visible from Settings (`true`, the default), which is the
+    /// entry point for a first-time setup.
     var showsInstallSection: Bool = true
 
     @State private var isEnabled = ApplePayAlertSettings.isEnabled
@@ -42,13 +42,14 @@ struct ApplePayAlertSettingsView: View {
             formContent
                 .paneChrome("Apple Pay", cancelLabel: "Fermer", onCancel: { paneDismiss() })
         } else {
-            // `.paneChrome` fournit son propre titre côté pane, mais en
-            // navigation standard depuis Réglages, `settingsLink` pousse
-            // cette destination NUE sur iOS (contrairement à macOS, où
-            // `SettingsView.settingsSectionPage` pose `.localizedNavigationTitle`
-            // depuis l'extérieur) — sans titre posé ICI, la barre reste vide.
-            // Même convention que les autres destinations "plates"
-            // (`BackupSettingsView`, etc.), qui le posent toutes elles-mêmes.
+            // `.paneChrome` supplies its own title on the pane side, but in
+            // standard navigation from Settings, `settingsLink` pushes this
+            // destination BARE on iOS (unlike macOS, where
+            // `SettingsView.settingsSectionPage` applies
+            // `.localizedNavigationTitle` from outside) — without a title set
+            // HERE, the bar stays empty. Same convention as the other "flat"
+            // destinations (`BackupSettingsView`, etc.), which all set it
+            // themselves.
             formContent
                 .localizedNavigationTitle("Apple Pay")
                 .navigationBarTitleDisplayMode(.inline)

@@ -5,14 +5,14 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 
 // MARK: - CoachRepository
 //
-// Accès aux 3 tables du coach (migration v47). Même style que les autres
-// repositories : SQLite3 direct, une connexion par appel, pas d'ORM.
+// Access to the coach's 3 tables. Same style as the other repositories:
+// direct SQLite3, one connection per call, no ORM.
 //
-// ⚠️ Rappel des cycles de vie, qui expliquent pourquoi ce sont 3 tables :
-//  • `coach_profile`         — écrit par l'utilisateur, SYNCHRONISÉ.
-//  • `coach_analyses`        — dérivé, local.
-//  • `coach_recommendations` — dérivé, local, mais avec un statut à PRÉSERVER
-//    d'une analyse à l'autre (cf. `replaceRecommendations`).
+// The lifecycles, which explain why these are 3 separate tables:
+//  • `coach_profile`         — written by the user, SYNCED.
+//  • `coach_analyses`        — derived, local.
+//  • `coach_recommendations` — derived, local, but with a status to PRESERVE
+//    from one analysis to the next (see `replaceRecommendations`).
 
 final class CoachRepository: @unchecked Sendable {
     static let shared = CoachRepository()
@@ -23,14 +23,13 @@ final class CoachRepository: @unchecked Sendable {
         self.store = store
     }
 
-    // MARK: - Profil (objectifs)
+    // MARK: - Profile (goals)
 
-    /// Les objectifs d'UN domaine.
+    /// ONE domain's goals.
     ///
-    /// ⚠️ Depuis la migration v50, `slot` porte le domaine (`transactions` /
-    /// `investments`) et non plus `'default'` : un objectif « mieux diversifier »
-    /// n'a rien à faire dans l'analyse des dépenses, et « moins dépenser » rien
-    /// à faire dans celle du portefeuille.
+    /// `slot` carries the domain (`transactions` / `investments`) rather
+    /// than `'default'`: a "diversify better" goal has no business in the
+    /// spending analysis, and "spend less" none in the portfolio's.
     func fetchProfile(domain: CoachDomain) -> CoachProfile {
         guard let db = openDB() else { return .empty }
         defer { sqlite3_close(db) }
@@ -44,8 +43,8 @@ final class CoachRepository: @unchecked Sendable {
                             updatedAt: parseDate(columnText(stmt, 1)))
     }
 
-    /// Tous les domaines d'un coup — une seule connexion pour le chargement du
-    /// store, au lieu d'une par domaine.
+    /// All domains at once — a single connection for the store's load,
+    /// instead of one per domain.
     func fetchProfiles() -> [CoachDomain: CoachProfile] {
         var result: [CoachDomain: CoachProfile] = [:]
         guard let db = openDB() else { return result }
@@ -55,10 +54,9 @@ final class CoachRepository: @unchecked Sendable {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return result }
         defer { sqlite3_finalize(stmt) }
         while sqlite3_step(stmt) == SQLITE_ROW {
-            // Une ligne `slot = 'default'` peut réapparaître : un appareil resté
-            // sur une version antérieure continue de la pousser. Elle n'est plus
-            // lue par personne — on l'ignore plutôt que de la faire ressusciter
-            // dans l'UI.
+            // A `slot = 'default'` row can reappear: a device still on an
+            // earlier version keeps pushing it. Nobody reads it any more —
+            // ignore it rather than resurrect it in the UI.
             guard let slot = columnText(stmt, 0), let domain = CoachDomain(rawValue: slot) else { continue }
             result[domain] = CoachProfile(objectives: columnText(stmt, 1) ?? "",
                                           updatedAt: parseDate(columnText(stmt, 2)))
@@ -66,11 +64,10 @@ final class CoachRepository: @unchecked Sendable {
         return result
     }
 
-    /// Écrit les objectifs d'un domaine. `uuid`/`updated_at` sont laissés aux
-    /// TRIGGERS de sync (`SyncSchema.installTriggers`) — les renseigner ici
-    /// court-circuiterait le suivi des modifications, exactement ce que les
-    /// triggers existent pour éviter (ils captent aussi la console SQL et les
-    /// écritures par lot).
+    /// Writes a domain's goals. `uuid`/`updated_at` are left to the sync
+    /// TRIGGERS (`SyncSchema.installTriggers`) — filling them in here would
+    /// bypass change tracking, exactly what the triggers exist to prevent
+    /// (they also catch the SQL console and batch writes).
     func saveObjectives(_ text: String, domain: CoachDomain) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
@@ -135,7 +132,7 @@ final class CoachRepository: @unchecked Sendable {
         sqlite3_step(stmt)
     }
 
-    // MARK: - Recommandations
+    // MARK: - Recommendations
 
     func fetchRecommendations(domain: CoachDomain? = nil) -> [CoachRecommendation] {
         guard let db = openDB() else { return [] }
@@ -176,20 +173,20 @@ final class CoachRepository: @unchecked Sendable {
         return result
     }
 
-    /// Remplace les recommandations d'un domaine par celles d'une nouvelle
-    /// analyse.
+    /// Replaces a domain's recommendations with those of a new analysis.
     ///
-    /// ⚠️ Trois règles, chacune pour une raison précise :
-    ///  1. UPSERT par `(domain, ref)` en **conservant le `status`** : une
-    ///     recommandation rejetée que le modèle repropose reste rejetée. Sans
-    ///     ça, chaque analyse ressusciterait tout ce que l'utilisateur a
-    ///     écarté — le meilleur moyen de lui faire ignorer le coach.
-    ///  2. Les lignes absentes du nouveau lot sont supprimées SAUF si elles
-    ///     sont `dismissed` : elles servent alors de pierre tombale, pour que
-    ///     le rejet survive à une disparition temporaire du sujet.
-    ///  3. Les pierres tombales de plus de 180 jours sont purgées — passé ce
-    ///     délai, la situation a probablement changé et la question mérite
-    ///     d'être reposée.
+    /// Three rules, each for a precise reason:
+    ///  1. UPSERT by `(domain, ref)` while **keeping the `status`**: a
+    ///     dismissed recommendation the model proposes again stays
+    ///     dismissed. Without this, every analysis would resurrect
+    ///     everything the user set aside — the surest way to make them
+    ///     ignore the coach.
+    ///  2. Rows absent from the new batch are deleted UNLESS they are
+    ///     `dismissed`: those act as tombstones, so the dismissal survives a
+    ///     temporary disappearance of the subject.
+    ///  3. Tombstones older than 180 days are purged — past that delay the
+    ///     situation has probably changed and the question deserves to be
+    ///     asked again.
     func replaceRecommendations(domain: CoachDomain, drafts: [CoachRecommendationDraft], now: Date = Date()) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
@@ -229,7 +226,7 @@ final class CoachRepository: @unchecked Sendable {
             sqlite3_finalize(stmt)
         }
 
-        // Nettoyage des lignes que la nouvelle analyse ne propose plus.
+        // Clean up rows the new analysis no longer proposes.
         let keptRefs = drafts.map { "'" + $0.ref.replacingOccurrences(of: "'", with: "''") + "'" }
         let notIn = keptRefs.isEmpty ? "" : " AND ref NOT IN (\(keptRefs.joined(separator: ",")))"
         var deleteStmt: OpaquePointer?
@@ -240,7 +237,7 @@ final class CoachRepository: @unchecked Sendable {
         }
         sqlite3_finalize(deleteStmt)
 
-        // Purge des pierres tombales périmées.
+        // Purge expired tombstones.
         let cutoff = isoString(now.addingTimeInterval(-180 * 24 * 3600))
         var purgeStmt: OpaquePointer?
         let purgeSQL = "DELETE FROM coach_recommendations WHERE domain = ? AND status = 'dismissed' AND generated_at < ?;"
@@ -288,9 +285,9 @@ final class CoachRepository: @unchecked Sendable {
         else { sqlite3_bind_null(stmt, col) }
     }
 
-    /// ⚠️ ISO 8601 AVEC l'heure, contrairement aux dates métier des autres
-    /// repositories (`yyyy-MM-dd`) : la péremption d'une analyse se compte en
-    /// heures le jour où elle vient de tourner, pas en jours.
+    /// ISO 8601 WITH the time, unlike the business dates of the other
+    /// repositories (`yyyy-MM-dd`): an analysis's staleness is counted in
+    /// hours on the day it just ran, not in days.
     private func isoString(_ date: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")

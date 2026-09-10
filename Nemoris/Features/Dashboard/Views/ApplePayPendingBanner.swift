@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// Bandeau compact "N dépenses Apple Pay en attente · X €", affiché
-/// SEULEMENT s'il y a au moins une entrée `pending` (cf.
-/// `DashboardAggregate.pendingApplePay`). Volontairement neutre, pas dans le
-/// style `AlertsBanner` : ce n'est pas un problème à résoudre, juste une
-/// visibilité sur des dépenses pas encore catégorisées — jamais comptées
-/// dans les totaux tant qu'elles restent ici.
+/// Compact "N pending Apple Pay expenses · €X" banner, shown ONLY when at
+/// least one `pending` entry exists (see
+/// `DashboardAggregate.pendingApplePay`). Deliberately neutral, not styled
+/// like `AlertsBanner`: this isn't a problem to solve, just visibility on
+/// expenses not yet categorized — never counted in the totals while they
+/// stay here.
 struct ApplePayPendingBanner: View {
     let count: Int
     let total: Double

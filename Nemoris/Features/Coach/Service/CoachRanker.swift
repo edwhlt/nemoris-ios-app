@@ -1,54 +1,52 @@
 import Foundation
 
-// MARK: - CoachRanker — arbitrage des recommandations
+// MARK: - CoachRanker — arbitrating between recommendations
 //
-// Moteur PUR (`import Foundation` uniquement) : aucun accès base, réseau, IA
-// ou SwiftUI. Même doctrine que `PortfolioEvolutionBuilder` /
-// `EnvelopeSpendingCalculator` — la règle de priorité doit être testable sans
-// modèle ni appareil, et surtout IDENTIQUE partout où l'app classe des
-// recommandations (Dashboard top 3, liste d'un domaine, futurs consommateurs).
+// PURE engine (`import Foundation` only): no database, network, AI or
+// SwiftUI access. Same doctrine as `PortfolioEvolutionBuilder` /
+// `EnvelopeSpendingCalculator` — the priority rule must be testable without a
+// model or a device, and above all IDENTICAL everywhere the app ranks
+// recommendations (Dashboard top 3, a domain's list, future consumers).
 //
-// ⚠️ L'arbitrage est DÉTERMINISTE, pas un troisième appel au modèle. Demander
-// à une IA de classer ce qu'une IA vient de produire coûterait un aller-retour
-// de plus, serait non reproductible d'un affichage à l'autre, et surtout
-// intestable. Le modèle fournit les SIGNAUX (impact, effort, confiance) ; la
-// pondération, elle, reste ici.
+// The arbitration is DETERMINISTIC, not a third call to the model. Asking an
+// AI to rank what an AI just produced would cost one more round trip,
+// wouldn't be reproducible from one display to the next, and above all
+// couldn't be tested. The model supplies the SIGNALS (impact, effort,
+// confidence); the weighting stays here.
 
 enum CoachRanker {
 
     // MARK: - Score
 
-    /// Montant annuel à partir duquel l'impact sature à 1,0. Au-delà, c'est
-    /// l'effort et la confiance qui départagent : entre « 4 000 €/an » et
-    /// « 12 000 €/an », les deux sont déjà « énorme », et laisser le montant
-    /// croître sans borne écraserait tout le reste du classement.
+    /// Annual amount at which impact saturates to 1.0. Beyond it, effort
+    /// and confidence break the tie: between "€4,000/yr" and "€12,000/yr",
+    /// both are already "huge", and letting the amount grow unbounded would
+    /// crush the rest of the ranking.
     static let impactCeiling: Double = 3_000
 
-    /// Score attribué à une recommandation NON CHIFFRABLE (impact 0).
+    /// Score given to a NON-QUANTIFIABLE recommendation (impact 0).
     ///
-    /// ⚠️ Ne peut pas être 0. `Insight.compositeScore` multipliait les trois
-    /// dimensions, donc tout insight à impact nul tombait mécaniquement à
-    /// zéro et ne remontait JAMAIS — alors que « tu es à 70 % sur une seule
-    /// ligne » est exactement le genre de conseil structurant qu'un
-    /// consultant met en avant. Une valeur médiane le laisse concourir sur sa
-    /// confiance et sa faisabilité.
+    /// Cannot be 0. `Insight.compositeScore` multiplied the three
+    /// dimensions, so any insight with zero impact mechanically fell to zero
+    /// and NEVER surfaced — even though "you're at 70% on a single holding"
+    /// is exactly the kind of structural advice a consultant leads with. A
+    /// median value lets it compete on its confidence and feasibility.
     static let unquantifiedImpactScore: Double = 0.35
 
-    /// Impact normalisé 0-1, sur une échelle LOGARITHMIQUE : l'écart utile
-    /// entre 20 €/an et 200 €/an est bien plus grand que celui entre 2 000 €
-    /// et 2 180 €, ce qu'une échelle linéaire ne rend pas.
+    /// Impact normalized 0-1, on a LOGARITHMIC scale: the useful gap
+    /// between €20/yr and €200/yr is far larger than the one between €2,000
+    /// and €2,180, which a linear scale doesn't convey.
     static func impactScore(_ annualImpact: Double) -> Double {
         guard annualImpact > 0 else { return unquantifiedImpactScore }
         let ratio = log10(1 + annualImpact) / log10(1 + impactCeiling)
         return min(1, max(0, ratio))
     }
 
-    /// Priorité 0-1 d'une recommandation, toutes dimensions confondues.
+    /// A recommendation's 0-1 priority, all dimensions combined.
     ///
-    /// Pondération : impact 50 %, confiance 30 %, faisabilité 20 %. La
-    /// confiance pèse plus que la faisabilité parce qu'une recommandation à
-    /// laquelle le modèle ne croit qu'à moitié ne doit pas remonter juste
-    /// parce qu'elle est facile à appliquer.
+    /// Weighting: impact 50%, confidence 30%, feasibility 20%. Confidence
+    /// weighs more than feasibility because a recommendation the model only
+    /// half believes in must not rise just because it's easy to apply.
     static func score(_ reco: CoachRecommendation) -> Double {
         let impact = impactScore(reco.annualImpact)
         let effort = Double(min(5, max(1, reco.effort))) / 5.0
@@ -56,12 +54,12 @@ enum CoachRanker {
         return impact * 0.5 + confidence * 0.3 + effort * 0.2
     }
 
-    // MARK: - Classement
+    // MARK: - Ranking
 
-    /// Trie par priorité décroissante. Départage STABLE en cas d'égalité
-    /// (impact puis `ref`) : sans ça, deux affichages successifs de la même
-    /// liste pourraient inverser deux cartes, ce qui donne l'impression que
-    /// l'écran « bouge tout seul ».
+    /// Sorts by decreasing priority. STABLE tie-breaking on equality
+    /// (impact then `ref`): without it, two successive displays of the same
+    /// list could swap two cards, which makes the screen look like it
+    /// "moves on its own".
     static func ranked(_ recos: [CoachRecommendation]) -> [CoachRecommendation] {
         recos.sorted { a, b in
             let sa = score(a), sb = score(b)
@@ -71,36 +69,36 @@ enum CoachRanker {
         }
     }
 
-    /// Les `limit` recommandations les plus importantes TOUS DOMAINES
-    /// CONFONDUS — ce qu'affiche le Dashboard.
+    /// The `limit` most important recommendations ACROSS ALL DOMAINS —
+    /// what the Dashboard displays.
     ///
-    /// ⚠️ Les recommandations rejetées ou déjà traitées sont écartées ICI,
-    /// pas au niveau de la vue : le Dashboard et la liste d'un domaine
-    /// doivent filtrer à l'identique, sinon une carte « faite » réapparaît
-    /// sur un écran et pas sur l'autre.
+    /// Dismissed or completed recommendations are filtered out HERE, not in
+    /// the view: the Dashboard and a domain's list must filter identically,
+    /// otherwise a "done" card reappears on one screen and not the other.
     static func topAcrossDomains(_ recos: [CoachRecommendation], limit: Int = 3) -> [CoachRecommendation] {
         guard limit > 0 else { return [] }
         return Array(ranked(recos.filter { $0.status.isVisible }).prefix(limit))
     }
 
-    /// Les recommandations visibles d'un domaine, classées.
+    /// A domain's visible recommendations, ranked.
     static func visible(_ recos: [CoachRecommendation], domain: CoachDomain) -> [CoachRecommendation] {
         ranked(recos.filter { $0.domain == domain && $0.status.isVisible })
     }
 
-    // MARK: - Bornage des valeurs rendues par le modèle
+    // MARK: - Clamping the values returned by the model
 
-    /// Ramène dans leurs bornes les trois signaux auto-évalués par le modèle.
+    /// Brings the model's three self-assessed signals back within bounds.
     ///
-    /// ⚠️ Indispensable : un modèle rend volontiers `effort: 12`, une
-    /// confiance de `95` (au lieu de 0,95) ou un impact négatif. Sans
-    /// normalisation, ces valeurs contaminent directement le classement.
+    /// Indispensable: a model happily returns `effort: 12`, a confidence of
+    /// `95` (instead of 0.95) or a negative impact. Without normalization,
+    /// those values contaminate the ranking directly.
     static func normalize(annualImpact: Double, effort: Int, confidence: Double)
         -> (annualImpact: Double, effort: Int, confidence: Double) {
         let impact = annualImpact.isFinite && annualImpact > 0 ? annualImpact : 0
         let boundedEffort = min(5, max(1, effort))
-        // Un modèle qui répond « 85 » pense « 85 % » : on rattrape plutôt que
-        // de tout écraser à 1,0, ce qui rendrait la dimension inutile.
+        // A model answering "85" means "85%": recover it rather than
+        // clamping everything to 1.0, which would make the dimension
+        // useless.
         var conf = confidence.isFinite ? confidence : 0.5
         if conf > 1 { conf = conf / 100 }
         return (impact, boundedEffort, min(1, max(0, conf)))

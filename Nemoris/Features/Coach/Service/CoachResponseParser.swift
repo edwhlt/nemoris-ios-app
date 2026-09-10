@@ -2,64 +2,65 @@ import Foundation
 
 // MARK: - CoachResponseParser
 //
-// Moteur PUR : transforme la réponse BRUTE du modèle en recommandations
-// exploitables. Aucun appel réseau, aucune base — donc testable sans modèle.
+// PURE engine: turns the model's RAW response into usable recommendations.
+// No network call, no database — therefore testable without a model.
 //
-// ⚠️ Tolérance volontaire. Ce parseur ne doit JAMAIS jeter l'analyse entière
-// à cause d'une ligne mal formée : c'est la classe de bug déjà payée sur
-// l'import de documents (une clé manquante faisait perdre la page complète,
-// cf. `LenientJSON`). Ici, une recommandation invalide est ignorée, les autres
-// passent.
+// Tolerance is deliberate. This parser must NEVER throw away the whole
+// analysis because of one malformed line: that's the class of bug already
+// paid for in document import, where a missing key lost the entire page (see
+// `LenientJSON`). Here an invalid recommendation is skipped and the rest go
+// through.
 
 enum CoachResponseParser {
 
-    /// Pourquoi une réponse n'a rien donné. Distinguer ces cas est essentiel :
-    /// « le modèle n'a rien à recommander » est un SUCCÈS, « je n'ai pas su
-    /// lire sa réponse » est un DÉFAUT — et les présenter pareil empêche de
-    /// diagnostiquer quoi que ce soit.
+    /// Why a response yielded nothing. Telling these apart is essential:
+    /// "the model has nothing to recommend" is a SUCCESS, "I couldn't read
+    /// its answer" is a DEFECT — and presenting them the same way makes
+    /// anything impossible to diagnose.
     enum Failure: Equatable {
-        /// Rien d'exploitable : ni JSON valide, ni objet récupérable.
+        /// Nothing usable: neither valid JSON nor a salvageable object.
         case unreadable
-        /// JSON lu, mais la liste de recommandations est absente du document.
+        /// JSON read, but the recommendation list is absent from the document.
         case missingList
-        /// Le modèle a écrit un préambule (le profil) puis a été COUPÉ avant
-        /// la moindre recommandation. Cas distinct : il n'y a rien à récupérer,
-        /// et la cause est un budget de sortie épuisé — pas un JSON malformé.
+        /// The model wrote a preamble (the profile) then was CUT OFF before
+        /// a single recommendation. A distinct case: there is nothing to
+        /// salvage, and the cause is an exhausted output budget — not
+        /// malformed JSON.
         case truncatedBeforeRecommendations
     }
 
     struct Result {
         var profileSummary: String?
         var drafts: [CoachRecommendationDraft]
-        /// `nil` quand la lecture s'est bien passée — y compris avec zéro
-        /// recommandation, qui est une réponse légitime.
+        /// `nil` when parsing went fine — including with zero
+        /// recommendations, which is a legitimate answer.
         var failure: Failure?
-        /// Vrai quand les recommandations ont été récupérées une par une dans
-        /// une réponse tronquée, au lieu d'être lues d'un bloc.
+        /// True when recommendations were salvaged one by one from a
+        /// truncated response instead of being read in one block.
         var wasSalvaged: Bool = false
     }
 
-    /// Nombre maximal de recommandations retenues par analyse.
+    /// Maximum number of recommendations kept per analysis.
     ///
-    /// Ce n'est PAS le plafond produit demandé (« on ne se limite pas à 3
-    /// suggestions ») : c'est un garde-fou contre un modèle qui partirait en
-    /// boucle et rendrait 200 lignes. Au-delà de 40, ce n'est plus un conseil,
-    /// c'est du bruit — et ça remplirait la base.
+    /// This is NOT a product cap ("we don't limit ourselves to 3
+    /// suggestions"): it's a guard against a model that loops and returns
+    /// 200 lines. Past 40 it stops being advice and becomes noise — and it
+    /// would fill the database.
     static let maxRecommendations = 40
 
-    /// Noms acceptés pour la liste de recommandations.
+    /// Accepted names for the recommendation list.
     ///
-    /// ⚠️ `recommandations` (orthographe française) n'est PAS une coquetterie :
-    /// on demande au modèle de répondre en français, et un modèle qui rédige
-    /// en français traduit volontiers ses propres clés JSON. Refuser cette
-    /// variante rendait la réponse entière inexploitable.
+    /// `recommandations` (French spelling) is NOT an affectation: the model
+    /// is asked to answer in French, and a model writing in French happily
+    /// translates its own JSON keys. Rejecting that variant made the whole
+    /// response unusable.
     private static let listKeys = ["recommendations", "recommandations", "items", "suggestions"]
     private static let profileKeys = ["profile", "profil", "summary", "resume"]
 
     static func parse(_ raw: String) -> Result {
         let cleaned = LenientJSON.repairSyntax(LenientJSON.repaired(LenientJSON.extractObject(from: raw)))
 
-        // ── Chemin nominal : le document entier est du JSON valide ──────────
+        // ── Nominal path: the whole document is valid JSON ──────────────────
         if let data = cleaned.data(using: .utf8),
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             let profile = profileKeys.compactMap { root[$0] as? String }.first?
@@ -68,34 +69,34 @@ enum CoachResponseParser {
                 return Result(profileSummary: profile?.isEmpty == false ? profile : nil,
                               drafts: [], failure: .missingList)
             }
-            // Liste présente mais vide = le modèle n'a rien à proposer. C'est
-            // une réponse valide, surtout pas une erreur.
+            // List present but empty = the model has nothing to propose.
+            // That's a valid answer, definitely not an error.
             return Result(profileSummary: profile?.isEmpty == false ? profile : nil,
                           drafts: collect(rawItems), failure: nil)
         }
 
-        // ── Repli : document STRUCTURELLEMENT cassé ─────────────────────────
+        // ── Fallback: STRUCTURALLY broken document ──────────────────────────
         //
-        // Deux causes vues en production, souvent ensemble :
-        //  • réponse COUPÉE en plein JSON (contexte trop court) — les objets
-        //    écrits avant la coupure restent complets ;
-        //  • le modèle OUBLIE `,"recommendations":` et colle le tableau à la
-        //    fin de la chaîne `profile`, qu'il ne referme donc jamais. La
-        //    parité des guillemets est alors décalée pour TOUT le reste du
-        //    document, ce qui met en échec n'importe quel appariement
-        //    d'accolades global (`LenientJSON.innermostObjects` compris).
+        // Two causes seen in practice, often together:
+        //  • response CUT OFF mid-JSON (context too short) — the objects
+        //    written before the cut remain complete;
+        //  • the model OMITS `,"recommendations":` and glues the array to the
+        //    end of the `profile` string, which it therefore never closes.
+        //    Quote parity is then off for ALL the rest of the document, which
+        //    defeats any global brace matching (`LenientJSON.innermostObjects`
+        //    included).
         //
-        // D'où une récupération CIBLÉE : on repart de chaque `{` dont la
-        // première clé est une clé de recommandation connue. À partir d'une
-        // accolade réelle, la parité redevient fiable quel que soit le
-        // désordre qui précède.
-        // ⚠️ On repart du texte BRUT, pas de `cleaned` : les réparations
-        // globales (guillemets recollés, clés nues citées) supposent de savoir
-        // à tout instant si l'on est DANS une chaîne. Sur un document dont la
-        // parité est cassée, elles sont elles-mêmes désorientées et peuvent
-        // aggraver le désordre. L'ordre correct est donc : EXTRAIRE d'abord —
-        // chaque objet repart d'une accolade réelle, donc d'une parité saine —
-        // puis réparer CHAQUE fragment isolément.
+        // Hence a TARGETED salvage: restart from each `{` whose first key is a
+        // known recommendation key. Starting from a real brace, parity becomes
+        // reliable again regardless of the disorder that precedes it.
+        //
+        // Note this restarts from the RAW text, not from `cleaned`: global
+        // repairs (re-joined quotes, bare keys quoted) require knowing at all
+        // times whether one is INSIDE a string. On a document with broken
+        // parity they are themselves disoriented and can worsen the disorder.
+        // The correct order is therefore: EXTRACT first — each object starts
+        // from a real brace, hence sane parity — then repair EACH fragment in
+        // isolation.
         let salvaged = recommendationObjects(in: raw).compactMap { fragment -> [String: Any]? in
             let repairedFragment = LenientJSON.repairSyntax(LenientJSON.repaired(fragment))
             guard let data = repairedFragment.data(using: .utf8) else { return nil }
@@ -103,10 +104,10 @@ enum CoachResponseParser {
         }
         let drafts = collect(salvaged)
         guard !drafts.isEmpty else {
-            // Un profil lisible mais aucun objet de recommandation : le modèle
-            // a dépensé tout son budget de sortie dans le préambule. Le dire
-            // précisément vaut mieux qu'un « pas exploitable » générique — la
-            // seule action utile est de changer de backend, pas de relancer.
+            // A readable profile but no recommendation object: the model
+            // spent its whole output budget on the preamble. Saying so
+            // precisely beats a generic "unusable" — the only useful action
+            // is to change backend, not to retry.
             if let profile = salvagedProfile(in: raw) {
                 return Result(profileSummary: profile, drafts: [],
                               failure: .truncatedBeforeRecommendations)
@@ -117,18 +118,18 @@ enum CoachResponseParser {
                       failure: nil, wasSalvaged: true)
     }
 
-    // MARK: - Analyse découpée en passes
+    // MARK: - Pass-split analysis
 
-    /// Fusionne les recommandations de plusieurs passes.
+    /// Merges the recommendations of several passes.
     ///
-    /// C'est le « reduce » du découpage, et il est DÉTERMINISTE : deux passes
-    /// qui repèrent le même sujet (l'abonnement vu à la fois dans les charges
-    /// récurrentes et dans les marchands) produisent la même `ref` — on garde
-    /// celle dont le modèle est le plus sûr, jamais les deux.
+    /// This is the "reduce" half of the split, and it is DETERMINISTIC: two
+    /// passes spotting the same subject (a subscription seen both in the
+    /// recurring charges and in the merchants) produce the same `ref` — the
+    /// one the model is most confident about is kept, never both.
     ///
-    /// ⚠️ Départage STABLE en cas d'égalité de confiance : sans lui, l'ordre
-    /// des passes déciderait, et deux analyses du même dossier pourraient
-    /// garder des variantes différentes du même conseil.
+    /// STABLE tie-breaking on equal confidence: without it, pass ordering
+    /// would decide, and two analyses of the same briefing could keep
+    /// different variants of the same advice.
     static func merge(_ batches: [[CoachRecommendationDraft]]) -> [CoachRecommendationDraft] {
         var best: [String: CoachRecommendationDraft] = [:]
         var order: [String] = []
@@ -148,9 +149,9 @@ enum CoachResponseParser {
         return Array(order.compactMap { best[$0] }.prefix(maxRecommendations))
     }
 
-    /// Lit une réponse qui ne porte QUE le profil (passe finale d'une analyse
-    /// découpée). Tolérante de la même façon que `parse` : JSON valide d'abord,
-    /// récupération au fil du texte ensuite.
+    /// Reads a response carrying ONLY the profile (final pass of a split
+    /// analysis). Tolerant in the same way as `parse`: valid JSON first,
+    /// then salvage from the raw text.
     static func parseProfileOnly(_ raw: String) -> String? {
         let cleaned = LenientJSON.repairSyntax(LenientJSON.repaired(LenientJSON.extractObject(from: raw)))
         if let data = cleaned.data(using: .utf8),
@@ -162,13 +163,13 @@ enum CoachResponseParser {
         return salvagedProfile(in: raw)
     }
 
-    /// Clés dont la présence en tête d'objet identifie une recommandation.
+    /// Keys whose presence at the head of an object identifies a recommendation.
     private static let recognisableKeys: Set<String> = [
         "key", "title", "detail", "rationale", "category", "annual_impact", "effort", "confidence"
     ]
 
-    /// Extrait les objets de recommandation d'un document cassé, en
-    /// appariant les accolades LOCALEMENT à partir de chaque candidat.
+    /// Extracts recommendation objects from a broken document by matching
+    /// braces LOCALLY from each candidate.
     private static func recommendationObjects(in text: String) -> [String] {
         var results: [String] = []
         var index = text.startIndex
@@ -178,8 +179,8 @@ enum CoachResponseParser {
                 index = text.index(after: index)
                 continue
             }
-            // Appariement à partir d'ici : `inString` repart de false, ce qui
-            // est exact puisqu'on est sur une accolade structurelle.
+            // Matching starts here: `inString` restarts at false, which is
+            // exact since this is a structural brace.
             var depth = 0
             var inString = false
             var escaped = false
@@ -203,15 +204,15 @@ enum CoachResponseParser {
                 cursor = text.index(after: cursor)
             }
 
-            guard let closed else { break }   // objet tronqué : rien après lui
+            guard let closed else { break }   // truncated object: nothing after it
             results.append(String(text[index...closed]))
             index = text.index(after: closed)
         }
         return results
     }
 
-    /// `true` si l'accolade en `position` ouvre un objet dont la première clé
-    /// est une clé de recommandation.
+    /// `true` if the brace at `position` opens an object whose first key is
+    /// a recommendation key.
     private static func startsRecommendation(_ text: String, at position: String.Index) -> Bool {
         var cursor = text.index(after: position)
         while cursor < text.endIndex, text[cursor].isWhitespace { cursor = text.index(after: cursor) }
@@ -226,10 +227,10 @@ enum CoachResponseParser {
         return recognisableKeys.contains(identifier)
     }
 
-    /// Récupère le profil quand le document est cassé — au mieux, sans rien
-    /// inventer : on lit la chaîne qui suit `"profile":` et on retire la
-    /// queue parasite (`\n[{`) que le modèle y a collée en oubliant la clé
-    /// `recommendations`.
+    /// Salvages the profile when the document is broken — best effort,
+    /// inventing nothing: read the string following `"profile":` and strip
+    /// the stray tail (`\n[{`) the model glued on when it forgot the
+    /// `recommendations` key.
     private static func salvagedProfile(in text: String) -> String? {
         for key in profileKeys {
             guard let keyRange = text.range(of: "\"\(key)\"") else { continue }
@@ -250,7 +251,7 @@ enum CoachResponseParser {
                 else { value.append(character) }
                 cursor = text.index(after: cursor)
             }
-            // La queue collée par le modèle : « …aiguë.\n[{ ».
+            // The tail glued on by the model: "…acute.\n[{".
             var cleanedValue = value
             while let last = cleanedValue.last, "[{ \t\n".contains(last) {
                 cleanedValue.removeLast()
@@ -262,15 +263,15 @@ enum CoachResponseParser {
         return nil
     }
 
-    /// Convertit et déduplique une liste d'objets bruts.
+    /// Converts and deduplicates a list of raw objects.
     private static func collect(_ rawItems: [[String: Any]]) -> [CoachRecommendationDraft] {
         var drafts: [CoachRecommendationDraft] = []
         var seenRefs = Set<String>()
         for item in rawItems {
             guard let draft = draft(from: item) else { continue }
-            // Un modèle repropose parfois deux fois le même sujet sous deux
-            // formulations. La table a un UNIQUE (domain, ref) : sans cette
-            // déduplication, la seconde écraserait la première en silence.
+            // A model sometimes proposes the same subject twice under two
+            // phrasings. The table has a UNIQUE (domain, ref): without this
+            // deduplication, the second would silently overwrite the first.
             guard seenRefs.insert(draft.ref).inserted else { continue }
             drafts.append(draft)
             if drafts.count >= maxRecommendations { break }
@@ -278,13 +279,13 @@ enum CoachResponseParser {
         return drafts
     }
 
-    // MARK: - Une recommandation
+    // MARK: - One recommendation
 
     private static func draft(from item: [String: Any]) -> CoachRecommendationDraft? {
         guard let title = string(item["title"]), !title.isEmpty else { return nil }
         let detail = string(item["detail"]) ?? ""
-        // Un conseil sans explication n'est pas exploitable — mais on ne le
-        // rejette pas pour autant : le titre seul reste une information.
+        // Advice with no explanation isn't actionable — but it isn't
+        // rejected for that: the title alone is still information.
         let rationale = string(item["rationale"])
         let category = string(item["category"])
 
@@ -294,8 +295,8 @@ enum CoachResponseParser {
             confidence: number(item["confidence"]) ?? 0.5
         )
 
-        // Clé stable : celle du modèle si elle est utilisable, sinon dérivée
-        // du titre.
+        // Stable key: the model's when usable, otherwise derived from the
+        // title.
         let modelKey = string(item["key"]).map(CoachRecommendationDraft.slug) ?? ""
         let ref = modelKey.isEmpty ? CoachRecommendationDraft.slug(title) : modelKey
         guard !ref.isEmpty else { return nil }
@@ -312,7 +313,7 @@ enum CoachResponseParser {
         )
     }
 
-    // MARK: - Lecture tolérante
+    // MARK: - Tolerant reading
 
     private static func string(_ value: Any?) -> String? {
         if let s = value as? String {
@@ -322,10 +323,10 @@ enum CoachResponseParser {
         return nil
     }
 
-    /// ⚠️ Un modèle rend indifféremment `120`, `120.5` ou `"120,50"` — et le
-    /// dernier cas est fréquent quand il répond en français. Les trois doivent
-    /// donner le même nombre, sinon l'impact tombe à 0 et la recommandation
-    /// dégringole dans le classement pour une raison purement typographique.
+    /// A model returns `120`, `120.5` or `"120,50"` interchangeably — and
+    /// the last case is common when it answers in French. All three must
+    /// yield the same number, otherwise the impact drops to 0 and the
+    /// recommendation falls in the ranking for a purely typographic reason.
     private static func number(_ value: Any?) -> Double? {
         if let d = value as? Double { return d }
         if let i = value as? Int { return Double(i) }

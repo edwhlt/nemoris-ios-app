@@ -1,57 +1,51 @@
 import Foundation
 
-// MARK: - Coach — modèles
+// MARK: - Coach models
 //
-// Le coach est un CONSULTANT, pas un détecteur de seuils : il reçoit un
-// dossier dense sur la situation de l'utilisateur (cf. `CoachBriefingBuilder`
-// / `InvestmentBriefingBuilder`), plus les objectifs que celui-ci a écrits, et
-// rend un diagnostic + un nombre NON PLAFONNÉ de recommandations.
+// The coach is a CONSULTANT, not a threshold detector: it receives a dense
+// briefing on the user's situation (see `CoachBriefingBuilder` /
+// `InvestmentBriefingBuilder`) plus the goals they wrote, and returns a
+// diagnosis and an UNCAPPED number of recommendations.
 //
-// Ce que ça remplace : `InsightEngine`, 5 détecteurs à seuils fixes dont le
-// texte était entièrement écrit en dur. Il n'est pas supprimé pour autant —
-// il devient (1) un fournisseur de SIGNAUX injectés dans le dossier et (2) le
-// repli quand aucune IA n'est disponible, comme chaque fonctionnalité IA de
-// cette app.
+// What it supersedes: `InsightEngine`, 5 fixed-threshold detectors whose
+// text was entirely hard-coded. It isn't removed for all that — it becomes
+// (1) a provider of SIGNALS injected into the briefing and (2) the fallback
+// when no AI is available, like every AI feature in this app.
 
-/// Le budget de contexte alloué au dossier et aux consignes, selon le backend
-/// RÉELLEMENT résolu pour la fonctionnalité — jamais le choix brut de
-/// l'utilisateur, c'est ce que le modèle va effectivement recevoir qui compte.
+/// The context budget allotted to the briefing and the instructions, based
+/// on the backend ACTUALLY resolved for the feature — never the user's raw
+/// preference: what matters is what the model will really receive.
 ///
-/// ⚠️ Apple Intelligence (`LanguageModelSession`) n'expose AUCUN paramètre de
-/// taille de contexte : la fenêtre est FIXE (de l'ordre de 4 000 tokens,
-/// entrée + sortie confondues) et une réponse qui la dépasse échoue plutôt
-/// que d'être tronquée proprement — `.compact` est calibré pour ce plafond,
-/// sans marge de négociation possible côté app (cf. `CoachBriefingBuilder`,
+/// Apple Intelligence (`LanguageModelSession`) exposes NO context-size
+/// parameter: the window is FIXED (on the order of 4,000 tokens, input and
+/// output combined) and a response that exceeds it fails rather than being
+/// cleanly truncated — `.compact` is calibrated for that ceiling, with no
+/// room to negotiate from the app side (see `CoachBriefingBuilder`,
 /// `CoachPrompt`).
 ///
-/// Un serveur local ou un fournisseur cloud a un contexte nettement plus
-/// large (souvent 8k-128k+, et `AIFeature.maxOutputTokens` leur accorde déjà
-/// 8 192 tokens de SORTIE) — les brider aux mêmes plafonds qu'Apple
-/// Intelligence gaspillait cette marge sans raison : dossier tronqué plus
-/// tôt qu'il ne devrait, profil réduit à 2 phrases y compris quand le modèle
-/// aurait largement la place de détailler (retour d'usage 2026-08-29).
+/// A local server or a cloud provider has a much wider context (often
+/// 8k-128k+, and `AIFeature.maxOutputTokens` already grants them 8,192
+/// OUTPUT tokens). Holding them to Apple Intelligence's ceilings wastes that
+/// headroom: the briefing gets truncated earlier than it needs to, and the
+/// profile is cut to 2 sentences even when the model has ample room to
+/// elaborate.
 enum CoachContextBudget: Sendable, Equatable {
-    /// Apple Intelligence — fenêtre fixe, non configurable.
+    /// Apple Intelligence — fixed window, not configurable.
     case compact
-    /// Serveur local ou fournisseur cloud — contexte nettement plus large.
+    /// Local server or cloud provider — much wider context.
     case generous
 
-    /// Depuis le backend RÉSOLU (jamais `.automatic`, qui n'est qu'une
-    /// préférence brute) — `nil`/`.automatic`/`.off` retombent sur `.compact`
-    /// par défaut prudent, mais ces cas ne devraient jamais atteindre un appel
-    /// modèle réel (`AIBackendResolver.resolve` ne les renvoie jamais tels quels).
-    /// Faut-il relancer l'analyse en passes courtes ?
+    /// Should the analysis be replayed in short passes?
     ///
-    /// ⚠️ Le déclencheur n'est PAS « ça a échoué » mais « le serveur a montré
-    /// sa vraie limite » : un modèle raisonnement qui rend de la réflexion
-    /// tronquée et zéro réponse (mesuré trois fois sur qwen3.5-9b via LM
-    /// Studio) dit exactement une chose — l'entrée qu'on lui envoie ne lui
-    /// laisse pas de quoi conclure. On ne le devine pas à l'avance, puisque le
-    /// même modèle réussit très bien sur une autre machine ; on l'apprend au
-    /// premier appel, et on rejoue en découpé.
+    /// The trigger is NOT "it failed" but "the server just showed its real
+    /// limit": a reasoning model that returns truncated deliberation and
+    /// zero answer says exactly one thing — the input it was given leaves it
+    /// no room to conclude. This can't be predicted in advance, since the
+    /// same model succeeds comfortably on another machine; it's learned on
+    /// the first call, and the analysis is replayed split up.
     ///
-    /// Une seule relance : si les passes courtes échouent aussi, le problème
-    /// n'est plus la taille de l'entrée, et boucler ferait juste attendre.
+    /// One retry only: if the short passes fail too, input size is no longer
+    /// the problem, and looping would just make the user wait.
     static func shouldRetryInPasses(budget: CoachContextBudget,
                                     sawReasoningOnly: Bool,
                                     producedRecommendations: Bool,
@@ -59,51 +53,55 @@ enum CoachContextBudget: Sendable, Equatable {
         budget == .generous && sawReasoningOnly && !producedRecommendations && !alreadyRetried
     }
 
+    /// From the RESOLVED backend (never `.automatic`, which is only a raw
+    /// preference). `nil`/`.automatic`/`.off` fall back to `.compact` as a
+    /// cautious default, but those cases should never reach a real model
+    /// call — `AIBackendResolver.resolve` never returns them as-is.
     static func resolved(from backend: AIBackendChoice?) -> CoachContextBudget {
         switch backend {
         case .localServer, .cloud: return .generous
-        // Le modèle embarqué tourne avec le `LlamaConfig.maxTokenCount` fixé
-        // par `EmbeddedModelManager` (4 096, comme Apple Intelligence) — même
-        // budget prudent, pour la même raison : petit GGUF, contexte limité.
+        // The embedded model runs with the `LlamaConfig.maxTokenCount` set by
+        // `EmbeddedModelManager` (4,096, same as Apple Intelligence) — same
+        // cautious budget, for the same reason: small GGUF, limited context.
         case .foundationModels, .embeddedModel, .automatic, .off, nil: return .compact
         }
     }
 }
 
-/// Un bloc du dossier, nommé — la brique que le découpage en passes
-/// distribue entre plusieurs appels quand le modèle ne peut pas tout lire
-/// d'un coup (cf. `CoachPassPlanner`).
+/// One named block of the briefing — the unit that pass splitting hands out
+/// across several calls when the model can't read everything at once (see
+/// `CoachPassPlanner`).
 struct CoachBriefingSection: Sendable, Equatable {
-    /// Identifiant stable, pour les tests et le diagnostic.
+    /// Stable identifier, for tests and diagnostics.
     let id: String
-    /// Nom lisible, annoncé au modèle (« tu regardes : … »).
+    /// Readable name, announced to the model ("you are looking at: …").
     let title: String
-    /// Le bloc tel qu'il part au modèle, en-tête compris.
+    /// The block as it goes to the model, header included.
     let body: String
 }
 
-/// Une passe d'analyse : ce qu'on envoie au modèle en UNE fois.
+/// One analysis pass: what is sent to the model in ONE go.
 ///
-/// Une seule passe pour un backend qui encaisse tout le dossier ; plusieurs
-/// pour une fenêtre de contexte étroite — le dossier est alors découpé, et
-/// les recommandations de chaque passe sont fusionnées ensuite. C'est le
-/// pendant du « map » d'un map-reduce : le « reduce » est DÉTERMINISTE
-/// (déduplication par `ref` + `CoachRanker`), pas un troisième appel modèle.
+/// A single pass for a backend that swallows the whole briefing; several for
+/// a narrow context window — the briefing is then split, and each pass's
+/// recommendations are merged afterwards. This is the "map" half of a
+/// map-reduce: the "reduce" is DETERMINISTIC (deduplication by `ref` plus
+/// `CoachRanker`), not a third model call.
 struct CoachAnalysisPass: Sendable, Equatable {
-    /// 1-based, pour l'annoncer au modèle (« passe 2 sur 3 »).
+    /// 1-based, so it can be announced to the model ("pass 2 of 3").
     let index: Int
     let total: Int
-    /// Les sections regardées dans cette passe, pour cadrer le modèle.
+    /// The sections examined in this pass, to frame the model.
     let focus: String
-    /// Le texte envoyé : chiffres clés + sections + objectifs.
+    /// The text sent: key figures + sections + goals.
     let body: String
 
     var isOnly: Bool { total <= 1 }
 }
 
-/// Les deux domaines d'expertise. Chacun a son propre backend IA
-/// configurable : l'analyse est lourde et ponctuelle, on peut vouloir un
-/// modèle cloud ici et Apple Intelligence pour le reste de l'app.
+/// The two areas of expertise. Each has its own configurable AI backend:
+/// the analysis is heavy and occasional, so one may want a cloud model here
+/// and Apple Intelligence for the rest of the app.
 enum CoachDomain: String, CaseIterable, Identifiable, Sendable {
     case transactions
     case investments
@@ -124,11 +122,11 @@ enum CoachDomain: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// La fonctionnalité IA correspondante (réglage de backend par domaine).
+    /// The matching AI feature (per-domain backend setting).
     ///
-    /// ⚠️ `.insights` conserve son `rawValue` historique : c'est la clé sous
-    /// laquelle le choix de backend de l'utilisateur est déjà persisté
-    /// (`ai.backend.insights`). Le renommer perdrait son réglage en silence.
+    /// `.insights` keeps its historical `rawValue`: it's the key under which
+    /// the user's backend choice is already persisted (`ai.backend.insights`).
+    /// Renaming it would silently lose their setting.
     var aiFeature: AIFeature {
         switch self {
         case .transactions: return .insights
@@ -137,9 +135,9 @@ enum CoachDomain: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// Cycle de vie d'une recommandation, PRÉSERVÉ d'une analyse à l'autre grâce à
-/// la clé stable `ref` : rejeter une recommandation la garde rejetée même si
-/// le modèle la repropose la semaine suivante.
+/// A recommendation's lifecycle, PRESERVED from one analysis to the next
+/// thanks to the stable `ref` key: dismissing a recommendation keeps it
+/// dismissed even if the model proposes it again the following week.
 enum CoachRecommendationStatus: String, Sendable {
     case new
     case seen
@@ -152,23 +150,24 @@ enum CoachRecommendationStatus: String, Sendable {
 struct CoachRecommendation: Identifiable, Hashable, Sendable {
     let id: Int
     let domain: CoachDomain
-    /// Clé stable inter-analyses (fournie par le modèle, sinon dérivée du titre).
+    /// Stable cross-analysis key (supplied by the model, else derived from the title).
     let ref: String
     var title: String
     var detail: String
-    /// Le RAISONNEMENT : sur quels chiffres du dossier le modèle s'appuie.
-    /// C'est ce qui distingue un conseil d'un slogan, et ce qui permet à
-    /// l'utilisateur de juger si la recommandation tient.
+    /// The RATIONALE: which figures from the briefing the model relies on.
+    /// This is what separates advice from a slogan, and what lets the user
+    /// judge whether the recommendation holds up.
     var rationale: String?
-    /// Libellé libre rendu par le modèle (« Abonnements », « Diversification »…).
-    /// Volontairement pas un enum : figer une taxonomie ramènerait la rigidité
-    /// des 5 `InsightKind` qu'on quitte.
+    /// Free-form label returned by the model ("Subscriptions",
+    /// "Diversification"…). Deliberately not an enum: freezing a taxonomy
+    /// would bring back the rigidity of the 5 `InsightKind` values being left
+    /// behind.
     var category: String?
-    /// Gain (ou coût évité) annuel estimé, en euros. 0 = non chiffrable.
+    /// Estimated annual gain (or avoided cost), in euros. 0 = not quantifiable.
     var annualImpact: Double
-    /// Faisabilité 1-5 (5 = trivial).
+    /// Feasibility 1-5 (5 = trivial).
     var effort: Int
-    /// Confiance 0-1 auto-évaluée par le modèle, bornée à l'écriture.
+    /// Confidence 0-1 self-assessed by the model, clamped on write.
     var confidence: Double
     var status: CoachRecommendationStatus
     var generatedAt: Date
@@ -177,20 +176,20 @@ struct CoachRecommendation: Identifiable, Hashable, Sendable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-/// Ce que le modèle a compris de la situation, pour UN domaine.
+/// What the model understood of the situation, for ONE domain.
 struct CoachAnalysis: Sendable {
     let domain: CoachDomain
-    /// Le « profil type » : quelques phrases qui caractérisent l'utilisateur.
+    /// The "profile": a few sentences characterizing the user.
     var profileSummary: String?
     var generatedAt: Date?
     var isError: Bool
     var message: String?
-    /// Backend qui a produit l'analyse, pour la traçabilité (« Claude », …).
+    /// Backend that produced the analysis, for traceability ("Claude", …).
     var backend: String?
-    /// Extrait de la réponse BRUTE du modèle, conservé uniquement en cas
-    /// d'échec de lecture. C'est la seule façon de distinguer « le modèle a
-    /// refusé », « il a répondu à côté » et « il a été coupé en plein JSON » —
-    /// sans lui, l'erreur est indiagnosticable (retour d'usage 2026-08-28).
+    /// Excerpt of the model's RAW response, kept only when parsing failed.
+    /// It's the only way to distinguish "the model refused", "it answered
+    /// off-topic" and "it was cut off mid-JSON" — without it, the error is
+    /// undiagnosable.
     var rawResponse: String?
 
     static func empty(_ domain: CoachDomain) -> CoachAnalysis {
@@ -198,8 +197,8 @@ struct CoachAnalysis: Sendable {
                       isError: false, message: nil, backend: nil, rawResponse: nil)
     }
 
-    /// Au-delà de ce délai, l'analyse est considérée périmée et une relance
-    /// AUTOMATIQUE est autorisée (asynchrone et non bloquante — cf. `CoachStore`).
+    /// Past this interval the analysis is considered stale and an AUTOMATIC
+    /// re-run is allowed (asynchronous and non-blocking — see `CoachStore`).
     static let stalenessInterval: TimeInterval = 7 * 24 * 3600
 
     func isStale(now: Date = Date()) -> Bool {
@@ -208,9 +207,9 @@ struct CoachAnalysis: Sendable {
     }
 }
 
-/// Recommandation telle qu'elle sort du modèle, AVANT persistance : pas
-/// encore d'`id`, pas encore de `status` (le repository conserve celui de la
-/// ligne existante s'il y en a une).
+/// A recommendation as it comes out of the model, BEFORE persistence: no
+/// `id` yet, no `status` yet (the repository keeps the existing row's status
+/// when there is one).
 struct CoachRecommendationDraft: Sendable {
     var ref: String
     var title: String
@@ -221,14 +220,14 @@ struct CoachRecommendationDraft: Sendable {
     var effort: Int
     var confidence: Double
 
-    /// Fabrique une clé stable à partir du texte quand le modèle n'en fournit
-    /// pas d'utilisable.
+    /// Builds a stable key from the text when the model supplies none that
+    /// is usable.
     ///
-    /// ⚠️ La stabilité de cette clé est ce qui fait tenir tout le mécanisme de
-    /// rejet persistant. Elle est volontairement dérivée d'un texte NORMALISÉ
-    /// (minuscules, accents et ponctuation retirés, tronqué) : deux analyses
-    /// successives reformulent presque toujours légèrement le même conseil, et
-    /// une clé calculée sur le titre brut changerait à chaque fois.
+    /// This key's stability is what holds the whole persistent-dismissal
+    /// mechanism together. It is deliberately derived from NORMALIZED text
+    /// (lowercased, diacritics and punctuation stripped, truncated): two
+    /// successive analyses almost always reword the same advice slightly,
+    /// and a key computed on the raw title would change every time.
     static func slug(_ raw: String) -> String {
         let folded = raw.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
         let allowed = folded.map { ch -> Character in
@@ -241,8 +240,8 @@ struct CoachRecommendationDraft: Sendable {
     }
 }
 
-/// Les objectifs écrits par l'utilisateur — la seule partie SYNCHRONISÉE
-/// (prose authored, pénible à retaper sur un second appareil).
+/// The goals written by the user — the only SYNCED part (hand-written
+/// prose, tedious to retype on a second device).
 struct CoachProfile: Sendable {
     var objectives: String
     var updatedAt: Date?

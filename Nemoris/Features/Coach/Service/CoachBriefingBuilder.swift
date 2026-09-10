@@ -1,26 +1,29 @@
 import Foundation
 
-// MARK: - CoachBriefingBuilder — le dossier « dépenses »
+// MARK: - CoachBriefingBuilder — the "spending" briefing
 //
-// Moteur PUR (`import Foundation` uniquement) : ni base, ni réseau, ni IA, ni
-// SwiftUI. Doctrine `PortfolioEvolutionBuilder`.
+// PURE engine (`import Foundation` only): no database, no network, no AI, no
+// SwiftUI. Same doctrine as `PortfolioEvolutionBuilder`.
 //
-// ─── Pourquoi un dossier, et pas les transactions brutes ───────────────────
+// ─── Why a briefing rather than the raw transactions ───────────────────────
 //
-// Six mois d'historique, c'est couramment 1 000 à 5 000 transactions. Les
-// envoyer telles quelles représente 100 000+ tokens : impossible sur
-// Foundation Models (~4 000 de contexte), lent et coûteux ailleurs. Un coach
-// qui « interprète toutes les transactions » ne peut donc pas les LIRE toutes.
+// Six months of history is commonly 1,000 to 5,000 transactions. Sending
+// them as-is is 100,000+ tokens: impossible on Foundation Models (~4,000 of
+// context), slow and costly elsewhere. A coach that "interprets every
+// transaction" therefore cannot READ them all.
 //
-// On lui présente à la place un DOSSIER : les mêmes faits, agrégés et
-// ordonnés, en ~3 000 caractères. C'est le travail qu'un consultant humain
-// ferait avant de rendre un avis — il ne lit pas les 5 000 lignes, il regarde
-// les moyennes, les tendances, les concentrations et les anomalies.
+// What it gets instead is a BRIEFING: the same facts, aggregated and
+// ordered, in ~3,000 characters. It's the work a human consultant would do
+// before giving an opinion — they don't read the 5,000 lines, they look at
+// averages, trends, concentrations and anomalies.
 //
-// ⚠️ Le dossier est BORNÉ (`maxCharacters`). Sans plafond, un utilisateur avec
-// 200 catégories ou 900 marchands ferait exploser le contexte et le modèle
-// tronquerait EN SILENCE — en perdant justement la fin du dossier, là où se
-// trouvent les objectifs de l'utilisateur.
+// The briefing is BOUNDED (`maxCharacters`). Without a ceiling, a user with
+// 200 categories or 900 merchants would blow the context and the model would
+// truncate SILENTLY — losing precisely the end of the briefing, which is
+// where the user's own goals sit.
+//
+// The briefing text itself stays in French: it is the content handed to a
+// model asked to answer the user in their own language.
 
 enum CoachBriefingBuilder {
 
@@ -32,10 +35,10 @@ enum CoachBriefingBuilder {
         var tiers: [Tiers]
         var patterns: [RecurringPattern]
         var envelopes: [BudgetEnvelope]
-        /// Signaux déjà repérés par la détection statistique
-        /// (`InsightEngine`), en une ligne chacun. Ils ne remplacent pas
-        /// l'analyse du modèle : ils lui évitent de re-déduire ce qu'un
-        /// calcul déterministe sait déjà, et lui donnent des points d'entrée.
+        /// Signals already spotted by statistical detection
+        /// (`InsightEngine`), one line each. They don't replace the model's
+        /// analysis: they spare it re-deriving what a deterministic
+        /// computation already knows, and give it entry points.
         var signals: [String]
         var objectives: String
         var now: Date
@@ -54,47 +57,46 @@ enum CoachBriefingBuilder {
         }
     }
 
-    // MARK: - Réglages
+    // MARK: - Settings
 
-    /// Plafonds de listes. Calibrés pour tenir dans `maxCharacters` sans
-    /// perdre le signal : au-delà du 12ᵉ poste de dépense ou du 15ᵉ marchand,
-    /// les montants deviennent anecdotiques face aux premiers.
+    /// List ceilings. Calibrated to fit within `maxCharacters` without
+    /// losing signal: past the 12th spending category or the 15th merchant,
+    /// the amounts become anecdotal next to the leading ones.
     static let maxCategories = 12
     static let maxMerchants = 15
     static let maxRecurring = 20
     static let maxSignals = 8
-    /// ⚠️ Ces deux plafonds manquaient : le détail mensuel et les enveloppes
-    /// étaient les seules listes non bornées du dossier. Sur un historique
-    /// long ou un budget très découpé, elles poussaient le dossier au-delà de
-    /// `maxCharacters` — et c'est alors la TRONCATURE qui décidait de ce qui
-    /// partait au modèle, en coupant la fin. Un plafond explicite garde la
-    /// main sur ce qu'on sacrifie.
+    /// The monthly detail and the envelopes are the two lists that most
+    /// easily grow unbounded. On a long history or a finely split budget they
+    /// push the briefing past `maxCharacters` — and then TRUNCATION decides
+    /// what reaches the model, by cutting the end. An explicit ceiling keeps
+    /// control over what gets sacrificed.
     static let maxMonths = 24
     static let maxEnvelopes = 20
-    /// Borne dure du dossier en mode `.compact` : ~6 000 caractères ≈ 1 600 tokens.
+    /// Hard bound on the briefing in `.compact` mode: ~6,000 characters ≈
+    /// 1,600 tokens.
     ///
-    /// ⚠️ Ce n'est PAS une marge confortable sur un modèle à 4 000 tokens de
-    /// contexte : avec ~700 tokens de consignes, il reste ~1 700 tokens pour
-    /// la réponse. C'est jouable, mais c'est précisément ce qui peut faire
-    /// COUPER la réponse en plein JSON sur un dossier maximal — d'où le repli
-    /// de récupération dans `CoachResponseParser` (retour d'usage 2026-08-28).
+    /// This is NOT comfortable headroom on a 4,000-token context model: with
+    /// ~700 tokens of instructions, ~1,700 tokens remain for the answer.
+    /// That's workable, but it's precisely what can CUT the response
+    /// mid-JSON on a maximal briefing — hence the salvage fallback in
+    /// `CoachResponseParser`.
     static let maxCharacters = 6_000
-    /// Borne du dossier en mode `.generous` (serveur local / cloud) : le
-    /// contexte de ces backends encaisse largement un dossier 3-4× plus riche
-    /// — pour la plupart des utilisateurs, le dossier ne l'atteint même pas
-    /// (les plafonds de LISTE ci-dessus, eux, ne bougent pas : au-delà du 12ᵉ
-    /// poste ou du 24ᵉ mois, le signal devient anecdotique quel que soit le
-    /// modèle qui le lit — cf. commentaire des plafonds de liste).
+    /// Briefing bound in `.generous` mode (local server / cloud): those
+    /// backends' context comfortably takes a briefing 3-4× richer — for most
+    /// users the briefing doesn't even reach it. The LIST ceilings above do
+    /// NOT move with it: past the 12th category or the 24th month, the signal
+    /// is anecdotal regardless of which model reads it.
     static let maxCharactersGenerous = 20_000
 
-    // MARK: - Construction
+    // MARK: - Assembly
 
-    /// Le dossier découpé en blocs NOMMÉS.
+    /// The briefing split into NAMED blocks.
     ///
-    /// C'est la même matière que `build`, mais adressable : sur une fenêtre de
-    /// contexte étroite, `CoachPassPlanner` répartit ces sections entre
-    /// plusieurs appels au lieu de tout envoyer d'un coup (et de se faire
-    /// tronquer là où le hasard décide).
+    /// Same material as `build`, but addressable: on a narrow context window,
+    /// `CoachPassPlanner` spreads these sections across several calls instead
+    /// of sending everything at once (and being truncated wherever chance
+    /// decides).
     static func sections(_ input: Input) -> [CoachBriefingSection] {
         var out: [CoachBriefingSection] = [
             CoachBriefingSection(id: "profil", title: "Profil et flux mensuels", body: profileBlock(input)),
@@ -115,13 +117,13 @@ enum CoachBriefingBuilder {
         return out
     }
 
-    /// Les chiffres clés en quelques lignes, RÉPÉTÉS dans chaque passe d'une
-    /// analyse découpée.
+    /// The key figures in a few lines, REPEATED in every pass of a split
+    /// analysis.
     ///
-    /// ⚠️ Sans eux, une passe qui ne voit que « les marchands » n'a aucune
-    /// idée du niveau de revenu et recommande dans le vide (« réduis Grab »
-    /// sans savoir si 417 € pèsent quelque chose). Le coût — ~250 caractères
-    /// par passe — est le prix de la pertinence.
+    /// Without them, a pass that only sees "the merchants" has no idea of the
+    /// income level and advises in a vacuum ("cut back on Grab" without
+    /// knowing whether €417 weighs anything). The cost — ~250 characters per
+    /// pass — is the price of relevance.
     static func condensedHeader(_ input: Input) -> String {
         let months = monthlyTotals(input)
         guard !months.isEmpty else { return "CHIFFRES CLÉS\nAucune transaction sur la période analysée." }
@@ -139,9 +141,9 @@ enum CoachBriefingBuilder {
     static func build(_ input: Input, budget: CoachContextBudget = .compact) -> String {
         var text = sections(input).map(\.body).joined(separator: "\n\n")
         let limit = budget == .compact ? maxCharacters : maxCharactersGenerous
-        // Les objectifs sont ajoutés APRÈS la troncature du reste : ils sont
-        // ce que l'utilisateur a écrit lui-même, ils ne doivent jamais être
-        // la partie sacrifiée quand le dossier est trop long.
+        // Goals are appended AFTER the rest is truncated: they are what the
+        // user wrote themselves, and must never be the part sacrificed when
+        // the briefing runs long.
         if text.count > limit {
             text = String(text.prefix(limit)) + "\n[…dossier tronqué]"
         }
@@ -151,7 +153,7 @@ enum CoachBriefingBuilder {
         return text
     }
 
-    // MARK: - Profil
+    // MARK: - Profile
 
     private static func profileBlock(_ input: Input) -> String {
         let months = monthlyTotals(input)
@@ -165,8 +167,8 @@ enum CoachBriefingBuilder {
         let savings = avgIncome - avgExpense
         let rate = avgIncome > 0 ? savings / avgIncome * 100 : 0
 
-        // Le taux d'épargne mois par mois : une moyenne de 12 % peut cacher
-        // « +30 % puis -6 % », ce qui n'appelle pas du tout le même conseil.
+        // The savings rate month by month: an average of 12% can hide
+        // "+30% then -6%", which calls for entirely different advice.
         let monthlyRates = months.map { $0.income > 0 ? ($0.income - $0.expense) / $0.income * 100 : 0 }
         let minRate = monthlyRates.min() ?? 0
         let maxRate = monthlyRates.max() ?? 0
@@ -180,15 +182,15 @@ enum CoachBriefingBuilder {
         lines.append("Taux d'épargne mensuel — le plus bas \(percent(minRate)), le plus haut \(percent(maxRate))")
         lines.append("")
         lines.append("Détail mensuel (revenus / dépenses / solde) :")
-        // Les mois les plus RÉCENTS : c'est la situation actuelle qui appelle
-        // un conseil, pas celle d'il y a trois ans.
+        // The most RECENT months: it's the current situation that calls for
+        // advice, not the one from three years ago.
         for m in months.suffix(maxMonths) {
             lines.append("  \(m.label) : \(money(m.income)) / \(money(m.expense)) / \(money(m.income - m.expense))")
         }
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - Catégories
+    // MARK: - Categories
 
     private static func categoryBlock(_ input: Input) -> String {
         let cal = calendar
@@ -198,9 +200,9 @@ enum CoachBriefingBuilder {
         let parentOf = parentIndex(input.categories)
         let nameOf = Dictionary(uniqueKeysWithValues: input.categories.map { ($0.id, $0.name) })
 
-        var total: [Int: Double] = [:]      // sur toute la période
-        var recent: [Int: Double] = [:]     // 3 derniers mois
-        var previous: [Int: Double] = [:]   // les 3 d'avant
+        var total: [Int: Double] = [:]      // over the whole period
+        var recent: [Int: Double] = [:]     // last 3 months
+        var previous: [Int: Double] = [:]   // the 3 before those
         var uncategorized: Double = 0
 
         for tx in input.transactions where tx.amount < 0 {
@@ -230,9 +232,9 @@ enum CoachBriefingBuilder {
         return lines.joined(separator: "\n")
     }
 
-    /// Tendance en clair plutôt qu'en pourcentage brut : « +18 % » sur une
-    /// base de 4 € n'a aucun sens, et le modèle ne peut pas le savoir sans la
-    /// base. On ne qualifie donc que ce qui est significatif en montant.
+    /// Trend in plain words rather than a raw percentage: "+18%" on a €4
+    /// base means nothing, and the model can't know that without the base.
+    /// So only what is significant in amount gets qualified.
     private static func trendLabel(recent: Double, previous: Double) -> String {
         guard previous > 30 || recent > 30 else { return "volume faible" }
         guard previous > 0 else { return "nouveau poste" }
@@ -242,7 +244,7 @@ enum CoachBriefingBuilder {
         return "stable"
     }
 
-    // MARK: - Charges récurrentes
+    // MARK: - Recurring charges
 
     private static func recurringBlock(_ input: Input) -> String? {
         let expenses = input.patterns.filter { $0.isActive && $0.isExpense }
@@ -268,7 +270,7 @@ enum CoachBriefingBuilder {
         }
     }
 
-    // MARK: - Marchands
+    // MARK: - Merchants
 
     private static func merchantBlock(_ input: Input) -> String? {
         var byTier: [Int: (count: Int, total: Double)] = [:]
@@ -290,7 +292,7 @@ enum CoachBriefingBuilder {
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - Enveloppes
+    // MARK: - Envelopes
 
     private static func envelopeBlock(_ input: Input) -> String? {
         let active = input.envelopes.filter { $0.isActive }
@@ -302,9 +304,9 @@ enum CoachBriefingBuilder {
         )
         guard !progresses.isEmpty else { return nil }
         var lines = ["ENVELOPPES BUDGÉTAIRES DU MOIS EN COURS (alloué · dépensé · état)"]
-        // Triées par tension décroissante, donc le plafond coupe les
-        // enveloppes les plus confortables — celles sur lesquelles il n'y a
-        // justement rien à dire.
+        // Sorted by decreasing pressure, so the ceiling cuts the most
+        // comfortable envelopes — precisely the ones with nothing to say
+        // about them.
         for p in progresses.sorted(by: { $0.rawRatio > $1.rawRatio }).prefix(maxEnvelopes) {
             let state: String
             switch p.healthState {
@@ -324,7 +326,7 @@ enum CoachBriefingBuilder {
         return input.transactions.filter { $0.date >= start && $0.date <= input.now }
     }
 
-    // MARK: - Signaux & objectifs
+    // MARK: - Signals & goals
 
     private static func signalBlock(_ input: Input) -> String? {
         let signals = input.signals.filter { !$0.isEmpty }
@@ -334,18 +336,18 @@ enum CoachBriefingBuilder {
         return lines.joined(separator: "\n")
     }
 
-    /// Interne (pas privé) : le découpage en passes le répète dans CHAQUE
-    /// passe — les objectifs sont la priorité n°1 du coach, une passe qui ne
-    /// les verrait pas conseillerait à côté.
+    /// Internal (not private): pass splitting repeats it in EVERY pass —
+    /// goals are the coach's top priority, and a pass that couldn't see them
+    /// would advise beside the point.
     static func objectivesBlock(_ input: Input) -> String? {
         let trimmed = input.objectives.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        // Borné aussi : un utilisateur peut coller trois pages.
+        // Bounded too: a user can paste three pages.
         let capped = trimmed.count > 1_500 ? String(trimmed.prefix(1_500)) + "…" : trimmed
         return "OBJECTIFS ÉCRITS PAR L'UTILISATEUR (à prendre comme la priorité n°1)\n\(capped)"
     }
 
-    // MARK: - Agrégation mensuelle
+    // MARK: - Monthly aggregation
 
     struct MonthTotals {
         let label: String
@@ -353,7 +355,7 @@ enum CoachBriefingBuilder {
         let expense: Double
     }
 
-    /// Totaux par mois calendaire, ordre chronologique.
+    /// Totals per calendar month, in chronological order.
     static func monthlyTotals(_ input: Input) -> [MonthTotals] {
         let cal = calendar
         var buckets: [DateComponents: (income: Double, expense: Double)] = [:]
@@ -373,17 +375,17 @@ enum CoachBriefingBuilder {
 
     // MARK: - Helpers
 
-    /// Calendrier grégorien explicite : un moteur pur ne doit pas dépendre du
-    /// réglage régional de l'appareil pour découper des mois.
+    /// Explicit Gregorian calendar: a pure engine must not depend on the
+    /// device's regional settings to split months.
     private static var calendar: Calendar { Calendar(identifier: .gregorian) }
 
-    /// Remonte la chaîne de parenté jusqu'à la catégorie racine. Agréger au
-    /// niveau racine évite un dossier saturé de sous-catégories à 4 € qui
-    /// noieraient les vrais postes.
+    /// Walks up the parent chain to the root category. Aggregating at root
+    /// level avoids a briefing saturated with €4 subcategories that would
+    /// drown the real ones.
     private static func rootCategory(_ id: Int, parentOf: [Int: Int]) -> Int {
         var current = id
-        // Borne de sécurité : une hiérarchie corrompue (cycle) ne doit pas
-        // faire tourner le moteur à l'infini.
+        // Safety bound: a corrupted hierarchy (a cycle) must not spin the
+        // engine forever.
         for _ in 0..<10 {
             guard let parent = parentOf[current] else { return current }
             current = parent
@@ -397,8 +399,8 @@ enum CoachBriefingBuilder {
         return result
     }
 
-    /// ⚠️ Locale forcée : moteur pur, sans accès à l'environnement SwiftUI.
-    /// Même convention que `InsightEngine` / `AlertEngine` (cf. CLAUDE.md §5).
+    /// Forced locale: pure engine, with no access to the SwiftUI
+    /// environment. Same convention as `InsightEngine` / `AlertEngine`.
     private static func money(_ value: Double) -> String {
         value.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))
     }

@@ -3,22 +3,22 @@ import SQLite3
 
 private let SQLITE_TRANSIENT_APPLEPAY = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-/// Une dépense Apple Pay déposée par l'automatisation Raccourcis, en attente
-/// de résolution — jamais créée directement par l'utilisateur.
+/// An Apple Pay expense dropped off by the Shortcuts automation, awaiting
+/// resolution — never created directly by the user.
 struct PendingApplePayEntry: Identifiable {
     enum Status: String {
-        /// Déposée, pas encore traitée.
+        /// Dropped off, not processed yet.
         case pending
-        /// Rapprochée d'une transaction arrivée par import bancaire (relevé
-        /// CSV/PDF/OFX). Pas encore livré — cf. AXE en cours.
+        /// Matched against a transaction that arrived through bank import
+        /// (CSV/PDF/OFX statement). Not implemented yet.
         case matched
-        /// Écartée par l'utilisateur.
+        /// Dismissed by the user.
         case dismissed
     }
 
     let id: Int
     var card: String?
-    /// Toujours négatif (dépense) — cf. `PendingApplePayRepository.addEntry`.
+    /// Always negative (an expense) — see `PendingApplePayRepository.addEntry`.
     var amount: Double
     var merchant: String
     var status: Status
@@ -26,39 +26,40 @@ struct PendingApplePayEntry: Identifiable {
     var createdAt: Date
 }
 
-/// CRUD pour `pending_apple_pay_entries` (migration v49).
+/// CRUD for `pending_apple_pay_entries`.
 ///
-/// Alimentée UNIQUEMENT par `ImportTransactionApplePayEntityIntent`
-/// (automatisation personnelle Raccourcis « Apple Pay », `openAppWhenRun =
-/// false` — s'exécute sans jamais afficher l'app). Table locale, jamais
-/// synchronisée (cf. `SyncSchema.swift`) : chaque appareil reçoit ses propres
-/// notifications Apple Pay, rien à réconcilier entre appareils.
+/// Populated ONLY by `ImportTransactionApplePayEntityIntent` (a personal
+/// "Apple Pay" Shortcuts automation, `openAppWhenRun = false` — it runs
+/// without ever showing the app). A local table, never synced (see
+/// `SyncSchema.swift`): each device receives its own Apple Pay
+/// notifications, so there is nothing to reconcile between devices.
 struct PendingApplePayRepository {
 
     private let store: SQLiteStore
 
-    /// La valeur par défaut vise la base de l'application : les sites
-    /// d'appel existants n'ont pas à changer.
+    /// The default value targets the app's own database: existing call
+    /// sites need no change.
     init(store: SQLiteStore = SQLiteStore()) {
         self.store = store
     }
 
-    // Propriété d'INSTANCE, pas `static` : un `ISO8601DateFormatter` n'est pas
-    // `Sendable`, et un `static let` en ferait une variable globale mutable
-    // partagée, rejetée par la concurrence stricte Swift 6 (cf. LiveSyncRepository).
+    // An INSTANCE property, not `static`: `ISO8601DateFormatter` isn't
+    // `Sendable`, and a `static let` would make it a shared mutable global,
+    // rejected by Swift 6 strict concurrency (see LiveSyncRepository).
     private let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
 
-    // MARK: - Écriture
+    // MARK: - Writing
 
-    /// Dépose une entrée en attente. `amount` peut arriver positif (valeur
-    /// brute fournie par le déclencheur Raccourcis « Apple Pay ») : on la
-    /// normalise en négatif ici, une bonne fois, pour rester compatible avec
-    /// la convention du reste de l'app (`transactions.amount < 0` = dépense)
-    /// sans que chaque futur lecteur (budget, notifications) ait à y penser.
+    /// Drops off a pending entry. `amount` can arrive positive (the raw
+    /// value supplied by the "Apple Pay" Shortcuts trigger): it is
+    /// normalized to negative here, once and for all, to stay compatible
+    /// with the rest of the app's convention (`transactions.amount < 0` = an
+    /// expense) without every future reader (budget, notifications) having
+    /// to think about it.
     @discardableResult
     func addEntry(card: String?, amount: Double, merchant: String) -> Bool {
         let now = isoFormatter.string(from: Date())
@@ -77,9 +78,9 @@ struct PendingApplePayRepository {
         }
     }
 
-    // MARK: - Mise à jour
+    // MARK: - Updating
 
-    /// Change le statut d'une entrée (écarter manuellement depuis la liste).
+    /// Changes an entry's status (manual dismissal from the list).
     @discardableResult
     func updateStatus(id: Int, to status: PendingApplePayEntry.Status) -> Bool {
         store.writeSingle(sql: "UPDATE pending_apple_pay_entries SET status = ? WHERE id = ?;") { stmt in
@@ -88,10 +89,10 @@ struct PendingApplePayRepository {
         }
     }
 
-    /// Corrige le montant d'une entrée déposée sans montant connu (cf.
-    /// `ImportTransactionApplePayEntityIntent` — stockée à 0 le temps que
-    /// l'utilisateur la corrige depuis `PendingApplePayListView`).
-    /// Normalisée en négatif comme `addEntry`, même convention.
+    /// Fixes the amount of an entry dropped off without a known amount (see
+    /// `ImportTransactionApplePayEntityIntent` — stored as 0 until the user
+    /// corrects it from `PendingApplePayListView`). Normalized to negative
+    /// like `addEntry`, same convention.
     @discardableResult
     func updateAmount(id: Int, amount: Double) -> Bool {
         store.writeSingle(sql: "UPDATE pending_apple_pay_entries SET amount = ? WHERE id = ?;") { stmt in
@@ -100,13 +101,13 @@ struct PendingApplePayRepository {
         }
     }
 
-    // MARK: - Suppression
+    // MARK: - Deletion
 
-    /// Supprime définitivement les entrées déposées avant `cutoff`, tous
-    /// statuts confondus (`pending` comme `dismissed` — rien ne les efface
-    /// jamais autrement, elles s'accumuleraient indéfiniment sinon). Geste
-    /// manuel, déclenché par l'utilisateur depuis les réglages. Renvoie le
-    /// nombre de lignes supprimées pour le feedback UI.
+    /// Permanently deletes entries dropped off before `cutoff`, whatever
+    /// their status (`pending` as well as `dismissed` — nothing else ever
+    /// removes them, so they would otherwise accumulate indefinitely). A
+    /// manual gesture, triggered by the user from settings. Returns the
+    /// number of rows deleted, for UI feedback.
     @discardableResult
     func purgeEntries(olderThan cutoff: Date) -> Int {
         store.write { db -> Int in
@@ -120,9 +121,9 @@ struct PendingApplePayRepository {
         } ?? 0
     }
 
-    // MARK: - Lecture
+    // MARK: - Reading
 
-    /// Entrées du statut donné (toutes si `nil`), plus récentes d'abord.
+    /// Entries with the given status (all when `nil`), most recent first.
     func fetchEntries(status: PendingApplePayEntry.Status? = nil) -> [PendingApplePayEntry] {
         store.read { db -> [PendingApplePayEntry] in
             let sql = status != nil
@@ -144,10 +145,10 @@ struct PendingApplePayRepository {
         } ?? []
     }
 
-    /// Somme des montants encore `pending` depuis `since` — support direct
-    /// d'une future alerte par période ("X € Apple Pay non catégorisé cette
-    /// semaine"). Négatif (convention dépense) ; le futur appelant applique
-    /// `abs(...)` pour l'affichage.
+    /// Sum of the amounts still `pending` since `since` — the direct
+    /// support for a per-period alert ("€X of uncategorized Apple Pay this
+    /// week"). Negative (the expense convention); the caller applies
+    /// `abs(...)` for display.
     func pendingTotal(since: Date) -> Double {
         store.read { db -> Double in
             var stmt: OpaquePointer?

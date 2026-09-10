@@ -1,25 +1,28 @@
 import Foundation
 
-// MARK: - InvestmentBriefingBuilder — le dossier « portefeuille »
+// MARK: - InvestmentBriefingBuilder — the "portfolio" briefing
 //
-// Moteur PUR, même doctrine et mêmes raisons que `CoachBriefingBuilder` :
-// on ne peut pas envoyer l'historique complet des ordres et des cours à un
-// modèle, on lui présente le dossier qu'un conseiller lirait.
+// PURE engine, same doctrine and same reasons as `CoachBriefingBuilder`: the
+// full history of orders and prices can't be sent to a model, so it gets the
+// briefing an adviser would read instead.
 //
-// ⚠️ Ce dossier ne contient QUE des faits mesurés dans la base. Aucune donnée
-// de marché externe, aucune projection : le modèle doit raisonner sur la
-// situation réelle de l'utilisateur (concentration, frais, liquidités
-// dormantes, cohérence avec ses objectifs), pas prédire des cours.
+// This briefing contains ONLY facts measured in the database. No external
+// market data, no projection: the model must reason about the user's real
+// situation (concentration, fees, idle cash, consistency with their goals),
+// not predict prices.
+//
+// The briefing text stays in French: it is content for a model asked to
+// answer the user in their own language.
 
 enum InvestmentBriefingBuilder {
 
-    // MARK: - Entrée
+    // MARK: - Input
 
     struct Input {
         var accounts: [InvestmentAccount]
         var positions: [InvestmentPosition]
-        /// Ordres récents, pour caractériser l'activité (buy & hold vs
-        /// trading actif) — deux profils qui n'appellent pas les mêmes conseils.
+        /// Recent orders, to characterize the activity (buy & hold vs
+        /// active trading) — two profiles that call for different advice.
         var recentOrders: [InvestmentOrder]
         var objectives: String
         var now: Date
@@ -35,18 +38,18 @@ enum InvestmentBriefingBuilder {
     }
 
     static let maxPositions = 20
-    /// Borne dure du dossier en mode `.compact` (Apple Intelligence). Voir
-    /// `CoachBriefingBuilder.maxCharacters` pour le détail du calcul.
+    /// Hard bound on the briefing in `.compact` mode (Apple Intelligence).
+    /// See `CoachBriefingBuilder.maxCharacters` for the arithmetic.
     static let maxCharacters = 6_000
-    /// Borne du dossier en mode `.generous` (serveur local / cloud) — même
-    /// raisonnement que `CoachBriefingBuilder.maxCharactersGenerous`.
+    /// Briefing bound in `.generous` mode (local server / cloud) — same
+    /// reasoning as `CoachBriefingBuilder.maxCharactersGenerous`.
     static let maxCharactersGenerous = 20_000
 
-    // MARK: - Construction
+    // MARK: - Assembly
 
-    /// Le dossier découpé en blocs NOMMÉS — même rôle que
-    /// `CoachBriefingBuilder.sections` : rendre le dossier distribuable entre
-    /// plusieurs passes quand la fenêtre de contexte est étroite.
+    /// The briefing split into NAMED blocks — same role as
+    /// `CoachBriefingBuilder.sections`: making the briefing distributable
+    /// across several passes when the context window is narrow.
     static func sections(_ input: Input) -> [CoachBriefingSection] {
         var out: [CoachBriefingSection] = [
             CoachBriefingSection(id: "portefeuille", title: "Vue d'ensemble du portefeuille", body: overviewBlock(input))
@@ -66,8 +69,8 @@ enum InvestmentBriefingBuilder {
         return out
     }
 
-    /// Les chiffres clés, répétés dans chaque passe d'une analyse découpée
-    /// (cf. `CoachBriefingBuilder.condensedHeader`).
+    /// The key figures, repeated in every pass of a split analysis (see
+    /// `CoachBriefingBuilder.condensedHeader`).
     static func condensedHeader(_ input: Input) -> String {
         let invested = input.positions.reduce(0.0) { $0 + $1.investedAmount }
         let current = input.positions.reduce(0.0) { $0 + $1.currentValue }
@@ -93,7 +96,7 @@ enum InvestmentBriefingBuilder {
         return text
     }
 
-    // MARK: - Vue d'ensemble
+    // MARK: - Overview
 
     private static func overviewBlock(_ input: Input) -> String {
         let invested = input.positions.reduce(0.0) { $0 + $1.investedAmount }
@@ -109,16 +112,15 @@ enum InvestmentBriefingBuilder {
         lines.append("Plus/moins-value latente : \(money(pnl)) (\(signedPercent(pnlPct)))")
         lines.append("Liquidités non investies : \(money(cash))")
         if totalCapital > 0 {
-            // Les liquidités dormantes sont un signal de coaching de premier
-            // ordre : du capital immobilisé sans rendement, souvent par
-            // inertie plutôt que par choix.
+            // Idle cash is a first-order coaching signal: capital tied up
+            // with no return, usually out of inertia rather than choice.
             lines.append("Capital total : \(money(totalCapital)) — dont \(percent(cash / totalCapital * 100)) en liquidités")
         }
         lines.append("Nombre de positions : \(input.positions.count) · Nombre de comptes : \(input.accounts.count)")
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - Comptes
+    // MARK: - Accounts
 
     private static func accountBlock(_ input: Input) -> String? {
         guard !input.accounts.isEmpty else { return nil }
@@ -150,9 +152,9 @@ enum InvestmentBriefingBuilder {
             lines.append("  \(type) : \(money(value)) · \(percent(value / total * 100))")
         }
 
-        // La concentration est LE risque structurel qu'un particulier ne voit
-        // pas de lui-même : il regarde ses lignes une par une, jamais leur
-        // poids relatif.
+        // Concentration is THE structural risk a retail investor doesn't
+        // see for themselves: they look at their holdings one by one, never
+        // at their relative weight.
         let sorted = input.positions.map(\.currentValue).sorted(by: >)
         let top1 = sorted.first ?? 0
         let top3 = sorted.prefix(3).reduce(0, +)
@@ -183,7 +185,7 @@ enum InvestmentBriefingBuilder {
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - Activité
+    // MARK: - Activity
 
     private static func activityBlock(_ input: Input) -> String? {
         guard !input.recentOrders.isEmpty else { return nil }
@@ -202,16 +204,16 @@ enum InvestmentBriefingBuilder {
         }
         var lines = ["ACTIVITÉ RÉCENTE"]
         lines.append("  \(buys) achats · \(sells) ventes · \(dividends) dividendes (\(money(dividendTotal)) perçus)")
-        // Les frais cumulés sont un levier concret et chiffrable, que
-        // l'utilisateur ne totalise jamais lui-même.
+        // Cumulative fees are a concrete, quantifiable lever that the user
+        // never totals up themselves.
         if feesTotal > 0 {
             lines.append("  Frais de courtage cumulés sur la période : \(money(feesTotal))")
         }
         return lines.joined(separator: "\n")
     }
 
-    /// Interne (pas privé) : répété dans chaque passe d'une analyse découpée,
-    /// même raison que côté dépenses.
+    /// Internal (not private): repeated in every pass of a split analysis,
+    /// same reason as on the spending side.
     static func objectivesBlock(_ input: Input) -> String? {
         let trimmed = input.objectives.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -221,8 +223,8 @@ enum InvestmentBriefingBuilder {
 
     // MARK: - Helpers
 
-    /// ⚠️ Locale forcée : moteur pur, sans accès à l'environnement SwiftUI
-    /// (cf. CLAUDE.md §5).
+    /// Forced locale: pure engine, with no access to the SwiftUI
+    /// environment.
     private static func money(_ value: Double) -> String {
         value.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))
     }

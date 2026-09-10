@@ -2,33 +2,34 @@ import Foundation
 
 // MARK: - CoachService
 //
-// Orchestration d'une analyse : rassembler les données → construire le dossier
-// → interroger le modèle → parser → persister.
+// Orchestrates one analysis: gather the data → build the briefing → query the
+// model → parse → persist.
 //
-// Impur par nature (base + IA). Toute la logique décidable est en dehors :
-// `CoachBriefingBuilder`, `InvestmentBriefingBuilder`, `CoachPrompt`,
-// `CoachResponseParser`, `CoachRanker` sont des moteurs purs testés à part.
+// Impure by nature (database + AI). Every decidable piece of logic lives
+// outside: `CoachBriefingBuilder`, `InvestmentBriefingBuilder`, `CoachPrompt`,
+// `CoachResponseParser` and `CoachRanker` are pure engines, tested separately.
 //
-// ⚠️ Le chargement des données et l'écriture tournent en `Task.detached` : une
-// analyse lit jusqu'à 10 000 transactions, ce qui bloquerait l'UI pendant
-// plusieurs centaines de millisecondes sur le main actor. C'est la même raison
-// qui avait fait sortir `SearchService` du main actor (gels macOS documentés).
+// Loading and writing run in a `Task.detached`: one analysis reads up to
+// 10,000 transactions, which would block the UI for several hundred
+// milliseconds on the main actor. It's the same reason `SearchService` was
+// moved off the main actor.
 
 @MainActor
 enum CoachService {
 
-    /// Fenêtre d'analyse. 6 mois : assez pour dégager une tendance et repérer
-    /// une dérive, assez court pour que les conseils portent sur la situation
-    /// actuelle et non sur un comportement abandonné depuis.
+    /// Analysis window. 6 months: long enough to establish a trend and spot
+    /// drift, short enough that the advice covers the current situation and
+    /// not a behavior abandoned since.
     ///
-    /// `nonisolated` : lu depuis la construction des dossiers, qui tourne hors
-    /// du main actor.
+    /// `nonisolated`: read from briefing construction, which runs off the
+    /// main actor.
     nonisolated static let analysisMonths = 6
 
-    // MARK: - Analyse
+    // MARK: - Analysis
 
-    /// Lance une analyse complète pour un domaine et persiste le résultat.
-    /// Ne lève jamais : un échec est un `CoachAnalysis` en erreur, affichable.
+    /// Runs a full analysis for one domain and persists the result.
+    /// Never throws: a failure is a `CoachAnalysis` in an error state, which
+    /// is displayable.
     static func analyze(domain: CoachDomain, now: Date = Date()) async -> CoachAnalysis {
         guard AIEnrichmentBackend.isAvailable(for: domain.aiFeature) else {
             let reason = AIEnrichmentBackend.unavailabilityReason(for: domain.aiFeature)
@@ -40,15 +41,15 @@ enum CoachService {
         }
         let resolvedBackend = AIEnrichmentBackend.resolved(for: domain.aiFeature)
         let backendLabel = resolvedBackend?.displayName
-        // Le dossier et le profil demandé s'adaptent au backend RÉSOLU, pas au
-        // choix brut de l'utilisateur : Apple Intelligence a une fenêtre de
-        // contexte fixe et non négociable, un serveur local ou un fournisseur
-        // cloud encaisse largement plus — cf. `CoachContextBudget`.
+        // The briefing and the requested profile adapt to the RESOLVED
+        // backend, not to the user's raw choice: Apple Intelligence has a
+        // fixed, non-negotiable context window, while a local server or a
+        // cloud provider takes far more — see `CoachContextBudget`.
         let budget = CoachContextBudget.resolved(from: resolvedBackend)
 
-        // Le dossier est découpé en PASSES : une seule quand le backend
-        // encaisse tout (comportement historique), plusieurs quand la fenêtre
-        // est étroite. Cf. `CoachPassPlanner` pour le pourquoi.
+        // The briefing is split into PASSES: a single one when the backend
+        // takes everything (historical behavior), several when the window is
+        // narrow. See `CoachPassPlanner` for the reasoning.
         let passes = await Task.detached(priority: .utility) {
             buildPasses(domain: domain, now: now, budget: budget)
         }.value
@@ -66,11 +67,11 @@ enum CoachService {
         var passCount = passes.count
         var degraded = false
 
-        // Repli ADAPTATIF : le serveur vient de montrer sa vraie limite (du
-        // raisonnement tronqué, aucune réponse). On ne l'a pas deviné à
-        // l'avance — le même modèle réussit ailleurs — mais maintenant qu'on
-        // le sait, on rejoue en passes courtes, qui divisent l'entrée par
-        // ~2,5 et lui rendent de quoi conclure.
+        // ADAPTIVE fallback: the server has just shown its real limit
+        // (truncated reasoning, no answer). It couldn't be predicted — the
+        // same model succeeds elsewhere — but now that it's known, the
+        // analysis is replayed in short passes, which divide the input by
+        // ~2.5 and give it room to conclude.
         if CoachContextBudget.shouldRetryInPasses(budget: budget,
                                                   sawReasoningOnly: outcome.sawReasoningOnly,
                                                   producedRecommendations: !outcome.drafts.isEmpty,
@@ -86,15 +87,15 @@ enum CoachService {
             }
         }
 
-        // ⚠️ Une réponse LUE mais sans recommandation n'est PAS une erreur :
-        // c'est le modèle qui n'a rien à proposer. Les confondre affichait
-        // « l'analyse n'a pas abouti » alors que tout s'était bien passé — et
-        // empêchait de diagnostiquer les vrais échecs, noyés dans le même
-        // message (retour d'usage 2026-08-28).
+        // A response that was READ but carries no recommendation is NOT an
+        // error: the model simply has nothing to propose. Conflating the two
+        // displayed "the analysis didn't succeed" when everything had gone
+        // fine — and buried the real failures under the same message.
         //
-        // ⚠️ En multi-passe, une passe en échec ne condamne PLUS l'analyse :
-        // c'est tout l'intérêt du découpage, chaque morceau réussit ou échoue
-        // pour son compte. On n'échoue que si RIEN n'a abouti.
+        // With multiple passes, one failed pass no longer condemns the
+        // analysis: that's the whole point of splitting, each piece succeeds
+        // or fails on its own. Failure is reported only if NOTHING came
+        // through.
         if outcome.drafts.isEmpty, let failure = outcome.failure {
             let failed = CoachAnalysis(domain: domain, profileSummary: outcome.profile,
                                        generatedAt: nil, isError: true,
@@ -118,19 +119,19 @@ enum CoachService {
         return analysis
     }
 
-    // MARK: - Exécution des passes
+    // MARK: - Pass execution
 
     private struct PassOutcome {
         var drafts: [CoachRecommendationDraft] = []
         var profile: String?
         var failure: CoachResponseParser.Failure?
-        /// Réponse brute de la PREMIÈRE passe en échec — de quoi diagnostiquer
-        /// sans noyer l'utilisateur sous N réponses.
+        /// Raw response of the FIRST failed pass — enough to diagnose
+        /// without drowning the user under N responses.
         var rawFailure: String?
         var failedPasses = 0
         var salvaged = false
-        /// Au moins une passe a rendu du raisonnement et aucune réponse — le
-        /// seul motif d'échec qui se rattrape en réduisant l'entrée.
+        /// At least one pass returned reasoning and no answer — the only
+        /// failure mode that shrinking the input can recover from.
         var sawReasoningOnly = false
     }
 
@@ -149,9 +150,9 @@ enum CoachService {
                 ? CoachPrompt.user(briefing: pass.body)
                 : pass.body
 
-            // Génération GUIDÉE d'abord quand c'est Apple Intelligence qui
-            // répond : le schéma interdit structurellement la prose, qui est
-            // précisément ce que rendait ce backend.
+            // GUIDED generation first when Apple Intelligence answers: the
+            // schema structurally forbids prose, which is precisely what
+            // this backend was returning.
             if let guided = await CoachGuidedGeneration.recommendations(
                 system: system, user: user, feature: domain.aiFeature) {
                 batches.append(guided)
@@ -176,8 +177,8 @@ enum CoachService {
                     outcome.failure = failure
                     outcome.rawFailure = raw
                 }
-                // Une passe partielle ne rend pas de profil ; sur la passe
-                // unique, un profil lisible reste affichable même en échec.
+                // A partial pass returns no profile; on the single pass, a
+                // readable profile stays displayable even on failure.
                 if pass.isOnly { outcome.profile = parsed.profileSummary }
                 continue
             }
@@ -188,10 +189,10 @@ enum CoachService {
 
         outcome.drafts = CoachResponseParser.merge(batches)
 
-        // Le profil est demandé À PART quand l'analyse est découpée : sur une
-        // fenêtre étroite, le réclamer en même temps que les recommandations
-        // revient à faire arbitrer le modèle entre les deux — et c'est le
-        // profil qui saute.
+        // The profile is requested SEPARATELY when the analysis is split:
+        // on a narrow window, asking for it alongside the recommendations
+        // makes the model arbitrate between the two — and the profile is
+        // what gets dropped.
         if passes.count > 1, !outcome.drafts.isEmpty {
             outcome.profile = await runProfilePass(domain: domain, passes: passes,
                                                    drafts: outcome.drafts,
@@ -204,8 +205,8 @@ enum CoachService {
                                        passes: [CoachAnalysisPass],
                                        drafts: [CoachRecommendationDraft],
                                        forceDirectAnswer: Bool) async -> String? {
-        // Les chiffres clés sont en tête de chaque passe : les reprendre de la
-        // première évite de reconstruire le dossier une fois de plus.
+        // The key figures head every pass: reusing the first one's avoids
+        // rebuilding the briefing once more.
         let header = passes[0].body.components(separatedBy: "\n\n").first ?? ""
         let system = CoachPrompt.profileSystem(for: domain)
         let user = CoachPrompt.profileUser(header: header, titles: drafts.prefix(10).map(\.title))
@@ -225,10 +226,10 @@ enum CoachService {
 
     private static func message(for failure: CoachResponseParser.Failure, passes: Int,
                                 sawReasoningOnly: Bool) -> String {
-        // Le cas « raisonnement sans réponse » a déjà été rejoué en passes
-        // courtes, mode raisonnement coupé. S'il revient ici, réduire l'entrée
-        // ne suffit pas : le dire, plutôt que de reproposer ce qu'on vient
-        // d'essayer tout seul.
+        // The "reasoning without an answer" case has already been replayed
+        // in short passes with reasoning mode off. If it comes back here,
+        // shrinking the input isn't enough: say so, rather than suggesting
+        // what the app just tried on its own.
         if sawReasoningOnly {
             return "Ce modèle réfléchit sans jamais écrire sa réponse : il dépense tout son budget en réflexion interne. L'app a déjà réessayé avec un dossier découpé en \(passes) extraits courts et le mode raisonnement coupé, sans succès — la réflexion brute est consultable ci-dessous. Dans ton serveur, augmente la longueur de contexte du modèle chargé (LM Studio : ⚙️ du modèle → « Context Length »), ou désactive son mode « Reasoning ». Un modèle sans mode raisonnement fonctionnera aussi."
         }
@@ -245,8 +246,8 @@ enum CoachService {
         }
     }
 
-    /// Note affichée quand l'analyse a abouti SANS être complète — le dire
-    /// vaut mieux que de laisser croire à un dossier entièrement couvert.
+    /// Note shown when the analysis succeeded WITHOUT being complete —
+    /// saying so beats implying the whole briefing was covered.
     private static func partialNote(_ outcome: PassOutcome, passes: Int, degraded: Bool) -> String? {
         if degraded {
             let missed = outcome.failedPasses > 0 ? " (\(outcome.failedPasses) extrait(s) sans résultat)" : ""
@@ -267,20 +268,20 @@ enum CoachService {
         }.value
     }
 
-    // MARK: - Dossiers
+    // MARK: - Briefings
 
-    /// Construit les passes d'un domaine. `nonisolated` : appelé depuis un
-    /// `Task.detached`, jamais sur le main actor.
+    /// Builds a domain's passes. `nonisolated`: called from a
+    /// `Task.detached`, never on the main actor.
     ///
-    /// Une passe unique en budget généreux (le dossier entier, comportement
-    /// historique), plusieurs quand la fenêtre de contexte est étroite.
-    /// Retourne `[]` quand il n'y a pas de données à analyser.
+    /// A single pass on a generous budget (the whole briefing, historical
+    /// behavior), several when the context window is narrow. Returns `[]`
+    /// when there is no data to analyze.
     nonisolated static func buildPasses(domain: CoachDomain, now: Date,
                                         budget: CoachContextBudget) -> [CoachAnalysisPass] {
-        // Les objectifs du DOMAINE analysé, jamais un texte partagé : demander
-        // au coach dépenses de servir un objectif de diversification, qu'aucun
-        // chiffre de son dossier ne peut éclairer, ne produit qu'un conseil
-        // d'évitement (« attends d'avoir un budget positif pour investir »).
+        // The goals of the DOMAIN being analyzed, never a shared text:
+        // asking the spending coach to serve a diversification goal that no
+        // figure in its briefing can inform yields nothing but evasive
+        // advice ("wait until your budget is positive before investing").
         let objectives = CoachRepository.shared.fetchProfile(domain: domain).objectives
         switch domain {
         case .transactions: return transactionsPasses(objectives: objectives, now: now, budget: budget)
@@ -296,8 +297,8 @@ enum CoachService {
         let transactions = txRepo.fetchTransactionsAllAccounts(from: from, to: now, limit: 10_000, offset: 0)
         guard !transactions.isEmpty else { return [] }
 
-        // Les signaux déterministes servent d'amorce au modèle : inutile qu'il
-        // re-déduise ce qu'un calcul exact sait déjà.
+        // The deterministic signals prime the model: no point having it
+        // re-derive what an exact computation already knows.
         let signals = InsightEngine.compute(txRepo: txRepo, now: now).map { insight in
             String(localized: insight.title)
         }
@@ -330,8 +331,8 @@ enum CoachService {
         }
         guard !positions.isEmpty else { return [] }
 
-        // Activité sur la fenêtre d'analyse seulement : un ordre passé il y a
-        // trois ans ne caractérise pas le comportement actuel.
+        // Activity over the analysis window only: an order placed three
+        // years ago doesn't characterize current behavior.
         let cal = Calendar(identifier: .gregorian)
         let since = cal.date(byAdding: .month, value: -analysisMonths, to: now) ?? now
         var recentOrders: [InvestmentOrder] = []

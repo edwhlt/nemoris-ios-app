@@ -1,16 +1,16 @@
 import SwiftUI
 
-/// Étape 1 (source UNIQUE) d'une fusion de tiers DOUBLONS : cherche le
-/// second tier à fusionner parmi tous les autres — utilisé seulement par le
-/// swipe "Fusionner…" d'UNE row (`ReferenceDataView.mergeTierSearchSourceId`).
-/// Une fusion groupée (2+ tiers déjà sélectionnés) n'a pas besoin de cet
-/// écran : elle va directement au résolveur de champs, cf.
-/// `PayeeMergeResolverView` — c'est LUI qui commet la fusion, pas ce picker.
-/// Niveau 2 (`.adaptivePane`) depuis `ReferenceDataView`, elle-même niveau 1
-/// — bascule en sheet bornée sur macOS. Même doctrine que
-/// `PayeeGroupMergeTargetPicker` (`PayeeGroupManagerView.swift`).
+/// Step 1 (SINGLE source) of a DUPLICATE payee merge: searches for the
+/// second payee to merge among all the others — used only by a single row's
+/// "Merge…" swipe (`ReferenceDataView.mergeTierSearchSourceId`). A bulk merge
+/// (2+ payees already selected) doesn't need this screen: it goes straight to
+/// the field resolver, see `PayeeMergeResolverView` — THAT is what commits
+/// the merge, not this picker. Level 2 (`.adaptivePane`) from
+/// `ReferenceDataView`, itself level 1 — falls back to a bounded sheet on
+/// macOS. Same doctrine as `PayeeGroupMergeTargetPicker`
+/// (`PayeeGroupManagerView.swift`).
 struct PayeeMergeTargetPicker: View {
-    /// Nom du tier déjà désigné (swipe), pour le titre/footer.
+    /// Name of the already-designated payee (swipe), for the title/footer.
     let sourceName: String
     let candidates: [Tiers]
     let onSelect: (Tiers) -> Void
@@ -54,8 +54,8 @@ struct PayeeMergeTargetPicker: View {
             }
         }
         #if os(macOS)
-        // Même politique que les autres listes de panneaux : `.plain` = base
-        // neutre, hauteur forcée sans `.adaptivePaneFrame()` externe.
+        // Same policy as the other pane lists: `.plain` = neutral base,
+        // height forced without an external `.adaptivePaneFrame()`.
         .scrollContentBackground(.hidden)
         .frame(maxWidth: .infinity, minHeight: 520, maxHeight: .infinity)
         #endif

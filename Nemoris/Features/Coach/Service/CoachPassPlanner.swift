@@ -1,70 +1,69 @@
 import Foundation
 
-// MARK: - CoachPassPlanner — découper le dossier quand le modèle ne peut pas tout lire
+// MARK: - CoachPassPlanner — splitting the briefing when the model can't read it all
 //
-// Moteur PUR (`import Foundation` uniquement) : aucun accès base, réseau, IA
-// ou SwiftUI. Même doctrine que `CoachBriefingBuilder` / `CoachRanker`.
+// PURE engine (`import Foundation` only): no database, network, AI or SwiftUI
+// access. Same doctrine as `CoachBriefingBuilder` / `CoachRanker`.
 //
-// ─── Le problème, posé honnêtement ─────────────────────────────────────────
+// ─── The problem, stated honestly ──────────────────────────────────────────
 //
-// Une fenêtre de contexte est un MUR, pas une jauge qui se recharge : ce qui
-// n'y tient pas n'est pas « oublié progressivement », il n'est jamais lu.
-// Apple Intelligence (`LanguageModelSession`) travaille dans ~4 000 tokens,
-// entrée ET sortie confondues, sans aucun paramètre pour l'élargir. Avec
-// ~700 tokens de consignes et ~1 600 de dossier, il reste ~1 700 tokens pour
-// écrire N recommandations argumentées : c'est ce qui faisait échouer chaque
-// analyse sur ce backend.
+// A context window is a WALL, not a gauge that refills: what doesn't fit
+// isn't "gradually forgotten", it is never read. Apple Intelligence
+// (`LanguageModelSession`) works within ~4,000 tokens, input AND output
+// combined, with no parameter to widen it. With ~700 tokens of instructions
+// and ~1,600 of briefing, ~1,700 tokens remain to write N reasoned
+// recommendations: that's what made every analysis fail on this backend.
 //
-// ⚠️ Ce qu'un outil comme LM Studio fait avec « un document de 50 pages »
-// n'est PAS de la mémoire longue : il découpe, il sélectionne ce qui est
-// pertinent, et il n'envoie que ça au modèle. La mémoire du modèle, elle, ne
-// dépasse jamais sa fenêtre. On applique donc le même principe — à ceci près
-// qu'on n'a pas besoin de chercher les passages pertinents : notre dossier
-// est DÉJÀ un agrégat structuré, ses sections sont les découpes naturelles.
+// What a tool like LM Studio does with "a 50-page document" is NOT long
+// memory: it splits, it selects what's relevant, and it sends only that to
+// the model. The model's own memory never exceeds its window. The same
+// principle applies here — except there's no need to search for the relevant
+// passages: this briefing is ALREADY a structured aggregate, and its
+// sections are the natural cut points.
 //
-// ─── Ce que fait ce planificateur ──────────────────────────────────────────
+// ─── What this planner does ────────────────────────────────────────────────
 //
-// Il transforme les sections du dossier en N passes qui tiennent chacune dans
-// le budget, chaque passe portant :
-//   • les CHIFFRES CLÉS (répétés) — sans eux, une passe « marchands » n'a
-//     aucune échelle de référence et conseille dans le vide ;
-//   • les OBJECTIFS (répétés) — priorité n°1 du coach, jamais sacrifiés ;
-//   • une ou plusieurs sections entières.
+// It turns the briefing's sections into N passes that each fit the budget,
+// every pass carrying:
+//   • the KEY FIGURES (repeated) — without them, a "merchants" pass has no
+//     scale of reference and advises in a vacuum;
+//   • the GOALS (repeated) — the coach's top priority, never sacrificed;
+//   • one or more whole sections.
 //
-// La fusion des résultats est DÉTERMINISTE (déduplication par `ref` puis
-// `CoachRanker`), pas un appel modèle de plus : demander à une IA de trier ce
-// qu'une IA vient d'écrire coûterait un aller-retour, serait non reproductible
-// et intestable.
+// Merging the results is DETERMINISTIC (deduplication by `ref`, then
+// `CoachRanker`), not one more model call: asking an AI to sort what an AI
+// just wrote would cost a round trip, wouldn't be reproducible, and couldn't
+// be tested.
 
 enum CoachPassPlanner {
 
-    /// Taille visée d'UNE passe, en caractères, sur une fenêtre étroite.
+    /// Target size of ONE pass, in characters, on a narrow window.
     ///
-    /// ~2 200 caractères ≈ 600 tokens. Avec ~450 tokens de consignes de passe
-    /// partielle, l'entrée tient sous 1 100 tokens : il reste largement de
-    /// quoi écrire 2 à 4 recommandations argumentées dans une fenêtre de
-    /// 4 000. C'est ce rapport-là qui compte, pas la taille absolue.
+    /// ~2,200 characters ≈ 600 tokens. With ~450 tokens of partial-pass
+    /// instructions, the input stays under 1,100 tokens: ample room remains
+    /// to write 2 to 4 reasoned recommendations within a 4,000-token window.
+    /// That ratio is what matters, not the absolute size.
     static let compactPassCharacters = 2_200
 
-    /// Place minimale garantie aux SECTIONS dans une passe.
+    /// Minimum room guaranteed to the SECTIONS within a pass.
     ///
-    /// ⚠️ Sans ce plancher, un utilisateur qui écrit une page d'objectifs
-    /// (bornés à 1 500 caractères par le dossier) ne laisserait plus de place
-    /// à la matière à analyser : la passe partirait avec des objectifs et
-    /// presque aucune donnée.
+    /// Without this floor, a user who writes a page of goals (capped at
+    /// 1,500 characters by the briefing) would leave no room for the
+    /// material to analyze: the pass would go out with goals and almost no
+    /// data.
     static let minimumSectionCharacters = 700
 
-    /// Objectifs répétés dans chaque passe : bornés plus court que dans le
-    /// dossier complet, puisqu'ils sont payés N fois.
+    /// Goals repeated in every pass: capped shorter than in the full
+    /// briefing, since they are paid for N times.
     static let objectivesPerPassCharacters = 600
 
-    /// Découpe le dossier en passes.
+    /// Splits the briefing into passes.
     ///
     /// - Parameters:
-    ///   - sections: les blocs nommés du dossier, dans l'ordre de lecture.
-    ///   - header: les chiffres clés, répétés dans chaque passe.
-    ///   - objectivesBlock: le bloc objectifs déjà formaté, ou `nil`.
-    ///   - budget: `.generous` ⇒ UNE passe avec tout (comportement historique).
+    ///   - sections: the briefing's named blocks, in reading order.
+    ///   - header: the key figures, repeated in every pass.
+    ///   - objectivesBlock: the already-formatted goals block, or `nil`.
+    ///   - budget: `.generous` ⇒ ONE pass with everything (historical behavior).
     static func plan(sections: [CoachBriefingSection],
                      header: String,
                      objectivesBlock: String?,
@@ -72,10 +71,10 @@ enum CoachPassPlanner {
         let usable = sections.filter { !$0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard !usable.isEmpty else { return [] }
 
-        // Un backend qui encaisse tout le dossier n'a rien à gagner au
-        // découpage : plusieurs appels coûteraient plus cher ET priveraient le
-        // modèle de la vue d'ensemble, qui est justement ce qui produit les
-        // recommandations transversales.
+        // A backend that takes the whole briefing has nothing to gain from
+        // splitting: several calls would cost more AND deprive the model of
+        // the overall view, which is precisely what produces the
+        // cross-cutting recommendations.
         if budget == .generous {
             var body = ([header] + usable.map(\.body)).joined(separator: "\n\n")
             if let objectivesBlock { body += "\n\n" + objectivesBlock }
@@ -88,16 +87,16 @@ enum CoachPassPlanner {
         let fixedCost = header.count + (objectives.map { $0.count + 2 } ?? 0)
         let sectionBudget = max(minimumSectionCharacters, compactPassCharacters - fixedCost)
 
-        // Regroupement glouton : on remplit une passe tant que la section
-        // suivante y tient encore. Une section SEULE plus grosse que le budget
-        // est tronquée mais garde sa passe — jamais abandonnée, sinon le
-        // découpage ferait disparaître de la matière au lieu de l'étaler.
+        // Greedy grouping: a pass is filled as long as the next section
+        // still fits. A SINGLE section larger than the budget is truncated
+        // but keeps its own pass — never dropped, otherwise splitting would
+        // make material disappear instead of spreading it out.
         var groups: [[CoachBriefingSection]] = []
         var current: [CoachBriefingSection] = []
         var currentCount = 0
 
         for section in usable {
-            let separator = current.isEmpty ? 0 : 2   // le "\n\n" de jointure
+            let separator = current.isEmpty ? 0 : 2   // the joining "\n\n"
             if !current.isEmpty, currentCount + separator + section.body.count > sectionBudget {
                 groups.append(current)
                 current = []

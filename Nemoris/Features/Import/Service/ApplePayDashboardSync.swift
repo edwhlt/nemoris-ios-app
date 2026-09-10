@@ -1,34 +1,34 @@
 import Foundation
 
-/// Prévient le Dashboard qu'une dépense Apple Pay a été déposée, écartée, ou
-/// purgée.
+/// Tells the Dashboard that an Apple Pay expense was dropped off, dismissed
+/// or purged.
 ///
-/// Nécessaire car le dépôt vient d'un process séparé (automatisation
-/// Raccourcis, `ImportTransactionApplePayEntityIntent`, `openAppWhenRun =
-/// false`) qui n'a aucun accès à `AppState` pour bumper `dataRefreshToken`
-/// lui-même. Sans ce nudge, le bandeau du Dashboard reste figé sur le compte
-/// mis en cache lors du dernier chargement, même une fois l'app rouverte :
-/// `DashboardSnapshotStore` ne recalcule que si la clé de cache (dérivée de
-/// `dataRefreshToken`) a changé.
+/// Necessary because the drop-off comes from a separate process (the
+/// Shortcuts automation `ImportTransactionApplePayEntityIntent`,
+/// `openAppWhenRun = false`) which has no access to `AppState` to bump
+/// `dataRefreshToken` itself. Without this nudge, the Dashboard banner stays
+/// frozen on the count cached at the last load, even once the app is
+/// reopened: `DashboardSnapshotStore` only recomputes when the cache key
+/// (derived from `dataRefreshToken`) has changed.
 ///
-/// Appelé à chaque retour au premier plan (`NemorisApp`, `scenePhase ==
-/// .active`) — extrait de l'ancien `ApplePayResolutionService` (résolution
-/// auto retirée, ce nudge reste nécessaire indépendamment).
+/// Called on every return to the foreground (`NemorisApp`, `scenePhase ==
+/// .active`).
 @MainActor
 enum ApplePayDashboardSync {
     private static let lastKnownPendingCountKey = "applePay.lastKnownPendingCount"
 
-    /// Vérifie le nombre d'entrées `pending` actuel et prévient le Dashboard
-    /// s'il a bougé depuis la dernière vérification.
+    /// Checks the current `pending` entry count and tells the Dashboard if
+    /// it has moved since the last check.
     static func syncIfNeeded(repository: PendingApplePayRepository = PendingApplePayRepository()) {
         let count = repository.fetchEntries(status: .pending).count
         notifyIfChanged(count)
     }
 
-    /// Poste la notification SEULEMENT si le nombre en attente a bougé —
-    /// évite de forcer un recalcul complet du Dashboard (`NemorisApp` bumpe
-    /// `appState.dataRefreshToken` dessus, ce qui invalide TOUT le cache, pas
-    /// seulement `.pendingApplePay`) à chaque foreground alors que rien n'a changé.
+    /// Posts the notification ONLY when the pending count has moved —
+    /// avoids forcing a full Dashboard recomputation (`NemorisApp` bumps
+    /// `appState.dataRefreshToken` on it, which invalidates the WHOLE cache,
+    /// not just `.pendingApplePay`) on every foreground when nothing has
+    /// changed.
     static func notifyIfChanged(_ count: Int) {
         let last = UserDefaults.standard.integer(forKey: lastKnownPendingCountKey)
         guard count != last else { return }
@@ -38,7 +38,7 @@ enum ApplePayDashboardSync {
 }
 
 extension Notification.Name {
-    /// Une entrée `pending_apple_pay_entries` a été déposée, écartée, ou
-    /// purgée.
+    /// A `pending_apple_pay_entries` row was dropped off, dismissed or
+    /// purged.
     static let nemorisApplePayDataDidChange = Notification.Name("nemorisApplePayDataDidChange")
 }

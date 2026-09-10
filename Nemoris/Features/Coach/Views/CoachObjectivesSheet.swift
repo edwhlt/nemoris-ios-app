@@ -2,21 +2,20 @@ import SwiftUI
 
 // MARK: - CoachObjectivesSheet
 //
-// Les objectifs que l'utilisateur écrit lui-même. C'est le seul endroit de
-// l'app où il DICTE au coach ce qui compte pour lui — sans quoi les
-// recommandations ne peuvent être qu'un optimum générique (« dépense moins »)
-// au lieu d'un chemin vers ce qu'il veut vraiment.
+// The goals the user writes themselves. This is the only place in the app
+// where they DICTATE to the coach what matters to them — without it,
+// recommendations can only be a generic optimum ("spend less") instead of a
+// path toward what they actually want.
 //
-// ⚠️ Texte SYNCHRONISÉ (`coach_profile` est dans `SyncSchema.syncedTables`) :
-// c'est de la prose écrite à la main, la retaper sur un second appareil serait
-// une friction inutile. Tout le reste du coach (analyses, recommandations)
-// reste local et régénérable.
+// This text is SYNCED (`coach_profile` is in `SyncSchema.syncedTables`):
+// it's hand-written prose, and retyping it on a second device would be
+// needless friction. Everything else in the coach (analyses,
+// recommendations) stays local and regenerable.
 
 struct CoachObjectivesSheet: View {
-    /// ⚠️ Les objectifs sont propres au DOMAINE depuis la migration v50 : un
-    /// « mieux diversifier » écrit une fois pour toutes contaminait l'analyse
-    /// des dépenses, qui ne voit aucun portefeuille et ne pouvait donc que
-    /// s'en excuser ou l'ignorer (retour d'usage 2026-09-02).
+    /// Goals are per-DOMAIN. A "diversify better" written once and shared
+    /// would contaminate the spending analysis, which sees no portfolio and
+    /// could therefore only apologize for it or ignore it.
     let domain: CoachDomain
 
     @Environment(CoachStore.self) private var store
@@ -25,14 +24,14 @@ struct CoachObjectivesSheet: View {
     @State private var text: String = ""
     @State private var hasLoaded = false
 
-    /// Exemples volontairement CONCRETS et chiffrés : un objectif vague
-    /// (« mieux gérer mon argent ») ne donne au modèle aucune prise, et c'est
-    /// exactement ce qu'un utilisateur écrit spontanément si on ne lui montre
-    /// pas à quoi ressemble un objectif exploitable.
+    /// Deliberately CONCRETE, quantified examples: a vague goal ("manage my
+    /// money better") gives the model nothing to grip, and that's exactly
+    /// what a user writes spontaneously unless shown what an actionable goal
+    /// looks like.
     ///
-    /// Ils sont propres au domaine : proposer « investir 200 €/mois en ETF »
-    /// dans l'écran des dépenses inviterait à réécrire l'objectif que ce
-    /// coach-là ne peut pas servir.
+    /// They are per-domain: offering "invest €200/month in ETFs" on the
+    /// spending screen would invite writing a goal that this particular
+    /// coach cannot serve.
     private var placeholder: String {
         switch domain {
         case .transactions:
@@ -87,8 +86,8 @@ struct CoachObjectivesSheet: View {
         .nemorisFormStyle()
         .tint(AppTheme.Colors.accent)
         .onAppear {
-            // Une seule fois : sans ce garde, un re-rendu écraserait la saisie
-            // en cours par la valeur persistée.
+            // Once only: without this guard, a re-render would overwrite the
+            // in-progress edit with the persisted value.
             guard !hasLoaded else { return }
             text = store.profile(for: domain).objectives
             hasLoaded = true

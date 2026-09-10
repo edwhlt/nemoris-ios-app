@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Sheet de réassignation : liste tous les payees existants, filtrable par recherche.
-/// Utilisé depuis `ImportSessionView` et `PayeeDetailView` pour les
-/// lignes/payees que l'utilisateur veut lier à un payee existant.
+/// Reassignment sheet: lists every existing payee, filterable by search.
+/// Used from `ImportSessionView` and `PayeeDetailView` for the rows/payees
+/// the user wants to link to an existing payee.
 struct PayeePickerSheet: View {
 
     let rawLabel: String
@@ -24,19 +24,18 @@ struct PayeePickerSheet: View {
                 payeeList
             }
             #if os(macOS)
-            // Sans frame explicite, un `List` nesté dans un VStack (par
-            // opposition à un `Form` racine, cf. nemorisFormStyle()) prend
-            // sa taille intrinsèque quand la vue est présentée en `.sheet`
-            // sur macOS — le popup apparaît quasi vide.
+            // Without an explicit frame, a `List` nested in a VStack (as
+            // opposed to a root `Form`, see nemorisFormStyle()) takes its
+            // intrinsic size when the view is presented as a `.sheet` on
+            // macOS — the popup then appears almost empty.
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             #endif
             .paneSearchable(text: $searchText, prompt: "Rechercher dans vos tiers")
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet et
-            // fournit son propre fond — la tentative précédente
-            // (`.toolbarBackground(for: .windowToolbar)`) compilait mais
-            // n'avait AUCUN effet visuel, confirmé par capture d'écran en
-            // direct (retour d'usage 2026-08-21). Cf. le commentaire de
-            // `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on a macOS sheet and supplies
+            // its own background. The earlier attempt
+            // (`.toolbarBackground(for: .windowToolbar)`) compiled but had NO
+            // visual effect. See the `macSheetChrome` comment in
+            // AdaptivePane.swift.
             .paneChrome("Lier à un tiers existant", cancelLabel: "Annuler", onCancel: { dismiss() })
             .task {
                 await Task.yield()
@@ -111,18 +110,17 @@ struct PayeePickerSheet: View {
             }
         }
         #if os(macOS)
-        // Un `List` sans hauteur idéale explicite, nesté dans un VStack
-        // (donc pas racine d'un NavigationStack), se voit attribuer une
-        // hauteur idéale quasi nulle par AppKit — même avec un
-        // `maxHeight: .infinity` en amont sur le conteneur, ça ne force que
-        // la borne haute, pas la taille de départ. D'où les rows invisibles
-        // malgré un popup correctement dimensionné.
+        // A `List` with no explicit ideal height, nested in a VStack (so
+        // not the root of a NavigationStack), is given a near-zero ideal
+        // height by AppKit — even with a `maxHeight: .infinity` upstream on
+        // the container, that only forces the upper bound, not the starting
+        // size. Hence invisible rows despite a correctly sized popup.
         .frame(minHeight: 320, maxHeight: .infinity)
-        // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS le
-        // `.background()` posé sur le VStack parent — sans ce modificateur
-        // (propagé aux deux List du Group ci-dessus), le fond de l'app est
-        // invisible et le bureau de l'utilisateur transparaît. Cf.
-        // `TagSummaryView` (retour d'usage 2026-08-19).
+        // On macOS, `List` paints ITS OWN system background OVER the
+        // `.background()` set on the parent VStack — without this modifier
+        // (propagated to both Lists in the Group above), the app's
+        // background is invisible and the user's desktop shows through. See
+        // `TagSummaryView`.
         .scrollContentBackground(.hidden)
         #endif
     }

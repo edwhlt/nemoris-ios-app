@@ -1,18 +1,19 @@
 import SwiftUI
 
-/// Dépenses Apple Pay en attente, affichées "à part" — jamais mélangées aux
-/// totaux Budget/Dashboard tant qu'elles n'ont pas été résolues (ouverture de
-/// l'app → moteur, ou rapprochement à l'import du relevé bancaire — les deux
-/// pas encore livrés). Ouverte depuis la carte du Dashboard. Groupées par
-/// semaine calendaire, cumul écrit en en-tête de chaque groupe.
+/// Pending Apple Pay expenses, shown separately — never mixed into the
+/// Budget/Dashboard totals until they have been resolved (neither the
+/// engine-on-launch path nor matching against a bank statement import is
+/// implemented yet). Opened from the Dashboard card. Grouped by calendar
+/// week, with each group's total written in its header.
 struct PendingApplePayListView: View {
     @Environment(\.paneDismiss) private var paneDismiss
     @Environment(AppState.self) private var appState
 
     @State private var entries: [PendingApplePayEntry] = []
     @State private var showSettings = false
-    /// Entrée déposée sans montant connu (cf. `ImportTransactionApplePayEntityIntent`)
-    /// en cours de correction — pilote l'alerte de saisie.
+    /// An entry dropped off without a known amount (see
+    /// `ImportTransactionApplePayEntityIntent`) being corrected — drives the
+    /// input alert.
     @State private var correctingEntry: PendingApplePayEntry?
     @State private var amountInput: String = ""
 
@@ -54,9 +55,9 @@ struct PendingApplePayListView: View {
         .task(id: appState.dataRefreshToken) { load() }
         .onAppear(perform: load)
         .adaptivePane(isPresented: $showSettings) {
-            // Le bandeau/liste n'est visible que si le raccourci a déjà
-            // déposé au moins une entrée — l'installation n'a donc pas sa
-            // place ici, contrairement à l'entrée Réglages.
+            // The banner/list is only visible once the shortcut has
+            // dropped off at least one entry — so installation has no place
+            // here, unlike the Settings entry.
             ApplePayAlertSettingsView(showsInstallSection: false)
         }
         .alert(
@@ -79,7 +80,7 @@ struct PendingApplePayListView: View {
         }
     }
 
-    // MARK: - Groupement par semaine
+    // MARK: - Weekly grouping
 
     private struct WeekGroup: Identifiable {
         let weekStart: Date
@@ -88,15 +89,14 @@ struct PendingApplePayListView: View {
         var total: Double { entries.reduce(0) { $0 + abs($1.amount) } }
     }
 
-    /// Semaine calendaire (lundi-dimanche, ISO 8601 fixe), la plus récente
-    /// d'abord. Appelle EXACTEMENT la même fonction que l'alerte de seuil
-    /// (`ApplePayAlertPeriod.week.start(from:)`) plutôt qu'une seconde
-    /// implémentation ad hoc — c'était le bug rapporté : cet écran calculait
-    /// le début de semaine avec `Calendar.current` (dépendant de la région,
-    /// et exécuté dans le process au premier plan) pendant que l'alerte le
-    /// calculait séparément depuis l'exécution en arrière-plan de
-    /// l'automatisation Raccourcis, deux implémentations qui pouvaient donc
-    /// diverger sur la définition même de "cette semaine".
+    /// Calendar week (Monday-Sunday, fixed ISO 8601), most recent first.
+    /// Calls EXACTLY the same function as the threshold alert
+    /// (`ApplePayAlertPeriod.week.start(from:)`) rather than a second ad hoc
+    /// implementation: computing the start of the week here with
+    /// `Calendar.current` (region-dependent, and running in the foreground
+    /// process) while the alert computed it separately from the Shortcuts
+    /// automation's background execution meant two implementations that
+    /// could diverge on the very definition of "this week".
     private var weekGroups: [WeekGroup] {
         let grouped = Dictionary(grouping: entries) { entry in
             ApplePayAlertPeriod.week.start(from: entry.createdAt)
@@ -121,9 +121,9 @@ struct PendingApplePayListView: View {
         }
     }
 
-    /// "Cette semaine" / "Semaine dernière" quand ça tombe juste, sinon "Semaine
-    /// du 25 août" — la date reste un `Text(_, format:)` pour respecter la
-    /// locale d'environnement (jamais un `String` littéral concaténé, cf. CLAUDE.md §5).
+    /// "This week" / "Last week" when it lines up, otherwise "Week of
+    /// August 25" — the date stays a `Text(_, format:)` so it honours the
+    /// environment locale (never a concatenated `String` literal).
     @ViewBuilder
     private func weekLabel(_ start: Date) -> some View {
         let calendar = Calendar.applePayWeek
@@ -183,9 +183,9 @@ struct PendingApplePayListView: View {
         }
     }
 
-    /// Déposée par le raccourci sans montant connu à l'instant du paiement
-    /// (cf. `ImportTransactionApplePayEntityIntent`) — stockée à 0, à corriger
-    /// manuellement. `abs` : le montant est toujours négatif une fois connu.
+    /// Dropped off by the shortcut without a known amount at payment time
+    /// (see `ImportTransactionApplePayEntityIntent`) — stored as 0, to be
+    /// corrected manually. `abs`: the amount is always negative once known.
     private func isAmountUnknown(_ entry: PendingApplePayEntry) -> Bool {
         abs(entry.amount) < 0.005
     }
@@ -200,16 +200,16 @@ struct PendingApplePayListView: View {
         guard let value = Double(normalized), value > 0 else { return }
         repository.updateAmount(id: entry.id, amount: value)
         load()
-        // Écran déjà au premier plan : bump direct, comme `dismiss(_:)`.
+        // Screen already in the foreground: bump directly, like `dismiss(_:)`.
         appState.dataRefreshToken = UUID()
     }
 
     private func dismiss(_ entry: PendingApplePayEntry) {
         repository.updateStatus(id: entry.id, to: .dismissed)
         load()
-        // Écran déjà au premier plan (contrairement au dépôt en arrière-plan
-        // par l'automatisation Raccourcis) : on peut bumper directement,
-        // pas besoin de la notification cross-process.
+        // Screen already in the foreground (unlike the background drop-off
+        // by the Shortcuts automation): the bump can happen directly, with
+        // no need for the cross-process notification.
         appState.dataRefreshToken = UUID()
     }
 }

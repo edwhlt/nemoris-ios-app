@@ -1,27 +1,26 @@
 import Foundation
 import UserNotifications
 
-/// Notifie l'utilisateur quand le cumul des dépenses Apple Pay encore
-/// `pending` dépasse le seuil configuré (`ApplePayAlertSettings`) sur la
-/// période choisie (jour/semaine/mois).
+/// Notifies the user when the running total of still-`pending` Apple Pay
+/// expenses exceeds the configured threshold (`ApplePayAlertSettings`) over
+/// the chosen period (day/week/month).
 ///
-/// Appelée juste après chaque `PendingApplePayRepository.addEntry` — y
-/// compris depuis `ImportTransactionApplePayEntityIntent.perform()`, qui
-/// s'exécute en arrière-plan (`openAppWhenRun = false`). C'est précisément le
-/// scénario que cette alerte sert : l'utilisateur n'ouvre jamais l'app,
-/// la notification est le seul signal qu'il reçoit.
+/// Called right after each `PendingApplePayRepository.addEntry` — including
+/// from `ImportTransactionApplePayEntityIntent.perform()`, which runs in the
+/// background (`openAppWhenRun = false`). That is precisely the scenario
+/// this alert serves: the user never opens the app, and the notification is
+/// the only signal they get.
 ///
-/// Permission demandée *lazy* (uniquement à la 1ère alerte réellement due, pas
-/// au premier dépôt), conformément à la convention CLAUDE.md §6.7. Si
-/// l'utilisateur refuse, no-op silencieux — l'entrée reste visible dans la
-/// liste "à part" du Dashboard de toute façon.
+/// Permission is requested *lazily* (only on the 1st alert actually due, not
+/// on the first drop-off). If the user declines, this is a silent no-op —
+/// the entry stays visible in the Dashboard's separate list anyway.
 enum ApplePayAlertService {
 
     private static let identifierPrefix = "applepay_alert_"
 
-    /// Vérifie le cumul de la période courante et notifie si le seuil est
-    /// franchi ET qu'on n'a pas déjà notifié pour CETTE période — une
-    /// nouvelle dépense dans la même période ne renvoie pas une 2e notif.
+    /// Checks the current period's total and notifies if the threshold is
+    /// crossed AND no notification was already sent for THIS period — a new
+    /// expense within the same period doesn't send a second one.
     static func checkAndNotifyIfNeeded(repository: PendingApplePayRepository = PendingApplePayRepository()) async {
         guard ApplePayAlertSettings.isEnabled else { return }
 
@@ -41,9 +40,9 @@ enum ApplePayAlertService {
         content.body = "\(formatAmount(total)) \(period.label.lowercased()) — seuil : \(formatAmount(ApplePayAlertSettings.threshold))"
         content.sound = .default
 
-        // `trigger: nil` = livraison immédiate, cohérent avec un seuil qui vient
-        // d'être franchi À L'INSTANT (contrairement à `BudgetNotificationService`,
-        // qui planifie pour une échéance FUTURE).
+        // `trigger: nil` = immediate delivery, consistent with a threshold
+        // crossed JUST NOW (unlike `BudgetNotificationService`, which
+        // schedules for a FUTURE due date).
         let request = UNNotificationRequest(
             identifier: "\(identifierPrefix)\(periodKey)",
             content: content,
@@ -79,11 +78,11 @@ enum ApplePayAlertService {
         }
     }
 
-    // MARK: - Formatage
+    // MARK: - Formatting
     //
-    // Service statique sans accès à l'environnement SwiftUI — même convention
-    // que `BudgetNotificationService` : `AppLocalization` relit la préférence
-    // de langue directement depuis `UserDefaults`.
+    // A static service with no access to the SwiftUI environment — same
+    // convention as `BudgetNotificationService`: `AppLocalization` reads the
+    // language preference straight from `UserDefaults`.
 
     private static func formatAmount(_ amount: Double) -> String {
         let f = NumberFormatter()
@@ -94,14 +93,14 @@ enum ApplePayAlertService {
         return f.string(from: NSNumber(value: amount)) ?? "\(amount)"
     }
 
-    /// Clé stable identifiant une période, dérivée de son DÉBUT (déjà aligné
-    /// par `Calendar.dateInterval`) — même valeur pour toute date retombant
-    /// dans le même jour/semaine/mois. Formateur créé à chaque appel plutôt
-    /// que mis en cache dans une propriété statique : `ISO8601DateFormatter`
-    /// n'est pas `Sendable`, un `static let` en ferait une variable globale
-    /// mutable rejetée par la concurrence stricte Swift 6 (même contrainte
-    /// que `PendingApplePayRepository.isoFormatter`, ici sans instance où la
-    /// loger puisque ce service est un `enum` sans état).
+    /// Stable key identifying a period, derived from its START (already
+    /// aligned by `Calendar.dateInterval`) — the same value for any date
+    /// falling in the same day/week/month. The formatter is created on every
+    /// call rather than cached in a static property: `ISO8601DateFormatter`
+    /// isn't `Sendable`, and a `static let` would make it a mutable global
+    /// rejected by Swift 6 strict concurrency (same constraint as
+    /// `PendingApplePayRepository.isoFormatter`, with no instance to host it
+    /// here since this service is a stateless `enum`).
     private static func periodKey(for start: Date) -> String {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]

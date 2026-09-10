@@ -1,31 +1,30 @@
 import SwiftUI
 
-/// Étape finale (et seule étape, pour une fusion groupée) d'une fusion de
-/// tiers DOUBLONS : résout les champs qui DIVERGENT entre `candidates` (≥2),
-/// puis commet la fusion — c'est CETTE vue qui écrit en base, pas
-/// `PayeeMergeTargetPicker` en amont.
+/// Final step (and the only step, for a bulk merge) of a DUPLICATE payee
+/// merge: resolves the fields that DIVERGE between `candidates` (≥2), then
+/// commits the merge — THIS view writes to the database, not
+/// `PayeeMergeTargetPicker` upstream.
 ///
-/// Retour d'usage : demander de choisir une "cible" dans un picker séparé
-/// n'avait pas de sens pour une sélection groupée déjà explicite (2+ tiers
-/// cochés) — l'utilisateur veut résoudre les CHAMPS qui divergent, pas
-/// rechercher un tiers qu'il a déjà sous les yeux. Un champ qui NE diverge
-/// pas ne pose aucune question (résolu silencieusement) — seuls les
-/// désaccords réels remontent à l'écran.
+/// Asking the user to choose a "target" in a separate picker made no sense
+/// for an already-explicit bulk selection (2+ payees ticked): they want to
+/// resolve the FIELDS that diverge, not search for a payee already in front
+/// of them. A field that does NOT diverge asks no question (resolved
+/// silently) — only real disagreements reach the screen.
 struct PayeeMergeResolverView: View {
-    /// ≥2 tiers à fusionner en un seul.
+    /// ≥2 payees to merge into one.
     let candidates: [Tiers]
     let allCategories: [Category]
     let payeeGroups: [PayeeGroup]
-    /// Pour choisir la fiche CONSERVÉE par défaut — celle qui a le plus
-    /// d'historique est la plus "établie".
+    /// Used to pick the KEPT record by default — the one with the most
+    /// history is the most "established".
     let transactionCounts: [Int: Int]
     var onMerged: () -> Void = {}
 
     @Environment(\.paneDismiss) private var dismiss
     private let repository = TransactionRepository()
 
-    /// La fiche dont l'id SURVIT — ses champs internes non résolus ici
-    /// (type de tier, virement lié…) sont conservés tels quels.
+    /// The record whose id SURVIVES — its internal fields not resolved here
+    /// (payee type, linked transfer…) are kept as-is.
     private let keeper: Tiers
 
     @State private var resolvedName: String
@@ -71,10 +70,10 @@ struct PayeeMergeResolverView: View {
         _resolvedGroupId    = State(initialValue: keeper.groupId ?? candidates.compactMap { $0.groupId }.first)
     }
 
-    // MARK: - Détection des conflits
+    // MARK: - Conflict detection
 
-    /// Valeurs non vides, dédupliquées insensible à la casse (garde la
-    /// première graphie rencontrée).
+    /// Non-empty values, deduplicated case-insensitively (keeps the first
+    /// spelling encountered).
     private func distinct(_ values: [String?]) -> [String] {
         var seen = Set<String>()
         var out: [String] = []
@@ -168,11 +167,11 @@ struct PayeeMergeResolverView: View {
         )
     }
 
-    /// Un champ texte en conflit : saisie libre + puces pour reprendre l'une
-    /// des valeurs des tiers fusionnés d'un tap. Texte libre plutôt qu'un
-    /// simple `Picker` : ni l'une ni l'autre valeur d'origine n'est parfois
-    /// la bonne (ex. fusionner "Carrefour Mkt" et "CARREFOUR MARKET" en
-    /// "Carrefour Market").
+    /// A conflicting text field: free entry plus chips to adopt one of the
+    /// merged payees' values in a tap. Free text rather than a plain
+    /// `Picker`: sometimes neither original value is the right one (e.g.
+    /// merging "Carrefour Mkt" and "CARREFOUR MARKET" into "Carrefour
+    /// Market").
     @ViewBuilder
     private func conflictField(_ title: String, value: Binding<String>, options: [String]) -> some View {
         Section(title) {
@@ -210,8 +209,8 @@ struct PayeeMergeResolverView: View {
         updated.domain = resolvedDomain.isEmpty ? nil : resolvedDomain
         updated.note = resolvedNote.isEmpty ? nil : resolvedNote
         updated.regex = resolvedRegex.isEmpty ? nil : resolvedRegex
-        // Champs internes non exposés ci-dessus : on comble depuis les
-        // autres candidats si la fiche conservée n'en a pas.
+        // Internal fields not surfaced above: filled in from the other
+        // candidates when the kept record has none.
         updated.engineMerchantId = keeper.engineMerchantId ?? candidates.compactMap { $0.engineMerchantId }.first
         updated.linkedCompteId   = keeper.linkedCompteId ?? candidates.compactMap { $0.linkedCompteId }.first
         updated.contactIdentifier = keeper.contactIdentifier ?? candidates.compactMap { $0.contactIdentifier }.first

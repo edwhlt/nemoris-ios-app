@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Sheet de sélection d'un groupe de marque (`payee_groups`) pour un payee.
-/// Permet aussi de créer un nouveau groupe à la volée.
+/// Sheet for picking a brand group (`payee_groups`) for a payee. Also
+/// allows creating a new group on the fly.
 ///
-/// utilisé depuis `PayeeDetailView`.
+/// Used from `PayeeDetailView`.
 struct PayeeGroupPickerView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -46,9 +46,9 @@ struct PayeeGroupPickerView: View {
                                 dismiss()
                             } label: {
                                 HStack {
-                                    // `engineMerchantId` : cf. commentaire de
-                                    // `PayeeGroupManagerView.row` — toujours
-                                    // `nil` en pratique, icône constante.
+                                    // `engineMerchantId`: see the comment on
+                                    // `PayeeGroupManagerView.row` — always
+                                    // `nil` in practice, constant icon.
                                     Image(systemName: "building.2")
                                         .foregroundStyle(AppTheme.Colors.accent)
                                     Text(g.displayName).foregroundStyle(AppTheme.Colors.textPrimary)
@@ -64,23 +64,22 @@ struct PayeeGroupPickerView: View {
                 }
             }
             #if os(macOS)
-            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
-            // celui du panneau hôte — sans ce modificateur, le bureau de
-            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            // On macOS, `List` paints ITS OWN system background OVER the
+            // host pane's — without this modifier, the user's desktop shows
+            // through.
             .scrollContentBackground(.hidden)
-            // ⚠️ Vérifié en direct (2026-08-26) sur `ImportActionsHelpSheet` :
-            // un `.frame(maxWidth: .infinity, maxHeight: .infinity)` seul
-            // (« greedy », qui ne fait que remplir l'espace déjà offert) NE
-            // SUFFIT PAS à empêcher un `List` de s'effondrer quand cette vue
-            // est atteinte via un `.sheet()` brut SANS `.adaptivePaneFrame()`
-            // externe (ex. `TierUpdateSheet`, `PayeeCreationFormSheet`) —
-            // macOS calcule alors la hauteur de la fenêtre depuis la taille
-            // "naturelle" du contenu, et un `List` ne la reporte pas de façon
-            // fiable dans ce contexte. Le `minHeight` NUMÉRIQUE est ce qui
-            // force réellement une hauteur — même valeur que
-            // `AdaptivePane.adaptivePaneFrame()` (`minHeight: 520`), pour
-            // rester cohérent avec les panes qui, eux, obtiennent cette
-            // contrainte de l'extérieur.
+            // A `.frame(maxWidth: .infinity, maxHeight: .infinity)` alone
+            // (greedy, merely filling the space already offered) is NOT
+            // enough to stop a `List` from collapsing when this view is
+            // reached through a bare `.sheet()` WITHOUT an external
+            // `.adaptivePaneFrame()` (e.g. `TierUpdateSheet`,
+            // `PayeeCreationFormSheet`) — macOS then computes the window
+            // height from the content's "natural" size, and a `List` doesn't
+            // report it reliably in that context. The NUMERIC `minHeight` is
+            // what actually forces a height — same value as
+            // `AdaptivePane.adaptivePaneFrame()` (`minHeight: 520`), to stay
+            // consistent with the panes that get that constraint from
+            // outside.
             .frame(maxWidth: .infinity, minHeight: 520, maxHeight: .infinity)
             #endif
             .paneSearchable(text: $search, prompt: "Rechercher un groupe…")
@@ -94,23 +93,23 @@ struct PayeeGroupPickerView: View {
                         dismiss()
                     }
                 }
-                // Cf. CLAUDE.md §5 : ré-injection \.locale obligatoire pour toute
-                // `.sheet()` niveau 2+ atteignable sur macOS. `\.paneHostContext`
-                // itou : ce picker peut lui-même être hébergé dans l'inspecteur
-                // macOS (`.inspector`, atteint via `.adaptivePane` depuis
-                // `PayeeDetailView`) — sans reset à `.modal`, le `.paneChrome`
-                // de `CreatePayeeGroupSheet` publierait ses boutons dans la
-                // barre système au lieu de les dessiner dans CETTE fenêtre
-                // séparée (aucun bouton visible dans le sheet lui-même).
+                // Re-injecting \.locale is mandatory for any level-2+
+                // `.sheet()` reachable on macOS. Same for
+                // `\.paneHostContext`: this picker can itself be hosted in
+                // the macOS inspector (`.inspector`, reached via
+                // `.adaptivePane` from `PayeeDetailView`) — without a reset
+                // to `.modal`, `CreatePayeeGroupSheet`'s `.paneChrome` would
+                // publish its buttons into the system bar instead of drawing
+                // them in THIS separate window (no button visible in the
+                // sheet itself).
                 .environment(\.locale, AppLocalization.locale)
                 .environment(\.paneHostContext, .modal)
             }
             .task { loadGroups() }
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
-            // tentative précédente (`.toolbarBackground(for: .windowToolbar)`)
-            // compilait mais n'avait AUCUN effet visuel, confirmé par capture
-            // d'écran en direct (retour d'usage 2026-08-21). Cf. le
-            // commentaire de `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on a macOS sheet. The earlier
+            // attempt (`.toolbarBackground(for: .windowToolbar)`) compiled but
+            // had NO visual effect. See the `macSheetChrome` comment in
+            // AdaptivePane.swift.
             .paneChrome(
                 "Groupe de marque",
                 cancelLabel: "Annuler", onCancel: { dismiss() },
@@ -147,11 +146,10 @@ private struct CreatePayeeGroupSheet: View {
                 }
             }
             .nemorisFormStyle()
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
-            // tentative précédente (`.toolbarBackground(for: .windowToolbar)`)
-            // compilait mais n'avait AUCUN effet visuel, confirmé par capture
-            // d'écran en direct (retour d'usage 2026-08-21). Cf. le
-            // commentaire de `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on a macOS sheet. The earlier
+            // attempt (`.toolbarBackground(for: .windowToolbar)`) compiled but
+            // had NO visual effect. See the `macSheetChrome` comment in
+            // AdaptivePane.swift.
             .paneChrome(
                 "Nouveau groupe",
                 cancelLabel: "Annuler", onCancel: { dismiss() },

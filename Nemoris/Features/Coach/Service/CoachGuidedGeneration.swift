@@ -3,34 +3,36 @@ import Foundation
 import FoundationModels
 #endif
 
-// MARK: - CoachGuidedGeneration — génération GUIDÉE par schéma (Apple Intelligence)
+// MARK: - CoachGuidedGeneration — SCHEMA-guided generation (Apple Intelligence)
 //
-// ⚠️ Pourquoi cette voie existe, alors que le coach avait délibérément choisi
-// « un seul chemin JSON pour tous les backends » :
+// Why this path exists, when the coach had deliberately chosen "one JSON
+// path for every backend":
 //
-// Ce choix tenait tant que les backends savaient tenir un contrat de format en
-// texte libre. Sur un petit modèle embarqué, non : Apple Intelligence et un
-// Llama 1B rendaient de la PROSE là où on demandait du JSON — l'analyse
-// échouait alors entièrement, alors que le modèle avait « compris » le dossier
-// (retour d'usage 2026-09-02, avec la réponse en prose à l'appui).
+// That choice held as long as the backends could honour a format contract in
+// free text. On a small on-device model they can't: Apple Intelligence and a
+// Llama 1B returned PROSE where JSON was asked for — the analysis then failed
+// entirely, even though the model had "understood" the briefing.
 //
-// La génération guidée supprime cette classe d'échec par construction : le
-// modèle est contraint PAR LE SCHÉMA au moment du décodage, il ne PEUT pas
-// produire autre chose. C'est déjà ce que fait l'import de documents
-// (`TransactionDocumentParser`) pour exactement la même raison.
+// Guided generation removes that class of failure by construction: the model
+// is constrained BY THE SCHEMA at decoding time, it CANNOT produce anything
+// else. Document import (`TransactionDocumentParser`) already does this for
+// exactly the same reason.
 //
-// Apple uniquement (`@Generable` est propre à Foundation Models). Les autres
-// backends continuent par le chemin JSON, qui leur convient.
+// Apple only (`@Generable` is specific to Foundation Models). The other
+// backends keep using the JSON path, which suits them.
+//
+// The prompt and `@Guide` descriptions stay in French: they are content for a
+// model asked to answer the user in their own language.
 
 @MainActor
 enum CoachGuidedGeneration {
 
-    /// Vrai si la fonctionnalité est réellement servie par Apple Intelligence
-    /// ET que le modèle est disponible ici.
+    /// True if the feature is actually served by Apple Intelligence AND the
+    /// model is available here.
     ///
-    /// ⚠️ Le test sur le backend RÉSOLU n'est pas cosmétique : appeler
-    /// Foundation Models en direct ferait ignorer un « serveur local », un
-    /// « cloud » ou un « désactivée » choisis pour CETTE fonctionnalité.
+    /// Testing the RESOLVED backend is not cosmetic: calling Foundation
+    /// Models directly would ignore a "local server", a "cloud" or a
+    /// "disabled" chosen for THIS feature.
     static func isAvailable(for feature: AIFeature) -> Bool {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
@@ -41,30 +43,29 @@ enum CoachGuidedGeneration {
         return false
     }
 
-    /// Recommandations d'une passe. `nil` = indisponible ou échec ⇒ l'appelant
-    /// retombe sur le chemin JSON générique, jamais sur rien.
+    /// One pass's recommendations. `nil` = unavailable or failed ⇒ the
+    /// caller falls back to the generic JSON path, never to nothing.
     static func recommendations(system: String, user: String, feature: AIFeature)
         async -> [CoachRecommendationDraft]? {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *), isAvailable(for: feature) {
-            // ⚠️ Une session NEUVE par passe. `LanguageModelSession` conserve
-            // la transcription d'un appel à l'autre : réutiliser la même
-            // session ferait grossir le contexte à chaque passe et
-            // épuiserait la fenêtre — exactement ce que le découpage cherche
-            // à éviter.
+            // A FRESH session per pass. `LanguageModelSession` keeps its
+            // transcript from one call to the next: reusing the same session
+            // would grow the context on every pass and exhaust the window —
+            // exactly what splitting is meant to avoid.
             let session = LanguageModelSession(instructions: system)
             do {
                 let response = try await session.respond(to: user, generating: AICoachRecommendations.self)
                 return convert(response.content)
             } catch {
-                print("[CoachGuidedGeneration] recommandations KO : \(error)")
+                print("[CoachGuidedGeneration] recommendations failed: \(error)")
             }
         }
         #endif
         return nil
     }
 
-    /// Profil de la passe finale. `nil` = indisponible ou échec.
+    /// The final pass's profile. `nil` = unavailable or failed.
     static func profile(system: String, user: String, feature: AIFeature) async -> String? {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *), isAvailable(for: feature) {
@@ -74,14 +75,14 @@ enum CoachGuidedGeneration {
                 let trimmed = response.content.profile.trimmingCharacters(in: .whitespacesAndNewlines)
                 return trimmed.isEmpty ? nil : trimmed
             } catch {
-                print("[CoachGuidedGeneration] profil KO : \(error)")
+                print("[CoachGuidedGeneration] profile failed: \(error)")
             }
         }
         #endif
         return nil
     }
 
-    // MARK: - Schémas
+    // MARK: - Schemas
 
     #if canImport(FoundationModels)
     @available(iOS 26.0, macOS 26.0, *)
@@ -119,9 +120,10 @@ enum CoachGuidedGeneration {
         var profile: String
     }
 
-    /// Passe par les mêmes bornes que le chemin JSON (`CoachRanker.normalize`) :
-    /// un modèle rend volontiers `effort: 12` ou une confiance de `95`, et ces
-    /// valeurs contamineraient directement le classement.
+    /// Goes through the same bounds as the JSON path
+    /// (`CoachRanker.normalize`): a model happily returns `effort: 12` or a
+    /// confidence of `95`, and those values would contaminate the ranking
+    /// directly.
     @available(iOS 26.0, macOS 26.0, *)
     private static func convert(_ extraction: AICoachRecommendations) -> [CoachRecommendationDraft] {
         var seen = Set<String>()
