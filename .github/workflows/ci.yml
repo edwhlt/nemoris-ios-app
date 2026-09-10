@@ -37,17 +37,26 @@ jobs:
         run: |
           # La frontière entre logique et présentation n'est utile que si elle
           # est vérifiée : sans ça elle fuit un fichier à la fois.
+          #
+          # Core/Localization/ est exempté parce qu'il DÉFINIT des modificateurs
+          # de vue : les API natives de chrome (.navigationTitle, .help,
+          # .accessibilityLabel) ignorent la locale d'environnement, et leurs
+          # remplaçants doivent donc lire `@Environment(\.locale)` pour rester
+          # réactifs à un changement de langue. C'est de la présentation, pas de
+          # la logique — la logique de résolution qui l'accompagne, elle, ne
+          # dépend que de Foundation.
           fuites=$(git ls-files 'Nemoris/**/*.swift' \
             | grep -v '/Views/' \
             | grep -v '^Nemoris/DesignSystem/' \
             | grep -v '^Nemoris/App/' \
+            | grep -v '^Nemoris/Core/Localization/' \
             | xargs grep -l '^import SwiftUI' 2>/dev/null || true)
           if [ -n "$fuites" ]; then
             echo "❌ SwiftUI importé hors des vues :"
             echo "$fuites" | sed 's/^/      /'
             exit 1
           fi
-          echo "✅ SwiftUI reste dans Views/, DesignSystem/ et App/"
+          echo "✅ SwiftUI reste dans Views/, DesignSystem/, App/ et Core/Localization/"
 
   moteurs:
     name: Spectre de recherche

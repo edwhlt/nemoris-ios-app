@@ -1130,7 +1130,7 @@ struct PatrimoineView: View {
                         // Badge contextuel selon la source résolue.
                         sourceBadge(source)
                     }
-                    vm.sourceLabel(for: asset)
+                    Text(vm.sourceLabel(for: asset))
                         .font(AppTheme.Typography.bodySmall)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .lineLimit(1)

@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 import Observation
 
 // MARK: - PatrimoineViewModel
@@ -470,21 +469,27 @@ final class PatrimoineViewModel {
 
     /// Texte descriptif court pour la source d'un asset, prêt à être affiché en
     /// sous-titre de row. Pas de logique conditionnelle dans la View.
-    func sourceLabel(for asset: PatrimoineAsset) -> Text {
+    ///
+    /// Rend une `LocalizedStringResource`, pas un `Text` : ce type est résolu à
+    /// la LECTURE par la vue, donc il suit un changement de langue en cours de
+    /// session, là où un `Text` construit ici figerait la traduction au moment
+    /// du calcul. Il garde en prime ce fichier libre de SwiftUI — la règle
+    /// d'architecture vérifiée en intégration continue.
+    func sourceLabel(for asset: PatrimoineAsset) -> LocalizedStringResource {
         if let bankId = asset.linkedAccountId,
            let acc = availableBankAccounts.first(where: { $0.id == bankId }) {
-            return Text("Lié à \(acc.name)")
+            return LocalizedStringResource("Lié à \(acc.name)")
         }
         if let invId = asset.linkedInvestmentAccountId,
            let acc = availableInvestmentAccounts.first(where: { $0.id == invId }) {
-            return Text("Lié à \(acc.name)")
+            return LocalizedStringResource("Lié à \(acc.name)")
         }
         if asset.isLinked {
             // Le lien existe en mémoire mais le compte source a disparu — l'UNIQUE
             // INDEX et le ON DELETE SET NULL devraient empêcher ce cas, mais on
             // tient ce libellé en filet de sécurité.
-            return Text("Lien rompu (dernière valeur connue)")
+            return LocalizedStringResource("Lien rompu (dernière valeur connue)")
         }
-        return Text("Valeur saisie manuellement")
+        return LocalizedStringResource("Valeur saisie manuellement")
     }
 }
