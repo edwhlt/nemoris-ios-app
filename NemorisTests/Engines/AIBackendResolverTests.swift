@@ -149,8 +149,12 @@ struct AIBackendResolverTests {
     func toutesLesOptionsProposees() {
         #expect(AIBackendChoice.allChoices.contains(.cloud(.claude)))
         #expect(AIBackendChoice.allChoices.contains(.cloud(.openAI)))
-        // automatique + Apple + serveur local + N cloud + désactivée
-        #expect(AIBackendChoice.allChoices.count == 4 + AICloudProvider.allCases.count,
+        // ⚠️ Le compte était resté à 4 quand le modèle EMBARQUÉ a rejoint le
+        // sélecteur : un backend qu'on peut choisir mais qu'aucun test ne
+        // connaît est exactement ce que cette assertion existe pour empêcher.
+        #expect(AIBackendChoice.allChoices.contains(.embeddedModel))
+        // automatique + Apple + modèle embarqué + serveur local + N cloud + désactivée
+        #expect(AIBackendChoice.allChoices.count == 5 + AICloudProvider.allCases.count,
                 "obtenu : \(AIBackendChoice.allChoices.count)")
     }
 

@@ -14,5 +14,11 @@ struct NemorisWidgetBundle: WidgetBundle {
         NemorisWidget()
         BudgetWidget()
         BudgetLockWidget()
+        InvestmentsWidget()
+        InvestmentsLockWidget()
+        PatrimoineWidget()
+        PatrimoineLockWidget()
+        TricountWidget()
+        TricountLockWidget()
     }
 }

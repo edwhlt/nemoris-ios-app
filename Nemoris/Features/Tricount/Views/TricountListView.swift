@@ -3,11 +3,8 @@ import TipKit
 struct TricountListView: View {
     @State private var groups: [TricountGroup] = []
     @State private var showLoadSheet = false
-    /// Ouvre le détail dans le panneau (adaptivePane), plus un push — cohérent
-    /// avec le reste de l'app (transactions, tiers, comptes Investissements…) :
-    /// un seul mental model de drill-down partout, et ça évite le "bouton
-    /// retour" du push qui désynchronisait l'affichage lors d'un changement
-    /// de module (`NavigationSplitView` gardait l'ancien contenu poussé).
+    /// macOS UNIQUEMENT : bascule le contenu de la colonne par état (cf.
+    /// `body`). iOS n'en a plus besoin — cf. note sur `listContent`.
     @State private var selectedGroup: TricountGroup?
     #if os(macOS)
     /// Pour fermer le panneau au retour vers la liste (cf. `onBack`).
@@ -41,9 +38,31 @@ struct TricountListView: View {
             } else if isEmbedded {
                 listContent
             } else {
+                // Non-embarqué sur macOS : cas déjà couvert par
+                // `if let group = selectedGroup` ci-dessus dès que la
+                // sélection change, `selectedGroup` n'est donc jamais lu ici
+                // — pas de `.navigationDestination` à y attacher.
                 NavigationStack { listContent }
             }
             #else
+            // iOS : chaque row pousse directement via `NavigationLink`
+            // (cf. `listContent`) — aucun `.navigationDestination` au niveau
+            // du conteneur, qu'il soit embarqué (menu "Plus") ou racine
+            // (onglet visible). Un `NavigationLink(destination:)` classique
+            // fonctionne à n'importe quelle profondeur d'une NavigationStack
+            // tant qu'il n'est jamais MÉLANGÉ, sur la MÊME pile, avec un
+            // `.navigationDestination(for:)/(item:)` value-based — exactement
+            // ce que faisait `MoreView` en emboîtant cette liste (elle-même
+            // atteinte par un `NavigationLink` classique côté `MoreView`,
+            // cf. `moreSection`) sous un `.navigationDestination(item:)` ici :
+            // le tout premier push de la session était avalé et la pile
+            // retombait jusqu'à la racine de "Plus" (retour d'usage). Réglages
+            // (`SettingsView`, atteint pareil depuis "Plus") n'a jamais ce
+            // souci car il est du `NavigationLink` classique de bout en bout.
+            // ⚠️ Le MÊME anti-pattern existait un niveau plus bas : chaque row
+            // pousse `TricountDetailView`, qui s'enveloppait elle-même
+            // inconditionnellement dans une SECONDE `NavigationStack` — cf. son
+            // commentaire de `body` pour le correctif (`\.paneHostContext`).
             if isEmbedded { listContent } else { NavigationStack { listContent } }
             #endif
         }
@@ -69,6 +88,8 @@ struct TricountListView: View {
             } else {
                 List {
                     ForEach(groups) { group in
+                        #if os(macOS)
+                        // macOS : bascule d'état (cf. `body`), jamais de push.
                         Button {
                             selectedGroup = group
                         } label: {
@@ -82,6 +103,22 @@ struct TricountListView: View {
                             trailingFullSwipe: false
                         )
                         .macGroupedRow(first: group.id == groups.first?.id, last: group.id == groups.last?.id)
+                        #else
+                        // iOS : vrai push, chevron natif de la `List` gratuit
+                        // — même mécanisme que "Réglages" dans le menu "Plus".
+                        NavigationLink {
+                            TricountDetailView(group: group)
+                        } label: {
+                            TricountGroupRow(group: group, isRefreshing: refreshingId == group.id)
+                        }
+                        .rowActions(
+                            leading: [RowAction("Mettre à jour", systemImage: "arrow.clockwise", tint: AppTheme.Colors.accent) { refreshGroup(group) }],
+                            trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { deleteGroup(group) }],
+                            leadingFullSwipe: false,
+                            trailingFullSwipe: false
+                        )
+                        .macGroupedRow(first: group.id == groups.first?.id, last: group.id == groups.last?.id)
+                        #endif
                     }
                 }
                 #if os(macOS)
@@ -91,7 +128,7 @@ struct TricountListView: View {
                 .listStyle(.plain)
                 // Décolle la 1ère carte du délimiteur natif macOS (barre d'outils
                 // ↔ contenu scrollé) — même correctif que TransactionsView.
-                .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+                .macGroupedListTopGap()
                 #endif
                 .scrollContentBackground(.hidden)
             }
@@ -100,24 +137,15 @@ struct TricountListView: View {
         // la NavigationSplitView macOS montre son matériau vibrant par défaut
         // au lieu du fond neutre AppTheme ().
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        .navigationTitle("Tricounts")
+        .localizedNavigationTitle("Tricounts")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 PaneToggleButton(label: "Charger un Tricount", systemImage: "plus", isOn: $showLoadSheet)
             }
         }
-        // macOS : `selectedGroup` bascule le CONTENU du module (cf. `body`) —
-        // pas de présentation ici. iOS : push piloté par item. Un `Binding(get:set:)`
-        // synthétique (nécessaire tant que `TricountGroup` n'était pas Hashable)
-        // provoquait un pop immédiat au tout premier push de la session — bug
-        // connu de `.navigationDestination(isPresented:)` avec un binding calculé
-        // au lieu d'un stockage `@State` direct. `item:` est piloté directement
-        // par `$selectedGroup`, sans binding intermédiaire.
-        #if !os(macOS)
-        .navigationDestination(item: $selectedGroup) { group in
-            TricountDetailView(group: group)
-        }
-        #endif
+        // La présentation du détail (push vs pane) est décidée par `body`,
+        // pas ici : elle dépend de `isEmbedded`, que `listContent` n'a pas
+        // besoin de connaître pour le reste de son contenu.
         .adaptivePane(isPresented: $showLoadSheet) {
             TricountLoadSheet { repo.setupTables(); loadGroups() }
         }

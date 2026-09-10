@@ -18,27 +18,31 @@ struct PayeePickerSheet: View {
     private let repository = TransactionRepository()
 
     var body: some View {
-        NavigationStack {
             VStack(spacing: 0) {
                 contextHeader
                 Divider()
                 payeeList
             }
-            .navigationTitle("Lier à un tiers existant")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-            }
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always),
-                        prompt: "Rechercher dans vos tiers")
+            #if os(macOS)
+            // Sans frame explicite, un `List` nesté dans un VStack (par
+            // opposition à un `Form` racine, cf. nemorisFormStyle()) prend
+            // sa taille intrinsèque quand la vue est présentée en `.sheet`
+            // sur macOS — le popup apparaît quasi vide.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            #endif
+            .paneSearchable(text: $searchText, prompt: "Rechercher dans vos tiers")
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet et
+            // fournit son propre fond — la tentative précédente
+            // (`.toolbarBackground(for: .windowToolbar)`) compilait mais
+            // n'avait AUCUN effet visuel, confirmé par capture d'écran en
+            // direct (retour d'usage 2026-08-21). Cf. le commentaire de
+            // `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome("Lier à un tiers existant", cancelLabel: "Annuler", onCancel: { dismiss() })
             .task {
                 await Task.yield()
                 loadPayees()
                 hasLoaded = true
             }
-        }
     }
 
     private var contextHeader: some View {
@@ -78,6 +82,7 @@ struct PayeePickerSheet: View {
                     }
                 }
                 .listStyle(.plain)
+                .macGroupedListTopGap()
             } else if allPayees.isEmpty {
                 EmptyStateView(
                     icon: "person.crop.circle.badge.questionmark",
@@ -99,10 +104,27 @@ struct PayeePickerSheet: View {
                         PayeeRowSummary(payee: payee, allCategories: allCategories)
                     }
                     .buttonStyle(.plain)
+                    .macGroupedRow(first: payee.id == filteredPayees.first?.id, last: payee.id == filteredPayees.last?.id)
                 }
                 .listStyle(.plain)
+                .macGroupedListTopGap()
             }
         }
+        #if os(macOS)
+        // Un `List` sans hauteur idéale explicite, nesté dans un VStack
+        // (donc pas racine d'un NavigationStack), se voit attribuer une
+        // hauteur idéale quasi nulle par AppKit — même avec un
+        // `maxHeight: .infinity` en amont sur le conteneur, ça ne force que
+        // la borne haute, pas la taille de départ. D'où les rows invisibles
+        // malgré un popup correctement dimensionné.
+        .frame(minHeight: 320, maxHeight: .infinity)
+        // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS le
+        // `.background()` posé sur le VStack parent — sans ce modificateur
+        // (propagé aux deux List du Group ci-dessus), le fond de l'app est
+        // invisible et le bureau de l'utilisateur transparaît. Cf.
+        // `TagSummaryView` (retour d'usage 2026-08-19).
+        .scrollContentBackground(.hidden)
+        #endif
     }
 
     private func loadPayees() {

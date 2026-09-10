@@ -243,24 +243,33 @@ struct InfoBadge: View {
 
 // MARK: - EmptyStateView
 
-struct EmptyStateView: View {
+struct EmptyStateView<Actions: View>: View {
     let icon: String
     let title: LocalizedStringKey
     private let message: Text
+    @ViewBuilder private let actions: () -> Actions
 
     /// Static, translatable message (the common case).
-    init(icon: String, title: LocalizedStringKey, message: LocalizedStringKey) {
+    init(
+        icon: String, title: LocalizedStringKey, message: LocalizedStringKey,
+        @ViewBuilder actions: @escaping () -> Actions = { EmptyView() }
+    ) {
         self.icon = icon
         self.title = title
         self.message = Text(message)
+        self.actions = actions
     }
 
     /// Runtime-computed message (e.g. a caught error) that must be shown
     /// verbatim rather than looked up in Localizable.strings.
-    init(icon: String, title: LocalizedStringKey, verbatimMessage: String) {
+    init(
+        icon: String, title: LocalizedStringKey, verbatimMessage: String,
+        @ViewBuilder actions: @escaping () -> Actions = { EmptyView() }
+    ) {
         self.icon = icon
         self.title = title
         self.message = Text(verbatimMessage)
+        self.actions = actions
     }
 
     var body: some View {
@@ -276,6 +285,14 @@ struct EmptyStateView: View {
                     .font(AppTheme.Typography.bodySmall)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
+            }
+            // Le VStack ajoute `spacing` autour de CHAQUE enfant, même un
+            // `EmptyView()` — sans ce garde, les ~20 sites qui n'utilisent
+            // aucune action gagneraient un espace vide en bas (régression
+            // visuelle silencieuse). `Actions.self == EmptyView.self` est
+            // le défaut du paramètre générique quand `actions:` est omis.
+            if Actions.self != EmptyView.self {
+                actions()
             }
         }
         .frame(maxWidth: .infinity)

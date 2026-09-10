@@ -165,7 +165,95 @@ enum LenientJSON {
         // Virgules dupliquées, puis virgule finale avant une fermeture.
         text = replacing(text, pattern: #",(\s*),"#, template: ",$1")
         text = replacing(text, pattern: #",(\s*)([}\]])"#, template: "$1$2")
-        return text
+
+        // Clés SANS aucun guillemet : `, effort:2` → `, "effort":2`.
+        //
+        // ⚠️ Distinct du motif d'entrée de cette fonction, qui ne rattrape que
+        // le guillemet OUVRANT manquant (`, amount":`). Un modèle rend
+        // couramment un objet dont une partie des clés est correctement
+        // citée et l'autre pas du tout — vu en production : `"annual_impact":0,
+        // effort:2, confidence:0.92`. Traité par un scanner plutôt qu'une
+        // regex, parce qu'un `mot:` dans une phrase française (« Bilan: … »)
+        // est fréquent dans les valeurs texte et ne doit surtout pas être
+        // réécrit.
+        return quotingBareKeys(text)
+    }
+
+    /// Ajoute les guillemets manquants autour des clés d'objet nues, en
+    /// ignorant tout ce qui se trouve à l'intérieur d'une chaîne.
+    static func quotingBareKeys(_ raw: String) -> String {
+        var output = ""
+        output.reserveCapacity(raw.count)
+        var inString = false
+        var escaped = false
+        /// Vrai quand la position courante peut accueillir une CLÉ : juste
+        /// après `{` ou `,`. C'est ce qui évite de toucher à une valeur.
+        var expectingKey = false
+
+        var index = raw.startIndex
+        while index < raw.endIndex {
+            let character = raw[index]
+
+            if inString {
+                output.append(character)
+                if escaped { escaped = false }
+                else if character == "\\" { escaped = true }
+                else if character == "\"" { inString = false }
+                index = raw.index(after: index)
+                continue
+            }
+
+            if character == "\"" {
+                inString = true
+                expectingKey = false
+                output.append(character)
+                index = raw.index(after: index)
+                continue
+            }
+
+            if character == "{" || character == "," {
+                expectingKey = true
+                output.append(character)
+                index = raw.index(after: index)
+                continue
+            }
+
+            if character.isWhitespace {
+                output.append(character)
+                index = raw.index(after: index)
+                continue
+            }
+
+            // Un identifiant nu à un emplacement de clé, suivi de `:`.
+            if expectingKey, character.isLetter || character == "_" {
+                var cursor = index
+                var identifier = ""
+                while cursor < raw.endIndex, raw[cursor].isLetter || raw[cursor].isNumber || raw[cursor] == "_" {
+                    identifier.append(raw[cursor])
+                    cursor = raw.index(after: cursor)
+                }
+                var lookahead = cursor
+                while lookahead < raw.endIndex, raw[lookahead].isWhitespace {
+                    lookahead = raw.index(after: lookahead)
+                }
+                if lookahead < raw.endIndex, raw[lookahead] == ":" {
+                    output.append("\"\(identifier)\"")
+                    index = cursor
+                    expectingKey = false
+                    continue
+                }
+                // Pas une clé (`true`, `null`, un nombre…) : on recopie tel quel.
+                output.append(identifier)
+                index = cursor
+                expectingKey = false
+                continue
+            }
+
+            expectingKey = false
+            output.append(character)
+            index = raw.index(after: index)
+        }
+        return output
     }
 
     private static func replacing(_ text: String, pattern: String, template: String) -> String {

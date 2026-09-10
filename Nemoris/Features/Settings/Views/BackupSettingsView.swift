@@ -118,7 +118,7 @@ struct BackupSettingsView: View {
             }
         }
         .nemorisFormStyle()
-        .navigationTitle("Sauvegarde locale & iCloud")
+        .localizedNavigationTitle("Sauvegarde locale & iCloud")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { reload() }
         .refreshable {

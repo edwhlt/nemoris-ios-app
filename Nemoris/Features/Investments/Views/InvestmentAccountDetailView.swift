@@ -55,7 +55,12 @@ struct InvestmentAccountDetailView: View {
 
     // Sync de masse
     @State private var isSyncingAll = false
-    @State private var syncAllStatus: String?
+    // ⚠️ `LocalizedStringResource`, pas `String` — même raison que
+    // `InvestmentAutoSyncService.lastSummary` : sinon figé dans la langue
+    // active au moment du sync plutôt que résolu à l'affichage.
+    @State private var syncAllStatus: LocalizedStringResource?
+    /// Détail "?" — liste des positions du compte avec leur dernier statut de sync.
+    @State private var showSyncDetail = false
     /// Skeleton tant que le 1er `refresh()` n'est pas terminé.
     @State private var hasLoaded = false
     @Environment(\.dismiss) private var dismiss
@@ -162,6 +167,9 @@ struct InvestmentAccountDetailView: View {
                 appState.dataRefreshToken = UUID()
             }
         }
+        .adaptivePane(isPresented: $showSyncDetail) {
+            InvestmentSyncDetailSheet(content: .list(summary: nil, positions: syncPositionStatuses))
+        }
         // Confirmation suppression compte
         .confirmationDialog(
             "Supprimer ce compte ?",
@@ -234,8 +242,8 @@ struct InvestmentAccountDetailView: View {
                 Button(action: onBack) {
                     Image(systemName: "chevron.left")
                 }
-                .help("Tous les comptes")
-                .accessibilityLabel("Tous les comptes")
+                .localizedHelp("Tous les comptes")
+                .localizedAccessibilityLabel("Tous les comptes")
             }
         }
         // Menu "⋯" aplati en boutons icône + tooltip dans UNE pilule via
@@ -252,7 +260,7 @@ struct InvestmentAccountDetailView: View {
                 } label: {
                     Image(systemName: "wrench.adjustable")
                 }
-                .help("Réparer les valeurs crypto")
+                .localizedHelp("Réparer les valeurs crypto")
             }
             PaneToggleButton(label: "Modifier le compte", systemImage: "pencil", isOn: $showAccountEditForm)
             Button(role: .destructive) {
@@ -260,7 +268,7 @@ struct InvestmentAccountDetailView: View {
             } label: {
                 Image(systemName: "trash")
             }
-            .help("Supprimer le compte")
+            .localizedHelp("Supprimer le compte")
         }
         #else
         ToolbarItem(placement: .topBarTrailing) {
@@ -343,7 +351,7 @@ struct InvestmentAccountDetailView: View {
     /// valeurs CoinGecko.
     private func repairCryptoValues() {
         let result = InvestmentRepository().purgeCorruptedCryptoData()
-        syncAllStatus = "Crypto réparé : \(result.positionsReset) position(s) reset, \(result.historyRowsDeleted) cours Yahoo purgés. Relance ta sync Binance/wallet."
+        syncAllStatus = LocalizedStringResource("Crypto réparé : \(result.positionsReset) position(s) reset, \(result.historyRowsDeleted) cours Yahoo purgés. Relance ta sync Binance/wallet.")
         viewModel.load()
         refresh()
     }
@@ -361,7 +369,8 @@ struct InvestmentAccountDetailView: View {
         for position in toSync {
             let identifier = position.bestSyncIdentifier
             guard !identifier.isEmpty else { continue }
-            _ = await InvestmentAutoSyncService.shared.syncHistory(identifier: identifier)
+            let outcome = await InvestmentAutoSyncService.shared.syncHistory(identifier: identifier)
+            InvestmentAutoSyncService.shared.recordOutcome(identifier: identifier, outcome: outcome)
         }
         refresh()
         NotificationCenter.default.post(name: .nemorisInvestmentsDidSync, object: nil)
@@ -379,10 +388,15 @@ struct InvestmentAccountDetailView: View {
                 previousValue: valuationIsEstimated ? displayedValuation : evolution.first?.value,
                 currency: account.currency,
                 rangeLabel: variationRangeLabel(localTimeRange),
-                // ⚠️ basis variation = POSITIONS SEULES (sans cash). Sinon le calcul
-                // de perf% serait gonflé artificiellement par la trésorerie ajoutée
-                // au currentValue mais absente de evolution.first?.value.
-                variationBasisValue: valuationIsEstimated ? displayedValuation : account.currentValue
+                // ⚠️ basis variation = POSITIONS SEULES (sans cash) ET restreinte à
+                // celles effectivement valorisées dans `evolution` (positionsWithoutHistory
+                // exclues) — sinon le calcul de perf% est gonflé artificiellement, par la
+                // trésorerie ajoutée au currentValue mais absente de evolution.first?.value,
+                // et par toute position sans historique sur la plage (même bug que le
+                // widget/hero global, cf. `portfolioVariationBasisValue`).
+                variationBasisValue: valuationIsEstimated
+                    ? displayedValuation
+                    : account.currentValue - positionsWithoutHistory.reduce(0) { $0 + $1.currentValue }
             )
 
             if valuationIsEstimated {
@@ -413,8 +427,48 @@ struct InvestmentAccountDetailView: View {
                 selection: $localTimeRange,
                 ranges: InvestmentTimeRange.availableRanges(since: account.openedAt)
             )
+
+            if !positions.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: syncProblemCount > 0 ? "exclamationmark.circle.fill" : "checkmark.circle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(syncProblemCount > 0 ? AppTheme.Colors.warning : AppTheme.Colors.success)
+                    syncSummaryLabel
+                        .font(AppTheme.Typography.labelMedium)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    SyncInfoButton(isPresented: $showSyncDetail)
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(.horizontal, AppTheme.Spacing.sm)
+    }
+
+    /// Statut de sync de chaque position du compte — lit `outcomesByIdentifier`
+    /// (rempli par TOUTE sync : passe globale, "Synchroniser tout" de ce compte,
+    /// pull-to-refresh d'une fiche position) plutôt qu'un suivi propre à cet écran.
+    private var syncPositionStatuses: [SyncPositionStatus] {
+        let outcomes = InvestmentAutoSyncService.shared.outcomesByIdentifier
+        return positions.map { position in
+            let key = position.bestSyncIdentifier.uppercased()
+            return SyncPositionStatus(
+                id: position.id,
+                name: position.assetName.isEmpty ? position.ticker : position.assetName,
+                outcome: outcomes[key]
+            )
+        }
+    }
+
+    private var syncProblemCount: Int {
+        syncPositionStatuses.filter(\.isProblem).count
+    }
+
+    private var syncSummaryLabel: Text {
+        syncProblemCount == 0
+            ? Text("Cours à jour")
+            : Text("\(syncProblemCount) position(s) non synchronisée(s)")
     }
 
     /// KPIs en ligne (investi · performance) + trésorerie si > 0. Style épuré
@@ -481,13 +535,37 @@ struct InvestmentAccountDetailView: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             SectionHeader(title: "Positions (\(positions.count))")
                 .padding(.horizontal, AppTheme.Spacing.sm)
-            #if os(macOS)
-            // ⚠️ macOS : ni List imbriquée, ni NavigationLink cliqué, ni PUSH
-            // profondeur 2 (cf. doc de `panePosition`) — la fiche position
-            // s'ouvre dans le panneau latéral global, comme les fiches de
-            // ReferenceDataView. Le compte reste visible à gauche.
+            // ⚠️ PAS de `List` ici, sur AUCUNE des deux plateformes.
+            //
+            // macOS : ni List imbriquée, ni NavigationLink cliqué, ni PUSH
+            // profondeur 2 ne sont sains (cf. doc de `panePosition`).
+            //
+            // iOS : une `List` `.scrollDisabled(true)` imbriquée dans le
+            // `ScrollView` du compte a besoin d'une hauteur EXPLICITE — et
+            // toute tentative de la dériver du contenu réel échoue pour la
+            // même raison structurelle : `List` VIRTUALISE ses rows (ne
+            // rend que celles proches du viewport). Un estimé fixe par ligne
+            // ("~66pt") casse dès qu'une ligne est plus haute que prévu (nom
+            // long sur 2 lignes) — décalage constaté sur un compte PEA
+            // réel. Le remède tenté ensuite (mesurer la hauteur RÉELLE de
+            // chaque row et sommer) a aggravé le bug au lieu de le
+            // résoudre : réduire la hauteur de la List réduit son viewport,
+            // ce qui réduit le nombre de rows RENDUES (donc mesurées),
+            // ce qui réduit encore la hauteur calculée — une boucle de
+            // rétroaction qui converge vers une poignée de lignes
+            // seulement (retour d'usage : "ça coupe dès 4 positions").
+            //
+            // Un simple `VStack` (comme déjà utilisé sur macOS) n'a besoin
+            // d'AUCUNE hauteur devinée : SwiftUI le dimensionne à son
+            // contenu réel, sans virtualisation, donc sans ce piège.
+            // Contrepartie assumée : le swipe natif (`.swipeActions`, qui
+            // n'existe que dans une vraie `List`) disparaît sur iOS — les
+            // mêmes actions restent joignables par appui long
+            // (`.contextMenu`, déjà branché par `.rowActions` sur les deux
+            // plateformes).
             VStack(spacing: 0) {
                 ForEach(positions) { position in
+                    #if os(macOS)
                     Button {
                         panePosition = position
                     } label: {
@@ -501,24 +579,7 @@ struct InvestmentAccountDetailView: View {
                         leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingPosition = position }],
                         trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { positionToDelete = position }]
                     )
-                    if position.id != positions.last?.id {
-                        Divider()
-                            .overlay(AppTheme.Colors.textSecondary.opacity(0.12))
-                            .padding(.leading, AppTheme.Spacing.sm)
-                    }
-                }
-            }
-            // Carte unique, même langage visuel que .macGroupedRow ailleurs dans
-            // l'app (cf. accountsListSection d'InvestmentsView.swift) : pas de
-            // List possible ici, donc un seul fond arrondi enveloppant les rows.
-            .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
-            .adaptivePane(item: $panePosition) { pushed in
-                PositionPane(viewModel: viewModel, account: account, position: pushed)
-            }
-            #else
-            // iOS : List conservée pour le swipe natif (RowActions → .swipeActions).
-            List {
-                ForEach(positions) { position in
+                    #else
                     NavigationLink {
                         InvestmentPositionDetailView(
                             viewModel: viewModel,
@@ -527,27 +588,30 @@ struct InvestmentAccountDetailView: View {
                         )
                     } label: {
                         positionRow(position)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, AppTheme.Spacing.sm)
+                            .contentShape(Rectangle())
                     }
-                    .listRowBackground(AppTheme.Colors.surface)
-                    .listRowInsets(EdgeInsets(top: 6, leading: AppTheme.Spacing.sm, bottom: 6, trailing: AppTheme.Spacing.sm))
-                    .listRowSeparatorTint(AppTheme.Colors.textSecondary.opacity(0.12))
+                    .buttonStyle(.plain)
                     .rowActions(
-                        // .sheet(item:) s'ouvre dès qu'editingPosition devient non-nil
                         leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingPosition = position }],
-                        trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { positionToDelete = position }],
-                        leadingFullSwipe: false,
-                        trailingFullSwipe: false
+                        trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { positionToDelete = position }]
                     )
+                    #endif
+                    if position.id != positions.last?.id {
+                        Divider()
+                            .overlay(AppTheme.Colors.textSecondary.opacity(0.12))
+                            .padding(.leading, AppTheme.Spacing.sm)
+                    }
                 }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .scrollDisabled(true)
-            // Hauteur estimée : ~66pt par position (ticker + asset_name + valeur + PnL).
-            .frame(height: CGFloat(positions.count) * 66)
-            // .plain (nécessaire pour le calcul de hauteur) désactive le groupement
-            // insetGrouped natif — même traitement que accountsListSection.
-            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
+            // Carte unique, même langage visuel que .macGroupedRow ailleurs
+            // dans l'app : un seul fond arrondi enveloppant toutes les rows.
+            .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
+            #if os(macOS)
+            .adaptivePane(item: $panePosition) { pushed in
+                PositionPane(viewModel: viewModel, account: account, position: pushed)
+            }
             #endif
         }
     }
@@ -691,7 +755,9 @@ struct InvestmentAccountDetailView: View {
         for position in positions {
             let identifier = position.bestSyncIdentifier
             guard !identifier.isEmpty else { failed += 1; continue }
-            switch await InvestmentAutoSyncService.shared.syncHistory(identifier: identifier) {
+            let outcome = await InvestmentAutoSyncService.shared.syncHistory(identifier: identifier)
+            InvestmentAutoSyncService.shared.recordOutcome(identifier: identifier, outcome: outcome)
+            switch outcome {
             case .success:     success += 1
             case .upToDate:    upToDate += 1
             case .rateLimited: rateLimited += 1
@@ -699,14 +765,18 @@ struct InvestmentAccountDetailView: View {
             }
         }
 
-        var parts: [String] = []
-        if success > 0      { parts.append("\(success) cours sync") }
-        if upToDate > 0     { parts.append("\(upToDate) à jour") }
-        if liveSyncOK > 0   { parts.append("\(liveSyncOK) LiveSync OK") }
-        if liveSyncErr > 0  { parts.append("\(liveSyncErr) LiveSync KO") }
-        if rateLimited > 0  { parts.append("\(rateLimited) limité\(rateLimited > 1 ? "s" : "") (réessaie plus tard)") }
-        if failed > 0       { parts.append("\(failed) sans cours") }
-        syncAllStatus = parts.isEmpty ? "Rien à synchroniser" : parts.joined(separator: " · ")
+        var parts: [LocalizedStringResource] = []
+        if success > 0      { parts.append(LocalizedStringResource("\(success) cours sync")) }
+        if upToDate > 0     { parts.append(LocalizedStringResource("\(upToDate) à jour")) }
+        if liveSyncOK > 0   { parts.append(LocalizedStringResource("\(liveSyncOK) LiveSync OK")) }
+        if liveSyncErr > 0  { parts.append(LocalizedStringResource("\(liveSyncErr) LiveSync KO")) }
+        if rateLimited > 0  { parts.append(LocalizedStringResource("\(rateLimited) limité\(rateLimited > 1 ? "s" : "") (réessaie plus tard)")) }
+        if failed > 0       { parts.append(LocalizedStringResource("\(failed) sans cours")) }
+        // `LocalizedStringResource` n'a pas de `.joined()` — repli manuel par
+        // imbrication (cf. `AppLocalization`/CLAUDE.md §5).
+        syncAllStatus = parts.isEmpty
+            ? LocalizedStringResource("Rien à synchroniser")
+            : parts.dropFirst().reduce(parts[0]) { acc, part in LocalizedStringResource("\(acc) · \(part)") }
         // Refresh local + notification globale (→ bump dataRefreshToken dans
         // NemorisApp → reload du dashboard). Avant : viewModel.load() PAR position.
         refresh()
@@ -722,7 +792,7 @@ struct InvestmentAccountDetailView: View {
         oneDayUnavailableNote = result.oneDayUnavailableNote
     }
 
-    private func variationRangeLabel(_ range: InvestmentTimeRange) -> String {
+    private func variationRangeLabel(_ range: InvestmentTimeRange) -> LocalizedStringResource {
         switch range {
         case .oneDay:     return "sur 1 jour"
         case .oneWeek:    return "sur 1 semaine"
@@ -738,7 +808,7 @@ struct InvestmentAccountDetailView: View {
 
     /// Couleur stable par type d'actif — alignée sur la palette du donut.
     private func assetTypeColor(_ raw: String) -> Color {
-        switch InvestmentAssetType(rawValue: raw) {
+        switch InvestmentAssetType(looselyMatching: raw) {
         case .stock:  return AppTheme.Colors.accent
         case .etf:    return AppTheme.Colors.accentSecondary
         case .bond:   return AppTheme.Colors.warning

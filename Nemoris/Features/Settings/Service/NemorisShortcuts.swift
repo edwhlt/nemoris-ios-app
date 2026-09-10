@@ -98,6 +98,83 @@ struct ImportInvestmentDocumentIntent: AppIntent {
     }
 }
 
+// MARK: - Import Apple Pay Transactions
+
+/// Dépose une dépense Apple Pay dans le tampon `pending_apple_pay_entries`
+/// (migration v49), via l'automatisation personnelle Raccourcis « Apple Pay ».
+///
+/// `openAppWhenRun = false` : s'exécute en arrière-plan, l'app n'apparaît
+/// JAMAIS au premier plan — c'est la seule condition qui rend l'automatisation
+/// réellement invisible pour l'utilisateur (Apple ne notifie pas les apps
+/// tierces des paiements Apple Pay, ce déclencheur Raccourcis est la seule
+/// voie disponible). AUCUN commit dans `transactions` ici : l'entrée reste en
+/// attente, affichée à part, jusqu'à sa résolution (ouverture de l'app) ou son
+/// rapprochement avec la transaction bancaire réelle à l'import du relevé.
+struct ImportTransactionApplePayEntityIntent: AppIntent {
+    static let title: LocalizedStringResource = "Importer une transaction Apple Pay"
+    static let description = IntentDescription(
+        "Dépose une dépense Apple Pay dans Nemoris en arrière-plan, sans ouvrir l'app. Elle apparaît à part, en attente, jusqu'à sa résolution."
+    )
+    static let openAppWhenRun: Bool = false
+
+    @Parameter(title: "Carte")
+    var card: String
+
+    // Optionnel à dessein : sur certaines transactions (sans contact avec
+    // pré-autorisation, transport en commun, pourboire ajouté après coup…),
+    // Apple Pay ne connaît pas encore le montant final au moment où le
+    // déclencheur se déclenche — la variable "Amount" arrive vide côté
+    // Raccourcis. Avec un `Double` obligatoire, Raccourcis n'a pas d'autre
+    // choix que d'INTERROMPRE l'automatisation pour demander une saisie
+    // manuelle — exactement ce que `openAppWhenRun = false` est censé éviter.
+    // En optionnel, une valeur absente est légitime : Raccourcis passe `nil`
+    // sans jamais solliciter l'utilisateur. `perform()` stocke alors 0 —
+    // l'entrée reste visible, à corriger à la main (cf. `PendingApplePayListView`).
+    @Parameter(title: "Montant")
+    var amount: Double?
+
+    @Parameter(title: "Marchand")
+    var merchant: String
+
+    // Le déclencheur Raccourcis « Apple Pay » peut fournir un nom distinct du
+    // marchand (ex. libellé de carte) selon la configuration de l'automatisation
+    // côté utilisateur. On ne le stocke pas séparément (pas de colonne dédiée,
+    // usage encore incertain) : simple repli si `merchant` est vide.
+    @Parameter(title: "Name")
+    var name: String
+
+    // Sans ça, chaque paramètre est résolu "à l'exécution" (saisie manuelle
+    // imposée) au lieu d'être exposé comme jeton dans l'éditeur Raccourcis —
+    // impossible d'y déposer une variable comme "Amount" issue de "Get
+    // Transaction". Même correctif que `ImportFileIntent`/
+    // `ImportInvestmentDocumentIntent` (cf. leurs commentaires).
+    static var parameterSummary: some ParameterSummary {
+        Summary("Enregistrer \(\.$amount) € chez \(\.$merchant) avec la carte \(\.$card) (\(\.$name))")
+    }
+
+    func perform() async throws -> some IntentResult {
+        // Montant absent (transaction sans montant connu à cet instant) :
+        // stocké à 0 plutôt que perdu ou redemandé — `PendingApplePayListView`
+        // repère ces entrées et propose de corriger le montant à la main.
+        let resolvedAmount = amount ?? 0
+
+        let label = merchant.isEmpty ? name : merchant
+        // Pas de `MainActor.run` ici : contrairement à `PendingImportInbox`
+        // (@MainActor, fichiers App Group), `PendingApplePayRepository` est
+        // stateless et ouvre sa propre connexion SQLite — sans affinité de thread.
+        let ok = PendingApplePayRepository().addEntry(card: card, amount: resolvedAmount, merchant: label)
+        guard ok else {
+            throw $amount.needsValueError("Impossible d'enregistrer la dépense Apple Pay dans Nemoris.")
+        }
+        // Vérifie tout de suite si le seuil configuré est franchi sur la
+        // période en cours — c'est le seul moment où ça a du sens ici : cet
+        // intent tourne sans jamais ouvrir l'app (`openAppWhenRun = false`),
+        // la notification est donc le seul signal que l'utilisateur reçoit.
+        await ApplePayAlertService.checkAndNotifyIfNeeded()
+        return .result()
+    }
+}
+
 // MARK: - App Shortcuts Provider
 
 struct NemorisShortcuts: AppShortcutsProvider {
@@ -122,6 +199,14 @@ struct NemorisShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Import investissement",
             systemImageName: "sparkles"
+        )
+        AppShortcut(
+            intent: ImportTransactionApplePayEntityIntent(),
+            phrases: [
+                "Importer une transaction Apple Pay dans \(.applicationName)",
+            ],
+            shortTitle: "Import Apple Pay Transaction",
+            systemImageName: "creditcard.rewards"
         )
     }
 }

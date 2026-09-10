@@ -173,7 +173,7 @@ struct CompanyMatchRow: View {
         .contentShape(Rectangle())
     }
 
-    private func statusBadge(_ text: String, _ color: Color) -> some View {
+    private func statusBadge(_ text: LocalizedStringKey, _ color: Color) -> some View {
         Text(text)
             .font(.system(size: 9, weight: .semibold))
             .padding(.horizontal, 5)

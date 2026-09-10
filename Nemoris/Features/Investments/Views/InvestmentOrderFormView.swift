@@ -54,7 +54,7 @@ struct InvestmentOrderFormView: View {
                 Section("Type d'opération") {
                     Picker("Type", selection: $orderType) {
                         ForEach(InvestmentOrderType.allCases) { type in
-                            Label(type.label, systemImage: type.systemIcon).tag(type)
+                            Label(LocalizedStringKey(type.label), systemImage: type.systemIcon).tag(type)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -64,14 +64,16 @@ struct InvestmentOrderFormView: View {
                     HStack {
                         Text("Quantité")
                         Spacer()
-                        TextField("0", text: $quantity)
+                        // Titre vide : la row a déjà son label — cf.
+                        // TransactionEditSheet pour la raison macOS.
+                        TextField("", text: $quantity)
                             .multilineTextAlignment(.trailing)
                             .keyboardType(.decimalPad)
                     }
                     HStack {
                         Text(orderType == .dividend ? "Montant unitaire" : "Prix unitaire")
                         Spacer()
-                        TextField("0,00", text: $unitPrice)
+                        TextField("", text: $unitPrice)
                             .multilineTextAlignment(.trailing)
                             .keyboardType(.decimalPad)
                         Text(currency)
@@ -80,7 +82,7 @@ struct InvestmentOrderFormView: View {
                     HStack {
                         Text("Frais")
                         Spacer()
-                        TextField("0,00", text: $fees)
+                        TextField("", text: $fees)
                             .multilineTextAlignment(.trailing)
                             .keyboardType(.decimalPad)
                         Text(currency)

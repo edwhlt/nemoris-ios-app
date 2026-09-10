@@ -52,6 +52,36 @@ struct AccountWidgetData: Codable {
     let monthIncome: Double
     let netBalance: Double
     let monthlyHistory: [MonthSummary]
+    var excludedFromAggregates: Bool = false
+
+    init(id: Int, name: String, type: String, monthExpense: Double, monthIncome: Double,
+         netBalance: Double, monthlyHistory: [MonthSummary], excludedFromAggregates: Bool = false) {
+        self.id = id
+        self.name = name
+        self.type = type
+        self.monthExpense = monthExpense
+        self.monthIncome = monthIncome
+        self.netBalance = netBalance
+        self.monthlyHistory = monthlyHistory
+        self.excludedFromAggregates = excludedFromAggregates
+    }
+
+    // Décodage manuel : le synthétisé échouerait (clé absente) sur un cache App
+    // Group écrit par une version antérieure de l'app — le widget se rechargerait
+    // sur un état vide/placeholder jusqu'au prochain refresh de l'app. v51 ajoute
+    // ce champ ; `decodeIfPresent` fait retomber une entrée ancienne sur `false`
+    // (non exclue), son comportement d'avant cette version.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        type = try c.decode(String.self, forKey: .type)
+        monthExpense = try c.decode(Double.self, forKey: .monthExpense)
+        monthIncome = try c.decode(Double.self, forKey: .monthIncome)
+        netBalance = try c.decode(Double.self, forKey: .netBalance)
+        monthlyHistory = try c.decode([MonthSummary].self, forKey: .monthlyHistory)
+        excludedFromAggregates = try c.decodeIfPresent(Bool.self, forKey: .excludedFromAggregates) ?? false
+    }
 }
 
 struct AllAccountsData: Codable {
@@ -59,6 +89,9 @@ struct AllAccountsData: Codable {
     let updatedAt: Date
 
     var combined: AccountWidgetData {
+        // Un compte "autre" garde sa propre entrée (sélectionnable individuellement
+        // dans le widget) mais n'entre pas dans "Tous les comptes".
+        let accounts = self.accounts.filter { !$0.excludedFromAggregates }
         let totalExpense = accounts.reduce(0) { $0 + $1.monthExpense }
         let totalIncome  = accounts.reduce(0) { $0 + $1.monthIncome }
         let allMonths = Dictionary(grouping: accounts.flatMap(\.monthlyHistory), by: \.month)
@@ -105,6 +138,88 @@ struct EnvelopeWidgetItem: Codable {
     var isOver: Bool { spent > allocated }
 }
 
+/// Variation (abs + %) du portefeuille sur une plage donnée, calculée avec le
+/// MÊME moteur que le chart in-app (`PortfolioEvolutionBuilder` + `InvestmentHeroCard`,
+/// cf. `WidgetDataStore.refreshInvestments`) — jamais un second calcul de plus-value.
+struct InvestmentRangeSnapshot: Codable {
+    let pnlAbsolute: Double
+    let pnlPercent: Double
+}
+
+/// Clés du dictionnaire `InvestmentsWidgetData.rangePnl`. Partagées avec le
+/// mirror de l'extension widget (`AppIntent.swift`) par leur VALEUR brute
+/// ("1J"/"1S"/"1M"), pas par un type commun — les deux cibles ne partagent pas
+/// de module Swift.
+enum InvestmentWidgetRangeKey {
+    static let oneDay   = "1J"
+    static let oneWeek  = "1S"
+    static let oneMonth = "1M"
+}
+
+struct InvestmentsWidgetData: Codable {
+    let totalValue: Double
+    /// Plus-value latente TOTALE depuis l'achat (coût d'acquisition vs valeur
+    /// actuelle) — conservée comme valeur d'affichage par défaut / de repli
+    /// quand la plage sélectionnée dans le widget n'a pas d'historique de prix.
+    let pnlAbsolute: Double
+    let pnlPercent: Double
+    let accountCount: Int
+    let updatedAt: Date
+    /// Variation sur 1J/1S/1M (clés `InvestmentWidgetRangeKey`). Une plage sans
+    /// historique de prix exploitable est absente du dictionnaire plutôt que
+    /// présente avec un zéro trompeur.
+    var rangePnl: [String: InvestmentRangeSnapshot] = [:]
+
+    var hasData: Bool { accountCount > 0 }
+
+    func pnl(forRangeKey key: String) -> InvestmentRangeSnapshot? { rangePnl[key] }
+
+    static let empty = InvestmentsWidgetData(totalValue: 0, pnlAbsolute: 0, pnlPercent: 0, accountCount: 0, updatedAt: Date())
+    static let placeholder = InvestmentsWidgetData(
+        totalValue: 18_450, pnlAbsolute: 1_230, pnlPercent: 7.1, accountCount: 2, updatedAt: Date(),
+        rangePnl: [
+            InvestmentWidgetRangeKey.oneDay:   InvestmentRangeSnapshot(pnlAbsolute: 42, pnlPercent: 0.2),
+            InvestmentWidgetRangeKey.oneWeek:  InvestmentRangeSnapshot(pnlAbsolute: 210, pnlPercent: 1.1),
+            InvestmentWidgetRangeKey.oneMonth: InvestmentRangeSnapshot(pnlAbsolute: 640, pnlPercent: 3.6),
+        ]
+    )
+}
+
+struct PatrimoineWidgetData: Codable {
+    let netWorth: Double
+    let totalAssets: Double
+    let totalLiabilities: Double
+    let itemsCount: Int
+    let updatedAt: Date
+
+    var hasData: Bool { itemsCount > 0 }
+
+    static let empty = PatrimoineWidgetData(netWorth: 0, totalAssets: 0, totalLiabilities: 0, itemsCount: 0, updatedAt: Date())
+    static let placeholder = PatrimoineWidgetData(netWorth: 182_400, totalAssets: 214_000, totalLiabilities: 31_600, itemsCount: 5, updatedAt: Date())
+}
+
+struct TricountGroupWidgetItem: Codable {
+    let id: Int
+    let title: String
+    let currency: String
+    /// Positif = le groupe me doit ; négatif = je dois au groupe.
+    let netBalance: Double
+}
+
+struct TricountWidgetData: Codable {
+    let groups: [TricountGroupWidgetItem]
+    let updatedAt: Date
+
+    static let empty = TricountWidgetData(groups: [], updatedAt: Date())
+    static let placeholder = TricountWidgetData(
+        groups: [
+            TricountGroupWidgetItem(id: 1, title: "Colocation", currency: "EUR", netBalance: 42.50),
+            TricountGroupWidgetItem(id: 2, title: "Vacances Portugal", currency: "EUR", netBalance: -18.20),
+        ],
+        updatedAt: Date()
+    )
+}
+
 // MARK: - WidgetDataStore
 
 /// Bridges the main app's SQLite data to widget and shortcut extensions via a shared App Group.
@@ -113,6 +228,9 @@ enum WidgetDataStore {
     static let snapshotKey    = "nemoris.widgetSnapshot"
     static let allAccountsKey = "nemoris.allAccountsData"
     static let budgetKey      = "nemoris.budgetWidgetData"
+    static let investmentsKey = "nemoris.investmentsWidgetData"
+    static let patrimoineKey  = "nemoris.patrimoineWidgetData"
+    static let tricountKey    = "nemoris.tricountWidgetData"
     // (pendingCSVKey supprimée 2026-07-22 — flux mort depuis l'import V3.
     //  Le dépôt de CSV passe par PendingImportInbox kind .transactions.)
 
@@ -121,8 +239,9 @@ enum WidgetDataStore {
     // MARK: - Public API
 
     /// Query the DB and push fresh snapshots for all accounts to the shared container.
-    /// Call on a background thread — performs synchronous SQLite reads.
-    static func refresh(preferredAccountId: Int? = nil) {
+    /// Call from a background task — performs synchronous SQLite reads, and hops onto
+    /// `@MainActor` internally for `refreshInvestments()` (le cache de cours l'est).
+    static func refresh(preferredAccountId: Int? = nil) async {
         let repo = TransactionRepository()
         let accounts = repo.fetchAccounts()
         guard !accounts.isEmpty else { return }
@@ -136,7 +255,12 @@ enum WidgetDataStore {
         var allTxns: [FinanceTransaction] = []
         for account in accounts {
             let txns = repo.fetchTransactions(accountId: account.id, from: monthStart, to: now, limit: 100_000)
-            allTxns.append(contentsOf: txns)
+            // Un compte "autre" garde son entrée individuelle (`accountDataList`,
+            // sélectionnable dans le widget) mais ses transactions n'entrent PAS
+            // dans `allTxns` — la source du budget agrégé plus bas.
+            if !account.excludedFromAggregates {
+                allTxns.append(contentsOf: txns)
+            }
             var expense = 0.0
             var income  = 0.0
             for tx in txns {
@@ -150,7 +274,8 @@ enum WidgetDataStore {
                 monthExpense: expense,
                 monthIncome: income,
                 netBalance: income - expense,
-                monthlyHistory: fetchHistory(accountId: account.id)
+                monthlyHistory: fetchHistory(accountId: account.id),
+                excludedFromAggregates: account.excludedFromAggregates
             ))
         }
 
@@ -180,6 +305,9 @@ enum WidgetDataStore {
             defaults.set(data, forKey: snapshotKey)
         }
         refreshBudget(allTxns: allTxns)
+        await refreshInvestments()
+        refreshPatrimoine()
+        refreshTricount()
         WidgetCenter.shared.reloadAllTimelines()
     }
 
@@ -225,6 +353,155 @@ enum WidgetDataStore {
             return .placeholder
         }
         return budget
+    }
+
+    // MARK: - Investments
+
+    /// Réutilise `InvestmentsRecap`, déjà partagé avec le Dashboard (AXE Q) — même
+    /// chiffre que le module, jamais un calcul divergent en plus.
+    ///
+    /// Le widget peut aussi afficher la variation sur 1J/1S/1M (choisi par
+    /// l'utilisateur via "Modifier le widget") : calculée avec le MÊME moteur
+    /// que `InvestmentHeroCard` in-app — `PortfolioEvolutionBuilder` + valeur
+    /// courante des positions comme base, jamais un second calcul de plus-value
+    /// (cf. doctrine AXE Q sur les calculs divergents).
+    @MainActor
+    private static func refreshInvestments() async {
+        let repository = InvestmentRepository()
+        let accounts = repository.fetchAccounts()
+        let recap = InvestmentsRecap.from(accounts: accounts)
+        let allPositions = accounts.flatMap { repository.fetchPositions(accountId: $0.id) }
+
+        var rangePnl: [String: InvestmentRangeSnapshot] = [:]
+        if !allPositions.isEmpty {
+            for (key, range) in [
+                (InvestmentWidgetRangeKey.oneDay, InvestmentTimeRange.oneDay),
+                (InvestmentWidgetRangeKey.oneWeek, InvestmentTimeRange.oneWeek),
+                (InvestmentWidgetRangeKey.oneMonth, InvestmentTimeRange.oneMonth),
+            ] {
+                // Même garde que le hero card in-app : en 1J sans AUCUNE cotation
+                // intrajournalière, ne pas fabriquer de courbe depuis des
+                // clôtures quotidiennes — la plage reste juste absente du dict.
+                if range == .oneDay,
+                   allPositions.allSatisfy({ PositionHistoryResolver.intradaySeries(for: $0).isEmpty }) {
+                    continue
+                }
+                let inputs = allPositions.map { position in
+                    PortfolioSeriesInput(
+                        positionId: position.id,
+                        quantity: position.quantity,
+                        history: PositionHistoryResolver.seriesHistory(for: position, range: range)
+                    )
+                }
+                let result = PortfolioEvolutionBuilder.build(inputs: inputs, range: range)
+                guard let start = result.points.first, start.value != 0 else { continue }
+                // ⚠️ Base de comparaison restreinte aux positions RÉELLEMENT
+                // valorisées par le builder (mêmes positions que `start.value`,
+                // via `pricedPositionIds`) — une position sans historique pour
+                // cette plage (ex. 1J sans cotation intrajournalière alors que
+                // d'autres positions en ont) était sinon comptée dans la valeur
+                // courante mais absente du point de départ, ce qui gonflait
+                // artificiellement le %  (même bug que celui déjà corrigé côté
+                // `InvestmentHeroCard` in-app via `variationBasisValue`).
+                let currentPricedValue = allPositions
+                    .filter { result.pricedPositionIds.contains($0.id) }
+                    .reduce(0.0) { $0 + $1.currentValue }
+                let delta = currentPricedValue - start.value
+                rangePnl[key] = InvestmentRangeSnapshot(
+                    pnlAbsolute: delta,
+                    pnlPercent: delta / start.value * 100
+                )
+            }
+        }
+
+        let data = InvestmentsWidgetData(
+            totalValue: recap.totalCurrentValue,
+            pnlAbsolute: recap.pnlAbsolute,
+            pnlPercent: recap.pnlPercent,
+            accountCount: recap.activeAccountCount,
+            updatedAt: Date(),
+            rangePnl: rangePnl
+        )
+        guard let defaults = UserDefaults(suiteName: appGroupID),
+              let encoded = try? JSONEncoder().encode(data) else { return }
+        defaults.set(encoded, forKey: investmentsKey)
+    }
+
+    // MARK: - Patrimoine
+
+    /// Réutilise `PatrimoineSnapshotBuilder`, le même moteur pur que le Dashboard et
+    /// `PatrimoineViewModel` (AXE Q) — pas un 4ᵉ calcul de patrimoine net.
+    private static func refreshPatrimoine() {
+        let patrimoineRepo = PatrimoineRepository()
+        let assets = patrimoineRepo.fetchAssets()
+        let realEstates = patrimoineRepo.fetchRealEstate()
+        let loans = patrimoineRepo.fetchLoans()
+
+        guard !assets.isEmpty || !realEstates.isEmpty || !loans.isEmpty else {
+            guard let defaults = UserDefaults(suiteName: appGroupID),
+                  let encoded = try? JSONEncoder().encode(PatrimoineWidgetData.empty) else { return }
+            defaults.set(encoded, forKey: patrimoineKey)
+            return
+        }
+
+        let txRepo = TransactionRepository()
+        let bankAccounts = txRepo.fetchAccounts()
+        let investmentAccounts = InvestmentRepository().fetchAccounts()
+        let existingBankIds = Set(bankAccounts.map(\.id))
+
+        var bankBalances: [Int: Double] = [:]
+        for id in PatrimoineSnapshotBuilder.linkedBankAccountIds(in: assets) where existingBankIds.contains(id) {
+            bankBalances[id] = txRepo.fetchAccountBalance(accountId: id, upToDate: nil)
+        }
+
+        let (values, _) = PatrimoineSnapshotBuilder.resolveValues(
+            assets: assets,
+            existingBankAccountIds: existingBankIds,
+            bankBalances: bankBalances,
+            investmentAccounts: investmentAccounts
+        )
+        var loanStates: [Int: LoanState] = [:]
+        for loan in loans { loanStates[loan.id] = LoanCalculator.compute(loan: loan) }
+
+        let snapshot = PatrimoineSnapshotBuilder.snapshot(
+            assets: assets,
+            realEstates: realEstates,
+            loans: loans,
+            resolvedValues: values,
+            loanStates: loanStates
+        )
+        let data = PatrimoineWidgetData(
+            netWorth: snapshot.netWorth,
+            totalAssets: snapshot.totalAssets,
+            totalLiabilities: snapshot.totalLiabilities,
+            itemsCount: snapshot.itemsCount,
+            updatedAt: Date()
+        )
+        guard let defaults = UserDefaults(suiteName: appGroupID),
+              let encoded = try? JSONEncoder().encode(data) else { return }
+        defaults.set(encoded, forKey: patrimoineKey)
+    }
+
+    // MARK: - Tricount
+
+    /// Réutilise `TricountRepository.computeBalances` (même logique que
+    /// `TricountDetailView`) — le solde net par groupe est la somme des balances
+    /// individuelles (`theyOwe - iOwe`), positif = le groupe me doit.
+    private static func refreshTricount() {
+        let repo = TricountRepository()
+        let groups = repo.fetchGroups()
+        var items: [TricountGroupWidgetItem] = []
+        for group in groups {
+            let entries = repo.fetchEntries(groupId: group.id)
+            let shares = repo.fetchShares(groupId: group.id)
+            let balances = repo.computeBalances(entries: entries, shares: shares, myName: group.myName)
+            let net = balances.reduce(0.0) { $0 + $1.net }
+            items.append(TricountGroupWidgetItem(id: group.id, title: group.title, currency: group.currency, netBalance: net))
+        }
+        let data = TricountWidgetData(groups: items, updatedAt: Date())
+        guard let defaults = UserDefaults(suiteName: appGroupID),
+              let encoded = try? JSONEncoder().encode(data) else { return }
+        defaults.set(encoded, forKey: tricountKey)
     }
 
     // MARK: - Budget

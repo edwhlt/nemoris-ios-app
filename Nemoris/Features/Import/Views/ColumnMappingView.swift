@@ -143,7 +143,7 @@ struct ColumnMappingView: View {
         .nemorisFormStyle()
         // Le titre suit la source : « Mapping CSV » sur une feuille de classeur
         // ferait douter l'utilisateur d'avoir choisi le bon fichier.
-        .navigationTitle(effective.sheetName == nil ? "Mapping CSV" : "Mapping du tableau")
+        .localizedNavigationTitle(effective.sheetName == nil ? "Mapping CSV" : "Mapping du tableau")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -191,7 +191,7 @@ struct ColumnMappingView: View {
         .padding(.vertical, 4)
     }
 
-    private func preview(_ label: String, value: String?, monospaced: Bool = false) -> some View {
+    private func preview(_ label: LocalizedStringKey, value: String?, monospaced: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Text(label).font(.caption2.bold()).foregroundStyle(AppTheme.Colors.textSecondary)
             if let value, !value.isEmpty {

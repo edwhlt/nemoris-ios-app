@@ -143,7 +143,7 @@ struct CurrencyConverterSheet: View {
                         set: { appState.preferredCurrency = $0 }
                     )) {
                         ForEach(CurrencyService.supportedCurrencies) { c in
-                            Text("\(c.code) — \(c.name)").tag(c.code)
+                            (Text(c.code) + Text(" — ") + Text(LocalizedStringKey(c.name))).tag(c.code)
                         }
                     } label: {
                         Label("Devise préférée", systemImage: "globe.europe.africa.fill")

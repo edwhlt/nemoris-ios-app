@@ -28,11 +28,29 @@ final class InvestmentAutoSyncService {
 
     private(set) var isSyncing = false
     private(set) var lastSyncAt: Date?
-    /// Résumé FR de la dernière passe (ex. "12 cours à jour · 2 sans données · Yahoo limité").
-    private(set) var lastSummary: String?
+    /// Résumé de la dernière passe (ex. "12 cours à jour · 2 sans données · Yahoo limité").
+    /// ⚠️ `LocalizedStringResource`, pas `String` — sinon figé dans la langue
+    /// active AU MOMENT DU SYNC (cf. `InvestmentSyncTraceStore.Entry.message`).
+    private(set) var lastSummary: LocalizedStringResource?
+    /// Vrai si la dernière passe a rencontré au moins un problème (calculé une
+    /// fois dans `buildSummary`, cf. `SyncSummary.hasIssues`) — pas un test de
+    /// sous-chaîne sur `lastSummary`, qui casserait dès que l'app n'est plus
+    /// en français.
+    private(set) var lastSyncHadIssues = false
     /// Outcome typé par identifier (clé uppercased) — consommé par les vues
     /// pour afficher un statut par position sans parser de messages.
     private(set) var outcomesByIdentifier: [String: PositionSyncOutcome] = [:]
+
+    /// Enregistre manuellement un outcome pour `identifier`. `syncNow()` (passe
+    /// complète) écrit directement dans `outcomesByIdentifier` ; les sync ciblées
+    /// (compte, position — `syncHistory(identifier:)` appelé hors passe complète)
+    /// passent par ici pour que le "?" reste une vue à jour quel que soit le
+    /// déclencheur, plutôt qu'un 2ᵉ suivi divergent par écran.
+    func recordOutcome(identifier: String, outcome: PositionSyncOutcome) {
+        let key = identifier.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !key.isEmpty else { return }
+        outcomesByIdentifier[key] = outcome
+    }
     /// Progression de la passe courante (nil hors sync).
     private(set) var progress: SyncProgress?
 
@@ -175,15 +193,17 @@ final class InvestmentAutoSyncService {
             await Task.yield()
         }
 
-        // 3. Résumé FR + persistance de la date
-        lastSummary = Self.buildSummary(
+        // 3. Résumé + persistance de la date
+        let summary = Self.buildSummary(
             outcomes: Array(outcomesByIdentifier.values),
             liveSyncTotal: liveSyncResults.count,
             liveSyncErrors: liveSyncErrors.count
         )
+        lastSummary = summary.text
+        lastSyncHadIssues = summary.hasIssues
         lastSyncAt = Date()
         UserDefaults.standard.set(lastSyncAt, forKey: Self.lastSyncKey)
-        print("[InvestmentAutoSyncService] Passe terminée — \(lastSummary ?? "aucun résumé")")
+        print("[InvestmentAutoSyncService] Passe terminée — \(String(localized: summary.text))")
     }
 
     // MARK: - Sync d'un identifier (corps déplacé depuis InvestmentsViewModel)
@@ -198,7 +218,7 @@ final class InvestmentAutoSyncService {
         guard !clean.isEmpty else {
             InvestmentSyncTraceStore.record(.init(
                 identifier: identifier, attemptedAt: Date(), status: .invalidId,
-                message: "Identifiant manquant (ticker/ISIN).",
+                message: LocalizedStringResource("Identifiant manquant (ticker/ISIN)."),
                 symbolsTried: [], source: nil, pointsCount: 0
             ))
             return .invalidIdentifier
@@ -217,7 +237,7 @@ final class InvestmentAutoSyncService {
            Calendar.current.isDateInToday(latest) {
             InvestmentSyncTraceStore.record(.init(
                 identifier: clean, attemptedAt: Date(), status: .success,
-                message: "Cours déjà à jour (dernier point aujourd'hui) — appel Yahoo évité.",
+                message: LocalizedStringResource("Cours déjà à jour (dernier point aujourd'hui) — appel Yahoo évité."),
                 symbolsTried: [clean], source: "cache", pointsCount: 0
             ))
             return .upToDate
@@ -235,10 +255,13 @@ final class InvestmentAutoSyncService {
                 : repository.updatePositionsCurrentValueFromLatestPrice(identifier: clean)
             let totalTouched = touchedA + touchedB
 
-            var msg = "Historique synchronisé via \(result.source) (\(result.points.count) points)."
-            if totalTouched > 0 {
-                msg += " \(totalTouched) position(s) mise(s) à jour."
-            }
+            // `LocalizedStringResource` s'imbrique dans un autre via
+            // interpolation (vérifié) — c'est ce qui permet de composer une
+            // phrase en deux morceaux sans jamais figer de texte résolu.
+            let baseMsg = LocalizedStringResource("Historique synchronisé via \(result.source) (\(result.points.count) points).")
+            let msg: LocalizedStringResource = totalTouched > 0
+                ? LocalizedStringResource("\(baseMsg) \(totalTouched) position(s) mise(s) à jour.")
+                : baseMsg
 
             // Trace persistante : TOUS les symboles essayés (pas seulement le
             // winner) pour montrer le chemin de résolution complet.
@@ -260,14 +283,14 @@ final class InvestmentAutoSyncService {
             case .invalidIdentifier:
                 InvestmentSyncTraceStore.record(.init(
                     identifier: clean, attemptedAt: Date(), status: .invalidId,
-                    message: error.localizedDescription,
+                    message: LocalizedStringResource("\(error.localizedDescription)"),
                     symbolsTried: [clean], source: nil, pointsCount: 0
                 ))
                 return .invalidIdentifier
             case .noData(let symbols):
                 InvestmentSyncTraceStore.record(.init(
                     identifier: clean, attemptedAt: Date(), status: .noData,
-                    message: error.localizedDescription,
+                    message: LocalizedStringResource("\(error.localizedDescription)"),
                     symbolsTried: symbols.isEmpty ? [clean] : symbols,
                     source: nil, pointsCount: 0
                 ))
@@ -275,7 +298,7 @@ final class InvestmentAutoSyncService {
             case .rateLimited(let provider, let retryAfter):
                 InvestmentSyncTraceStore.record(.init(
                     identifier: clean, attemptedAt: Date(), status: .rateLimited,
-                    message: error.localizedDescription,
+                    message: LocalizedStringResource("\(error.localizedDescription)"),
                     symbolsTried: [clean], source: nil, pointsCount: 0
                 ))
                 return .rateLimited(provider: provider, retryAfter: retryAfter)
@@ -286,28 +309,28 @@ final class InvestmentAutoSyncService {
             case .rateLimited(let provider, let retryAfter):
                 InvestmentSyncTraceStore.record(.init(
                     identifier: clean, attemptedAt: Date(), status: .rateLimited,
-                    message: "Limite de requêtes \(provider.displayName) atteinte.",
+                    message: LocalizedStringResource("Limite de requêtes \(provider.displayName) atteinte."),
                     symbolsTried: [clean], source: nil, pointsCount: 0
                 ))
                 return .rateLimited(provider: provider, retryAfter: retryAfter)
             case .timeout:
                 InvestmentSyncTraceStore.record(.init(
                     identifier: clean, attemptedAt: Date(), status: .error,
-                    message: "Délai réseau dépassé.",
+                    message: LocalizedStringResource("Délai réseau dépassé."),
                     symbolsTried: [clean], source: nil, pointsCount: 0
                 ))
                 return .networkError("Délai réseau dépassé.")
             case .network(let message):
                 InvestmentSyncTraceStore.record(.init(
                     identifier: clean, attemptedAt: Date(), status: .error,
-                    message: "Erreur réseau : \(message)",
+                    message: LocalizedStringResource("Erreur réseau : \(message)"),
                     symbolsTried: [clean], source: nil, pointsCount: 0
                 ))
                 return .networkError(message)
             case .badStatus(let code):
                 InvestmentSyncTraceStore.record(.init(
                     identifier: clean, attemptedAt: Date(), status: .error,
-                    message: "HTTP \(code)",
+                    message: LocalizedStringResource("HTTP \(code)"),
                     symbolsTried: [clean], source: nil, pointsCount: 0
                 ))
                 return .networkError("HTTP \(code)")
@@ -315,7 +338,7 @@ final class InvestmentAutoSyncService {
         } catch {
             InvestmentSyncTraceStore.record(.init(
                 identifier: clean, attemptedAt: Date(), status: .error,
-                message: error.localizedDescription,
+                message: LocalizedStringResource("\(error.localizedDescription)"),
                 symbolsTried: [clean], source: nil, pointsCount: 0
             ))
             return .networkError(error.localizedDescription)
@@ -330,7 +353,7 @@ final class InvestmentAutoSyncService {
            Calendar.current.isDateInToday(latest) {
             InvestmentSyncTraceStore.record(.init(
                 identifier: identifier, attemptedAt: Date(), status: .success,
-                message: "Cours déjà à jour (dernier point aujourd'hui) — appel CoinGecko évité.",
+                message: LocalizedStringResource("Cours déjà à jour (dernier point aujourd'hui) — appel CoinGecko évité."),
                 symbolsTried: [coinId], source: "cache", pointsCount: 0
             ))
             return .upToDate
@@ -345,15 +368,15 @@ final class InvestmentAutoSyncService {
                     ?? MarketDataProvider.coinGecko.defaultCooldown
                 InvestmentSyncTraceStore.record(.init(
                     identifier: identifier, attemptedAt: Date(), status: .rateLimited,
-                    message: "CoinGecko : limite de requêtes atteinte — réessai dans \(Int(remaining))s (coinId \(coinId)).",
+                    message: LocalizedStringResource("CoinGecko : limite de requêtes atteinte — réessai dans \(Int(remaining))s (coinId \(coinId))."),
                     symbolsTried: [coinId], source: nil, pointsCount: 0
                 ))
                 return .rateLimited(provider: .coinGecko, retryAfter: remaining)
             }
-            let reason = result.errorReason ?? "raison inconnue"
+            let reason: LocalizedStringResource = result.errorReason.map { LocalizedStringResource(stringLiteral: $0) } ?? LocalizedStringResource("raison inconnue")
             InvestmentSyncTraceStore.record(.init(
                 identifier: identifier, attemptedAt: Date(), status: .noData,
-                message: "CoinGecko : \(reason) (coinId \(coinId)).",
+                message: LocalizedStringResource("CoinGecko : \(reason) (coinId \(coinId))."),
                 symbolsTried: [coinId], source: nil, pointsCount: 0
             ))
             return .noData(symbolsTried: [coinId])
@@ -362,8 +385,10 @@ final class InvestmentAutoSyncService {
         _ = repository.savePriceHistory(identifier: identifier, points: result.points, source: "coingecko")
         let touched = repository.updatePositionsCurrentValueFromLatestPrice(identifier: identifier)
 
-        var msg = "Historique synchronisé via coingecko (\(result.points.count) points)."
-        if touched > 0 { msg += " \(touched) position(s) mise(s) à jour." }
+        let baseCryptoMsg = LocalizedStringResource("Historique synchronisé via coingecko (\(result.points.count) points).")
+        let msg: LocalizedStringResource = touched > 0
+            ? LocalizedStringResource("\(baseCryptoMsg) \(touched) position(s) mise(s) à jour.")
+            : baseCryptoMsg
         InvestmentSyncTraceStore.record(.init(
             identifier: identifier, attemptedAt: Date(), status: .success,
             message: msg, symbolsTried: [coinId, identifier],
@@ -434,7 +459,7 @@ final class InvestmentAutoSyncService {
                 PriceHistoryCache.shared.save(identifier: clean, points: points, resolution: .intraday30m)
                 InvestmentSyncTraceStore.record(.init(
                     identifier: clean, attemptedAt: Date(), status: .success,
-                    message: "Cours intrajournaliers synchronisés via yahoo (\(points.count) points, pas de 30 min).",
+                    message: LocalizedStringResource("Cours intrajournaliers synchronisés via yahoo (\(points.count) points, pas de 30 min)."),
                     symbolsTried: candidates, source: "yahoo", pointsCount: points.count
                 ))
                 return .success(points: points.count, source: "yahoo")
@@ -458,14 +483,19 @@ final class InvestmentAutoSyncService {
                 if case .networkError = lastOutcome { return .error }
                 return .noData
             }(),
-            message: "Cours intrajournaliers (1J) indisponibles. " + {
+            // Pas de `+` : `LocalizedStringResource` ne concatène pas comme
+            // `String`/`Text` — chaque branche compose sa propre ressource
+            // complète (imbrication testée et supportée), en partant du
+            // même préfixe.
+            message: {
+                let prefix = LocalizedStringResource("Cours intrajournaliers (1J) indisponibles.")
                 switch lastOutcome {
                 case .rateLimited(let provider, let retryAfter):
-                    return "\(provider.displayName) limite les requêtes — réessai dans \(Int(retryAfter)) s."
+                    return LocalizedStringResource("\(prefix) \(provider.displayName) limite les requêtes — réessai dans \(Int(retryAfter)) s.")
                 case .networkError(let message):
-                    return message
+                    return LocalizedStringResource("\(prefix) \(message)")
                 default:
-                    return "Aucun point 30 min renvoyé pour ce titre."
+                    return LocalizedStringResource("\(prefix) Aucun point 30 min renvoyé pour ce titre.")
                 }
             }(),
             symbolsTried: candidates, source: nil, pointsCount: 0
@@ -511,11 +541,21 @@ final class InvestmentAutoSyncService {
         return days <= 2
     }
 
+    /// `hasIssues` remplace un ancien test `summary.contains("erreur")` côté
+    /// vue (`InvestmentsView`) — fragile car il matchait des MOTS FRANÇAIS
+    /// dans un texte désormais résolu dans la langue de l'app : cassé dès que
+    /// l'app tourne en anglais. Calculé ici, une seule fois, à partir des
+    /// mêmes compteurs que le texte — pas une 2ᵉ lecture divergente.
+    struct SyncSummary {
+        let text: LocalizedStringResource
+        let hasIssues: Bool
+    }
+
     private static func buildSummary(
         outcomes: [PositionSyncOutcome],
         liveSyncTotal: Int,
         liveSyncErrors: Int
-    ) -> String {
+    ) -> SyncSummary {
         var synced = 0, upToDate = 0, noData = 0, invalid = 0, netErrors = 0
         var limitedProviders = Set<String>()
         for outcome in outcomes {
@@ -528,21 +568,32 @@ final class InvestmentAutoSyncService {
             case .rateLimited(let provider, _):  limitedProviders.insert(provider.displayName)
             }
         }
+        let hasIssues = noData > 0 || invalid > 0 || netErrors > 0
+            || !limitedProviders.isEmpty || liveSyncErrors > 0
 
-        var parts: [String] = []
-        if synced > 0    { parts.append("\(synced) cours synchronisé\(synced > 1 ? "s" : "")") }
-        if upToDate > 0  { parts.append("\(upToDate) à jour") }
-        if noData > 0    { parts.append("\(noData) sans données") }
-        if invalid > 0   { parts.append("\(invalid) sans identifiant") }
-        if netErrors > 0 { parts.append("\(netErrors) erreur\(netErrors > 1 ? "s" : "") réseau") }
+        // `LocalizedStringResource` ne conforme pas à `Sequence.joined()` —
+        // repli manuel par imbrication (testé, supporté), qui préserve la
+        // clé + les arguments de chaque fragment au lieu de figer du texte.
+        var parts: [LocalizedStringResource] = []
+        if synced > 0    { parts.append(LocalizedStringResource("\(synced) cours synchronisé\(synced > 1 ? "s" : "")")) }
+        if upToDate > 0  { parts.append(LocalizedStringResource("\(upToDate) à jour")) }
+        if noData > 0    { parts.append(LocalizedStringResource("\(noData) sans données")) }
+        if invalid > 0   { parts.append(LocalizedStringResource("\(invalid) sans identifiant")) }
+        if netErrors > 0 { parts.append(LocalizedStringResource("\(netErrors) erreur\(netErrors > 1 ? "s" : "") réseau")) }
         if !limitedProviders.isEmpty {
-            parts.append("\(limitedProviders.sorted().joined(separator: " + ")) limité")
+            parts.append(LocalizedStringResource("\(limitedProviders.sorted().joined(separator: " + ")) limité"))
         }
         if liveSyncErrors > 0 {
-            parts.append("\(liveSyncErrors)/\(liveSyncTotal) LiveSync en erreur")
+            parts.append(LocalizedStringResource("\(liveSyncErrors)/\(liveSyncTotal) LiveSync en erreur"))
         } else if liveSyncTotal > 0 {
-            parts.append("\(liveSyncTotal) LiveSync OK")
+            parts.append(LocalizedStringResource("\(liveSyncTotal) LiveSync OK"))
         }
-        return parts.isEmpty ? "Rien à synchroniser" : parts.joined(separator: " · ")
+        guard let first = parts.first else {
+            return SyncSummary(text: LocalizedStringResource("Rien à synchroniser"), hasIssues: false)
+        }
+        let text = parts.dropFirst().reduce(first) { acc, part in
+            LocalizedStringResource("\(acc) · \(part)")
+        }
+        return SyncSummary(text: text, hasIssues: hasIssues)
     }
 }

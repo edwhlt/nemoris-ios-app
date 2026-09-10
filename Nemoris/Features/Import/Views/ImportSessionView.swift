@@ -58,7 +58,20 @@ struct ImportSessionView: View {
                                 pendingUpdate = captured
                             }
                         }
+                        // Cf. CLAUDE.md §5 : ré-injection \.locale obligatoire pour
+                        // toute `.sheet()` niveau 2+ atteignable sur macOS.
+                        // ⚠️ `\.paneHostContext` obligatoire aussi : cette vue
+                        // (`ImportSessionView`) est elle-même hébergée dans
+                        // l'inspecteur macOS (`.inspector`) — un `.sheet()` brut
+                        // ouvert depuis là hérite cette valeur, et `.paneChrome`
+                        // la lit pour publier ses boutons dans la barre système
+                        // au lieu de les dessiner dans CETTE fenêtre séparée
+                        // (aucun bouton visible dans le sheet lui-même). Reset
+                        // à `.modal`, comme le fait `.adaptivePane` sur son
+                        // propre repli `.sheet()` (cf. AdaptivePane.swift).
                         .presentationDetents([.medium, .large])
+                        .environment(\.locale, AppLocalization.locale)
+                        .environment(\.paneHostContext, .modal)
                     }
                     // Étape 2 (ou direct pour .matched) : édition du tier choisi avant assign.
                     .sheet(item: $pendingUpdate) { pending in
@@ -71,12 +84,16 @@ struct ImportSessionView: View {
                             pendingUpdate = nil
                         }
                         .presentationDetents([.large])
+                        .environment(\.locale, AppLocalization.locale)
+                        .environment(\.paneHostContext, .modal)
                     }
                     .sheet(item: $rowToEnrich) { row in
                         EnrichmentSheetView(row: row) { enrichment in
                             viewModel.apply(enrichment: enrichment, toRowId: row.id)
                         }
                         .presentationDetents([.large])
+                        .environment(\.locale, AppLocalization.locale)
+                        .environment(\.paneHostContext, .modal)
                     }
                     .sheet(item: $rowToCreatePayee) { row in
                         PayeeCreationFormSheet(
@@ -86,10 +103,14 @@ struct ImportSessionView: View {
                             viewModel.createPayeeAndAssign(rowId: row.id, newPayee: newPayee)
                         }
                         .presentationDetents([.large])
+                        .environment(\.locale, AppLocalization.locale)
+                        .environment(\.paneHostContext, .modal)
                     }
                     .sheet(isPresented: $showActionsHelp) {
                         ImportActionsHelpSheet()
                             .presentationDetents([.medium, .large])
+                            .environment(\.locale, AppLocalization.locale)
+                            .environment(\.paneHostContext, .modal)
                     }
                     .overlay(alignment: .top) {
                         if let toast = visibleBulkToast {
@@ -114,7 +135,7 @@ struct ImportSessionView: View {
                         }
                     }
             } else if let loadError {
-                EmptyStateView(icon: "exclamationmark.triangle", title: "Erreur", message: loadError)
+                EmptyStateView(icon: "exclamationmark.triangle", title: "Erreur", verbatimMessage: loadError)
             } else {
                 // Skeleton initial avant que la session ne soit chargée + résolution moteur démarrée.
                 ScrollView {
@@ -186,7 +207,7 @@ struct ImportSessionView: View {
             Divider()
             commitBar(viewModel)
         }
-        .navigationTitle("Import en cours")
+        .localizedNavigationTitle("Import en cours")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -290,7 +311,7 @@ struct ImportSessionView: View {
     }
 
     @ViewBuilder
-    private func stat(_ label: String, value: String, color: Color) -> some View {
+    private func stat(_ label: LocalizedStringKey, value: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
             Text(value).font(.headline).foregroundStyle(color)
@@ -380,6 +401,12 @@ struct ImportSessionView: View {
                 }
             }
             .listStyle(.plain)
+            #if os(macOS)
+            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
+            // celui du panneau hôte — sans ce modificateur, le bureau de
+            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            .scrollContentBackground(.hidden)
+            #endif
         }
     }
 
@@ -607,7 +634,7 @@ private struct ResolutionChip: View {
         chip(label: label, color: color, icon: icon)
     }
 
-    private var label: String {
+    private var label: LocalizedStringKey {
         switch snapshot {
         case .pending: return "Analyse…"
         case .matched: return "Reconnu"
@@ -640,7 +667,7 @@ private struct ResolutionChip: View {
         }
     }
 
-    private func chip(label: String, color: Color, icon: String) -> some View {
+    private func chip(label: LocalizedStringKey, color: Color, icon: String) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon).font(.caption2.weight(.bold))
             Text(label).font(.caption2.weight(.semibold))
@@ -669,7 +696,7 @@ private struct ActionChip: View {
         }
     }
 
-    private func chip(_ label: String, icon: String, color: Color) -> some View {
+    private func chip(_ label: LocalizedStringKey, icon: String, color: Color) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon).font(.caption2.weight(.bold))
             Text(label).font(.caption2.weight(.semibold))
@@ -697,7 +724,7 @@ private struct ClusterChip: View {
 
 /// Bouton d'action inline compact pour la row cell (style import V2 ressuscité).
 private struct ActionButton: View {
-    let title: String
+    let title: LocalizedStringKey
     let icon: String
     let tint: Color
     let action: () -> Void
@@ -771,8 +798,20 @@ struct ImportActionsHelpSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            List {
+            // `Form`, PAS `List` : vérifié en direct sur macOS (2026-08-26) —
+            // même armé du correctif `.frame(maxWidth: .infinity, maxHeight:
+            // .infinity)` documenté sur `PayeePickerSheet`, un `List` brut
+            // (`.automatic` style) présenté par un `.sheet()` SANS
+            // `.adaptivePaneFrame()` externe rendait une fenêtre quasiment
+            // sans hauteur : titre + bouton "Compris" collés, aucune row
+            // visible. Un `Form` avec `.nemorisFormStyle()` utilise EXACTEMENT
+            // le même `.frame` greedy mais calcule fiablement sa hauteur —
+            // c'est la voie déjà éprouvée par tous les autres sheets/forms
+            // du repo (`EnrichmentSheetView`, `TierUpdateSheet`,
+            // `PayeeCreationFormSheet`, `AddTricountReimbursementSheet`…).
+            // Aucun de ces deux a de contenu interactif (que du texte), donc
+            // rien ne dépend spécifiquement de `List`.
+            Form {
                 Section {
                     ForEach(options) { opt in
                         HStack(alignment: .top, spacing: 12) {
@@ -783,7 +822,7 @@ struct ImportActionsHelpSheet: View {
                                     .foregroundStyle(opt.color)
                             }
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(opt.title).font(.subheadline.bold())
+                                Text(LocalizedStringKey(opt.title)).font(.subheadline.bold())
                                 Text(opt.description)
                                     .font(.caption)
                                     .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -810,15 +849,11 @@ struct ImportActionsHelpSheet: View {
                     Text("Bon à savoir").textCase(nil)
                 }
             }
-            .navigationTitle("Traiter une transaction")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Label("Compris", systemImage: "checkmark")
-                    }
-                }
-            }
-        }
+            .nemorisFormStyle()
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
+            // barre d'outils native laisse le bureau de l'utilisateur
+            // transparaître (retour d'usage 2026-08-21). Cf. le commentaire
+            // de `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome("Traiter une transaction", confirmLabel: "Compris", confirmIcon: "checkmark", onConfirm: { dismiss() })
     }
 }

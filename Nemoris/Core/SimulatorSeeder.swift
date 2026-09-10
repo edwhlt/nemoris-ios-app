@@ -1,9 +1,12 @@
 import Foundation
 import SQLite3
 
-#if targetEnvironment(simulator)
+#if targetEnvironment(simulator) || (os(macOS) && DEBUG)
 
 /// Seeds the SQLite database with realistic fake French finance data for simulator testing.
+/// Also compiled for native macOS DEBUG builds, gated further at the call site behind the
+/// `-nemorisScreenshotMode` launch argument (marketing-screenshot automation) — never runs
+/// unless that flag is explicitly passed, and never ships in a macOS Release build.
 /// Called once at app launch if the database is empty (no accounts).
 enum SimulatorSeeder {
 

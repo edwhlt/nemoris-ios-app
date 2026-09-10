@@ -12,18 +12,43 @@ struct TransactionFiltersSheet: View {
     let accounts: [Account]
     let allCategories: [Category]
     let allTags: [Tag]
-    @Binding var tiersSearchText: String
+    let allTiers: [Tiers]
+    @Binding var payeeSearchText: String
+    @Binding var labelSearchText: String
     @Binding var selectedCategoryId: Int
     @Binding var filterTagIds: Set<Int>
     @Binding var grouping: TransactionGrouping
     let onApply: () -> Void
 
     // Local copies to avoid re-rendering parent on every keystroke
-    @State private var localTiersSearch: String = ""
+    @State private var localPayeeSearch: String = ""
+    @State private var localLabelSearch: String = ""
+
+    /// Catégories aplaties en pré-ordre (parent puis ses enfants) avec la
+    /// profondeur de chacune — un `Picker` ne peut pas rendre un vrai arbre,
+    /// mais l'indentation suffit à transmettre la hiérarchie sans y perdre la
+    /// sélection directe d'un parent OU d'un enfant (contrairement à une vraie
+    /// arborescence pliable, hors de portée d'un simple `Picker`).
+    private var categoryPickerEntries: [(node: CategoryNode, depth: Int)] {
+        CategoryNode.flattenedForest(CategoryNode.buildForest(from: allCategories))
+    }
+
+    /// Suggestions de tiers pour l'autocomplétion — noms déjà connus qui
+    /// contiennent la saisie, le tiers déjà retenu exclu (il n'y a rien à
+    /// proposer de plus une fois qu'il est choisi).
+    private var payeeSuggestions: [String] {
+        guard !localPayeeSearch.isEmpty else { return [] }
+        let names = Set(allTiers.map(\.name))
+        guard !names.contains(localPayeeSearch) else { return [] }
+        return names
+            .filter { $0.localizedCaseInsensitiveContains(localPayeeSearch) }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .prefix(6)
+            .map { $0 }
+    }
 
     var body: some View {
         @Bindable var appState = appState
-        NavigationStack {
             Form {
                 Section {
                     if accounts.isEmpty {
@@ -44,7 +69,7 @@ struct TransactionFiltersSheet: View {
                             // Aucun account.id ne vaut 0 (AUTOINCREMENT démarre à 1).
                             Label("Tous les comptes", systemImage: "rectangle.stack.fill").tag(0)
                             ForEach(accounts.groupedByType, id: \.type) { group in
-                                Section(group.type.label) {
+                                Section(LocalizedStringKey(group.type.label)) {
                                     ForEach(group.accounts) { a in Text(a.name).tag(a.id) }
                                 }
                             }
@@ -65,15 +90,55 @@ struct TransactionFiltersSheet: View {
                     DatePicker("Au", selection: $appState.filterToDate, displayedComponents: .date)
                 }
 
-                Section("Recherche") {
-                    TextField("Filtrer par tiers ou libellé…", text: $localTiersSearch)
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField("Tiers…", text: $localPayeeSearch)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                        // Suggestions d'autocomplétion — tap = remplit le champ
+                        // avec le nom exact (le filtre reste un `LIKE`, pas une
+                        // égalité stricte, mais un nom exact évite les faux
+                        // positifs d'un tiers dont le nom en contient un autre).
+                        if !payeeSuggestions.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(payeeSuggestions, id: \.self) { name in
+                                        Button {
+                                            localPayeeSearch = name
+                                        } label: {
+                                            Text(name)
+                                                .font(.caption2)
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(AppTheme.Colors.accent.opacity(0.12), in: Capsule())
+                                                .foregroundStyle(AppTheme.Colors.accent)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    TextField("Libellé…", text: $localLabelSearch)
                         .autocorrectionDisabled()
 
+                    // Aplatie en pré-ordre avec indentation par profondeur —
+                    // un `Picker` ne peut pas rendre un vrai arbre pliable,
+                    // mais l'indentation transmet la hiérarchie sans rien
+                    // retirer : parent ET enfants restent sélectionnables.
                     Picker("Catégorie", selection: $selectedCategoryId) {
                         Text("Toutes").tag(-1)
                         Text("Non catégorisé").tag(-2)
-                        ForEach(allCategories) { c in Text(c.name).tag(c.id) }
+                        ForEach(categoryPickerEntries, id: \.node.id) { entry in
+                            Text(String(repeating: "    ", count: entry.depth) + entry.node.category.name)
+                                .tag(entry.node.category.id)
+                        }
                     }
+                } header: {
+                    Text("Recherche")
+                } footer: {
+                    Text("Tiers et libellé se combinent : renseigne les deux pour restreindre aux transactions qui correspondent aux deux à la fois.")
                 }
 
                 if !allTags.isEmpty {
@@ -133,7 +198,7 @@ struct TransactionFiltersSheet: View {
                         }
                     )) {
                         ForEach(TransactionDensity.allCases) { d in
-                            Label(d.label, systemImage: d.systemIcon).tag(d)
+                            Label(LocalizedStringKey(d.label), systemImage: d.systemIcon).tag(d)
                         }
                     } label: {
                         Text("Densité")
@@ -147,8 +212,10 @@ struct TransactionFiltersSheet: View {
 
                 Section {
                     Button("Réinitialiser les filtres") {
-                        localTiersSearch   = ""
-                        tiersSearchText    = ""
+                        localPayeeSearch   = ""
+                        localLabelSearch   = ""
+                        payeeSearchText    = ""
+                        labelSearchText    = ""
                         selectedCategoryId = -1
                         filterTagIds       = []
                     }
@@ -156,21 +223,24 @@ struct TransactionFiltersSheet: View {
                 }
             }
             .nemorisFormStyle()
-            .navigationTitle("Filtres")
-            .navigationBarTitleDisplayMode(.inline)
-            .onAppear { localTiersSearch = tiersSearchText }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Fermer", systemImage: "xmark") { paneDismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Appliquer", systemImage: "checkmark") {
-                        tiersSearchText = localTiersSearch
-                        onApply()
-                        paneDismiss()
-                    }
-                }
+            .onAppear {
+                localPayeeSearch = payeeSearchText
+                localLabelSearch = labelSearchText
             }
-        }
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
+            // barre d'outils native laisse le bureau de l'utilisateur
+            // transparaître (retour d'usage 2026-08-21). Cf. le commentaire
+            // de `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome(
+                "Filtres",
+                cancelLabel: "Fermer", onCancel: { paneDismiss() },
+                confirmLabel: "Appliquer", confirmIcon: "checkmark",
+                onConfirm: {
+                    payeeSearchText = localPayeeSearch
+                    labelSearchText = localLabelSearch
+                    onApply()
+                    paneDismiss()
+                }
+            )
     }
 }

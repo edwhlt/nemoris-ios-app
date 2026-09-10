@@ -152,7 +152,7 @@ struct AssetFormView: View {
 
                     Picker("Catégorie", selection: $kind) {
                         ForEach(AssetKind.allCases, id: \.self) { k in
-                            Label(k.label, systemImage: k.systemIcon).tag(k)
+                            Label(LocalizedStringKey(k.label), systemImage: k.systemIcon).tag(k)
                         }
                     }
                 }
@@ -196,7 +196,9 @@ struct AssetFormView: View {
                             Text("Valeur")
                                 .font(AppTheme.Typography.bodyMedium)
                             Spacer()
-                            TextField("0,00", text: $manualValueText)
+                            // Titre vide : la row a déjà son label ("Valeur")
+                            // — cf. TransactionEditSheet pour la raison macOS.
+                            TextField("", text: $manualValueText)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .focused($valueFieldFocused)

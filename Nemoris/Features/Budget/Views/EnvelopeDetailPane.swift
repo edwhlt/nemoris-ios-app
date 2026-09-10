@@ -21,7 +21,7 @@ struct EnvelopeDetailPane: View {
                         .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
                     VStack(alignment: .leading, spacing: 2) {
                         Text(envelope.name).font(AppTheme.Typography.bodyMedium)
-                        Text(envelope.period.label)
+                        Text(LocalizedStringKey(envelope.period.label))
                             .font(AppTheme.Typography.labelSmall)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
@@ -35,7 +35,11 @@ struct EnvelopeDetailPane: View {
 
             Section("Détails") {
                 LabeledContent("Plafond") { Text(envelope.amount, format: .currency(code: "EUR")) }
-                LabeledContent("Période", value: envelope.period.label)
+                LabeledContent {
+                    Text(LocalizedStringKey(envelope.period.label))
+                } label: {
+                    Text("Période")
+                }
                 if let categoryName {
                     LabeledContent("Catégorie", value: categoryName)
                 }

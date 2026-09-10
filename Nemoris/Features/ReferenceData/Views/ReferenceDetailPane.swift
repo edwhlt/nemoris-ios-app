@@ -55,7 +55,7 @@ struct ReferenceDetailPane: View {
                     .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
                 VStack(alignment: .leading, spacing: 2) {
                     Text(a.name).font(AppTheme.Typography.bodyMedium)
-                    Text(a.accountType.label)
+                    Text(LocalizedStringKey(a.accountType.label))
                         .font(AppTheme.Typography.labelSmall)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
@@ -65,6 +65,13 @@ struct ReferenceDetailPane: View {
             LabeledContent("Type", value: a.accountType.label)
             LabeledContent("Transactions", value: "\(counts)")
             LabeledContent("Identifiant", value: "#\(a.id)")
+        }
+        if a.excludedFromAggregates {
+            Section {
+                Label("Exclu des calculs agrégés (catégories, budget, dashboard, coach IA)", systemImage: "eye.slash")
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+                    .font(AppTheme.Typography.labelSmall)
+            }
         }
         Section {
             Button {

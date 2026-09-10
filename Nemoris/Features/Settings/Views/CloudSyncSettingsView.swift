@@ -117,7 +117,7 @@ struct CloudSyncSettingsView: View {
         .scrollContentBackground(.hidden)
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        .navigationTitle("Synchronisation iCloud")
+        .localizedNavigationTitle("Synchronisation iCloud")
         .navigationBarTitleDisplayMode(.inline)
         // Rafraîchit en continu tant que l'écran est visible : les accusés de
         // réception CloudKit (qui vident sync_pending) arrivent en tâche de fond
@@ -207,7 +207,7 @@ struct CloudSyncSettingsView: View {
         return status.accountAvailable ? AppTheme.Colors.textSecondary : AppTheme.Colors.warning
     }
 
-    private func infoRow(icon: String, title: String, text: String) -> some View {
+    private func infoRow(icon: String, title: LocalizedStringKey, text: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: AppTheme.Spacing.md) {
             Image(systemName: icon)
                 .font(.system(size: 18))
@@ -232,6 +232,6 @@ struct CloudSyncSettingsView: View {
         guard let date = parser.date(from: iso) else { return iso }
         // Locale forcée fr_FR : méthode `static`, pas d'accès à l'environnement
         // SwiftUI — cf. commentaire équivalent dans InsightEngine.swift.
-        return date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Locale(identifier: "fr_FR")))
+        return date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(AppLocalization.locale))
     }
 }

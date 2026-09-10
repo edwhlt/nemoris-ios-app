@@ -71,7 +71,8 @@ struct InsightCard: View {
                 .frame(width: 40, height: 40)
                 .background(AppTheme.Colors.accent.opacity(0.13), in: Circle())
             VStack(alignment: .leading, spacing: 3) {
-                Text(insight.kind.label.uppercased())
+                Text(LocalizedStringKey(insight.kind.label))
+                    .textCase(.uppercase)
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(0.6)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -124,7 +125,8 @@ struct InsightDetailSheet: View {
                             .frame(width: 56, height: 56)
                             .background(AppTheme.Colors.accent.opacity(0.13), in: Circle())
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(insight.kind.label.uppercased())
+                            Text(LocalizedStringKey(insight.kind.label))
+                                .textCase(.uppercase)
                                 .font(.system(size: 11, weight: .semibold))
                                 .tracking(0.6)
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -188,9 +190,10 @@ struct InsightDetailSheet: View {
     }
 
     @ViewBuilder
-    private func kpi(label: String, value: String, color: Color) -> some View {
+    private func kpi(label: LocalizedStringKey, value: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label.uppercased())
+            Text(label)
+                .textCase(.uppercase)
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(0.4)
                 .foregroundStyle(AppTheme.Colors.textSecondary)

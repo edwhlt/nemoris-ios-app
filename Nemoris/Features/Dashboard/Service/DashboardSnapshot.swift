@@ -49,7 +49,7 @@ struct DashboardPeriod: Hashable, Sendable {
     /// sinon sur la locale RÉELLE de l'appareil au lieu du français — même
     /// précédent que `PatrimoineView.swift`.
     var monthLabel: String? {
-        monthStart?.formatted(.dateTime.month(.wide).year().locale(Locale(identifier: "fr_FR")))
+        monthStart?.formatted(.dateTime.month(.wide).year().locale(AppLocalization.locale))
     }
 
     private var monthStart: Date? {
@@ -108,6 +108,11 @@ enum DashboardAggregate: String, Sendable, CaseIterable {
     case patrimoine
     case alerts
     case insights
+    /// Dépenses Apple Pay en attente (automatisation Raccourcis, cf.
+    /// `PendingApplePayRepository`). Requête directe et déjà bon marché (une
+    /// poignée de lignes) : pas de `DashboardSource` dédiée, même traitement
+    /// que `.insights` qui fait aussi son propre accès direct.
+    case pendingApplePay
 
     /// Agrégats lourds, calculés dans une seconde passe à priorité basse pour que le
     /// reste de l'écran s'affiche sans les attendre.
@@ -142,6 +147,8 @@ enum DashboardAggregate: String, Sendable, CaseIterable {
             return [.goals, .patrimoineAssets, .bankAccounts, .investmentAccounts]
         case .insights:
             return []   // l'InsightEngine fait son propre scan sur 180 jours
+        case .pendingApplePay:
+            return []   // requête directe sur pending_apple_pay_entries
         }
     }
 
@@ -150,7 +157,7 @@ enum DashboardAggregate: String, Sendable, CaseIterable {
         .yearSeries, .categoryBreakdown, .tagBreakdown,
         .investments, .patrimoine,
         .budgetEnvelopes,   // avant .alerts
-        .alerts, .insights
+        .alerts, .insights, .pendingApplePay
     ]
 
     /// Agrégats nécessaires aux éléments FIXES du Dashboard (hero, bandeau d'alertes,
@@ -161,7 +168,8 @@ enum DashboardAggregate: String, Sendable, CaseIterable {
         .alerts,            // AlertsBanner
         .investments,       // colonne « Investi » du bandeau
         .patrimoine,        // colonne « Patrimoine »
-        .budgetEnvelopes    // colonne « Enveloppes » (et dépendance des alertes)
+        .budgetEnvelopes,   // colonne « Enveloppes » (et dépendance des alertes)
+        .pendingApplePay    // bandeau Apple Pay en attente
     ]
 
     /// Complète un ensemble demandé avec ses dépendances transitives.
@@ -201,6 +209,10 @@ struct DashboardSnapshot: Sendable {
     var patrimoine: PatrimoineSnapshot?
     var alerts: [Alert]?
     var insights: [Insight]?
+    /// Nombre et total (positif, déjà `abs`) des dépenses Apple Pay encore
+    /// `pending`. `nil` = pas encore calculé — distinct de `0` (aucune en attente).
+    var pendingApplePayCount: Int?
+    var pendingApplePayTotal: Double?
 
     /// Fusionne une passe partielle : seuls les champs renseignés écrasent les nôtres.
     /// C'est ce qui permet à la passe lourde (insights) d'arriver après coup sans
@@ -218,6 +230,8 @@ struct DashboardSnapshot: Sendable {
         if let v = other.patrimoine         { result.patrimoine = v }
         if let v = other.alerts             { result.alerts = v }
         if let v = other.insights           { result.insights = v }
+        if let v = other.pendingApplePayCount { result.pendingApplePayCount = v }
+        if let v = other.pendingApplePayTotal { result.pendingApplePayTotal = v }
         return result
     }
 }
@@ -264,7 +278,7 @@ extension DashboardAggregate {
             return .period(period)
         case .yearSeries:
             return .year(period.year)
-        case .budgetEnvelopes, .investments, .patrimoine, .alerts, .insights:
+        case .budgetEnvelopes, .investments, .patrimoine, .alerts, .insights, .pendingApplePay:
             return .global
         }
     }

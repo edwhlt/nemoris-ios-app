@@ -169,7 +169,11 @@ struct SettingsView: View {
             })
         } else {
             section.destination
-                .navigationTitle(section.title)
+                // ⚠️ Résolution explicite, jamais `LocalizedStringKey(...)` :
+                // `.navigationTitle` ponte vers la chrome native (barre de
+                // titre macOS), qui ne respecte pas fiablement `\.locale`
+                // forcé par l'app. Cf. CLAUDE.md §5.
+                .localizedNavigationTitle(section.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
@@ -179,8 +183,8 @@ struct SettingsView: View {
                         } label: {
                             Image(systemName: "chevron.left")
                         }
-                        .help("Réglages")
-                        .accessibilityLabel("Réglages")
+                        .localizedHelp("Réglages")
+                        .localizedAccessibilityLabel("Réglages")
                     }
                 }
         }
@@ -285,6 +289,12 @@ struct SettingsView: View {
                     settingsLink(.companySources) {
                         Label("Sources entreprises", systemImage: "globe.europe.africa.fill")
                     }
+                    // Réglage propre à l'automatisation Apple Pay (Raccourcis) :
+                    // installation du raccourci, seuil + période de l'alerte
+                    // "dépenses en attente", nettoyage des anciennes entrées.
+                    settingsLink(.applePay) {
+                        Label("Alertes Apple Pay", systemImage: "bell.badge")
+                    }
                 }
                 .listRowBackground(AppTheme.Colors.surface)
 
@@ -376,7 +386,7 @@ struct SettingsView: View {
         .tint(AppTheme.Colors.accent)
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        .navigationTitle("Paramètres")
+        .localizedNavigationTitle("Paramètres")
         .adaptivePane(isPresented: $showPaywall) {
             PaywallView().environment(store)
         }
@@ -547,6 +557,7 @@ struct SettingsView: View {
                         // du vert accent qui, lui, devient beaucoup plus clair en dark
                         // mode : le cuivre inchangé y lisait comme un marron terne.
                         Button("Passer Pro") { showPaywall = true }
+                            .buttonStyle(.plain)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 14)
@@ -721,7 +732,7 @@ struct AdvancedSettingsView: View {
             }
         }
         .nemorisFormStyle()
-        .navigationTitle("Avancé")
+        .localizedNavigationTitle("Avancé")
         .navigationBarTitleDisplayMode(.large)
         // iOS : picker en sheet (le contrôleur UIKit EST une vue). macOS : panneau
         // système ouvert directement depuis l'action (cf. `presentOpenPanel`).
@@ -818,7 +829,7 @@ struct PrivacyView: View {
         .scrollContentBackground(.hidden)
         .nemorisFormStyle()
         .background(AppTheme.Colors.background)
-        .navigationTitle("Confidentialité")
+        .localizedNavigationTitle("Confidentialité")
         .navigationBarTitleDisplayMode(.large)
     }
 }
@@ -830,7 +841,7 @@ struct PrivacyView: View {
 /// de module et désynchronise la sidebar. Sur iOS, push classique.
 enum SettingsSection: String, Identifiable, CaseIterable {
     case modules, importCSV, companySources, backup, cloudSync
-    case ai, privacy, taxReport, advanced
+    case ai, privacy, taxReport, advanced, applePay
 
     var id: String { rawValue }
 
@@ -845,6 +856,7 @@ enum SettingsSection: String, Identifiable, CaseIterable {
         case .privacy:         return "Données & vie privée"
         case .taxReport:       return "Rapport fiscal France"
         case .advanced:        return "Base de données & Console SQL"
+        case .applePay:        return "Apple Pay"
         }
     }
 
@@ -859,6 +871,11 @@ enum SettingsSection: String, Identifiable, CaseIterable {
         case .privacy:         PrivacyView()
         case .taxReport:       TaxReportView()
         case .advanced:        AdvancedSettingsView()
+        // `isPane: false` : atteinte en navigation standard ici, pas en pane
+        // (cf. doc de `ApplePayAlertSettingsView`) — sans ça elle poserait
+        // son propre `.paneChrome` par-dessus le titre/retour déjà fournis
+        // par `settingsSectionPage`.
+        case .applePay:        ApplePayAlertSettingsView(isPane: false)
         }
     }
 }

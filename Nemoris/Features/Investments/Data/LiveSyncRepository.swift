@@ -10,7 +10,7 @@ private let SQLITE_TRANSIENT_LIVESYNC = unsafeBitCast(-1, to: sqlite3_destructor
 // `InvestmentCredentialStore` (Keychain).
 
 /// Modèle Swift d'un lien live sync (1 ligne de la table investment_live_sync).
-struct InvestmentLiveSyncLink: Identifiable, Hashable {
+struct InvestmentLiveSyncLink: Identifiable {
     let id: Int
     var providerId: String
     var displayName: String
@@ -20,7 +20,7 @@ struct InvestmentLiveSyncLink: Identifiable, Hashable {
     var enabled: Bool
     var lastSyncAt: Date?
     var lastSyncStatus: SyncStatus?
-    var lastSyncMessage: String?
+    var lastSyncMessage: LocalizedStringResource?
     var showTokensWithoutPrice: Bool
     var createdAt: Date
 
@@ -173,7 +173,7 @@ final class LiveSyncRepository: @unchecked Sendable {
     /// Met à jour uniquement les colonnes de status (utile après une sync).
     func updateSyncStatus(linkId: Int,
                           status: InvestmentLiveSyncLink.SyncStatus,
-                          message: String?,
+                          message: LocalizedStringResource?,
                           syncedAt: Date = Date()) {
         executeWrite("""
             UPDATE investment_live_sync SET
@@ -182,13 +182,32 @@ final class LiveSyncRepository: @unchecked Sendable {
             """) { stmt, _ in
             sqlite3_bind_text(stmt, 1, self.dateFormatter.string(from: syncedAt), -1, SQLITE_TRANSIENT_LIVESYNC)
             sqlite3_bind_text(stmt, 2, status.rawValue, -1, SQLITE_TRANSIENT_LIVESYNC)
-            if let msg = message {
-                sqlite3_bind_text(stmt, 3, msg, -1, SQLITE_TRANSIENT_LIVESYNC)
+            if let msg = message, let json = Self.encodeMessage(msg) {
+                sqlite3_bind_text(stmt, 3, json, -1, SQLITE_TRANSIENT_LIVESYNC)
             } else {
                 sqlite3_bind_null(stmt, 3)
             }
             sqlite3_bind_int(stmt, 4, Int32(linkId))
         }
+    }
+
+    /// `last_sync_message` reste une colonne `TEXT` — le `LocalizedStringResource`
+    /// y est encodé en JSON (il est `Codable`) plutôt que via une migration de
+    /// colonne. `decodeMessage` retombe sur le texte BRUT (`stringLiteral:`,
+    /// verbatim, non réactif) si le contenu n'est pas du JSON valide — couvre
+    /// les lignes écrites par l'ancienne version (`String` en clair), sans
+    /// jamais faire planter la lecture.
+    private static func encodeMessage(_ resource: LocalizedStringResource) -> String? {
+        guard let data = try? JSONEncoder().encode(resource) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func decodeMessage(_ raw: String) -> LocalizedStringResource {
+        if let data = raw.data(using: .utf8),
+           let resource = try? JSONDecoder().decode(LocalizedStringResource.self, from: data) {
+            return resource
+        }
+        return LocalizedStringResource(stringLiteral: raw)
     }
 
     /// Supprime un lien. Le caller doit ALSO supprimer les credentials du Keychain
@@ -218,8 +237,8 @@ final class LiveSyncRepository: @unchecked Sendable {
             ? nil : dateFormatter.date(from: String(cString: sqlite3_column_text(stmt, 6)))
         let lastStatus: InvestmentLiveSyncLink.SyncStatus? = sqlite3_column_type(stmt, 7) == SQLITE_NULL
             ? nil : InvestmentLiveSyncLink.SyncStatus(rawValue: String(cString: sqlite3_column_text(stmt, 7)))
-        let lastMessage: String? = sqlite3_column_type(stmt, 8) == SQLITE_NULL
-            ? nil : String(cString: sqlite3_column_text(stmt, 8))
+        let lastMessage: LocalizedStringResource? = sqlite3_column_type(stmt, 8) == SQLITE_NULL
+            ? nil : Self.decodeMessage(String(cString: sqlite3_column_text(stmt, 8)))
         let showTokens = sqlite3_column_int(stmt, 9) != 0
         let createdAt = sqlite3_column_type(stmt, 10) == SQLITE_NULL
             ? Date() : (dateFormatter.date(from: String(cString: sqlite3_column_text(stmt, 10))) ?? Date())

@@ -1,6 +1,7 @@
 import Foundation
 import StoreKit
 import Observation
+import WidgetKit
 
 // MARK: - Access Level
 
@@ -252,7 +253,12 @@ final class PurchaseManager {
     /// Jamais persisté — appelé à chaque lancement et à chaque mise à jour de transaction.
     func refreshEntitlements() async {
         #if DEBUG
-        if devOverrideEnabled { accessLevel = .lifetime; activeSubscriptionProductID = nil; return }
+        if devOverrideEnabled {
+            accessLevel = .lifetime
+            activeSubscriptionProductID = nil
+            WidgetCenter.shared.reloadAllTimelines()
+            return
+        }
         #endif
         var highest = AccessLevel.free
         var subscriptionID: String?
@@ -274,7 +280,17 @@ final class PurchaseManager {
         }
         activeSubscriptionProductID = subscriptionID
 
+        let changed = accessLevel != highest
         accessLevel = highest
+
+        // Le widget Budget lit son propre accès Pro via `Transaction.currentEntitlements`
+        // dans l'extension (cf. `WidgetAccessGate`), mais ne le recalcule que quand
+        // WidgetKit relance sa timeline — jamais spontanément après un achat/une
+        // restauration. Sans ce reload, un widget déjà posé restait verrouillé (ou
+        // déverrouillé) jusqu'à sa prochaine actualisation planifiée (30 min).
+        if changed {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
     }
 
     /// Écoute les mises à jour en temps réel (renouvellements automatiques, révocations).

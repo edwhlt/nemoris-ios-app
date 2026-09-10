@@ -368,80 +368,123 @@ struct MetadataKeyManagerView: View {
     }
 }
 
-/// Contenu de l'onglet « Métadonnées » de l'écran Données.
-///
-/// ⚠️ Vue à part, et pas un `case` de plus dans le `switch` de
-/// `ReferenceDataView` : celui-ci atteignait déjà la limite de type-check du
-/// compilateur (« unable to type-check this expression in reasonable time »).
-struct MetadataKeysTabContent: View {
-    let searchText: String
+/// Création ET édition d'une clé — un seul formulaire pour les deux, comme
+/// `PayeeDetailView` (`key: nil` = création). Utilisé par l'onglet
+/// « Métadonnées » de l'écran Données (`ReferenceDataView`), via le bouton
+/// "+" de la toolbar (création) et le panneau détail (édition) — même
+/// parcours swipeable/inspecteur que Comptes/Tiers/Tags. Distinct de
+/// `MetadataKeyManagerView` ci-dessus, qui reste le raccourci de création
+/// rapide DEPUIS la fiche transaction (ne pas fusionner : contextes différents).
+struct MetadataKeyFormView: View {
+    @Environment(\.paneDismiss) private var dismiss
+    /// `nil` = nouvelle clé.
+    let key: TransactionMetadataKey?
+    var onSave: () -> Void = {}
 
-    @State private var keys: [TransactionMetadataKey] = []
-    @State private var usage: [Int: Int] = [:]
-    @State private var showManager = false
+    @State private var name: String
+    @State private var icon: String
+    @State private var fillsFromImport: Bool
+    @State private var errorMessage: String?
 
     private let repository = TransactionMetadataRepository()
 
-    private var filtered: [TransactionMetadataKey] {
-        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return keys }
-        return keys.filter { $0.name.lowercased().contains(query) }
+    /// Mêmes symboles que `MetadataKeyManagerView` — saisir un nom de SF
+    /// Symbol à la main n'a aucun sens pour un utilisateur.
+    private let iconChoices = ["tag", "creditcard", "briefcase", "folder", "person.2",
+                               "building.2", "airplane", "car", "house", "star"]
+
+    init(key: TransactionMetadataKey?, onSave: @escaping () -> Void = {}) {
+        self.key = key
+        self.onSave = onSave
+        _name = State(initialValue: key?.name ?? "")
+        _icon = State(initialValue: key?.displayIcon ?? "tag")
+        _fillsFromImport = State(initialValue: key?.role == .paymentMethod)
     }
 
     var body: some View {
-        Group {
-            if keys.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Aucune métadonnée")
-                        .font(.subheadline.weight(.medium))
-                    Text("Définis tes propres étiquettes — « Projet », « Pro / Perso », « Mode de paiement »… — pour classer tes transactions comme tu l'entends.")
-                        .font(.caption)
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.vertical, 6)
-                .macGroupedRow(first: true, last: false)
-            } else {
-                ForEach(filtered) { key in
-                    HStack(spacing: 10) {
-                        Image(systemName: key.displayIcon)
-                            .foregroundStyle(AppTheme.Colors.accent)
-                            .frame(width: 22)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(key.name)
-                            if let role = key.role {
-                                Text(LocalizedStringKey(role.displayName))
-                                    .font(.caption)
-                                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                            }
-                        }
-                        Spacer()
-                        Text("\(usage[key.id] ?? 0)")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
+        Form {
+            Section {
+                TextField("Nom (ex. Projet, Pro / Perso)", text: $name)
+                Picker("Icône", selection: $icon) {
+                    ForEach(iconChoices, id: \.self) { i in
+                        Label(i, systemImage: i).tag(i)
                     }
-                    .macGroupedRow(first: key.id == filtered.first?.id, last: false)
                 }
+                Toggle("Renseignée par l'import", isOn: $fillsFromImport)
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.danger)
+                }
+            } footer: {
+                Text("« Renseignée par l'import » fait remplir cette métadonnée automatiquement avec le moyen de paiement déduit du libellé bancaire (CB, virement, prélèvement…). Une seule métadonnée peut jouer ce rôle.")
             }
-
-            Button {
-                showManager = true
-            } label: {
-                Label("Gérer les métadonnées", systemImage: "slider.horizontal.3")
-            }
-            // Seule row du groupe si la recherche ne matche aucune clé existante.
-            .macGroupedRow(first: keys.isEmpty ? false : filtered.isEmpty, last: true)
         }
-        .adaptivePane(isPresented: $showManager) {
-            MetadataKeyManagerView(onChange: load)
-        }
-        .task { load() }
+        .nemorisFormStyle()
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.Colors.background.ignoresSafeArea())
+        // Convention : toute vue présentée en panneau pose son propre tint.
+        .tint(AppTheme.Colors.accent)
+        .paneChrome(
+            key == nil ? "Nouvelle métadonnée" : "Renommer",
+            cancelLabel: "Annuler", onCancel: { dismiss() },
+            confirmLabel: key == nil ? "Créer" : "Enregistrer",
+            confirmIcon: key == nil ? "plus" : "checkmark",
+            confirmDisabled: name.trimmingCharacters(in: .whitespaces).isEmpty,
+            onConfirm: save
+        )
     }
 
-    private func load() {
-        keys = repository.fetchKeys()
-        usage = Dictionary(uniqueKeysWithValues: keys.map {
-            ($0.id, repository.transactionIds(keyId: $0.id, value: nil).count)
-        })
+    private func save() {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let role: MetadataKeyRole? = fillsFromImport ? .paymentMethod : nil
+        if var existing = key {
+            existing.name = trimmed
+            existing.icon = icon
+            existing.role = role
+            guard repository.updateKey(existing) else {
+                errorMessage = "Ce nom est déjà utilisé."
+                return
+            }
+        } else {
+            guard repository.addKey(name: trimmed, icon: icon, role: role) != nil else {
+                errorMessage = "Ce nom est déjà utilisé."
+                return
+            }
+        }
+        onSave()
+        dismiss()
+    }
+}
+
+/// Détail en lecture seule d'une clé (Fermer / Supprimer / Modifier) — le
+/// `detail:` d'`adaptiveEntityPane` dans `ReferenceDataView`. Même gabarit
+/// que `PayeeDetailPane`/`ReferenceDetailPane`.
+struct MetadataKeyDetailPane: View {
+    let key: TransactionMetadataKey
+    let usageCount: Int
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: AppTheme.Spacing.md) {
+                    Image(systemName: key.displayIcon)
+                        .font(.title3)
+                        .foregroundStyle(AppTheme.Colors.accent)
+                        .frame(width: 36, height: 36)
+                        .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
+                    Text(key.name).font(AppTheme.Typography.bodyMedium)
+                }
+            }
+            Section("Détails") {
+                if let role = key.role {
+                    LabeledContent("Rôle", value: role.displayName)
+                }
+                LabeledContent("Transactions", value: "\(usageCount)")
+                LabeledContent("Identifiant", value: "#\(key.id)")
+            }
+        }
+        .nemorisFormStyle()
     }
 }

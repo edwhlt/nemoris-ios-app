@@ -89,7 +89,14 @@ struct TransactionEditSheet: View {
                                 .background(Circle().fill(type == .expense ? AppTheme.Colors.danger.opacity(0.12) : AppTheme.Colors.success.opacity(0.12)))
                         }
                         .buttonStyle(.plain)
-                        TextField("0.00", text: $amountText)
+                        // Titre vide, PAS "0.00" : la ligne a déjà son label
+                        // ("Montant") juste avant. Sur macOS, le titre d'un
+                        // TextField dans une row de Form déjà labellisée ne
+                        // sert pas de texte fantôme comme sur iOS — il
+                        // s'affiche en PERMANENCE comme un second label,
+                        // d'où "0.00" ET la vraie valeur côte à côte (retour
+                        // d'usage 2026-08-19).
+                        TextField("", text: $amountText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 90)

@@ -35,9 +35,9 @@ struct DashboardView: View {
         month: nil
     )
     @State private var showSettings = false
-    @State private var showImport = false
     @State private var showSearch = false
     @State private var showCustomize = false
+    @State private var showApplePayPending = false
     #if os(macOS)
     /// macOS : pour fermer le panneau au moment où « Personnaliser » remplace
     /// le dashboard (cf. `body`) — sinon un panneau Import/Recherche déjà
@@ -195,6 +195,18 @@ struct DashboardView: View {
                             .padding(.top, AppTheme.Spacing.md)
                     }
 
+                    // Affiché à part des totaux — jamais dans le hero/les
+                    // enveloppes tant que ces dépenses n'ont pas été résolues.
+                    if let count = store.snapshot.pendingApplePayCount, count > 0 {
+                        ApplePayPendingBanner(
+                            count: count,
+                            total: store.snapshot.pendingApplePayTotal ?? 0,
+                            onTap: { showApplePayPending = true }
+                        )
+                        .padding(.horizontal, AppTheme.Spacing.lg)
+                        .padding(.top, AppTheme.Spacing.md)
+                    }
+
                     Group {
                         if store.snapshot.stats == nil {
                             heroSkeleton
@@ -206,7 +218,11 @@ struct DashboardView: View {
                     .padding(.top, AppTheme.Spacing.xl)
 
                     if showsOnboardingCard {
-                        OnboardingImportCard { showImport = true }
+                        // Comme Investissements : c'est la navigation RACINE qui
+                        // décide où afficher l'outil d'import (destination à
+                        // part entière sur desktop, pane sur iPhone) — pas un
+                        // panneau collé au Dashboard (retour d'usage).
+                        OnboardingImportCard { appState.openImportTool(destination: .transactions) }
                             .padding(.horizontal, AppTheme.Spacing.lg)
                             .padding(.top, AppTheme.Spacing.xxxl)
                     } else {
@@ -230,7 +246,7 @@ struct DashboardView: View {
                 .padding(.bottom, AppTheme.Spacing.xxxl)
             }
         }
-        .navigationTitle("Dashboard")
+        .localizedNavigationTitle("Dashboard")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
@@ -285,7 +301,10 @@ struct DashboardView: View {
             }
         }
         .sheet(isPresented: $showSettings) {
+            // Cf. CLAUDE.md §5 : ré-injection \.locale obligatoire pour toute
+            // `.sheet()` niveau 2+ atteignable sur macOS.
             SettingsView().environment(appState)
+                .environment(\.locale, AppLocalization.locale)
         }
         // macOS : géré par `body` (navigation par état — cf. commentaire dessus).
         // iOS : sheet classique, `DashboardCustomizeView` reste poussable/dismissable
@@ -299,11 +318,11 @@ struct DashboardView: View {
             }
         }
         #endif
-        .adaptivePane(isPresented: $showImport) {
-            ImportEntryView().environment(appState)
-        }
         .adaptivePane(isPresented: $showSearch) {
             SearchView().environment(appState)
+        }
+        .adaptivePane(isPresented: $showApplePayPending) {
+            PendingApplePayListView().environment(appState)
         }
         // Une seule clé pour les 3 dimensions (données mutées, exercice, filtre mois)
         // plutôt que trois `.task(id:)` empilés. Le store ne recalcule que les
@@ -419,7 +438,8 @@ struct DashboardView: View {
     /// **Pas de card**, pas de fond — le dégradé du backdrop fait le travail.
     @ViewBuilder private var editorialHero: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-            Text(heroEyebrow.uppercased())
+            heroEyebrow
+                .textCase(.uppercase)
                 .font(.system(size: 11, weight: .semibold))
                 .tracking(0.8)
                 .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -542,17 +562,17 @@ struct DashboardView: View {
     private var heroIncome: Double { heroMonthTotals?.income ?? stats.totalIncome }
     private var heroExpense: Double { heroMonthTotals?.expense ?? stats.totalExpense }
 
-    private var heroEyebrow: String {
-        if let label = period.monthLabel { return label }
-        if isMonthDominant { return "Ce mois-ci" }
-        return "Bilan annuel · \(period.year)"
+    private var heroEyebrow: Text {
+        if let label = period.monthLabel { return Text(label) }
+        if isMonthDominant { return Text("Ce mois-ci") }
+        return Text("Bilan annuel · \(period.year)")
     }
 
     /// Petite "pilule" stat utilisée dans le pied du hero. Reste alignée gauche,
     /// pas de fond pour ne pas concurrencer le big number. Juste icône colorée +
     /// montant en `moneySmall` + label en très petit.
     @ViewBuilder
-    private func heroStatPill(icon: String, label: String, value: Double, color: Color) -> some View {
+    private func heroStatPill(icon: String, label: LocalizedStringKey, value: Double, color: Color) -> some View {
         HStack(alignment: .center, spacing: AppTheme.Spacing.sm) {
             Image(systemName: icon)
                 .font(.system(size: 13, weight: .semibold))
@@ -560,7 +580,8 @@ struct DashboardView: View {
                 .frame(width: 28, height: 28)
                 .background(color.opacity(0.13), in: Circle())
             VStack(alignment: .leading, spacing: 1) {
-                Text(label.uppercased())
+                Text(label)
+                    .textCase(.uppercase)
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(0.4)
                     .foregroundStyle(AppTheme.Colors.textSecondary)

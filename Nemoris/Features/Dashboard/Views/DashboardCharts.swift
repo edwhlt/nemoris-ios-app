@@ -20,16 +20,28 @@ struct MonthlyBarChartView: View {
         let id = UUID()
         let date: Date
         let month: String
-        let type: String
+        let type: BarPointType
         let value: Double
+    }
+    
+    enum BarPointType: String, Hashable, CaseIterable, Plottable {
+        case income
+        case expense
+
+        var localizedResource: LocalizedStringResource {
+            switch self {
+            case .income: "Revenus"
+            case .expense: "Dépenses"
+            }
+        }
     }
 
     private var points: [BarPoint] {
         data.flatMap { item -> [BarPoint] in
             guard let date = dashboardMonthParser.date(from: item.month) else { return [] }
             return [
-                BarPoint(date: date, month: item.month, type: "Recettes", value: item.income),
-                BarPoint(date: date, month: item.month, type: "Dépenses", value: item.expense)
+                BarPoint(date: date, month: item.month, type: .income, value: item.income),
+                BarPoint(date: date, month: item.month, type: .expense, value: item.expense)
             ]
         }
     }
@@ -47,17 +59,22 @@ struct MonthlyBarChartView: View {
                 if selectedMonth == point.month {
                     Text(point.value, format: .currency(code: "EUR").presentation(.narrow))
                         .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(point.type == "Dépenses" ? AppTheme.Colors.danger : AppTheme.Colors.success)
+                        .foregroundStyle(point.type == .expense ? AppTheme.Colors.danger : AppTheme.Colors.success)
                         .fixedSize()
                 }
             }
         }
         .chartForegroundStyleScale([
-            "Recettes": AppTheme.Colors.success,
-            "Dépenses": AppTheme.Colors.danger
+            BarPointType.income: AppTheme.Colors.success,
+            BarPointType.expense: AppTheme.Colors.danger
         ])
         .chartXAxis {
-            AxisMarks(values: .stride(by: .month)) { _ in
+            // Sécurité générale contre les labels illisibles (cf.
+            // PeriodBarChartView plus bas) : même une plage "raisonnable" en
+            // apparence (plusieurs années de mois) peut en accumuler trop
+            // pour la largeur réelle — `.automatic` les espace au lieu d'en
+            // poser un par mois sans condition.
+            AxisMarks(values: .automatic(desiredCount: 8)) { _ in
                 AxisValueLabel(format: .dateTime.month(.narrow))
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             }
@@ -84,7 +101,22 @@ struct MonthlyBarChartView: View {
                     }
             }
         }
+        .chartLegend(.hidden)
         .frame(height: 200)
+        
+        HStack(spacing: 8) {
+            legendDot(color: AppTheme.Colors.success, label: BarPointType.income.localizedResource)
+            legendDot(color: AppTheme.Colors.danger, label: BarPointType.expense.localizedResource)
+        }
+    }
+
+    @ViewBuilder private func legendDot(color: Color, label: LocalizedStringResource) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+        }
     }
 }
 
@@ -189,14 +221,26 @@ struct BalanceTimeChart: View {
     private struct BarPoint: Identifiable {
         let id: String
         let date: Date
-        let type: String
+        let type: BarPointType
         let value: Double
+    }
+    
+    enum BarPointType: String, Hashable, CaseIterable, Plottable {
+        case income
+        case expense
+
+        var localizedResource: LocalizedStringResource {
+            switch self {
+            case .income: "Revenus"
+            case .expense: "Dépenses"
+            }
+        }
     }
 
     private var barPoints: [BarPoint] {
         periodData.flatMap { p -> [BarPoint] in [
-            BarPoint(id: "\(p.id.timeIntervalSince1970)-rec", date: p.id, type: "Recettes", value: p.income),
-            BarPoint(id: "\(p.id.timeIntervalSince1970)-dep", date: p.id, type: "Dépenses", value: p.expense)
+            BarPoint(id: "\(p.id.timeIntervalSince1970)-rec", date: p.id, type: .income, value: p.income),
+            BarPoint(id: "\(p.id.timeIntervalSince1970)-dep", date: p.id, type: .expense, value: p.expense)
         ]}
     }
 
@@ -204,6 +248,11 @@ struct BalanceTimeChart: View {
         VStack(alignment: .leading, spacing: 6) {
             selectionHeader
             chartContent
+            
+            HStack(spacing: 8) {
+                legendDot(color: AppTheme.Colors.success, label: BarPointType.income.localizedResource)
+                legendDot(color: AppTheme.Colors.danger, label: BarPointType.expense.localizedResource)
+            }
         }
         .onChange(of: granularity) { _, _ in
             selectedPeriod = nil
@@ -211,6 +260,15 @@ struct BalanceTimeChart: View {
         }
     }
 
+    @ViewBuilder private func legendDot(color: Color, label: LocalizedStringResource) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+        }
+    }
+    
     @ViewBuilder
     private var selectionHeader: some View {
         if let period = selectedPeriod {
@@ -301,11 +359,18 @@ struct BalanceTimeChart: View {
             }
         }
         .chartForegroundStyleScale([
-            "Recettes": AppTheme.Colors.success,
-            "Dépenses": AppTheme.Colors.danger
+            BarPointType.income: AppTheme.Colors.success,
+            BarPointType.expense: AppTheme.Colors.danger
         ])
         .chartXAxis {
-            AxisMarks(values: .stride(by: calUnit)) { _ in
+            // `.stride(by: calUnit)` posait UNE marque PAR JOUR en granularité
+            // "jour" — sur une plage de plusieurs mois/un an, ça empile des
+            // centaines de labels qui se chevauchent en un bloc illisible
+            // (retour d'usage). `.automatic(desiredCount:)` laisse Swift
+            // Charts espacer les labels selon la largeur réellement
+            // disponible au lieu d'en poser un par unité — même remède que
+            // les charts Investments (cf. positionChart/EvolutionChart).
+            AxisMarks(values: .automatic(desiredCount: 6)) { _ in
                 AxisValueLabel(format: xAxisFormat)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             }
@@ -330,6 +395,7 @@ struct BalanceTimeChart: View {
             }
         }
         .frame(height: 220)
+        .chartLegend(.hidden)
         .animation(AppTheme.Animations.easeInOut, value: selectedPeriod?.id)
     }
 
@@ -386,8 +452,8 @@ struct DashboardSummaryCard: View {
 // MARK: - ChartCard (updated with AppTheme)
 
 struct ChartCard<Content: View>: View {
-    let title: String
-    var subtitle: String? = nil
+    let title: LocalizedStringKey
+    var subtitle: LocalizedStringKey? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {

@@ -58,13 +58,18 @@ struct MoneyFlowSankeyView: View {
     private var totalIncome: Double { incomeNodes.reduce(0) { $0 + $1.amount } }
     private var totalExpenses: Double { expenseNodes.reduce(0) { $0 + $1.amount } }
 
-    private func makeLayout(nodes: [SankeyNode], scale: Double, height: CGFloat, gap: CGFloat) -> [NodeLayout] {
+    private func makeLayout(nodes: [SankeyNode], scale: Double, height: CGFloat, gap: CGFloat, minHeight: CGFloat = 4) -> [NodeLayout] {
         guard scale > 0, !nodes.isEmpty else { return [] }
         let totalGap = gap * CGFloat(max(nodes.count - 1, 0))
         let usable = height - totalGap
         var y: CGFloat = 0
         return nodes.map { node in
-            let h = max((node.amount / scale) * usable, 4)
+            // Plancher relevé au-dessus du minimum purement visuel (4pt) : sans
+            // ça, une petite catégorie obtenait une bande si fine que son label
+            // à 2 lignes + montant chevauchait le node voisin — la vraie cause
+            // du rendu "écrasé" sur un conteneur étroit, pas seulement la
+            // largeur de `labelW`.
+            let h = max((node.amount / scale) * usable, minHeight)
             let ln = NodeLayout(node: node, y: y, height: h)
             y += h + gap
             return ln
@@ -79,18 +84,22 @@ struct MoneyFlowSankeyView: View {
                 .frame(maxWidth: .infinity, minHeight: 80)
         } else {
             let extraRow = totalIncome > totalExpenses ? 1 : 0
-            let chartH = CGFloat(max(incomeNodes.count, expenseNodes.count + extraRow)) * 54 + 20
+            let chartH = CGFloat(max(incomeNodes.count, expenseNodes.count + extraRow)) * 60 + 20
             GeometryReader { geo in
                 let nodeW: CGFloat = 10
-                let labelW: CGFloat = 90
+                // Largeur de label proportionnelle à l'espace dispo (au lieu d'une
+                // valeur fixe) : sur un conteneur étroit (panneau macOS, mobile
+                // portrait), 90pt de chaque côté écrasait le flux central à
+                // presque rien. Bornée pour rester lisible aux deux extrêmes.
+                let labelW: CGFloat = min(max(geo.size.width * 0.24, 58), 92)
                 let gap: CGFloat = 5
                 let leftX: CGFloat = labelW + 4
                 let rightX: CGFloat = geo.size.width - labelW - 4
                 let midX: CGFloat = (leftX + rightX) * 0.5
                 let h = geo.size.height
                 let maxT = max(totalIncome, totalExpenses, 1)
-                let leftLayout  = makeLayout(nodes: incomeNodes,  scale: maxT, height: h, gap: gap)
-                let rightLayout = makeLayout(nodes: expenseNodes, scale: maxT, height: h, gap: gap)
+                let leftLayout  = makeLayout(nodes: incomeNodes,  scale: maxT, height: h, gap: gap, minHeight: 28)
+                let rightLayout = makeLayout(nodes: expenseNodes, scale: maxT, height: h, gap: gap, minHeight: 28)
                 let savingsAmount = totalIncome - totalExpenses
                 let savingsH: CGFloat = savingsAmount > 0
                     ? max((savingsAmount / maxT) * h, 4) : 0
@@ -151,12 +160,16 @@ struct MoneyFlowSankeyView: View {
                             Text(ln.node.label)
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(ln.color)
-                                .lineLimit(1)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.85)
+                                .multilineTextAlignment(.trailing)
                             Text(ln.node.amount, format: .currency(code: "EUR").precision(.fractionLength(0)))
                                 .font(.system(size: 8))
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
-                        .frame(width: labelW, height: max(ln.height, 22), alignment: .trailing)
+                        .frame(width: labelW, height: max(ln.height, 28), alignment: .trailing)
                         .offset(x: 0, y: ln.y)
                     }
 
@@ -166,12 +179,16 @@ struct MoneyFlowSankeyView: View {
                             Text(rn.node.label)
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(rn.color)
-                                .lineLimit(1)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.85)
+                                .multilineTextAlignment(.leading)
                             Text(rn.node.amount, format: .currency(code: "EUR").precision(.fractionLength(0)))
                                 .font(.system(size: 8))
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
-                        .frame(width: labelW, height: max(rn.height, 22), alignment: .leading)
+                        .frame(width: labelW, height: max(rn.height, 28), alignment: .leading)
                         .offset(x: rightX + 4, y: rn.y)
                     }
 
@@ -185,8 +202,10 @@ struct MoneyFlowSankeyView: View {
                             Text(savingsAmount, format: .currency(code: "EUR").precision(.fractionLength(0)))
                                 .font(.system(size: 8))
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
-                        .frame(width: labelW, height: max(savingsH, 22), alignment: .leading)
+                        .frame(width: labelW, height: max(savingsH, 28), alignment: .leading)
                         .offset(x: rightX + 4, y: savingsY)
                     }
                 }

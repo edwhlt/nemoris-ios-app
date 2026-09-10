@@ -48,6 +48,7 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "E8971B12302F78DE0022F53E"
                BuildableName = "NemorisUITests.xctest"
+               BlueprintName = "NemorisUITests"
                ReferencedContainer = "container:Nemoris.xcodeproj">
             </BuildableReference>
          </TestableReference>

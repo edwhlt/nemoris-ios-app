@@ -52,8 +52,16 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
     case transactionImport
     /// Extraction d'ordres et de positions depuis un avis d'opéré ou un portefeuille.
     case investmentImport
-    /// Reformulation des insights du tableau de bord (coach financier).
+    /// Coach dépenses : analyse du budget et des habitudes.
+    ///
+    /// ⚠️ Le `rawValue` reste « insights » alors que la fonctionnalité a
+    /// changé de nature (elle ne reformule plus des analyses statistiques,
+    /// elle les PRODUIT). C'est délibéré : c'est la clé sous laquelle le choix
+    /// de backend est déjà persisté (`ai.backend.insights`). La renommer
+    /// remettrait tous les utilisateurs en « Automatique » sans le leur dire.
     case insights
+    /// Coach investissement : analyse du portefeuille.
+    case investmentCoach
     /// Assistant de rédaction SQL de la console.
     case sqlAssistant
 
@@ -64,7 +72,8 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
         case .merchantEnrichment: return "Identification des marchands"
         case .transactionImport:  return "Import de relevés"
         case .investmentImport:   return "Import de portefeuille"
-        case .insights:           return "Coach financier"
+        case .insights:           return "Coach dépenses"
+        case .investmentCoach:    return "Coach investissement"
         case .sqlAssistant:       return "Assistant SQL"
         }
     }
@@ -75,6 +84,7 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
         case .transactionImport:  return "doc.text.magnifyingglass"
         case .investmentImport:   return "chart.line.uptrend.xyaxis"
         case .insights:           return "lightbulb"
+        case .investmentCoach:    return "chart.line.uptrend.xyaxis"
         case .sqlAssistant:       return "terminal"
         }
     }
@@ -89,7 +99,9 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
         case .investmentImport:
             return "Lit un avis d'opéré ou une capture de portefeuille. Sans IA, seul l'ancrage par code ISIN fonctionne, et les captures de portefeuille ne sont pas exploitables."
         case .insights:
-            return "Reformule les analyses du tableau de bord en langage naturel. Sans IA, elles restent affichées telles quelles."
+            return "Analyse tes dépenses, tes charges et tes enveloppes, puis propose des actions chiffrées. Sans IA, seule la détection statistique à seuils fixes reste disponible."
+        case .investmentCoach:
+            return "Analyse ton portefeuille : concentration, liquidités dormantes, frais, cohérence avec tes objectifs. Sans IA, aucune recommandation n'est produite."
         case .sqlAssistant:
             return "Rédige des requêtes SQL en conversation. Sans IA, la console reste utilisable à la main."
         }
@@ -120,6 +132,35 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
     /// Vrai si cette fonctionnalité tire un vrai bénéfice de la lecture d'image.
     var benefitsFromImage: Bool { optionalCapabilities.contains(.image) }
 
+    /// Budget de SORTIE, en tokens.
+    ///
+    /// ⚠️ Indispensable, et longtemps absent côté serveur local : sans
+    /// `max_tokens` dans la requête, un serveur compatible OpenAI (LM Studio,
+    /// Ollama) applique SA propre limite par défaut, souvent quelques
+    /// centaines de tokens. La réponse est alors coupée net quelle que soit la
+    /// taille du contexte — c'est ce qui tronquait les analyses du coach en
+    /// plein milieu de leur préambule (retour d'usage 2026-08-28).
+    ///
+    /// Les valeurs ne sont pas uniformes parce que les besoins ne le sont pas :
+    /// identifier un marchand tient en trois lignes, une analyse de coach
+    /// développe N recommandations argumentées.
+    var maxOutputTokens: Int {
+        switch self {
+        case .merchantEnrichment:                 return 512
+        case .transactionImport, .investmentImport: return 4_096
+        // ⚠️ Un modèle "thinking" (Qwen3, DeepSeek-R1…) consomme une partie de
+        // CE budget pour son raisonnement interne AVANT d'écrire la réponse
+        // finale — vu en usage réel : 3 527 tokens dépensés en réflexion sur un
+        // budget de 4 096, `content` resté vide. Une valeur plus large ne
+        // corrige pas un modèle qui s'arrête sans avoir conclu (ça reste un
+        // défaut du modèle/serveur, cf. `LocalLLMService.reasoning_content`),
+        // mais réduit le risque qu'un dossier plus volumineux fasse déborder
+        // un raisonnement par ailleurs complet sur le budget lui-même.
+        case .insights, .investmentCoach:         return 8_192
+        case .sqlAssistant:                       return 2_048
+        }
+    }
+
     /// Ordre de grandeur de ce qui part au modèle, affiché dans les Réglages
     /// quand le backend résolu n'est PAS 100 % sur l'appareil (serveur local ou
     /// cloud) — pour que l'utilisateur sache à quoi s'attendre avant que ça
@@ -132,8 +173,12 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
             return "Prompt court par marchand inconnu — quelques centaines de tokens."
         case .transactionImport, .investmentImport:
             return "Le document entier part au modèle : plusieurs milliers de tokens par page, davantage encore si elle est transmise en image plutôt qu'en texte."
-        case .insights:
-            return "Un prompt court par analyse, relancé à chaque ouverture du tableau de bord."
+        case .insights, .investmentCoach:
+            // ⚠️ Corrigé : ce n'était plus vrai. Le coach n'envoie plus « un
+            // prompt court à chaque ouverture du tableau de bord » — il envoie
+            // un DOSSIER agrégé (~1 000 tokens) et n'est relancé qu'à la
+            // demande, ou automatiquement une fois l'analyse périmée (7 jours).
+            return "Un dossier agrégé de ta situation, environ un millier de tokens, à chaque analyse — à la demande ou une fois par semaine au plus."
         case .sqlAssistant:
             return "Conversation multi-tours : le contexte s'accumule au fil des questions, donc la consommation augmente avec l'échange."
         }
@@ -180,6 +225,10 @@ enum AIBackendChoice: Codable, Hashable, Sendable {
     case foundationModels
     /// Serveur HTTP compatible OpenAI (LM Studio, Ollama…).
     case localServer
+    /// Modèle GGUF téléchargé depuis Hugging Face et exécuté DANS l'app
+    /// (`SwiftLlama`/llama.cpp) — aucun serveur externe, aucune dépendance à
+    /// Apple Intelligence. Cf. `EmbeddedModelService`.
+    case embeddedModel
     case cloud(AICloudProvider)
     /// Aucun appel, jamais.
     case off
@@ -189,6 +238,7 @@ enum AIBackendChoice: Codable, Hashable, Sendable {
         case .automatic:        return "Automatique"
         case .foundationModels: return "Apple Intelligence"
         case .localServer:      return "Serveur local"
+        case .embeddedModel:    return "Modèle embarqué"
         case .cloud(let p):     return p.displayName
         case .off:              return "Désactivée"
         }
@@ -199,6 +249,7 @@ enum AIBackendChoice: Codable, Hashable, Sendable {
         case .automatic:        return "sparkles"
         case .foundationModels: return "apple.logo"
         case .localServer:      return "server.rack"
+        case .embeddedModel:    return "internaldrive"
         case .cloud:            return "cloud"
         case .off:              return "slash.circle"
         }
@@ -212,7 +263,7 @@ enum AIBackendChoice: Codable, Hashable, Sendable {
 
     /// Options proposées dans le sélecteur, dans l'ordre d'affichage.
     static var allChoices: [AIBackendChoice] {
-        [.automatic, .foundationModels, .localServer]
+        [.automatic, .foundationModels, .embeddedModel, .localServer]
             + AICloudProvider.allCases.map { .cloud($0) }
             + [.off]
     }
@@ -225,15 +276,18 @@ struct AIBackendAvailability: Sendable, Hashable {
     var foundationModels = false
     var foundationModelsReadsImages = false
     var localServer = false
+    var embeddedModel = false
     var configuredCloudProviders: [AICloudProvider] = []
 
     init(foundationModels: Bool = false,
          foundationModelsReadsImages: Bool = false,
          localServer: Bool = false,
+         embeddedModel: Bool = false,
          configuredCloudProviders: [AICloudProvider] = []) {
         self.foundationModels = foundationModels
         self.foundationModelsReadsImages = foundationModelsReadsImages
         self.localServer = localServer
+        self.embeddedModel = embeddedModel
         self.configuredCloudProviders = configuredCloudProviders
     }
 }
@@ -262,13 +316,20 @@ enum AIBackendResolver {
         case .localServer:
             return availability.localServer ? .localServer : nil
 
+        case .embeddedModel:
+            return availability.embeddedModel ? .embeddedModel : nil
+
         case .cloud(let provider):
             return availability.configuredCloudProviders.contains(provider) ? .cloud(provider) : nil
 
         case .automatic:
-            // Ordre de préférence : le plus privé d'abord. On ne bascule vers
-            // le réseau que faute de mieux, et vers le cloud qu'en dernier.
+            // Ordre de préférence : le plus privé d'abord. Le modèle embarqué
+            // passe AVANT le serveur local : il ne dépend d'aucune autre
+            // machine et ne quitte jamais l'appareil, alors qu'un serveur
+            // externe suppose une IP à joindre. On ne bascule vers le réseau
+            // que faute de mieux, et vers le cloud qu'en dernier.
             if supportsFoundationModels(feature, availability) { return .foundationModels }
+            if availability.embeddedModel { return .embeddedModel }
             if availability.localServer { return .localServer }
             if let provider = availability.configuredCloudProviders.first { return .cloud(provider) }
             return nil
@@ -295,6 +356,9 @@ enum AIBackendResolver {
         // Le modèle chargé décide : un modèle purement textuel répondra une
         // erreur, et l'appelant retombera sur l'OCR.
         case .localServer:      return true
+        // Scope v1 : texte seulement. Un GGUF multimodal (mmproj séparé) est
+        // un pipeline distinct, non couvert — cf. `EmbeddedModelService`.
+        case .embeddedModel:    return false
         case .cloud(let p):     return p.supportsImages
         case .automatic, .off, .none: return false
         }

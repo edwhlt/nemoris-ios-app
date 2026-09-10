@@ -9,31 +9,46 @@ import SwiftUI
 // "Investissements", "Ordre des onglets") — la même ligne (un module) se
 // modifiait à 3 endroits qu'il fallait garder cohérents.
 //
-// `List` + `.onMove`, editMode forcé sur iOS uniquement — le drag&drop de
-// réordonnancement sur macOS a besoin d'une vraie `List` (backing natif type
-// NSTableView) ; un `Form { }.formStyle(.grouped)` a l'air d'une liste mais
-// n'en est pas une, le drag n'y fait rien quelle que soit l'imbrication (une
-// hypothèse antérieure de ce commentaire, jamais vérifiée sur device,
-// blâmait l'imbrication dans le Form géant de réglages — c'était le Form
-// lui-même). Convention déjà en place ailleurs (ReferenceDataView,
-// TransactionsView…) : `List` + `.listStyle(.plain)` sur macOS +
-// `.macGroupedRow(first:last:)` par row pour les cartes arrondies que `Form`
-// donnait gratuitement.
+// `Form`, editMode forcé sur iOS uniquement — même recette que
+// `DashboardCustomizeView`. Historique court (retour d'usage 2026-09, 3
+// allers-retours) :
 //
-// ⚠️ Contrepartie : `Form(.grouped)` stylait automatiquement tout `Toggle`
-// simple en switch macOS ; `List` ne le fait pas (défaut = case à cocher,
-// cf. `PayeeDetailView`/`InvestmentPDFImportView` qui doivent déjà le
-// préciser hors Form). D'où `.toggleStyle(.switch)` explicite ci-dessous.
+// 1. À l'origine (avant ce dépôt) : `Form` + `.onMove`, réordonnancement
+//    macOS non fonctionnel (`.onMove` seul ne réordonne réellement qu'à
+//    l'intérieur d'une vraie `List`, backing natif NSTableView côté macOS —
+//    un `Form { }.formStyle(.grouped)` a l'air d'une liste mais n'en est
+//    pas une, le drag n'y fait rien quelle que soit l'imbrication).
+// 2. Migré vers `List` + `.macGroupedRow` + `macReorderable` (onDrag/onDrop
+//    bas niveau, cf. `ReorderableRow.swift`) pour de vrai le réordonnancement
+//    macOS. Ça a marché… mais avec un freeze de plusieurs secondes à chaque
+//    relâchement de drag, non résolu par les 2 tentatives suivantes
+//    (mutation live vs différée, `mainTabOrder` rendu Observable-tracké).
+// 3. Le point commun entre CE freeze (`ModulesSettingsView`, `List`) et
+//    l'ABSENCE de freeze sur `DashboardCustomizeView` (déjà revenu à `Form`
+//    pour une raison purement esthétique, cf. son propre historique) a
+//    fini par pointer vers l'INTERACTION `.onDrag`/`.onDrop` × `List`
+//    (NSTableView) elle-même sur macOS — pas vers la logique de
+//    réordonnancement en tant que telle, qui est restée identique entre les
+//    deux écrans. Revenu au `Form`, le freeze n'a plus de raison de se
+//    reproduire.
 //
-// ⚠️ `.background(…)`, jamais `ZStack { Color.ignoresSafeArea(); List }`
-// (piège documenté CLAUDE.md §N.1, à l'origine décrit pour `Form`).
+// `macReorderable` (`ReorderableRow.swift`) reste le mécanisme macOS : c'est
+// un modifier `onDrag`/`onDrop` générique, PAS lié à `List` — il fonctionne
+// aussi bien sur une row de `Form`. `.onMove` reste câblé, réservé à iOS
+// (poignée ☰ de l'edit mode).
+//
+// ⚠️ `.background(…)`, jamais `ZStack { Color.ignoresSafeArea(); Form }`
+// (piège documenté CLAUDE.md §N.1).
 
 struct ModulesSettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(PurchaseManager.self) private var store
     @AppStorage("nemoris.reimbursementsEnabled") private var reimbursementsEnabled = true
-    @State private var tabOrder: [MainTabItem] = []
     @State private var showPaywall = false
+    #if os(macOS)
+    /// Module actuellement glissé — cf. `macReorderable` (`ReorderableRow.swift`).
+    @State private var draggedTab: MainTabItem?
+    #endif
 
     /// `nil` sur iOS (le `NavigationLink` qui pousse cet écran fournit déjà
     /// son bouton retour natif). Sur macOS, fourni par l'appelant — cf.
@@ -80,65 +95,64 @@ struct ModulesSettingsView: View {
 
     // MARK: - Contenu principal
 
-    // ⚠️ `List`, PAS `Form` : `.onMove` ne réordonne réellement qu'à l'intérieur
-    // d'une vraie `List` (backing natif type NSTableView côté macOS). Le
-    // `Form { }.formStyle(.grouped)` posé par `nemorisFormStyle()` a l'AIR
-    // d'une liste mais n'est pas construit dessus — le drag n'y a jamais
-    // d'effet, indépendamment de l'imbrication (contrairement à ce que
-    // supposait un commentaire antérieur sur `DashboardCustomizeView`, jamais
-    // vérifié sur device). Convention déjà en place ailleurs (ReferenceDataView,
-    // TransactionsView…) : `List` + `.listStyle(.plain)` sur macOS +
-    // `.macGroupedRow(first:last:)` par row pour retrouver les cartes arrondies
-    // que `Form` donne gratuitement.
+    // ⚠️ `$appState.mainTabOrder` directement, PAS de mirroir `@State` local
+    // (contrairement à une version antérieure de cet écran) : `mainTabOrder`
+    // est une propriété STOCKÉE côté `AppState` (2026-09, même doctrine que
+    // `dashboardLayout`) — un mirroir local ne ferait que retarder la
+    // propagation d'un cran vers la sidebar/`.onChange` de `MainTabView`.
     private var content: some View {
-        List {
+        @Bindable var appState = appState
+        return Form {
             Section {
-                ForEach(tabOrder) { tab in
+                ForEach(appState.mainTabOrder) { tab in
                     row(for: tab)
-                        .macGroupedRow(first: tab == tabOrder.first, last: tab == tabOrder.last)
+                        #if os(macOS)
+                        .macReorderable(tab, items: $appState.mainTabOrder, dragged: $draggedTab) {}
+                        #endif
                 }
                 .onMove(perform: moveTab)
             } header: {
                 Text("Modules")
-                    .macGroupedSectionHeader()
             } footer: {
                 Text("Glissez pour réordonner. Les 4 premiers s'affichent dans la barre du bas (iPhone) ; tous apparaissent dans la barre latérale (Mac/iPad). L'interrupteur active ou désactive le module.")
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                    .macGroupedSectionHeader()
             }
 
             Section {
-                Toggle(isOn: $reimbursementsEnabled) {
-                    Label("Remboursements", systemImage: "arrow.uturn.left.circle")
+                HStack(spacing: AppTheme.Spacing.md) {
+                    // Icône colorée EXPLICITEMENT : un `Label` posé comme label
+                    // d'un `Toggle` sur macOS rend son icône dans l'accent
+                    // "contrôle" du système (bleu) plutôt que la couleur de
+                    // l'app, `.tint(...)` sur le `Toggle` ne s'y propageant pas
+                    // (retour d'usage 2026-09, capture à l'appui — icône bleue
+                    // alors que toutes les autres rows sont en vert accent).
+                    // Structure alignée sur `row(for:)` ci-dessous pour rester
+                    // visuellement cohérente avec la liste des modules.
+                    Image(systemName: "arrow.uturn.left.circle")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AppTheme.Colors.accent)
+                        .frame(width: 26)
+                    Text("Remboursements")
+                        .font(AppTheme.Typography.bodyMedium)
+                        .foregroundStyle(AppTheme.Colors.textPrimary)
+                    Spacer(minLength: 0)
+                    Toggle("", isOn: $reimbursementsEnabled)
+                        .labelsHidden()
+                        .tint(AppTheme.Colors.accent)
+                        .toggleStyle(.switch)
                 }
-                .tint(AppTheme.Colors.accent)
-                .toggleStyle(.switch)
-                .macGroupedRow()
             } header: {
                 Text("Autres fonctionnalités")
-                    .macGroupedSectionHeader()
             } footer: {
                 Text("Pas un onglet à part : ce suivi apparaît directement dans Transactions et Tricount.")
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                    .macGroupedSectionHeader()
             }
         }
-        #if os(macOS)
-        // .plain = base neutre pour les cartes custom dessinées par
-        // macGroupedRow. contentMargins décolle la 1ʳᵉ carte de la toolbar
-        // (iOS insetGrouped ajoute cet espace automatiquement, pas .plain) —
-        // même recette que TransactionsView/PatrimoineView.
-        .listStyle(.plain)
-        .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
-        #endif
-        .scrollContentBackground(.hidden)
-        .tint(AppTheme.Colors.accent)
+        .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        .navigationTitle("Modules")
+        .localizedNavigationTitle("Modules")
         .navigationBarTitleDisplayMode(.inline)
         #if os(iOS)
-        // editMode n'existe pas sur macOS — le drag&drop de réordonnancement
-        // marche nativement sur Mac sans mode édition (cf. DashboardCustomizeView).
+        // Même choix que `DashboardCustomizeView` : le mode édition permanent
+        // évite un bouton « Modifier » pour une liste dont c'est la seule fonction.
         .environment(\.editMode, .constant(.active))
         #else
         // Sur macOS cet écran REMPLACE le contenu de `SettingsView` (pas un
@@ -151,19 +165,18 @@ struct ModulesSettingsView: View {
                 Button { onBack?() } label: {
                     Image(systemName: "chevron.left")
                 }
-                .help("Réglages")
-                .accessibilityLabel("Réglages")
+                .localizedHelp("Réglages")
+                .localizedAccessibilityLabel("Réglages")
             }
         }
         #endif
-        .onAppear { tabOrder = appState.mainTabOrder }
         .adaptivePane(isPresented: $showPaywall) {
             PaywallView().environment(store)
         }
         #if os(iOS)
         .navigationDestination(item: $pushedModuleConfig) { tab in
             moduleConfigDestination(tab)
-                .navigationTitle(tab.title)
+                .localizedNavigationTitle(tab.title)
                 .navigationBarTitleDisplayMode(.inline)
         }
         #endif
@@ -185,7 +198,7 @@ struct ModulesSettingsView: View {
                     .frame(width: 26)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(tab.title)
+                    Text(LocalizedStringKey(tab.title))
                         .font(AppTheme.Typography.bodyMedium)
                         .foregroundStyle(AppTheme.Colors.textPrimary)
                     if let subtitle = fixedSubtitle(for: tab) {
@@ -211,6 +224,10 @@ struct ModulesSettingsView: View {
                             }
                     }
                 }
+
+                #if os(macOS)
+                ReorderHandle()
+                #endif
             }
 
             // Lien vers le réglage propre du module — seulement quand il a du
@@ -229,7 +246,7 @@ struct ModulesSettingsView: View {
             if configurableModules.contains(tab), isOn, !locked {
                 configLink(tab) {
                     HStack {
-                        Text("Réglages de \(tab.title)")
+                        (Text("Réglages de ") + Text(LocalizedStringKey(tab.title)))
                             .font(AppTheme.Typography.labelMedium)
                         Spacer()
                         #if os(macOS)
@@ -262,7 +279,7 @@ struct ModulesSettingsView: View {
         }
     }
 
-    private func fixedSubtitle(for tab: MainTabItem) -> String? {
+    private func fixedSubtitle(for tab: MainTabItem) -> LocalizedStringKey? {
         switch tab {
         case .dashboard:     return "Toujours actif"
         case .referenceData: return "Suit le module Transactions"
@@ -287,7 +304,7 @@ struct ModulesSettingsView: View {
     @ViewBuilder
     private func moduleConfigPage(_ tab: MainTabItem) -> some View {
         moduleConfigDestination(tab)
-            .navigationTitle(tab.title)
+            .localizedNavigationTitle(tab.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigation) {
@@ -296,8 +313,8 @@ struct ModulesSettingsView: View {
                     } label: {
                         Image(systemName: "chevron.left")
                     }
-                    .help("Modules")
-                    .accessibilityLabel("Modules")
+                    .localizedHelp("Modules")
+                    .localizedAccessibilityLabel("Modules")
                 }
             }
     }
@@ -316,8 +333,7 @@ struct ModulesSettingsView: View {
     // MARK: - Mutations
 
     private func moveTab(from source: IndexSet, to destination: Int) {
-        tabOrder.move(fromOffsets: source, toOffset: destination)
-        appState.mainTabOrder = tabOrder
+        appState.mainTabOrder.move(fromOffsets: source, toOffset: destination)
     }
 }
 
@@ -342,7 +358,7 @@ struct TransactionsModuleSettingsView: View {
                     Picker("Compte par défaut", selection: $appState.defaultAccountId) {
                         Text("Premier disponible").tag(0)
                         ForEach(accounts.groupedByType, id: \.type) { group in
-                            Section(group.type.label) {
+                            Section(LocalizedStringKey(group.type.label)) {
                                 ForEach(group.accounts) { a in
                                     Text(a.name).tag(a.id)
                                 }
@@ -359,7 +375,7 @@ struct TransactionsModuleSettingsView: View {
         .scrollContentBackground(.hidden)
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        .navigationTitle("Transactions")
+        .localizedNavigationTitle("Transactions")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if DatabaseManager.shared.hasDatabase() {
@@ -399,7 +415,7 @@ struct InvestmentsModuleSettingsView: View {
         .scrollContentBackground(.hidden)
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        .navigationTitle("Investissements")
+        .localizedNavigationTitle("Investissements")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -435,7 +451,7 @@ struct BudgetModuleSettingsView: View {
         .scrollContentBackground(.hidden)
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        .navigationTitle("Budget")
+        .localizedNavigationTitle("Budget")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

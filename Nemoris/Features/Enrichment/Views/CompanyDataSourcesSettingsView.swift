@@ -37,7 +37,7 @@ struct CompanyDataSourcesSettingsView: View {
         .scrollContentBackground(.hidden)
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        .navigationTitle("Sources entreprises")
+        .localizedNavigationTitle("Sources entreprises")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -53,7 +53,7 @@ struct CompanyDataSourcesSettingsView: View {
                         .foregroundStyle(source.isImplemented ? AppTheme.Colors.accent : AppTheme.Colors.warning)
                     VStack(alignment: .leading, spacing: 2) {
                         HStack {
-                            Text(source.displayName).font(.subheadline.weight(.semibold))
+                            Text(LocalizedStringKey(source.displayName)).font(.subheadline.weight(.semibold))
                             if let country = source.country {
                                 Text(country)
                                     .font(.caption2.monospaced().weight(.bold))

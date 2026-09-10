@@ -16,6 +16,13 @@ INTERDITS="SwiftUI|UIKit|AppKit|PDFKit|Vision|FoundationModels|CloudKit|Contacts
 
 MOTEURS=(
   "Nemoris/Features/Budget/Service/EnvelopeSpendingCalculator.swift"
+  "Nemoris/Features/Coach/Model/CoachModels.swift"
+  "Nemoris/Features/Coach/Service/CoachBriefingBuilder.swift"
+  "Nemoris/Features/Coach/Service/CoachPassPlanner.swift"
+  "Nemoris/Features/Coach/Service/CoachPrompt.swift"
+  "Nemoris/Features/Coach/Service/CoachRanker.swift"
+  "Nemoris/Features/Coach/Service/CoachResponseParser.swift"
+  "Nemoris/Features/Coach/Service/InvestmentBriefingBuilder.swift"
   "Nemoris/Features/Dashboard/Service/DashboardSnapshot.swift"
   "Nemoris/Features/Dashboard/Service/Layout/DashboardGridPlanner.swift"
   "Nemoris/Features/Dashboard/Model/DashboardCardID.swift"
@@ -28,10 +35,12 @@ MOTEURS=(
   "Nemoris/Features/Import/Pipeline/Readers/LedgerXMLReader.swift"
   "Nemoris/Features/Import/Pipeline/Readers/XLSXReader.swift"
   "Nemoris/Features/Import/Pipeline/Readers/ZIPArchiveReader.swift"
+  "Nemoris/Features/Investments/Service/ChartYDomain.swift"
   "Nemoris/Features/Investments/Service/PortfolioEvolutionBuilder.swift"
   "Nemoris/Features/Investments/Service/PDFImport/InvestmentStatementExtractor.swift"
   "Nemoris/Features/Investments/Service/PDFImport/StatementReconciler.swift"
   "Nemoris/Features/Patrimoine/Service/PatrimoineSnapshotBuilder.swift"
+  "Nemoris/Features/ReferenceData/Service/SQLStatementGuard.swift"
 )
 # Le module de planification de requêtes est pur dans son intégralité.
 MOTEURS+=("Nemoris/Features/Enrichment/Service/QueryPlanning/"*.swift)

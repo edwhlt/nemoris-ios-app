@@ -57,12 +57,12 @@ struct TricountEntryDetailSheet: View {
         entry.typeTransaction.uppercased() == "NORMAL" ? -entry.total : entry.total
     }
 
-    private var entryTypeLabel: String {
+    private var entryTypeLabel: LocalizedStringResource {
         switch entry.typeTransaction.uppercased() {
         case "NORMAL":   return "Dépense"
         case "INCOME":   return "Revenu"
         case "BALANCE", "TRANSFER": return "Transfert"
-        default:         return entry.typeTransaction
+        default:         return LocalizedStringResource(stringLiteral: entry.typeTransaction)
         }
     }
 

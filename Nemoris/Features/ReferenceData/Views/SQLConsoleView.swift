@@ -636,6 +636,10 @@ struct SQLFilesListView: View {
     @State private var newName = ""
     @State private var selectedFile: URL?
     @State private var showEditor = false
+    /// Vrai UNIQUEMENT quand `selectedFile` a été ouvert via l'action « Exécuter »
+    /// (swipe iOS / clic droit macOS) — dans tous les autres cas (tap sur la row,
+    /// création de fichier), ouvrir un fichier affiche l'éditeur SANS l'exécuter.
+    @State private var autoRunOnOpen = false
     /// Doc du schéma en panneau (cf. `.adaptivePane` dans le body) plutôt qu'en push.
     @State private var showSchema = false
     @State private var renamingEntry: SQLConsoleHelper.Entry?
@@ -644,6 +648,15 @@ struct SQLFilesListView: View {
     @State private var errorMessage: String?
     private let consoleTip = SQLConsoleTip()
 
+    /// Rendu par `.localizedNavigationTitle`, qui résout la CLÉ contre le bundle
+    /// de la langue choisie dans l'app et se rafraîchit au changement (cf.
+    /// `AppLocalization`). On renvoie donc la clé source telle quelle, jamais une
+    /// chaîne déjà résolue.
+    ///
+    /// ⚠️ Un nom de fichier utilisateur n'est pas une clé de traduction — mais le
+    /// faire passer par le même chemin est SANS RISQUE : une clé absente de la
+    /// table retombe sur le texte source, donc sur le nom de fichier lui-même
+    /// (vérifié). Ça évite d'avoir deux modificateurs concurrents sur la même vue.
     private var navTitle: String {
         #if os(macOS)
         if let file = selectedFile { return file.deletingPathExtension().lastPathComponent }
@@ -686,17 +699,18 @@ struct SQLFilesListView: View {
         // refonte en arborescence : ils se plient/déplient sur place.
         Group {
             if let file = selectedFile {
-                SQLEditorView(fileURL: file)
+                SQLEditorView(fileURL: file, autoRunOnOpen: autoRunOnOpen)
             } else {
                 fileListBody
             }
         }
-        .navigationTitle(navTitle)
+        .localizedNavigationTitle(navTitle)
         .toolbar {
             if selectedFile != nil {
                 ToolbarItem(placement: .navigation) {
                     Button {
                         selectedFile = nil
+                        autoRunOnOpen = false
                     } label: {
                         Label("Retour", systemImage: "chevron.left")
                     }
@@ -710,10 +724,10 @@ struct SQLFilesListView: View {
         .background(AppTheme.Colors.background.ignoresSafeArea())
         #else
         fileListBody
-            .navigationTitle(navTitle)
+            .localizedNavigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(isPresented: $showEditor) {
-                if let file = selectedFile { SQLEditorView(fileURL: file) }
+                if let file = selectedFile { SQLEditorView(fileURL: file, autoRunOnOpen: autoRunOnOpen) }
             }
         #endif
     }
@@ -732,12 +746,16 @@ struct SQLFilesListView: View {
                 .listRowBackground(Color.clear)
             ForEach(visibleRows) { node in
                 entryRow(node)
+                    .macGroupedRow(first: node.id == visibleRows.first?.id, last: node.id == visibleRows.last?.id)
             }
         }
         #if os(macOS)
+        // Même politique que TricountListView/TransactionsView : .plain =
+        // base neutre pour les cartes custom dessinées par macGroupedRow.
+        .listStyle(.plain)
         // Décolle la 1ère carte du délimiteur natif macOS (barre d'outils ↔
         // contenu scrollé) — même correctif que TransactionsView.
-        .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+        .macGroupedListTopGap()
         #endif
         .scrollContentBackground(.hidden)
         .overlay {
@@ -879,19 +897,16 @@ struct SQLFilesListView: View {
                 }
             }
             .rowActions(trailing: [
-                RowAction("Supprimer", systemImage: "trash", role: .destructive) { handleDelete(entry) },
-                RowAction("Déplacer", systemImage: "folder", tint: AppTheme.Colors.accentSecondary) { movingEntry = entry },
-                RowAction("Renommer", systemImage: "pencil", tint: AppTheme.Colors.accent) {
+                RowAction("Supprimer", systemImage: "trash", role: .destructive, iconOnly: true) { handleDelete(entry) },
+                RowAction("Déplacer", systemImage: "folder", tint: AppTheme.Colors.accentSecondary, iconOnly: true) { movingEntry = entry },
+                RowAction("Renommer", systemImage: "pencil", tint: AppTheme.Colors.accent, iconOnly: true) {
                     renameInput = entry.displayName
                     renamingEntry = entry
                 }
             ], trailingFullSwipe: false)
         case .file(let fileURL):
             Button {
-                selectedFile = fileURL
-                #if !os(macOS)
-                showEditor = true
-                #endif
+                openFile(fileURL, autoRun: false)
             } label: {
                 HStack(spacing: 6) {
                     // Réserve la largeur du chevron des dossiers : fichiers et
@@ -905,18 +920,40 @@ struct SQLFilesListView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .rowActions(trailing: [
-                RowAction("Supprimer", systemImage: "trash", role: .destructive) { handleDelete(entry) },
-                RowAction("Déplacer", systemImage: "folder", tint: AppTheme.Colors.accentSecondary) { movingEntry = entry },
-                RowAction("Renommer", systemImage: "pencil", tint: AppTheme.Colors.accent) {
-                    renameInput = entry.displayName
-                    renamingEntry = entry
-                }
-            ], trailingFullSwipe: false)
+            .rowActions(
+                leading: [
+                    // Seule façon d'exécuter SANS d'abord voir l'éditeur : swipe
+                    // (iOS) ou clic droit (macOS, `rowActions` rend `leading` dans
+                    // le menu contextuel). Le tap normal sur la row, lui, ouvre
+                    // toujours l'éditeur SANS exécuter (cf. `openFile`).
+                    RowAction("Exécuter", systemImage: "play.fill", tint: AppTheme.Colors.accent, iconOnly: true) {
+                        openFile(fileURL, autoRun: true)
+                    }
+                ],
+                trailing: [
+                    RowAction("Supprimer", systemImage: "trash", role: .destructive, iconOnly: true) { handleDelete(entry) },
+                    RowAction("Déplacer", systemImage: "folder", tint: AppTheme.Colors.accentSecondary, iconOnly: true) { movingEntry = entry },
+                    RowAction("Renommer", systemImage: "pencil", tint: AppTheme.Colors.accent, iconOnly: true) {
+                        renameInput = entry.displayName
+                        renamingEntry = entry
+                    }
+                ],
+                trailingFullSwipe: false
+            )
         }
     }
 
     // MARK: - Actions
+
+    /// Point d'ouverture UNIQUE d'un fichier — `autoRun` distingue un tap normal
+    /// (éditeur seul) de l'action « Exécuter » (swipe iOS / clic droit macOS).
+    private func openFile(_ url: URL, autoRun: Bool) {
+        selectedFile = url
+        autoRunOnOpen = autoRun
+        #if !os(macOS)
+        showEditor = true
+        #endif
+    }
 
     private func reload() {
         tree = SQLConsoleHelper.buildTree()
@@ -943,10 +980,7 @@ struct SQLFilesListView: View {
         }
         revealFolder(creationDir)
         reload()
-        selectedFile = url
-        #if !os(macOS)
-        showEditor = true
-        #endif
+        openFile(url, autoRun: false)
     }
 
     private func handleCreateFolder() {
@@ -986,7 +1020,7 @@ struct SQLFilesListView: View {
 // MARK: - Folder picker sheet
 
 private struct FolderPickerSheet: View {
-    let title: String
+    let title: LocalizedStringKey
     /// Si non-nil, ce dossier (et ses sous-dossiers) sont exclus pour éviter
     /// de déplacer un dossier dans lui-même.
     let excludingFolder: URL?
@@ -1002,7 +1036,6 @@ private struct FolderPickerSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             List {
                 Section {
                     Text(title)
@@ -1018,28 +1051,46 @@ private struct FolderPickerSheet: View {
                             Text(folder.label)
                                 .foregroundStyle(AppTheme.Colors.textPrimary)
                         }
+                        .macGroupedRow(first: folder.url == folders.first?.url, last: folder.url == folders.last?.url)
                     }
                 }
             }
-            .navigationTitle("Choisir un dossier")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-            }
-        }
+            #if os(macOS)
+            // Même politique que TricountListView/TransactionsView : .plain =
+            // base neutre pour les cartes custom dessinées par macGroupedRow.
+            .listStyle(.plain)
+            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
+            // celui du panneau hôte — sans ce modificateur, le bureau de
+            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            .scrollContentBackground(.hidden)
+            #endif
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
+            // tentative précédente (`.toolbarBackground(for: .windowToolbar)`)
+            // compilait mais n'avait AUCUN effet visuel, confirmé par capture
+            // d'écran en direct (retour d'usage 2026-08-21). Cf. le
+            // commentaire de `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome("Choisir un dossier", cancelLabel: "Annuler", onCancel: { dismiss() })
     }
 }
 
 // MARK: - Editor View
 //
 // Layout: two horizontal pages (swipe left/right)
-//   Page 0 — Results  (default, auto-run on open when no unfilled variables)
-//   Page 1 — Editor   (full-height syntax-highlighted editor)
+//   Page 0 — Results  (only shown first if opened via the explicit « Exécuter »
+//                       action — swipe iOS / clic droit macOS — with no unfilled
+//                       variables; auto-runs in that case only)
+//   Page 1 — Editor   (full-height syntax-highlighted editor — the DEFAULT page
+//                       on open, no execution happens just from opening a file)
 
 struct SQLEditorView: View {
     let fileURL: URL
+    /// Vrai UNIQUEMENT quand ce fichier a été ouvert via l'action « Exécuter »
+    /// (swipe iOS / clic droit macOS sur `SQLFilesListView`) — dans ce cas, et
+    /// seulement dans ce cas, le fichier s'exécute automatiquement à l'ouverture
+    /// et atterrit sur la page Résultats. Par défaut (tap normal, toolbar
+    /// « Exécuter » de cette vue elle-même) : l'ouverture affiche l'éditeur SANS
+    /// exécuter, l'exécution restant un geste explicite de l'utilisateur.
+    var autoRunOnOpen: Bool = false
 
     private let repository = TransactionRepository()
     @State private var sqlText: String = ""
@@ -1054,26 +1105,46 @@ struct SQLEditorView: View {
     /// seule `SQLFilesListView` (l'écran de liste) l'exposait, obligeant un
     /// aller-retour pour vérifier une colonne pendant qu'on écrit une requête.
     @State private var showSchema: Bool = false
+    /// Le contenu lu depuis le disque (`loadFile`) n'est plus synchrone sur le
+    /// main thread — tant qu'il n'est pas revenu, on affiche un spinner léger
+    /// au lieu de figer l'app le temps de la lecture (retour terrain : ouvrir
+    /// un fichier "prenait parfois un peu de temps" avec l'UI gelée pendant).
+    @State private var isLoadingFile = true
+
+    /// Instructions bloquées (modification de SCHÉMA) — jamais exécutées,
+    /// cf. `SQLStatementGuard`. Non-nil ⇒ l'alerte de blocage est affichée.
+    @State private var blockedStatements: [SQLStatementClassification]? = nil
+    /// Lot en attente de confirmation (modification de DONNÉES) — capturé tel
+    /// quel (variables déjà substituées) pour être rejoué après confirmation
+    /// sans reclassifier ni resubstituer.
+    @State private var pendingConfirmation: (queries: [(name: String, sql: String)], summary: [SQLStatementClassification])? = nil
+    /// Échec de la sauvegarde proposée avant une modification de données —
+    /// l'utilisateur choisit alors d'exécuter quand même ou d'annuler.
+    @State private var backupFailure: (queries: [(name: String, sql: String)], message: String)? = nil
 
     private var fileName: String { fileURL.deletingPathExtension().lastPathComponent }
     private var hasUnfilledVars: Bool { detectedVarSpecs.contains { (variables[$0.name] ?? "").isEmpty } }
 
     var body: some View {
         Group {
-            #if os(macOS)
-            // Le swipe entre pages n'existe pas au trackpad de la même façon,
-            // et `.tabViewStyle(.page(...))` est shimmé vers le TabView natif
-            // macOS (PlatformShims.swift) qui, sans `.tabItem`, dessine deux
-            // boutons de bascule VIERGES (le "pilule transparente" observée) —
-            // seule issue : le picker segmenté explicite ci-dessous.
-            if currentPage == 0 { resultsPage } else { editorPage }
-            #else
-            TabView(selection: $currentPage) {
-                resultsPage.tag(0)
-                editorPage.tag(1)
+            if isLoadingFile {
+                loadingPlaceholder
+            } else {
+                #if os(macOS)
+                // Le swipe entre pages n'existe pas au trackpad de la même façon,
+                // et `.tabViewStyle(.page(...))` est shimmé vers le TabView natif
+                // macOS (PlatformShims.swift) qui, sans `.tabItem`, dessine deux
+                // boutons de bascule VIERGES (le "pilule transparente" observée) —
+                // seule issue : le picker segmenté explicite ci-dessous.
+                if currentPage == 0 { resultsPage } else { editorPage }
+                #else
+                TabView(selection: $currentPage) {
+                    resultsPage.tag(0)
+                    editorPage.tag(1)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                #endif
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            #endif
         }
         .navigationTitle(fileName)
         .navigationBarTitleDisplayMode(.inline)
@@ -1124,7 +1195,57 @@ struct SQLEditorView: View {
                 .paneChrome("Schéma de la base",
                             cancelLabel: "Fermer", onCancel: { showSchema = false })
         }
-        .onAppear { loadFile() }
+        .alert(
+            "Modification de schéma bloquée",
+            isPresented: Binding(get: { blockedStatements != nil }, set: { if !$0 { blockedStatements = nil } })
+        ) {
+            Button("Compris", role: .cancel) { blockedStatements = nil }
+        } message: {
+            Text(SQLGuardMessages.blocked(blockedStatements ?? []))
+        }
+        .confirmationDialog(
+            "Cette requête modifie des données",
+            isPresented: Binding(get: { pendingConfirmation != nil }, set: { if !$0 { pendingConfirmation = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Sauvegarder puis exécuter") {
+                guard let pending = pendingConfirmation else { return }
+                pendingConfirmation = nil
+                backupThenRun(pending.queries)
+            }
+            Button("Exécuter sans sauvegarder", role: .destructive) {
+                guard let pending = pendingConfirmation else { return }
+                pendingConfirmation = nil
+                performExecution(pending.queries)
+            }
+            Button("Annuler", role: .cancel) { pendingConfirmation = nil }
+        } message: {
+            Text(SQLGuardMessages.confirmation(pendingConfirmation?.summary ?? []))
+        }
+        .alert(
+            "La sauvegarde a échoué",
+            isPresented: Binding(get: { backupFailure != nil }, set: { if !$0 { backupFailure = nil } })
+        ) {
+            Button("Exécuter quand même", role: .destructive) {
+                guard let failure = backupFailure else { return }
+                backupFailure = nil
+                performExecution(failure.queries)
+            }
+            Button("Annuler", role: .cancel) { backupFailure = nil }
+        } message: {
+            Text((backupFailure?.message ?? "") + "\n\nExécuter quand même la requête sans sauvegarde préalable ?")
+        }
+        .task { await loadFile() }
+    }
+
+    @ViewBuilder
+    private var loadingPlaceholder: some View {
+        VStack {
+            Spacer()
+            ProgressView()
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // ── Page 0: Results ──────────────────────────────────────────────────
@@ -1193,7 +1314,7 @@ struct SQLEditorView: View {
 
     #if !os(macOS)
     @ViewBuilder
-    private func swipeHint(label: String, icon: String) -> some View {
+    private func swipeHint(label: LocalizedStringKey, icon: String) -> some View {
         HStack(spacing: 4) {
             if icon == "chevron.left" { Image(systemName: icon).font(.caption2) }
             Text(label).font(.caption2)
@@ -1206,15 +1327,28 @@ struct SQLEditorView: View {
 
     // MARK: - File I/O
 
-    private func loadFile() {
-        sqlText = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+    private func loadFile() async {
+        // Lecture hors main thread : sur un fichier volumineux ou un disque
+        // lent, `String(contentsOf:)` synchrone sur le main actor gelait
+        // l'app pendant toute la durée de la lecture.
+        let url = fileURL
+        let text = await Task.detached(priority: .userInitiated) {
+            (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        }.value
+        sqlText = text
+        isLoadingFile = false
         refreshVariables(sqlText)
-        // Auto-run if file has content and no variables to fill
+        // Ouvrir un fichier n'exécute JAMAIS par défaut — seule l'action
+        // explicite « Exécuter » (swipe iOS / clic droit macOS sur la liste des
+        // fichiers) déclenche l'auto-run ici, et seulement si toutes les
+        // variables sont déjà renseignées (sinon l'utilisateur doit les remplir
+        // dans l'éditeur, comme avant).
         let trimmed = sqlText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty && detectedVarSpecs.isEmpty {
+        if autoRunOnOpen && !trimmed.isEmpty && detectedVarSpecs.isEmpty {
             executeSQL()          // run immediately, stay on results page
-        } else if !detectedVarSpecs.isEmpty {
-            currentPage = 1       // go to editor so user can fill in variables
+            currentPage = 0
+        } else {
+            currentPage = 1       // toujours l'éditeur par défaut
         }
     }
 
@@ -1251,19 +1385,52 @@ struct SQLEditorView: View {
     }
 
     private func executeSQL() {
+        let vars = variables
+        let queries = parseNamedQueries(sqlText).map { q in
+            (name: q.name, sql: vars.isEmpty ? q.sql : SQLVariableParsing.substitute(q.sql, values: vars))
+        }
+        runGuarded(queries)
+    }
+
+    /// Classe chaque instruction du lot (variables déjà substituées) et, selon
+    /// le verdict le plus sévère : bloque (schéma), demande confirmation
+    /// (données), ou exécute directement (lecture seule / maintenance).
+    private func runGuarded(_ queries: [(name: String, sql: String)]) {
+        let assessment = SQLStatementGuard.assess(queries.map(\.sql))
+        if assessment.isBlocked {
+            blockedStatements = assessment.blockedStatements
+            return
+        }
+        if assessment.needsConfirmation {
+            pendingConfirmation = (queries: queries, summary: assessment.statementsNeedingConfirmation)
+            return
+        }
+        performExecution(queries)
+    }
+
+    /// Crée une sauvegarde manuelle avant d'exécuter un lot déjà confirmé par
+    /// l'utilisateur — même mécanisme que "Sauvegarder maintenant" dans
+    /// Réglages › Sauvegarde (`BackupService.createSnapshot`), synchrone.
+    private func backupThenRun(_ queries: [(name: String, sql: String)]) {
+        do {
+            try BackupService.shared.createSnapshot()
+            performExecution(queries)
+        } catch {
+            backupFailure = (queries: queries, message: "Impossible de créer la sauvegarde : \(error.localizedDescription)")
+        }
+    }
+
+    private func performExecution(_ queries: [(name: String, sql: String)]) {
         isExecuting = true
         sections = []
-        let queries = parseNamedQueries(sqlText)
         let repo = repository
-        let vars = variables
-        Task.detached(priority: .userInitiated) { [vars] in
+        Task.detached(priority: .userInitiated) {
             var results: [SQLQuerySection] = []
             for q in queries {
-                let sql = vars.isEmpty ? q.sql : SQLVariableParsing.substitute(q.sql, values: vars)
-                let outcome = repo.executeSQL(sql)
+                let outcome = repo.executeSQL(q.sql)
                 switch outcome {
-                case .success(let res): results.append(SQLQuerySection(label: q.name, sql: sql, result: res, error: nil))
-                case .failure(let err): results.append(SQLQuerySection(label: q.name, sql: sql, result: nil, error: err.message))
+                case .success(let res): results.append(SQLQuerySection(label: q.name, sql: q.sql, result: res, error: nil))
+                case .failure(let err): results.append(SQLQuerySection(label: q.name, sql: q.sql, result: nil, error: err.message))
                 }
             }
             await MainActor.run { sections = results; isExecuting = false }

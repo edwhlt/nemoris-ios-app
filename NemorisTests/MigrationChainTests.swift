@@ -217,4 +217,71 @@ struct MigrationChainTests {
         #expect(tables(urlAncien) == tables(urlNeuf),
                 "écart : \(tables(urlAncien).symmetricDifference(tables(urlNeuf)).sorted())")
     }
+
+    // MARK: - Détection de dérive de schéma
+
+    @Test("Un commentaire SQL différent dans une table déjà migrée n'est pas une dérive")
+    func commentaireSeulNestPasUneDerive() throws {
+        let (dossier, url) = try baseVierge()
+        defer { try? FileManager.default.removeItem(at: dossier) }
+        #expect(DatabaseManager.migrate(at: url) == nil)
+
+        // Reproduit une base migrée AVANT un simple passage de traduction des
+        // commentaires (FR → EN, ou l'inverse) : la table a déjà été créée
+        // une fois, `CREATE TABLE IF NOT EXISTS` ne la retouche jamais — sa
+        // colonne `sql` dans sqlite_master garde le texte, commentaire
+        // compris, du jour où elle a été créée pour de vrai.
+        _ = SQLiteStore(databaseURL: url).write { db in
+            sqlite3_exec(db, "DROP TABLE transaction_metadata_keys;", nil, nil, nil)
+            sqlite3_exec(db, """
+                CREATE TABLE transaction_metadata_keys (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name       TEXT NOT NULL,
+                    icon       TEXT,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    -- Rôle fonctionnel optionnel, texte totalement différent
+                    -- de celui du fichier source actuel — seul ce commentaire
+                    -- change, pas une colonne.
+                    role       TEXT,
+                    created_at TEXT NOT NULL,
+                    uuid       TEXT,
+                    updated_at TEXT
+                );
+                """, nil, nil, nil)
+        }
+
+        let resultat = DatabaseManager.detectSchemaDrift(at: url)
+        #expect(resultat == .clean, "un commentaire ne doit jamais déclencher une dérive : \(resultat)")
+    }
+
+    @Test("Une vraie colonne manquante est bien détectée comme une dérive")
+    func colonneManquanteEstDetectee() throws {
+        let (dossier, url) = try baseVierge()
+        defer { try? FileManager.default.removeItem(at: dossier) }
+        #expect(DatabaseManager.migrate(at: url) == nil)
+
+        // Contre-épreuve du test précédent : un vrai écart structurel (ici,
+        // la colonne `role` a disparu) doit rester détecté malgré le
+        // nettoyage des commentaires.
+        _ = SQLiteStore(databaseURL: url).write { db in
+            sqlite3_exec(db, "DROP TABLE transaction_metadata_keys;", nil, nil, nil)
+            sqlite3_exec(db, """
+                CREATE TABLE transaction_metadata_keys (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name       TEXT NOT NULL,
+                    icon       TEXT,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    uuid       TEXT,
+                    updated_at TEXT
+                );
+                """, nil, nil, nil)
+        }
+
+        guard case .drifted(_, _, let changed) = DatabaseManager.detectSchemaDrift(at: url) else {
+            Issue.record("une colonne manquante aurait dû être signalée comme une dérive")
+            return
+        }
+        #expect(changed.contains("transaction_metadata_keys"))
+    }
 }

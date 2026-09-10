@@ -3,18 +3,18 @@ import Foundation
 // MARK: - InsightEngine
 //
 // Moteur de détection des "insights" — opportunités d'optimisation détectées
-// statistiquement à partir de l'historique de l'utilisateur. Pas de ML / LLM ici :
-// 5 détecteurs purs déterministes. Le wording naturel sera optionnellement
-// posé par Foundation Models (Couche 3 — voir `InsightLLMService` si activé).
+// statistiquement à partir de l'historique de l'utilisateur. Pas de ML / LLM
+// ici : 5 détecteurs purs déterministes.
+//
+// Depuis AXE AC (coach IA), ce moteur sert à DEUX endroits : (1) source des
+// "signaux" injectés dans le dossier envoyé au coach dépenses
+// (`CoachService.transactionsBriefing`), et (2) repli affiché sur le Dashboard
+// tant qu'aucune analyse IA n'a encore tourné (`InsightsCoachCard`, doctrine
+// offline-first). Il n'est plus le moteur de recommandation principal.
 //
 // **Philosophie** : on préfère 3 insights solides et actionnables à 20
 // insights vagues. Les seuils sont calibrés pour ne déclencher que sur des
 // signaux statistiquement robustes.
-//
-// **Locale forcée en dur (fr_FR) sur les montants des `title`/`detail`** : ce
-// moteur est pur (pas d'accès à l'environnement SwiftUI), donc `.formatted()`
-// retomberait sinon sur la locale RÉELLE de l'appareil au lieu du français
-// forcé par l'app — même précédent que `PatrimoineView.swift`.
 
 enum InsightEngine {
 
@@ -84,19 +84,24 @@ enum InsightEngine {
             // Coût annuel = mensualité × 12 ou montant tel quel pour yearly
             let annualCost: Double = {
                 switch pattern.frequency {
-                case .monthly: return abs(pattern.amountAvg) * 12
-                case .yearly:  return abs(pattern.amountAvg)
-                case .weekly:  return abs(pattern.amountAvg) * 52
-                case .daily:   return abs(pattern.amountAvg) * 365
+                case .monthly:    return abs(pattern.amountAvg) * 12
+                case .quarterly:  return abs(pattern.amountAvg) * 4
+                case .semiannual: return abs(pattern.amountAvg) * 2
+                case .yearly:     return abs(pattern.amountAvg)
+                case .weekly:     return abs(pattern.amountAvg) * 52
+                case .biweekly:   return abs(pattern.amountAvg) * 26
+                case .daily:      return abs(pattern.amountAvg) * 365
                 }
             }()
 
             let payeeName = allTiers.first(where: { $0.id == payeeId })?.name ?? pattern.name
+            let monthlyStr = monthlyEquivalent(pattern).formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
+            let annualStr = annualCost.formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
             result.append(Insight(
                 id: "dormant_\(payeeId)",
                 kind: .dormantSubscription,
-                title: "\(payeeName) — non utilisé depuis \(daysSinceLast) jours",
-                detail: "Vous payez \(monthlyEquivalent(pattern).formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR"))))/mois pour \(payeeName) mais aucune transaction associée n'apparaît depuis \(daysSinceLast) jours. Envisagez de résilier — \(annualCost.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))) économisés par an.",
+                title:"\(payeeName) — non utilisé depuis \(daysSinceLast) jours",
+                detail: "Vous payez \(monthlyStr)/mois pour \(payeeName) mais aucune transaction associée n'apparaît depuis \(daysSinceLast) jours. Envisagez de résilier — \(annualStr) économisés par an.",
                 annualImpact: annualCost,
                 actionability: 5,  // Désabonnement = 1 clic dans Réglages → Abonnements iOS
                 confidence: min(1.0, Double(daysSinceLast) / 180.0)  // Plus dormant longtemps → plus confiant
@@ -139,11 +144,14 @@ enum InsightEngine {
             let potentialSaving = annualCost * 0.5
 
             let payeeName = allTiers.first(where: { $0.id == tierId })?.name ?? "Inconnu"
+            let unitAvgStr = unitAvg.formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
+            let annualCostStr = annualCost.formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
+            let savingStr = potentialSaving.formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
             result.append(Insight(
                 id: "habit_\(tierId)",
                 kind: .smallFrequentHabit,
-                title: "\(payeeName) — \(count) achats en 90 j à ~\(unitAvg.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR"))))",
-                detail: "Cumulé sur l'année : \(annualCost.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))). Réduire la fréquence de moitié → \(potentialSaving.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))) économisés/an.",
+                title: "\(payeeName) — \(count) achats en 90 j à ~\(unitAvgStr)",
+                detail: "Cumulé sur l'année : \(annualCostStr). Réduire la fréquence de moitié → \(savingStr) économisés/an.",
                 annualImpact: potentialSaving,
                 actionability: 3,  // Changement d'habitude — pas trivial mais réalisable
                 confidence: min(1.0, Double(count) / 30.0)  // Plus de tx → plus de confiance
@@ -174,11 +182,13 @@ enum InsightEngine {
             let monthlyTotal = group.reduce(0.0) { $0 + monthlyEquivalent($1) }
             let catName = allCategories.first(where: { $0.id == cid })?.name ?? "Catégorie"
             let names = group.map { $0.name }.joined(separator: ", ")
+            let monthlyStr = monthlyTotal.formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
+            let annualStr = (monthlyTotal*12).formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
             result.append(Insight(
                 id: "dup_\(cid)",
                 kind: .duplicateSubscriptions,
                 title: "\(group.count) abonnements actifs en \(catName)",
-                detail: "Vous payez actuellement \(names) — total \(monthlyTotal.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR"))))/mois (\((monthlyTotal*12).formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR"))))/an). Vérifiez si tous sont vraiment utilisés.",
+                detail: "Vous payez actuellement \(names) — total \(monthlyStr)/mois (\(annualStr)/an). Vérifiez si tous sont vraiment utilisés.",
                 annualImpact: monthlyTotal * 12 * 0.3,  // Hypothèse : 30 % réduction possible
                 actionability: 4,
                 confidence: 0.7
@@ -223,11 +233,14 @@ enum InsightEngine {
             let increase = lastMonthSpent - baselineMonthly
             let increasePct = increase / baselineMonthly * 100
             let catName = allCategories.first(where: { $0.id == cid })?.name ?? "Catégorie"
+            let lastMonthStr = lastMonthSpent.formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
+            let baselineStr = baselineMonthly.formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
+            let increaseStr = increase.formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
             result.append(Insight(
                 id: "drift_\(cid)",
                 kind: .categoryDrift,
                 title: "\(catName) : +\(Int(increasePct)) % vs vos 3 mois précédents",
-                detail: "Ce mois-ci : \(lastMonthSpent.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))). Moyenne des 3 mois précédents : \(baselineMonthly.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))). Soit \(increase.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))) de plus. Pic ponctuel ou nouvelle tendance ?",
+                detail: "Ce mois-ci : \(lastMonthStr). Moyenne des 3 mois précédents : \(baselineStr). Soit \(increaseStr) de plus. Pic ponctuel ou nouvelle tendance ?",
                 annualImpact: increase * 12,  // Si la dérive persiste 1 an
                 actionability: 2,  // Identifier la cause demande de l'analyse user
                 confidence: min(1.0, baselineMonthly / 200.0)
@@ -257,11 +270,12 @@ enum InsightEngine {
         let share = topAmount / total
         guard share > 0.30 else { return [] }
         let catName = allCategories.first(where: { $0.id == topCid })?.name ?? "Catégorie"
+        let topAmountStr = topAmount.formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
         return [Insight(
             id: "top_\(topCid)",
             kind: .topCategoryConcentration,
             title: "\(catName) = \(Int(share * 100)) % de vos dépenses",
-            detail: "Sur les 6 derniers mois, vous avez dépensé \(topAmount.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))) en \(catName) — \(Int(share * 100)) % de votre total. C'est votre principal poste : un ajustement même modeste ici a un impact disproportionné.",
+            detail: "Sur les 6 derniers mois, vous avez dépensé \(topAmountStr) en \(catName) — \(Int(share * 100)) % de votre total. C'est votre principal poste : un ajustement même modeste ici a un impact disproportionné.",
             annualImpact: 0,  // Informatif, pas d'action chiffrée
             actionability: 1,
             confidence: 0.8
@@ -273,10 +287,13 @@ enum InsightEngine {
     private static func monthlyEquivalent(_ p: RecurringPattern) -> Double {
         let abs_amount = abs(p.amountAvg)
         switch p.frequency {
-        case .daily:   return abs_amount * 30.42
-        case .weekly:  return abs_amount * 4.33
-        case .monthly: return abs_amount
-        case .yearly:  return abs_amount / 12.0
+        case .daily:      return abs_amount * 30.42
+        case .weekly:     return abs_amount * 4.33
+        case .biweekly:   return abs_amount * 2.17
+        case .monthly:    return abs_amount
+        case .quarterly:  return abs_amount / 3.0
+        case .semiannual: return abs_amount / 6.0
+        case .yearly:     return abs_amount / 12.0
         }
     }
 }

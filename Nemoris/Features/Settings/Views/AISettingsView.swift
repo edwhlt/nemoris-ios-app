@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
@@ -27,6 +28,36 @@ struct AISettingsView: View {
     @State private var localBaseURL = ""
     @State private var localModel = ""
     @State private var localAPIKey = ""
+    @State private var localDisableThinking = false
+
+    // Modèle embarqué (téléchargé depuis Hugging Face, exécuté dans l'app)
+    @State private var embeddedModels: [EmbeddedModelInfo] = []
+    @State private var embeddedActiveID: String?
+    @State private var embeddedInput = ""
+    @State private var embeddedCandidates: [EmbeddedModelCandidate] = []
+    @State private var mlxRepoCandidate: EmbeddedMLXRepoCandidate?
+    @State private var embeddedWarnings: [String: String] = [:]
+    /// Avertissement RAM affiché APRÈS coup — import ou activation d'un
+    /// modèle déjà en place, où il n'y a pas de candidat/ligne dédiée pour
+    /// porter `embeddedWarnings` comme lors d'un téléchargement.
+    @State private var embeddedActionWarning: String?
+    @State private var embeddedAnalyzeError: String?
+    @State private var isAnalyzingEmbedded = false
+    // Progression du téléchargement en cours : lue DIRECTEMENT depuis
+    // `EmbeddedModelDownloadStatus.shared` partout où c'est affiché, sans
+    // wrapper — c'est un singleton `@Observable` externe à cette vue (même
+    // convention que `EmbeddedModelManager.shared` juste en dessous), pas un
+    // état que la vue possède. `@Observable` abonne automatiquement tout
+    // `body` qui LIT une de ses propriétés ; c'est précisément ce qui permet
+    // à l'indication de survivre à la fermeture/réouverture de l'écran (le
+    // téléchargement lui-même continue déjà en coulisses).
+    @State private var downloadError: String?
+    @State private var renamingModelID: String?
+    @State private var renameText = ""
+    #if !os(macOS)
+    @State private var showImportGGUFPicker = false
+    @State private var showImportMLXFolderPicker = false
+    #endif
 
     // Fournisseurs cloud
     @State private var cloudKeys: [AICloudProvider: String] = [:]
@@ -47,21 +78,33 @@ struct AISettingsView: View {
 
     /// Écran « Sources avancées » ouvert par-dessus la liste par fonctionnalité.
     ///
-    /// ⚠️ Navigation par ÉTAT, pas `NavigationLink` : sur macOS, `AISettingsView`
-    /// est déjà atteinte par REMPLACEMENT de contenu depuis `SettingsView`
-    /// (`pushedSection`), sans `NavigationStack` à cet endroit — un
-    /// `NavigationLink` posé ici n'aurait aucune pile où s'empiler et resterait
-    /// inerte au tap. Même mécanisme sur iOS plutôt que deux chemins à faire
-    /// diverger ; le retour est un bouton manuel, pas un swipe-back.
+    /// ⚠️ Navigation DIFFÉRENTE selon la plateforme, et c'est voulu ici — pas
+    /// une divergence à unifier. Sur macOS, `AISettingsView` est atteinte par
+    /// REMPLACEMENT de contenu depuis `SettingsView` (`pushedSection`), sans
+    /// `NavigationStack` à cet endroit : un vrai push n'aurait aucune pile où
+    /// s'empiler. Sur iOS en revanche, `AISettingsView` EST poussée via un
+    /// vrai `NavigationLink` depuis `SettingsView` — une pile existe donc
+    /// réellement ici, et un second push interne (`.navigationDestination`)
+    /// y fonctionne nativement. Un ancien essai avait volontairement gardé le
+    /// même mécanisme (état + bouton manuel) sur les deux plateformes « pour
+    /// ne pas diverger » — mais sur iOS ce bouton manuel s'AJOUTAIT au bouton
+    /// retour automatique du push plutôt que de le remplacer (les deux
+    /// vivent au même niveau de pile), d'où deux chevrons empilés dans la
+    /// barre (retour d'usage, capture à l'appui). Diverger ICI est donc le
+    /// bon choix, pas une entorse à la doctrine.
     @State private var showAdvanced = false
 
     var body: some View {
         Group {
+            #if os(macOS)
             if showAdvanced {
                 advancedBody
             } else {
                 mainBody
             }
+            #else
+            mainBody
+            #endif
         }
         .onAppear(perform: load)
     }
@@ -83,7 +126,7 @@ struct AISettingsView: View {
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
         .tint(AppTheme.Colors.accent)
-        .navigationTitle("Intelligence artificielle")
+        .localizedNavigationTitle("Intelligence artificielle")
         .navigationBarTitleDisplayMode(.inline)
         #if os(macOS)
         .toolbar {
@@ -93,10 +136,15 @@ struct AISettingsView: View {
                 } label: {
                     Image(systemName: "chevron.left")
                 }
-                .help("Réglages")
-                .accessibilityLabel("Réglages")
+                .localizedHelp("Réglages")
+                .localizedAccessibilityLabel("Réglages")
             }
         }
+        #else
+        // Vrai push : le bouton retour AUTOMATIQUE de ce niveau de pile
+        // suffit alors dans `advancedBody` (natif, un seul chevron) — cf.
+        // le commentaire de `showAdvanced` ci-dessus.
+        .navigationDestination(isPresented: $showAdvanced) { advancedBody }
         #endif
     }
 
@@ -107,6 +155,7 @@ struct AISettingsView: View {
     private var advancedBody: some View {
         Form {
             appleSection
+            embeddedModelSection
             localServerSection
             ForEach(AICloudProvider.allCases, id: \.self) { provider in
                 cloudSection(provider)
@@ -117,8 +166,12 @@ struct AISettingsView: View {
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
         .tint(AppTheme.Colors.accent)
-        .navigationTitle("Sources avancées")
+        .localizedNavigationTitle("Sources avancées")
         .navigationBarTitleDisplayMode(.inline)
+        #if os(macOS)
+        // Sur macOS, `advancedBody` REMPLACE `mainBody` par état (pas de
+        // push) : aucun bouton retour automatique n'existe à cet endroit, le
+        // bouton manuel reste nécessaire ici.
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -126,10 +179,16 @@ struct AISettingsView: View {
                 } label: {
                     Image(systemName: "chevron.left")
                 }
-                .help("Intelligence artificielle")
-                .accessibilityLabel("Intelligence artificielle")
+                .localizedHelp("Intelligence artificielle")
+                .localizedAccessibilityLabel("Intelligence artificielle")
             }
         }
+        #endif
+        // Sur iOS, `advancedBody` est un vrai push (`.navigationDestination`
+        // sur `mainBody`) : le bouton retour automatique de la pile revient
+        // déjà nativement à `mainBody`. Un second bouton manuel ici
+        // s'AJOUTERAIT à celui-là (même niveau de pile) plutôt que de le
+        // remplacer, d'où le double chevron corrigé (retour d'usage).
     }
 
     /// Ligne d'accès à « Sources avancées », même style que les liens de
@@ -186,7 +245,7 @@ struct AISettingsView: View {
                     // Ce qui sera RÉELLEMENT utilisé, plus l'avertissement s'il
                     // y a lieu — l'information qui manquerait si le détail
                     // vivait derrière un push.
-                    Text(LocalizedStringKey(statusLine(for: feature)))
+                    statusLine(for: feature)
                         .font(.caption)
                         .foregroundStyle(effectiveColor(for: feature))
                         .fixedSize(horizontal: false, vertical: true)
@@ -215,20 +274,30 @@ struct AISettingsView: View {
     /// La ligne d'état sous le sélecteur : d'abord le problème s'il y en a un,
     /// sinon le backend effectif — et le rappel que les données sortent quand
     /// c'est le cas.
-    private func statusLine(for feature: AIFeature) -> String {
-        if let reason = AIEnrichmentBackend.unavailabilityReason(for: feature) { return reason }
+    ///
+    /// ⚠️ Renvoie un `Text` COMPOSÉ (concaténation de fragments `Text` littéraux),
+    /// jamais une `String` assemblée puis passée à un seul `Text` : un
+    /// `Text(LocalizedStringKey(uneStringDéjàRésolue))` fige la clé sur le texte
+    /// déjà traduit — le picker de langue des Réglages ne le rafraîchit alors
+    /// plus jamais (`Text(LocalizedStringKey)`/`Text(LocalizedStringResource)`
+    /// se ré-résolvent contre `\.locale` au rendu, une `String` figée non). Même
+    /// motif que `PatrimoineView.goalSubtitle`.
+    private func statusLine(for feature: AIFeature) -> Text {
+        if let reason = AIEnrichmentBackend.unavailabilityReason(for: feature) {
+            return Text(LocalizedStringKey(reason))
+        }
         var line = effectiveLabel(for: feature)
         // ⚠️ Sur le backend RÉSOLU, pas le choix brut : « Automatique » qui
         // retombe sur le cloud fait sortir les données tout autant qu'un choix
         // `.cloud` explicite — `(choices[feature] ?? .automatic).leavesDevice`
         // valait toujours `false` pour `.automatic` et ratait ce cas.
         if AIEnrichmentBackend.resolved(for: feature)?.leavesDevice == true {
-            line += " · ⚠️ les données quittent l'appareil"
+            line = line + Text(" · ⚠️ les données quittent l'appareil")
         }
         if feature.benefitsFromImage, !AIEnrichmentBackend.supportsImageInput(for: feature) {
             // Pas une erreur : l'import fonctionne, mais en océrisant la
             // capture — donc en perdant la mise en page, qui porte du sens.
-            line += " · captures océrisées (pas de lecture d'image)"
+            line = line + Text(" · captures océrisées (pas de lecture d'image)")
         }
         return line
     }
@@ -248,13 +317,16 @@ struct AISettingsView: View {
     /// ⚠️ La distinction compte : « Automatique » sur un appareil où rien n'est
     /// configuré veut dire « aucune IA », et l'utilisateur doit le voir ici
     /// plutôt que de le découvrir devant un bouton grisé.
-    private func effectiveLabel(for feature: AIFeature) -> String {
+    private func effectiveLabel(for feature: AIFeature) -> Text {
         let asked = choices[feature] ?? .automatic
         guard let resolved = AIEnrichmentBackend.resolved(for: feature) else {
-            return asked == .off ? "Désactivée" : "\(asked.displayName) — indisponible"
+            if asked == .off { return Text("Désactivée") }
+            return Text(LocalizedStringKey(asked.displayName)) + Text(" — indisponible")
         }
-        if asked == .automatic { return "Automatique → \(resolved.displayName)" }
-        return resolved.displayName
+        if asked == .automatic {
+            return Text("Automatique → ") + Text(LocalizedStringKey(resolved.displayName))
+        }
+        return Text(LocalizedStringKey(resolved.displayName))
     }
 
     private func effectiveColor(for feature: AIFeature) -> Color {
@@ -292,6 +364,407 @@ struct AISettingsView: View {
         }
     }
 
+    // MARK: - Modèle embarqué
+
+    /// Pas de marketplace : un champ pour coller un lien/repo Hugging Face, un
+    /// bouton pour analyser (taille + avertissement RAM/stockage AVANT tout
+    /// octet téléchargé), et la liste des modèles déjà téléchargés
+    /// (renommer/activer/supprimer). Un seul actif à la fois — cf.
+    /// `EmbeddedModelService`.
+    private var embeddedModelSection: some View {
+        Section {
+            // EN PREMIER, et INDÉPENDANT de `embeddedCandidates`/`mlxRepoCandidate`
+            // (qui, eux, sont perdus si on quitte l'écran puis qu'on y revient) :
+            // c'est précisément ce qui rend un téléchargement en cours visible
+            // après une navigation, alors que le téléchargement lui-même n'a
+            // jamais été interrompu — cf. `EmbeddedModelDownloadStatus`.
+            if let inFlight = EmbeddedModelDownloadStatus.shared.inFlight {
+                inFlightDownloadBanner(inFlight)
+            }
+
+            TextField("Lien ou repo Hugging Face", text: $embeddedInput,
+                      prompt: Text("owner/repo (GGUF ou MLX), ou lien vers un .gguf"))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .disableAutocorrection(true)
+
+            Button {
+                Task { await analyzeEmbedded() }
+            } label: {
+                if isAnalyzingEmbedded {
+                    HStack { ProgressView().controlSize(.small); Text("Analyse…") }
+                } else {
+                    Label("Analyser", systemImage: "magnifyingglass")
+                }
+            }
+            .disabled(isAnalyzingEmbedded || embeddedInput.trimmingCharacters(in: .whitespaces).isEmpty)
+
+            if let embeddedAnalyzeError {
+                Label(LocalizedStringKey(embeddedAnalyzeError), systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.danger)
+            }
+
+            ForEach(embeddedCandidates) { candidate in
+                candidateRow(candidate)
+            }
+            if let mlxRepoCandidate {
+                mlxRepoCandidateRow(mlxRepoCandidate)
+            }
+
+            // Chemin PRINCIPAL, pas seulement un repli : n'importe quel
+            // fichier/dossier déjà présent sur l'appareil, quelle que soit son
+            // origine — pas seulement Hugging Face.
+            Button {
+                #if os(macOS)
+                presentOpenPanel(contentTypes: [UTType(filenameExtension: "gguf") ?? .data]) { url in
+                    Task { await importGGUFFile(url) }
+                }
+                #else
+                showImportGGUFPicker = true
+                #endif
+            } label: {
+                Label("Importer un fichier .gguf…", systemImage: "square.and.arrow.down.on.square")
+            }
+
+            if EmbeddedModelManager.mlxSupported {
+                Button {
+                    #if os(macOS)
+                    presentOpenPanel(contentTypes: [.folder]) { url in
+                        Task { await importMLXFolder(url) }
+                    }
+                    #else
+                    showImportMLXFolderPicker = true
+                    #endif
+                } label: {
+                    Label("Importer un dossier de modèle MLX…", systemImage: "folder.badge.plus")
+                }
+            }
+
+            if let downloadError {
+                Label(LocalizedStringKey(downloadError), systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.danger)
+            }
+            if let embeddedActionWarning {
+                Label(LocalizedStringKey(embeddedActionWarning), systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.Colors.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if !embeddedModels.isEmpty {
+                ForEach(embeddedModels) { model in
+                    downloadedModelRow(model)
+                }
+            }
+        } header: {
+            Text("Modèle embarqué")
+        } footer: {
+            Text("Un fichier .gguf ou un dossier de modèle MLX, obtenu par le moyen de ton choix (lien direct, Hugging Face, Fichiers, Mac…), exécuté entièrement sur cet appareil. Aucune donnée transmise une fois en place. Fonctionne sans Apple Intelligence.")
+        }
+        #if !os(macOS)
+        .sheet(isPresented: $showImportGGUFPicker) {
+            DocumentPickerView(contentTypes: [UTType(filenameExtension: "gguf") ?? .data]) { url in
+                showImportGGUFPicker = false
+                Task { await importGGUFFile(url) }
+            }
+            .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showImportMLXFolderPicker) {
+            DocumentPickerView(contentTypes: [.folder]) { url in
+                showImportMLXFolderPicker = false
+                Task { await importMLXFolder(url) }
+            }
+            .ignoresSafeArea()
+        }
+        #endif
+    }
+
+    /// Visible que l'écran vienne d'ouvrir ou soit resté ouvert depuis le
+    /// début du téléchargement — c'est tout l'intérêt de lire
+    /// `EmbeddedModelDownloadStatus.shared` plutôt qu'un `@State` local.
+    private func inFlightDownloadBanner(_ inFlight: EmbeddedModelDownloadStatus.InFlight) -> some View {
+        HStack(spacing: 10) {
+            if let progress = inFlight.progress {
+                ProgressView(value: progress)
+                    .frame(width: 60)
+                Text("\(inFlight.label) — \(Int((progress * 100).rounded())) %")
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else {
+                ProgressView().controlSize(.small)
+                Text("Téléchargement de \(inFlight.label)…")
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func candidateRow(_ candidate: EmbeddedModelCandidate) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(candidate.fileName)
+                        .font(.subheadline.weight(.medium))
+                    if let size = candidate.sizeBytes {
+                        Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                }
+                Spacer()
+                if EmbeddedModelDownloadStatus.shared.inFlight?.candidateID == candidate.id {
+                    if let progress = EmbeddedModelDownloadStatus.shared.inFlight?.progress {
+                        ProgressView(value: progress)
+                            .frame(width: 60)
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                } else {
+                    Button {
+                        Task { await downloadCandidate(candidate) }
+                    } label: {
+                        Image(systemName: "arrow.down.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(EmbeddedModelDownloadStatus.shared.inFlight != nil)
+                }
+            }
+            if let warning = embeddedWarnings[candidate.id] {
+                Label(LocalizedStringKey(warning), systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.Colors.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// Un modèle MLX est TOUJOURS plusieurs fichiers — rien à désambiguïser
+    /// comme pour les quantizations GGUF, donc UNE seule ligne pour tout le
+    /// repo plutôt qu'une liste par fichier.
+    private func mlxRepoCandidateRow(_ candidate: EmbeddedMLXRepoCandidate) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(candidate.repo)
+                            .font(.subheadline.weight(.medium))
+                        Text("MLX")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(AppTheme.Colors.textSecondary.opacity(0.15), in: Capsule())
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                    if let total = candidate.totalSizeBytes {
+                        Text("\(candidate.files.count) fichiers · \(ByteCountFormatter.string(fromByteCount: total, countStyle: .file))")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    } else {
+                        Text("\(candidate.files.count) fichiers")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                }
+                Spacer()
+                if EmbeddedModelDownloadStatus.shared.inFlight?.candidateID == candidate.id {
+                    if let progress = EmbeddedModelDownloadStatus.shared.inFlight?.progress {
+                        ProgressView(value: progress)
+                            .frame(width: 60)
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                } else {
+                    Button {
+                        Task { await downloadMLXRepoCandidate(candidate) }
+                    } label: {
+                        Image(systemName: "arrow.down.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(EmbeddedModelDownloadStatus.shared.inFlight != nil)
+                }
+            }
+            if let warning = embeddedWarnings[candidate.id] {
+                Label(LocalizedStringKey(warning), systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.Colors.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func downloadedModelRow(_ model: EmbeddedModelInfo) -> some View {
+        HStack {
+            Button {
+                Task { await setActiveEmbedded(model.id) }
+            } label: {
+                Image(systemName: embeddedActiveID == model.id ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(embeddedActiveID == model.id ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 2) {
+                if renamingModelID == model.id {
+                    TextField("Nom", text: $renameText)
+                        .font(.subheadline)
+                        .onSubmit { Task { await commitRename(model.id) } }
+                } else {
+                    HStack(spacing: 6) {
+                        Text(model.displayName)
+                            .font(.subheadline.weight(embeddedActiveID == model.id ? .semibold : .regular))
+                        Text(model.format == .mlx ? "MLX" : "GGUF")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(AppTheme.Colors.textSecondary.opacity(0.15), in: Capsule())
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                    }
+                }
+                Text("\(model.sourceDescription) · \(ByteCountFormatter.string(fromByteCount: model.sizeBytes, countStyle: .file))")
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+            }
+
+            Spacer()
+
+            Menu {
+                Button {
+                    renamingModelID = model.id
+                    renameText = model.displayName
+                } label: {
+                    Label("Renommer", systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    Task { await deleteEmbedded(model.id) }
+                } label: {
+                    Label("Supprimer", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func loadEmbeddedModels() async {
+        embeddedModels = await EmbeddedModelManager.shared.downloadedModels()
+        embeddedActiveID = EmbeddedModelManager.activeModelID
+    }
+
+    private func analyzeEmbedded() async {
+        isAnalyzingEmbedded = true
+        embeddedAnalyzeError = nil
+        embeddedCandidates = []
+        mlxRepoCandidate = nil
+        embeddedWarnings = [:]
+        defer { isAnalyzingEmbedded = false }
+        do {
+            let result = try await EmbeddedModelManager.shared.analyze(embeddedInput)
+            switch result {
+            case .ggufFiles(let candidates):
+                embeddedCandidates = candidates
+                for candidate in candidates {
+                    guard let size = candidate.sizeBytes else { continue }
+                    if let warning = await EmbeddedModelManager.shared.sizeWarning(forBytes: size) {
+                        embeddedWarnings[candidate.id] = warning
+                    }
+                }
+            case .mlxRepo(let repo):
+                mlxRepoCandidate = repo
+                if let total = repo.totalSizeBytes,
+                   let warning = await EmbeddedModelManager.shared.sizeWarning(forBytes: total) {
+                    embeddedWarnings[repo.id] = warning
+                }
+            }
+        } catch {
+            embeddedAnalyzeError = error.localizedDescription
+        }
+    }
+
+    private func downloadCandidate(_ candidate: EmbeddedModelCandidate) async {
+        EmbeddedModelDownloadStatus.shared.start(candidateID: candidate.id, label: candidate.fileName)
+        downloadError = nil
+        do {
+            _ = try await EmbeddedModelManager.shared.download(candidate: candidate) { progress in
+                Task { @MainActor in EmbeddedModelDownloadStatus.shared.update(progress: progress) }
+            }
+            embeddedInput = ""
+            embeddedCandidates = []
+            embeddedWarnings = [:]
+            await loadEmbeddedModels()
+        } catch {
+            downloadError = error.localizedDescription
+        }
+        EmbeddedModelDownloadStatus.shared.finish()
+    }
+
+    private func downloadMLXRepoCandidate(_ candidate: EmbeddedMLXRepoCandidate) async {
+        EmbeddedModelDownloadStatus.shared.start(candidateID: candidate.id, label: candidate.repo)
+        downloadError = nil
+        do {
+            _ = try await EmbeddedModelManager.shared.downloadMLXRepo(candidate: candidate) { progress in
+                Task { @MainActor in EmbeddedModelDownloadStatus.shared.update(progress: progress) }
+            }
+            embeddedInput = ""
+            mlxRepoCandidate = nil
+            embeddedWarnings = [:]
+            await loadEmbeddedModels()
+        } catch {
+            downloadError = error.localizedDescription
+        }
+        EmbeddedModelDownloadStatus.shared.finish()
+    }
+
+    private func setActiveEmbedded(_ id: String) async {
+        embeddedActionWarning = await EmbeddedModelManager.shared.setActive(id: id)
+        embeddedActiveID = id
+    }
+
+    private func deleteEmbedded(_ id: String) async {
+        await EmbeddedModelManager.shared.delete(id: id)
+        await loadEmbeddedModels()
+    }
+
+    private func commitRename(_ id: String) async {
+        await EmbeddedModelManager.shared.rename(id: id, to: renameText)
+        renamingModelID = nil
+        await loadEmbeddedModels()
+    }
+
+    /// Import direct — n'importe quelle source, aucune dépendance au réseau
+    /// ni à Hugging Face. Copie synchrone (rapide, même conteneur de l'app),
+    /// pas de barre de progression nécessaire contrairement au téléchargement.
+    private func importGGUFFile(_ url: URL) async {
+        downloadError = nil
+        embeddedActionWarning = nil
+        do {
+            let result = try await EmbeddedModelManager.shared.importFile(from: url)
+            embeddedActionWarning = result.warning
+            await loadEmbeddedModels()
+        } catch {
+            downloadError = error.localizedDescription
+        }
+    }
+
+    private func importMLXFolder(_ url: URL) async {
+        downloadError = nil
+        embeddedActionWarning = nil
+        do {
+            let result = try await EmbeddedModelManager.shared.importFolder(from: url)
+            embeddedActionWarning = result.warning
+            await loadEmbeddedModels()
+        } catch {
+            downloadError = error.localizedDescription
+        }
+    }
+
     // MARK: - Serveur local
 
     private var localServerSection: some View {
@@ -312,10 +785,15 @@ struct AISettingsView: View {
                 .onChange(of: localAPIKey) { _, value in
                     LocalLLMKeychain.save(value, for: LocalLLMKeychain.apiKeyID)
                 }
+
+            Toggle("Couper le mode raisonnement", isOn: $localDisableThinking)
+                .onChange(of: localDisableThinking) { _, value in
+                    LocalLLMService.disableThinking = value
+                }
         } header: {
             Text("Serveur local")
         } footer: {
-            Text("Un serveur compatible OpenAI (LM Studio, Ollama…) sur ton Mac ou sur cet appareil. Les données restent sur ton réseau.")
+            Text("Un serveur compatible OpenAI (LM Studio, Ollama…) sur ton Mac ou sur cet appareil. Les données restent sur ton réseau.\n\nLe mode raisonnement est conservé par défaut : c'est lui qui donne les meilleures analyses. Ne le coupe que si ce serveur renvoie des réponses vides — certains modèles (Qwen, DeepSeek) dépensent alors tout leur budget en réflexion sans jamais écrire de réponse. Tous les serveurs n'honorent pas ce réglage.")
         }
     }
 
@@ -391,6 +869,14 @@ struct AISettingsView: View {
         var successes: [String] = []
         var failures: [String] = []
 
+        if EmbeddedModelManager.hasConfiguration {
+            do {
+                let message = try await EmbeddedModelService.shared.testConnection()
+                successes.append("Modèle embarqué : \(message)")
+            } catch {
+                failures.append("Modèle embarqué — \(error.localizedDescription)")
+            }
+        }
         if LocalLLMService.hasConfiguration {
             do {
                 let message = try await LocalLLMService.shared.testConnection()
@@ -424,6 +910,7 @@ struct AISettingsView: View {
         }
         localBaseURL = LocalLLMService.baseURL
         localModel = LocalLLMService.model
+        localDisableThinking = LocalLLMService.disableThinking
         localAPIKey = LocalLLMKeychain.load(id: LocalLLMKeychain.apiKeyID) ?? ""
         for provider in AICloudProvider.allCases {
             cloudKeys[provider] = CloudLLMKeychain.load(provider) ?? ""
@@ -434,6 +921,7 @@ struct AISettingsView: View {
                 .string(forKey: "ai.cloud.\(provider.rawValue).model") ?? ""
         }
         appleStatus = Self.detectAppleStatus()
+        Task { await loadEmbeddedModels() }
     }
 
     // MARK: - Statut Apple Intelligence

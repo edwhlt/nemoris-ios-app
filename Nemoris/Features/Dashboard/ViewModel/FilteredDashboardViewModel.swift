@@ -74,7 +74,15 @@ final class FilteredDashboardViewModel {
 
     func load(filter: TransactionFilter) {
         isLoading = true
-        allTransactions = repository.fetchAllFilteredTransactions(filter: filter, excludeInternalTransfers: true)
+        // Écran d'analyse (cumuls/totaux) : exclut les comptes "autres" — mais
+        // seulement quand l'agrégat porte sur "tous les comptes" (accountId == 0).
+        // Un compte précis explicitement choisi par l'utilisateur (même "autre")
+        // affiche son analyse normalement, il l'a demandée lui-même.
+        allTransactions = repository.fetchAllFilteredTransactions(
+            filter: filter,
+            excludeInternalTransfers: true,
+            excludeOtherAccounts: filter.accountId == 0
+        )
         let tagMap = repository.fetchTagsForTransactions(allTransactions.map { $0.id })
         aggregate(transactions: allTransactions, tagMap: tagMap)
         isLoading = false

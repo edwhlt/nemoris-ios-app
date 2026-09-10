@@ -25,7 +25,7 @@ struct RecurringManagementView: View {
                     .listRowBackground(Color.clear)
                 } else {
                     if !active.isEmpty {
-                        Section("Actifs") {
+                        Section {
                             ForEach(active) { p in
                                 RecurringPatternRow(pattern: p, categories: vm.categories)
                                     .contentShape(Rectangle())
@@ -34,12 +34,14 @@ struct RecurringManagementView: View {
                                         RowAction("Supprimer", systemImage: "trash", role: .destructive) { vm.deletePattern(id: p.id) },
                                         RowAction("Désactiver", systemImage: "pause.circle", tint: AppTheme.Colors.warning) { vm.togglePattern(p) }
                                     ])
+                                    .macGroupedRow(first: p.id == active.first?.id, last: p.id == active.last?.id)
                             }
+                        } header: {
+                            Text("Actifs").macGroupedSectionHeader()
                         }
-                        .listRowBackground(AppTheme.Colors.surface)
                     }
                     if !inactive.isEmpty {
-                        Section("Inactifs") {
+                        Section {
                             ForEach(inactive) { p in
                                 RecurringPatternRow(pattern: p, categories: vm.categories)
                                     .contentShape(Rectangle())
@@ -48,15 +50,23 @@ struct RecurringManagementView: View {
                                         RowAction("Supprimer", systemImage: "trash", role: .destructive) { vm.deletePattern(id: p.id) },
                                         RowAction("Réactiver", systemImage: "play.circle", tint: AppTheme.Colors.success) { vm.togglePattern(p) }
                                     ])
+                                    .macGroupedRow(first: p.id == inactive.first?.id, last: p.id == inactive.last?.id)
                             }
+                        } header: {
+                            Text("Inactifs").macGroupedSectionHeader()
                         }
-                        .listRowBackground(AppTheme.Colors.surface)
                     }
                 }
             }
+            #if os(macOS)
+            // Même politique que TricountListView/TransactionsView : .plain =
+            // base neutre pour les cartes custom dessinées par macGroupedRow.
+            .listStyle(.plain)
+            .macGroupedListTopGap()
+            #endif
             .scrollContentBackground(.hidden)
         }
-        .navigationTitle("Récurrents")
+        .localizedNavigationTitle("Récurrents")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

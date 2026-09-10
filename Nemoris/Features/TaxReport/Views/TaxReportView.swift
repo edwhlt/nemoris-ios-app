@@ -57,7 +57,7 @@ struct TaxReportView: View {
                 .padding(.bottom, AppTheme.Spacing.xxxl)
             }
         }
-        .navigationTitle("Rapport fiscal \(selectedYear.yearLabel)")
+        .localizedNavigationTitle("Rapport fiscal \(selectedYear.yearLabel)")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { compute() }
         .onChange(of: selectedYear) { _, _ in compute() }
@@ -321,7 +321,7 @@ struct TaxReportView: View {
     // MARK: - Header helper
 
     @ViewBuilder
-    private func sectionHeader(eyebrow: String, trailingButton: String?, onCopy: (() -> Void)?) -> some View {
+    private func sectionHeader(eyebrow: LocalizedStringKey, trailingButton: LocalizedStringKey?, onCopy: (() -> Void)?) -> some View {
         HStack {
             Text(eyebrow)
                 .font(.system(size: 11, weight: .semibold))

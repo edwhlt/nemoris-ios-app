@@ -13,10 +13,11 @@ import UniformTypeIdentifiers
 /// iOS 27), d'où le passage à un choix par fonctionnalité (cf. `AIFeature`).
 ///
 /// ⚠️ Deux fonctionnalités contournaient encore ce point de passage et
-/// parlaient à Foundation Models directement : le coach financier
-/// (`InsightLLMService`) et l'assistant SQL (`SQLAssistantService`). Un
-/// « Désactivée » choisi dans les Réglages n'avait donc aucun effet sur elles.
-/// Elles sont désormais branchées ici.
+/// parlaient à Foundation Models directement : le coach financier (via un
+/// service de reformulation jamais réellement appelé, retiré depuis — cf.
+/// AXE AC) et l'assistant SQL (`SQLAssistantService`). Un « Désactivée »
+/// choisi dans les Réglages n'avait donc aucun effet sur elles. Le coach est
+/// désormais branché ici via `CoachService`/`CoachPrompt`.
 ///
 /// `@MainActor` car il lit `EnrichmentLLMService.shared.isAvailable`, lui-même
 /// `@MainActor` — les sites synchrones (`.disabled(...)`, `State(initialValue:)`)
@@ -47,6 +48,7 @@ enum AIEnrichmentBackend {
             foundationModels: EnrichmentLLMService.shared.isAvailable,
             foundationModelsReadsImages: EnrichmentLLMService.shared.supportsImageInput,
             localServer: LocalLLMService.hasConfiguration,
+            embeddedModel: EmbeddedModelService.hasConfiguration,
             configuredCloudProviders: AICloudProvider.allCases.filter {
                 CloudLLMService.hasConfiguration($0)
             })
@@ -91,6 +93,8 @@ enum AIEnrichmentBackend {
             return "Apple Intelligence est imposé pour cette fonctionnalité mais n'est pas disponible sur cet appareil."
         case .localServer:
             return "Aucun serveur local n'est configuré. Réglages → Intelligence artificielle."
+        case .embeddedModel:
+            return "Aucun modèle embarqué actif. Réglages → Intelligence artificielle → Sources avancées."
         case .cloud(let provider):
             return "Aucune clé API enregistrée pour \(provider.displayName). Réglages → Intelligence artificielle."
         case .automatic:
@@ -108,6 +112,8 @@ enum AIEnrichmentBackend {
             return await EnrichmentLLMService.shared.identify(context: context)
         case .localServer:
             return await LocalLLMService.shared.identify(context: context)
+        case .embeddedModel:
+            return await EmbeddedModelService.shared.identify(context: context)
         case .cloud(let provider):
             return await CloudLLMService(provider: provider).identify(context: context)
         case .automatic, .off, .none:
@@ -117,23 +123,80 @@ enum AIEnrichmentBackend {
 
     // MARK: - Complétion générique
 
+    /// Ce qu'une complétion a réellement produit.
+    ///
+    /// ⚠️ `isReasoningOnly` n'est pas un détail de journalisation : c'est la
+    /// différence entre « ce modèle répond mal » et « ce serveur vient de
+    /// montrer sa vraie limite ». Le second cas se RATTRAPE (relancer avec un
+    /// contexte plus court), le premier non — les confondre affichait un échec
+    /// là où une seconde tentative aurait abouti.
+    struct CompletionOutcome {
+        var text: String?
+        var isReasoningOnly = false
+    }
+
     /// Complétion texte via le backend actif de cette fonctionnalité. `nil` si
     /// indisponible ou en échec : l'appelant doit TOUJOURS avoir un chemin sans
     /// IA.
     static func completeText(feature: AIFeature,
                              system: String,
                              user: String) async -> String? {
+        await complete(feature: feature, system: system, user: user).text
+    }
+
+    /// Même complétion, avec le MOTIF de l'échec quand il est exploitable.
+    ///
+    /// - Parameter forceDirectAnswer: coupe le mode raisonnement d'un serveur
+    ///   local pour cet appel. Réservé à une relance après `isReasoningOnly` —
+    ///   le premier essai garde toujours la configuration choisie par
+    ///   l'utilisateur.
+    static func complete(feature: AIFeature,
+                         system: String,
+                         user: String,
+                         forceDirectAnswer: Bool = false) async -> CompletionOutcome {
         switch resolved(for: feature) {
         case .foundationModels:
-            return await EnrichmentLLMService.shared.complete(system: system, user: user)
+            return CompletionOutcome(text: await EnrichmentLLMService.shared.complete(system: system, user: user))
         case .localServer:
-            do { return try await LocalLLMService.shared.complete(systemPrompt: system, userPrompt: user) }
-            catch { print("[AIEnrichmentBackend] \(feature.rawValue) local error: \(error)"); return nil }
+            do {
+                let text = try await LocalLLMService.shared.complete(
+                    systemPrompt: system, userPrompt: user,
+                    maxTokens: feature.maxOutputTokens,
+                    forceDirectAnswer: forceDirectAnswer)
+                return CompletionOutcome(text: text)
+            } catch let error as LocalLLMError {
+                print("[AIEnrichmentBackend] \(feature.rawValue) local error: \(error)")
+                if case .reasoningOnly(let reasoning) = error {
+                    // Le raisonnement remonte comme TEXTE : sans lui, le
+                    // dépliant diagnostic serait vide si la relance échoue
+                    // aussi. Il ne sera parsé avec succès par personne, et
+                    // c'est très bien — le drapeau porte l'information utile.
+                    return CompletionOutcome(text: reasoning, isReasoningOnly: true)
+                }
+                return CompletionOutcome(text: nil)
+            } catch {
+                print("[AIEnrichmentBackend] \(feature.rawValue) local error: \(error)")
+                return CompletionOutcome(text: nil)
+            }
+        case .embeddedModel:
+            do {
+                let text = try await EmbeddedModelService.shared.complete(
+                    systemPrompt: system, userPrompt: user, maxTokens: feature.maxOutputTokens)
+                return CompletionOutcome(text: text)
+            } catch {
+                print("[AIEnrichmentBackend] \(feature.rawValue) embedded error: \(error)")
+                return CompletionOutcome(text: nil)
+            }
         case .cloud(let provider):
-            do { return try await CloudLLMService(provider: provider).complete(systemPrompt: system, userPrompt: user) }
-            catch { print("[AIEnrichmentBackend] \(feature.rawValue) cloud error: \(error)"); return nil }
+            do {
+                let text = try await CloudLLMService(provider: provider).complete(systemPrompt: system, userPrompt: user)
+                return CompletionOutcome(text: text)
+            } catch {
+                print("[AIEnrichmentBackend] \(feature.rawValue) cloud error: \(error)")
+                return CompletionOutcome(text: nil)
+            }
         case .automatic, .off, .none:
-            return nil
+            return CompletionOutcome(text: nil)
         }
     }
 
@@ -150,11 +213,15 @@ enum AIEnrichmentBackend {
             guard let dataURL = Self.pngDataURL(from: image) else { return nil }
             do {
                 return try await LocalLLMService.shared.complete(
-                    systemPrompt: system, userPrompt: user, imageDataURL: dataURL)
+                    systemPrompt: system, userPrompt: user, imageDataURL: dataURL,
+                    maxTokens: feature.maxOutputTokens)
             } catch {
                 print("[AIEnrichmentBackend] \(feature.rawValue) local image error: \(error)")
                 return nil
             }
+        case .embeddedModel:
+            // Scope v1 : texte seulement, cf. `EmbeddedModelService`.
+            return nil
         case .cloud(let provider):
             guard let dataURL = Self.pngDataURL(from: image) else { return nil }
             do {

@@ -93,7 +93,7 @@ struct GoalFormView: View {
 
                     Picker("Type", selection: $kind) {
                         ForEach(GoalKind.allCases, id: \.self) { k in
-                            Label(k.label, systemImage: k.systemIcon).tag(k)
+                            Label(LocalizedStringKey(k.label), systemImage: k.systemIcon).tag(k)
                         }
                     }
                     Text(kind.explanation)
@@ -108,7 +108,9 @@ struct GoalFormView: View {
                             Text("Montant cible")
                                 .font(AppTheme.Typography.bodyMedium)
                             Spacer()
-                            TextField("0,00", text: $targetAmountText)
+                            // Titre vide : la row a déjà son label ("Montant
+                            // cible") — cf. TransactionEditSheet pour la raison macOS.
+                            TextField("", text: $targetAmountText)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(maxWidth: 160)
@@ -129,7 +131,9 @@ struct GoalFormView: View {
                             Text("Montant actuel")
                                 .font(AppTheme.Typography.bodyMedium)
                             Spacer()
-                            TextField("0,00", text: $customCurrentAmountText)
+                            // Titre vide : la row a déjà son label ("Montant
+                            // actuel") — cf. TransactionEditSheet.
+                            TextField("", text: $customCurrentAmountText)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(maxWidth: 160)
@@ -203,7 +207,7 @@ struct GoalFormView: View {
 
     @ViewBuilder
     private func templateRow(name templateName: String, target: Double, kind templateKind: GoalKind,
-                             icon: String, subtitle: String) -> some View {
+                             icon: String, subtitle: LocalizedStringKey) -> some View {
         Button {
             self.name = templateName
             self.kind = templateKind

@@ -654,7 +654,7 @@ struct InvestmentPDFImportView: View {
 
     @ViewBuilder
     private func confidenceBadge(_ confidence: Double) -> some View {
-        let (label, color): (String, Color) = {
+        let (label, color): (LocalizedStringKey, Color) = {
             if confidence >= 0.85 { return ("Sûr", AppTheme.Colors.success) }
             if confidence >= 0.6 { return ("Probable", AppTheme.Colors.warning) }
             return ("Incertain", AppTheme.Colors.danger)
@@ -736,13 +736,18 @@ struct InvestmentPDFImportView: View {
                     .background(AppTheme.Colors.accent, in: RoundedRectangle(cornerRadius: 12))
                     .foregroundStyle(.white)
             }
+            // Sans ça, macOS applique le chrome de bouton par défaut (teinté
+            // par l'accent de l'app) par-dessus le fond déjà accent — le
+            // texte blanc devient illisible (même bug que `SettingsView`
+            // "Passer Pro" / `ReferenceDataView.accountRow`).
+            .buttonStyle(.plain)
             .padding(.horizontal, 24)
             .padding(.bottom, 16)
         }
     }
 
     @ViewBuilder
-    private func summaryRow(icon: String, label: String, value: String, color: Color) -> some View {
+    private func summaryRow(icon: String, label: LocalizedStringKey, value: String, color: Color) -> some View {
         HStack {
             Image(systemName: icon)
                 .foregroundStyle(color)

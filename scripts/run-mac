@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Usage:
+#   ./run-mac
+#
+# Optional:
+#   XCODE_APP="/Applications/Xcode-26.4.app" ./run-mac
+#   SCHEME="MyApp" ./run-mac
+#   CATALYST=1 ./run-mac
+#   CONFIGURATION=Debug ./run-mac
+#
+# Put this script at the root of the Xcode project/workspace.
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+cd "$PROJECT_ROOT"
+
+XCODE_APP="${XCODE_APP:-/Applications/Xcode.app}"
+CONFIGURATION="${CONFIGURATION:-Debug}"
+DERIVED_DATA="${DERIVED_DATA:-$PROJECT_ROOT/.derivedData/mac}"
+CATALYST="${CATALYST:-0}"
+
+die() {
+  echo "❌ $*" >&2
+  exit 1
+}
+
+if [[ ! -d "$XCODE_APP/Contents/Developer" ]]; then
+  die "Xcode introuvable: $XCODE_APP
+Exemple:
+  XCODE_APP=\"/Applications/Xcode-26.4.app\" ./run-mac"
+fi
+
+export DEVELOPER_DIR="$XCODE_APP/Contents/Developer"
+
+echo "🛠  Xcode: $(xcodebuild -version | tr '\n' ' ')"
+
+
+# ---- Detect workspace/project ------------------------------------------------
+
+if [[ -n "${WORKSPACE:-}" ]]; then
+  CONTAINER_FLAG="-workspace"
+  CONTAINER_PATH="$WORKSPACE"
+elif [[ -n "${PROJECT:-}" ]]; then
+  CONTAINER_FLAG="-project"
+  CONTAINER_PATH="$PROJECT"
+else
+  shopt -s nullglob
+  workspaces=( *.xcworkspace )
+  projects=( *.xcodeproj )
+  shopt -u nullglob
+
+  if (( ${#workspaces[@]} == 1 )); then
+    CONTAINER_FLAG="-workspace"
+    CONTAINER_PATH="${workspaces[0]}"
+  elif (( ${#workspaces[@]} > 1 )); then
+    die "Plusieurs .xcworkspace trouvés. Relance avec:
+  WORKSPACE=\"MonApp.xcworkspace\" ./run-mac"
+  elif (( ${#projects[@]} == 1 )); then
+    CONTAINER_FLAG="-project"
+    CONTAINER_PATH="${projects[0]}"
+  elif (( ${#projects[@]} > 1 )); then
+    die "Plusieurs .xcodeproj trouvés. Relance avec:
+  PROJECT=\"MonApp.xcodeproj\" ./run-mac"
+  else
+    die "Aucun .xcworkspace ou .xcodeproj trouvé dans $PROJECT_ROOT"
+  fi
+fi
+
+[[ -e "$CONTAINER_PATH" ]] || die "Projet introuvable: $CONTAINER_PATH"
+
+echo "📦 Projet: $CONTAINER_PATH"
+
+
+# ---- Detect scheme -----------------------------------------------------------
+
+if [[ -z "${SCHEME:-}" ]]; then
+  LIST_JSON="$(mktemp -t xcode-schemes.XXXXXX)"
+  trap 'rm -f "${LIST_JSON:-}"' EXIT
+
+  xcodebuild "$CONTAINER_FLAG" "$CONTAINER_PATH" -list -json > "$LIST_JSON"
+
+  PREFERRED="$(basename "$CONTAINER_PATH")"
+  PREFERRED="${PREFERRED%.xcworkspace}"
+  PREFERRED="${PREFERRED%.xcodeproj}"
+
+  SCHEME="$(
+    python3 - "$LIST_JSON" "$PREFERRED" <<'PY'
+import json, sys
+
+path, preferred = sys.argv[1], sys.argv[2]
+data = json.load(open(path))
+root = data.get("workspace") or data.get("project") or {}
+schemes = root.get("schemes") or []
+
+if preferred in schemes:
+    print(preferred)
+elif len(schemes) == 1:
+    print(schemes[0])
+else:
+    print("")
+PY
+  )"
+
+  if [[ -z "$SCHEME" ]]; then
+    echo "❌ Impossible de choisir automatiquement le scheme." >&2
+    echo "Schemes disponibles:" >&2
+    python3 - "$LIST_JSON" <<'PY' >&2
+import json, sys
+data = json.load(open(sys.argv[1]))
+root = data.get("workspace") or data.get("project") or {}
+for s in root.get("schemes") or []:
+    print(f"  - {s}")
+PY
+    echo >&2
+    echo "Relance par exemple avec:" >&2
+    echo "  SCHEME=\"MonScheme\" ./run-mac" >&2
+    exit 1
+  fi
+fi
+
+echo "🎯 Scheme: $SCHEME"
+
+
+# ---- Destination -------------------------------------------------------------
+
+if [[ -n "${MAC_DESTINATION:-}" ]]; then
+  DESTINATION="$MAC_DESTINATION"
+elif [[ "$CATALYST" == "1" ]]; then
+  DESTINATION="platform=macOS,variant=Mac Catalyst"
+else
+  DESTINATION="platform=macOS"
+fi
+
+echo "🖥  Destination: $DESTINATION"
+
+
+# ---- Build -------------------------------------------------------------------
+
+mkdir -p "$DERIVED_DATA"
+
+echo "🔨 Build macOS…"
+
+xcodebuild \
+  "$CONTAINER_FLAG" "$CONTAINER_PATH" \
+  -scheme "$SCHEME" \
+  -configuration "$CONFIGURATION" \
+  -destination "$DESTINATION" \
+  -derivedDataPath "$DERIVED_DATA" \
+  build
+
+
+# ---- Locate built .app -------------------------------------------------------
+
+PRODUCT_DIR="$DERIVED_DATA/Build/Products/$CONFIGURATION"
+
+APP_PATH="$(
+  find "$PRODUCT_DIR" \
+    -maxdepth 1 \
+    -type d \
+    -name '*.app' \
+    ! -name '*Tests.app' \
+    ! -name '*UITests.app' \
+    -print \
+    | head -n 1
+)"
+
+# Catalyst can sometimes use a suffixed products directory depending on setup.
+if [[ -z "$APP_PATH" && "$CATALYST" == "1" ]]; then
+  APP_PATH="$(
+    find "$DERIVED_DATA/Build/Products" \
+      -maxdepth 2 \
+      -type d \
+      -name '*.app' \
+      ! -name '*Tests.app' \
+      ! -name '*UITests.app' \
+      -print \
+      | head -n 1
+  )"
+fi
+
+[[ -n "$APP_PATH" && -d "$APP_PATH" ]] || die "Build réussi, mais aucun .app n'a été trouvé dans DerivedData."
+
+echo "🚀 Lancement de $(basename "$APP_PATH")…"
+open "$APP_PATH" --args -nemorisScreenshotMode
+
+echo "✅ App lancée sur le Mac"

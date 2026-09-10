@@ -5,6 +5,14 @@ import TipKit
 struct PatternEditSheet: View {
     @Bindable var vm: BudgetViewModel
     let pattern: RecurringPattern?
+    /// Pré-remplissage optionnel pour une CRÉATION (pattern == nil) — utilisé
+    /// pour laisser l'utilisateur ajuster un candidat détecté (montant, jour,
+    /// catégorie…) avant de le valider, au lieu de ne pouvoir que l'accepter
+    /// tel quel. Ignoré si `pattern` n'est pas nil (édition d'un existant).
+    var prefill: RecurringPattern? = nil
+    /// Appelé après une création réussie (pattern == nil) — permet à l'appelant
+    /// (ex: la liste de candidats détectés) de retirer l'élément d'origine.
+    var onCreated: (() -> Void)? = nil
     // paneDismiss (pas \.dismiss) : la vue est présentée via adaptivePane —
     // sheet iOS OU panneau macOS, la fermeture est uniforme.
     @Environment(\.paneDismiss) private var dismiss
@@ -28,7 +36,32 @@ struct PatternEditSheet: View {
                 Section("Informations") {
                     TextField("Nom (ex: Netflix, Loyer)", text: $name)
                     HStack {
-                        TextField("Montant", text: $amount).keyboardType(.decimalPad)
+                        // `LabeledContent` plutôt qu'un `TextField` nu : sur
+                        // macOS, le titre d'un `TextField` devient un LABEL à
+                        // gauche plutôt qu'un placeholder DANS le champ
+                        // (contrairement à iOS) — le champ n'avait alors
+                        // aucun label visible sur macOS. Retour d'usage
+                        // 2026-08-28. Un placeholder "0,00" puis
+                        // `.textFieldStyle(.roundedBorder)` ont été essayés
+                        // pour rendre le champ plus visiblement "éditable",
+                        // puis retirés à la demande — le style natif
+                        // (sans bordure ni placeholder, cohérent avec le
+                        // reste du Form) reste préférable.
+                        // `.frame(minWidth:)` toujours nécessaire sur le
+                        // conteneur : sans lui, cette ligne partage l'espace
+                        // avec un Picker segmenté à largeur fixe (160pt) — sur
+                        // macOS, l'un des deux se fait écraser à une largeur
+                        // quasi nulle (invisible, non cliquable) au lieu de se
+                        // répartir l'espace comme sur iOS. Retour d'usage
+                        // 2026-08-19 : le champ montant disparaissait,
+                        // rendant le formulaire impossible à valider
+                        // (confirmDisabled restait vrai puisque le champ,
+                        // invisible, ne pouvait jamais être rempli).
+                        LabeledContent("Montant") {
+                            TextField("", text: $amount)
+                                .keyboardType(.decimalPad)
+                        }
+                        .frame(minWidth: 140)
                         Picker("", selection: $isExpense) {
                             Text("Dépense").tag(true)
                             Text("Revenu").tag(false)
@@ -39,9 +72,9 @@ struct PatternEditSheet: View {
                 }
                 Section("Fréquence") {
                     Picker("Fréquence", selection: $frequency) {
-                        ForEach(RecurrenceFrequency.allCases) { f in Text(f.label).tag(f) }
+                        ForEach(RecurrenceFrequency.allCases) { f in Text(LocalizedStringKey(f.label)).tag(f) }
                     }
-                    if frequency == .monthly {
+                    if frequency.usesDayOfMonthAnchor {
                         Stepper("Jour du mois : \(anchorDay ?? 1)",
                                 value: Binding(get: { anchorDay ?? 1 }, set: { anchorDay = $0 }),
                                 in: 1...31)
@@ -86,7 +119,7 @@ struct PatternEditSheet: View {
                     allTiers = TransactionRepository().fetchTiers()
                 }
             }
-            .paneChrome(pattern == nil ? "Nouveau récurrent" : "Modifier",
+            .paneChrome(pattern != nil ? "Modifier" : (prefill != nil ? "Récurrent détecté" : "Nouveau récurrent"),
                         cancelLabel: "Annuler", onCancel: { dismiss() },
                         confirmLabel: "Enregistrer", confirmIcon: "checkmark",
                         confirmDisabled: name.isEmpty || amount.isEmpty) {
@@ -95,7 +128,9 @@ struct PatternEditSheet: View {
     }
 
     private func populateFields() {
-        guard let p = pattern else { return }
+        // Un pattern existant (édition) prime sur le pré-remplissage d'un
+        // candidat détecté — les deux ne sont jamais fournis en même temps.
+        guard let p = pattern ?? prefill else { return }
         name = p.name
         amount = String(format: "%.2f", p.displayAmount)
         isExpense = p.isExpense
@@ -122,14 +157,18 @@ struct PatternEditSheet: View {
             )
             vm.updatePattern(updated)
         } else {
+            // isManual reflète l'origine réelle : "détecté" si on part d'un
+            // candidat (même ajusté), "saisi manuellement" sinon — cohérent
+            // avec le champ "Origine" affiché dans PatternDetailPane.
             let new = RecurringPattern(
                 id: 0, name: name, amountAvg: signed, amountTolerance: 0.15,
                 categoryId: categoryId, payeeId: payeeId, frequency: frequency,
-                anchorDay: anchorDay, isActive: true, isManual: true,
-                createdAt: Date(), lastDetectedAt: nil,
+                anchorDay: anchorDay, isActive: true, isManual: prefill == nil,
+                createdAt: Date(), lastDetectedAt: prefill?.lastDetectedAt,
                 startDate: startDate, endDate: effectiveEndDate
             )
             vm.addManualPattern(new)
+            onCreated?()
         }
     }
 }

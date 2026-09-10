@@ -239,11 +239,11 @@ struct SearchView: View {
                     .foregroundStyle(entry.color)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.title)
+                Text(LocalizedStringKey(entry.title))
                     .font(AppTheme.Typography.bodyMedium)
                     .foregroundStyle(AppTheme.Colors.textPrimary)
                     .lineLimit(1)
-                Text(entry.description)
+                Text(LocalizedStringKey(entry.description))
                     .font(AppTheme.Typography.bodySmall)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
                     .lineLimit(1)
@@ -270,7 +270,7 @@ struct SearchView: View {
                     .foregroundStyle(AppTheme.Colors.textPrimary)
                     .lineLimit(1)
                 if let sub = subtitle(for: result) {
-                    Text(sub)
+                    sub
                         .font(AppTheme.Typography.bodySmall)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .lineLimit(1)
@@ -338,25 +338,26 @@ struct SearchView: View {
         }
     }
 
-    private func subtitle(for result: SearchResult) -> String? {
+    private func subtitle(for result: SearchResult) -> Text? {
         switch result {
         case .transaction(let t):
             let date = t.date.formatted(.dateTime.day().month(.abbreviated).year().locale(appState.locale))
-            return "\(date) · \(t.categoryName.isEmpty ? "Sans catégorie" : t.categoryName)"
-        case .payee(let p):       return p.city ?? p.address
-        case .account(let a):     return a.accountType.label
+            let categoryLabel: Text = t.categoryName.isEmpty ? Text("Sans catégorie") : Text(t.categoryName)
+            return Text("\(date) · ") + categoryLabel
+        case .payee(let p):       return (p.city ?? p.address).map { Text($0) }
+        case .account(let a):     return Text(LocalizedStringKey(a.accountType.label))
         case .category:           return nil
         case .tag:                return nil
-        case .asset(let a):       return a.assetKind.label
-        case .loan(let l):        return l.loanType.label
-        case .realEstate(let r):  return r.address
-        case .goal(let g):        return g.kind.label
-        case .investmentAccount(let a):  return a.broker
-        case .investmentPosition(let p): return p.ticker.isEmpty ? nil : p.ticker
-        case .budgetEnvelope(let e):     return e.period.label
-        case .recurringPattern(let p):   return p.frequency.label
-        case .tricountGroup(let g):      return "\(g.entryCount) dépense\(g.entryCount > 1 ? "s" : "")"
-        case .tricountEntry(let e):      return "Payé par \(e.whoPaid)"
+        case .asset(let a):       return Text(LocalizedStringKey(a.assetKind.label))
+        case .loan(let l):        return Text(LocalizedStringKey(l.loanType.label))
+        case .realEstate(let r):  return r.address.map { Text($0) }
+        case .goal(let g):        return Text(LocalizedStringKey(g.kind.label))
+        case .investmentAccount(let a):  return Text(a.broker)
+        case .investmentPosition(let p): return p.ticker.isEmpty ? nil : Text(p.ticker)
+        case .budgetEnvelope(let e):     return Text(LocalizedStringKey(e.period.label))
+        case .recurringPattern(let p):   return Text(LocalizedStringKey(p.frequency.label))
+        case .tricountGroup(let g):      return Text("\(g.entryCount) dépense\(g.entryCount > 1 ? "s" : "")")
+        case .tricountEntry(let e):      return Text("Payé par \(e.whoPaid)")
         }
     }
 

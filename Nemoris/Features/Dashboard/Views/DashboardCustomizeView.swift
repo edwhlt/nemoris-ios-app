@@ -6,9 +6,27 @@ import SwiftUI
 // taille de chaque carte.
 //
 // **Calque strictement sur « Ordre des onglets »** (`SettingsView`) : `Form` +
-// `ForEach` + `.onMove`, avec `editMode` forcé sur iOS uniquement. C'est le seul
-// pattern de réordonnancement déjà validé sur macOS dans cette app — le drag&drop y
-// fonctionne nativement sans mode édition.
+// `ForEach` + `.onMove`, avec `editMode` forcé sur iOS uniquement.
+//
+// ⚠️ Historique court : cet écran est brièvement passé par `List` +
+// `.macGroupedRow` (même recette que `ModulesSettingsView`) pour tenter de
+// réparer le réordonnancement macOS, qui ne marchait pas via `.onMove` seul
+// (`.onMove` a besoin d'une vraie `List`/`ForEach`, jamais d'un `Form` — cf.
+// doc `ModulesSettingsView`). Retour d'usage direct (2026-09) : le rendu
+// `List` (séparateurs internes entre rows, en-tête petite-caps façon liste de
+// données) rendait cet écran COURT ET CURATÉ moins lisible que l'ancien
+// `Form` — les lignes de séparation "c'est bien quand on a énormément de
+// données dans un scrollable […] on a pas besoin de ça" ici. Revenu au `Form`
+// d'origine.
+//
+// Le réordonnancement macOS n'a PAS besoin de `List` pour autant :
+// `macReorderable` (`ReorderableRow.swift`) est bâti sur `onDrag`/`onDrop`,
+// des modifiers SwiftUI génériques qui fonctionnent sur N'IMPORTE QUELLE vue
+// — `Form` compris, pas seulement `List`. C'est `.onMove` spécifiquement (pas
+// le drag&drop en général) qui a besoin d'un vrai `List`. `ReorderHandle()`
+// (même fichier) rend le geste DÉCOUVRABLE — sans lui la row est glissable
+// mais rien à l'écran ne le suggère (retour d'usage 2026-09 : "on peut drag,
+// mais on ne voit pas qu'on peut le faire").
 //
 // ⚠️ `Form { }.background(…)` et surtout PAS `ZStack { Color.ignoresSafeArea(); Form }` :
 // sur macOS le `Color.ignoresSafeArea()` rend le Form infiniment haut (fenêtre étirée
@@ -23,12 +41,27 @@ struct DashboardCustomizeView: View {
     /// `dismiss()` seul n'aurait rien à fermer. nil sur iOS, où la vue reste
     /// poussée dans la sheet du dashboard et `dismiss()` suffit.
     var onBack: (() -> Void)? = nil
+    #if os(macOS)
+    /// Carte actuellement glissée — cf. `macReorderable` (`ReorderableRow.swift`).
+    @State private var draggedCard: DashboardCardPreference?
+    #endif
 
     var body: some View {
+        @Bindable var appState = appState
         Form {
             Section {
+                // `$appState.dashboardLayout` directement : `dashboardLayout`
+                // est une propriété STOCKÉE (comme `mainTabOrder` depuis
+                // 2026-09 — un get/set calculé sur `UserDefaults` ne notifie
+                // aucun observateur `@Observable`, ce qui causait un freeze
+                // perçu à la fin d'un drag, cf. doc `AppState.mainTabOrder`),
+                // donc `macReorderable` peut réordonner en place sans mirroir
+                // `@State` local.
                 ForEach(appState.dashboardLayout) { preference in
                     row(for: preference)
+                        #if os(macOS)
+                        .macReorderable(preference, items: $appState.dashboardLayout, dragged: $draggedCard) {}
+                        #endif
                 }
                 .onMove(perform: move)
             } header: {
@@ -48,7 +81,7 @@ struct DashboardCustomizeView: View {
         }
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        .navigationTitle("Personnaliser")
+        .localizedNavigationTitle("Personnaliser")
         #if os(iOS)
         // Même choix que l'écran « Ordre des onglets » : le mode édition permanent
         // évite un bouton « Modifier » pour une liste dont c'est la seule fonction.
@@ -78,7 +111,7 @@ struct DashboardCustomizeView: View {
                     .frame(width: 26)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(preference.card.title)
+                    Text(LocalizedStringKey(preference.card.title))
                         .font(AppTheme.Typography.bodyMedium)
                         .foregroundStyle(AppTheme.Colors.textPrimary)
                     if !isAvailable, let module = preference.card.requiredModule {
@@ -102,6 +135,10 @@ struct DashboardCustomizeView: View {
                 ))
                 .labelsHidden()
                 .disabled(!isAvailable)
+
+                #if os(macOS)
+                ReorderHandle()
+                #endif
             }
 
             // Le sélecteur de taille n'a de sens que si la carte en supporte plusieurs :
@@ -113,7 +150,7 @@ struct DashboardCustomizeView: View {
                     set: { newValue in update(preference.card) { $0.size = newValue } }
                 )) {
                     ForEach(preference.card.supportedSizes, id: \.self) { size in
-                        Text(size.label).tag(size)
+                        Text(LocalizedStringKey(size.label)).tag(size)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -128,7 +165,7 @@ struct DashboardCustomizeView: View {
     /// désactivé dans les Réglages (`showBudget` etc. à `false`) de l'abonnement Pro
     /// qui a expiré (module toujours activé, mais `PurchaseManager` ne le déverrouille
     /// plus) — même ordre de check que `AppState.isDashboardCardAvailable`.
-    private func unavailableReason(_ module: MainTabItem) -> String {
+    private func unavailableReason(_ module: MainTabItem) -> LocalizedStringKey {
         guard appState.availableTabsResolved.contains(module) else {
             return "Module « \(module.title) » désactivé"
         }

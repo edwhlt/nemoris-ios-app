@@ -1,4 +1,4 @@
-name: FinanceMobileIOS
+name: Nemoris
 options:
   bundleIdPrefix: fr.hedwin
 settings:
@@ -13,13 +13,13 @@ targets:
     platform: iOS
     deploymentTarget: "26.0"
     sources:
-      - path: FinanceMobileIOS
+      - path: Nemoris
     resources:
-      - path: FinanceMobileIOS/Resources
+      - path: Nemoris/Resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: fr.hedwin.financemobileios
-        INFOPLIST_FILE: FinanceMobileIOS/Resources/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: fr.hedwin.Nemoris
+        INFOPLIST_FILE: Nemoris/Resources/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 schemes:

@@ -51,15 +51,15 @@ struct DashboardOverviewBanner: View {
 
                         if investments.totalInvested > 0 {
                             caption(
-                                String(format: "%@%.1f %%",
+                                Text(String(format: "%@%.1f %%",
                                        investments.pnlAbsolute >= 0 ? "+" : "",
-                                       investments.pnlPercent),
+                                       investments.pnlPercent)),
                                 color: investments.pnlAbsolute >= 0
                                     ? AppTheme.Colors.success
                                     : AppTheme.Colors.danger
                             )
                         } else {
-                            caption("\(investments.activeAccountCount) compte\(investments.activeAccountCount > 1 ? "s" : "")")
+                            caption(Text("\(investments.activeAccountCount) compte\(investments.activeAccountCount > 1 ? "s" : "")"))
                         }
                     }
                 }
@@ -89,12 +89,12 @@ struct DashboardOverviewBanner: View {
                         if patrimoine.totalLiabilities > 0 {
                             caption(
                                 appState.amountsHidden
-                                    ? "••• de dettes"
-                                    : "\(compact(patrimoine.totalLiabilities)) de dettes",
+                                    ? Text("••• de dettes")
+                                    : Text("\(compact(patrimoine.totalLiabilities)) de dettes"),
                                 color: AppTheme.Colors.danger
                             )
                         } else {
-                            caption("\(patrimoine.itemsCount) élément\(patrimoine.itemsCount > 1 ? "s" : "")")
+                            caption(Text("\(patrimoine.itemsCount) élément\(patrimoine.itemsCount > 1 ? "s" : "")"))
                         }
                     }
                 }
@@ -135,7 +135,7 @@ struct DashboardOverviewBanner: View {
     private func column<Content: View>(
         icon: String,
         tint: Color,
-        title: String,
+        title: LocalizedStringKey,
         destination: MainTabItem,
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -148,7 +148,8 @@ struct DashboardOverviewBanner: View {
                     Image(systemName: icon)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(tint)
-                    Text(title.uppercased())
+                    Text(title)
+                        .textCase(.uppercase)
                         .font(.system(size: 9, weight: .semibold))
                         .tracking(0.5)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -172,8 +173,8 @@ struct DashboardOverviewBanner: View {
     }
 
     @ViewBuilder
-    private func caption(_ text: String, color: Color = AppTheme.Colors.textSecondary) -> some View {
-        Text(text)
+    private func caption(_ text: Text, color: Color = AppTheme.Colors.textSecondary) -> some View {
+        text
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(color)
             .lineLimit(1)

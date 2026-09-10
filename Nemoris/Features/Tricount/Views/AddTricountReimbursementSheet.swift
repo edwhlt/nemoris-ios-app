@@ -47,7 +47,9 @@ struct AddTricountReimbursementSheet: View {
                     HStack {
                         Text("Montant (\(currency))")
                         Spacer()
-                        TextField("0.00", text: $amountText)
+                        // Titre vide : la row a déjà son label ("Montant (…)")
+                        // — cf. TransactionEditSheet pour la raison macOS.
+                        TextField("", text: $amountText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                     }
@@ -64,7 +66,18 @@ struct AddTricountReimbursementSheet: View {
                 allTiers = txRepo.fetchTiers()
             }
             .sheet(isPresented: $showTiersPicker) {
+                // Ré-injection \.locale obligatoire : `.sheet()` niveau 2+ sur
+                // macOS n'hérite pas de l'environnement depuis un ancêtre
+                // au-dessus d'un `NavigationSplitView` (cf. CLAUDE.md §5).
+                // `\.paneHostContext` itou : cette sheet est ouverte depuis une
+                // vue elle-même hébergée dans l'inspecteur macOS (`.inspector`,
+                // cette sheet est présentée via `.adaptivePane`) — sans reset à
+                // `.modal`, le `.paneChrome` de `TiersSearchSheet` publierait
+                // ses boutons dans la barre système au lieu de les dessiner
+                // dans CETTE fenêtre séparée (aucun bouton visible).
                 TiersSearchSheet(allTiers: allTiers, selectedId: $selectedTiersId)
+                    .environment(\.locale, AppLocalization.locale)
+                    .environment(\.paneHostContext, .modal)
             }
             .paneChrome(existingReimbursement == nil ? "Nouveau remboursement" : "Modifier le remboursement",
                         cancelLabel: "Annuler", onCancel: { dismiss() },

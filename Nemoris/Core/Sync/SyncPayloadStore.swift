@@ -561,6 +561,10 @@ struct SyncPayloadStore: Sendable {
         // apply fail. Identity adoption (min(uuid) wins) merges them instead
         // of leaving a permanently failing record.
         "transaction_metadata_keys": "name",  // UNIQUE COLLATE NOCASE
+        // Singleton row: `slot` is always 'default'. Two devices each writing
+        // their objectives produce two uuids for the SAME logical row —
+        // adoption merges them instead of leaving a record failing forever.
+        "coach_profile": "slot",             // UNIQUE
     ]
 
     /// Reference tables where a collision on `name` (COLLATE NOCASE) means

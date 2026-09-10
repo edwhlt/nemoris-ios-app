@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Observation
 
 // MARK: - PatrimoineViewModel
@@ -469,21 +470,21 @@ final class PatrimoineViewModel {
 
     /// Texte descriptif court pour la source d'un asset, prêt à être affiché en
     /// sous-titre de row. Pas de logique conditionnelle dans la View.
-    func sourceLabel(for asset: PatrimoineAsset) -> String {
+    func sourceLabel(for asset: PatrimoineAsset) -> Text {
         if let bankId = asset.linkedAccountId,
            let acc = availableBankAccounts.first(where: { $0.id == bankId }) {
-            return "Lié à \(acc.name)"
+            return Text("Lié à \(acc.name)")
         }
         if let invId = asset.linkedInvestmentAccountId,
            let acc = availableInvestmentAccounts.first(where: { $0.id == invId }) {
-            return "Lié à \(acc.name)"
+            return Text("Lié à \(acc.name)")
         }
         if asset.isLinked {
             // Le lien existe en mémoire mais le compte source a disparu — l'UNIQUE
             // INDEX et le ON DELETE SET NULL devraient empêcher ce cas, mais on
             // tient ce libellé en filet de sécurité.
-            return "Lien rompu (dernière valeur connue)"
+            return Text("Lien rompu (dernière valeur connue)")
         }
-        return "Valeur saisie manuellement"
+        return Text("Valeur saisie manuellement")
     }
 }

@@ -33,12 +33,14 @@ struct PrevisionRow: View {
             // Bouton rapide skip : visible seulement sur les .pending
             if let onSkip, enriched.status == .pending {
                 Button(action: onSkip) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.6))
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .frame(width: 22, height: 22)
+                        .background(AppTheme.Colors.surfaceSecondary, in: Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Ignorer cette échéance")
+                .localizedAccessibilityLabel("Ignorer cette échéance")
             }
         }
     }

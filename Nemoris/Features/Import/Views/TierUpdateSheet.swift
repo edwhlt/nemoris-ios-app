@@ -55,48 +55,100 @@ struct TierUpdateSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                contextSection
-                identitySection
-                classificationSection
-                localizationSection
-                advancedSection
-            }
-            .nemorisFormStyle()
-            .navigationTitle("Vérifier le tier")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    // ⚠️ Volontairement en texte, PAS d'icône : contrairement à un
-                    // vrai "Annuler", ce bouton APPLIQUE quand même la ligne
-                    // (`onApply(existingPayee)`) — juste sans les modifications
-                    // proposées. Un xmark serait lu comme "ne rien faire", alors
-                    // qu'un clic ici valide bel et bien l'import de la ligne.
-                    Button("Sans modif") {
-                        onApply(existingPayee)
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        onApply(buildUpdatedPayee())
-                        dismiss()
-                    } label: {
-                        Label("Enregistrer", systemImage: "checkmark")
-                    }
-                }
-            }
-            .sheet(isPresented: $showGroupPicker) {
-                PayeeGroupPickerView(currentGroupId: groupId) { group in
-                    groupId = group?.id
-                }
-            }
-            .task {
-                if allCategories.isEmpty { allCategories = repository.fetchCategories() }
-                if payeeGroups.isEmpty { payeeGroups = repository.fetchPayeeGroups() }
-            }
+        let form = Form {
+            contextSection
+            identitySection
+            classificationSection
+            localizationSection
+            advancedSection
         }
+        .nemorisFormStyle()
+        .sheet(isPresented: $showGroupPicker) {
+            // Cf. CLAUDE.md §5 : ré-injection \.locale obligatoire pour toute
+            // `.sheet()` niveau 2+ atteignable sur macOS. `\.paneHostContext`
+            // itou (cf. commentaire équivalent dans PayeeCreationFormSheet) :
+            // cette sheet hérite `.inspector` de son ancêtre `ImportSessionView`,
+            // et son `.paneChrome` interne a besoin de `.modal` pour dessiner
+            // ses boutons dans CETTE fenêtre au lieu de la barre système.
+            PayeeGroupPickerView(currentGroupId: groupId) { group in
+                groupId = group?.id
+            }
+            .environment(\.locale, AppLocalization.locale)
+            .environment(\.paneHostContext, .modal)
+        }
+        .task {
+            if allCategories.isEmpty { allCategories = repository.fetchCategories() }
+            if payeeGroups.isEmpty { payeeGroups = repository.fetchPayeeGroups() }
+        }
+
+        #if os(macOS)
+        // Ni `.paneChrome` ni `.toolbar` natif ici : les DEUX boutons
+        // appliquent la ligne (aucun n'est un vrai "annuler"), donc ni
+        // l'icône xmark forcée du slot `cancel` de `.paneChrome`, ni la
+        // barre d'outils native (dont le matériau translucide laisse le
+        // bureau transparaître, retour d'usage 2026-08-21) ne conviennent.
+        // Barres dessinées à la main, dédiées à ce seul écran.
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Text("Vérifier le tier")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.Colors.textPrimary)
+                Spacer()
+            }
+            .padding(.horizontal, AppTheme.Spacing.lg)
+            .padding(.vertical, AppTheme.Spacing.md)
+            .background(AppTheme.Colors.background)
+            Divider()
+            form
+            Divider()
+            HStack {
+                Spacer()
+                Button("Sans modif") {
+                    onApply(existingPayee)
+                    dismiss()
+                }
+                .buttonStyle(.bordered)
+                Button("Enregistrer") {
+                    onApply(buildUpdatedPayee())
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppTheme.Colors.accent)
+            }
+            .padding(.horizontal, AppTheme.Spacing.lg)
+            .padding(.vertical, AppTheme.Spacing.md)
+            .background(AppTheme.Colors.background)
+        }
+        .background(AppTheme.Colors.background)
+        #else
+        NavigationStack {
+            form
+                .localizedNavigationTitle("Vérifier le tier")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        // ⚠️ Volontairement en texte, PAS d'icône : contrairement à un
+                        // vrai "Annuler", ce bouton APPLIQUE quand même la ligne
+                        // (`onApply(existingPayee)`) — juste sans les modifications
+                        // proposées. Un xmark serait lu comme "ne rien faire", alors
+                        // qu'un clic ici valide bel et bien l'import de la ligne.
+                        Button("Sans modif") {
+                            onApply(existingPayee)
+                            dismiss()
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button {
+                            onApply(buildUpdatedPayee())
+                            dismiss()
+                        } label: {
+                            Label("Enregistrer", systemImage: "checkmark")
+                        }
+                    }
+                }
+        }
+        #endif
     }
 
     // MARK: - Sections
@@ -221,7 +273,7 @@ struct TierUpdateSheet: View {
 
     /// Champ texte éditable + chip de suggestion (si différente de la valeur actuelle).
     @ViewBuilder
-    private func editableField(title: String,
+    private func editableField(title: LocalizedStringKey,
                                value: Binding<String>,
                                suggestion: String?,
                                suggestionLabel: String,

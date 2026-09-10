@@ -269,12 +269,18 @@ private struct InspectorChromeToolbar: ViewModifier {
             if let icon = button.systemImage {
                 Image(systemName: icon)
             } else {
-                Text(button.label)
+                // `LocalizedStringKey(...)`, jamais `Text(button.label)` :
+                // `.label` est une `String` d'exécution, donc l'overload
+                // verbatim — aucune traduction. Enveloppée, elle est résolue
+                // par SwiftUI contre `\.locale`, donc traduite ET réactive.
+                Text(LocalizedStringKey(button.label))
             }
         }
         .disabled(button.disabled)
-        .help(button.label)
-        .accessibilityLabel(button.label)
+        // `.help`/`.accessibilityLabel` pontent vers la chrome native et ne
+        // consultent PAS `\.locale` — d'où les modificateurs dédiés.
+        .localizedHelp(button.label)
+        .localizedAccessibilityLabel(button.label)
         .tint(button.role == .destructive ? AppTheme.Colors.danger : AppTheme.Colors.accent)
     }
 }
@@ -337,7 +343,28 @@ private struct AdaptivePaneBoolModifier<PaneContent: View>: ViewModifier {
                 paneContent()
                     .environment(\.paneDismiss, { isPresented = false })
                     .environment(\.paneHostContext, .modal)
+                    // ⚠️ Ré-injection EXPLICITE, obligatoire — bug réel confirmé
+                    // par sonde le 2026-08-25 : une `.sheet()` macOS ouverte
+                    // depuis le contenu de la colonne "detail" d'un
+                    // `NavigationSplitView` n'hérite PAS de `\.locale` posé au
+                    // niveau de la fenêtre, même remonté à la vraie racine du
+                    // contenu. Cette sheet est une vraie `NSWindow` séparée sur
+                    // macOS (contrairement à iOS, où elle partage la fenêtre) —
+                    // son ancrage d'environnement semble ignorer tout ce qui est
+                    // au-dessus d'un `NavigationSplitView`. `AppLocalization.locale`
+                    // (lecture directe UserDefaults, pas de dépendance SwiftUI)
+                    // donne la valeur correcte indépendamment de ce bug.
+                    .environment(\.locale, AppLocalization.locale)
                     .adaptivePaneFrame()
+                    // Même raison que `presentPane` ci-dessous : sans fond
+                    // explicite, un `.sheet` macOS niveau 2+ (une pane ouverte
+                    // depuis une pane déjà ouverte) laisse transparaître le
+                    // matériau translucide par défaut de la fenêtre — le
+                    // fond de bureau de l'utilisateur bleedait à travers
+                    // (retour d'usage 2026-08-19). Seul le chemin racine
+                    // (`presentPane`) l'avait ; ce chemin niveau 2+ ne
+                    // l'avait jamais eu.
+                    .background(AppTheme.Colors.background)
             }
         }
     }
@@ -395,7 +422,15 @@ private struct AdaptivePaneItemModifier<Item: Identifiable, PaneContent: View>: 
                 paneContent(value)
                     .environment(\.paneDismiss, { item = nil })
                     .environment(\.paneHostContext, .modal)
+                    // Cf. AdaptivePaneBoolModifier : ré-injection obligatoire,
+                    // une `.sheet()` macOS niveau 2+ n'hérite pas de `\.locale`
+                    // depuis un ancêtre au-dessus d'un `NavigationSplitView`.
+                    .environment(\.locale, AppLocalization.locale)
                     .adaptivePaneFrame()
+                    // Cf. AdaptivePaneBoolModifier : sans ce fond, un `.sheet`
+                    // macOS niveau 2+ laisse transparaître le matériau
+                    // translucide par défaut de la fenêtre.
+                    .background(AppTheme.Colors.background)
             }
         }
     }
@@ -420,6 +455,188 @@ private struct AdaptivePaneItemModifier<Item: Identifiable, PaneContent: View>: 
 }
 
 #endif
+
+// MARK: - Custom chrome for macOS sheets (level 2+)
+
+/// Dessine la barre de titre + boutons d'une sheet macOS À LA MAIN, sans
+/// `.navigationTitle`/`.toolbar` natif.
+///
+/// Root cause établie par capture d'écran EN DIRECT (retour d'usage
+/// 2026-08-21) : la barre d'outils native d'une `.sheet` macOS (fenêtre
+/// séparée) ET son bandeau de boutons bas (`.cancellationAction`/
+/// `.confirmationAction`) sont des surfaces AppKit à matériau translucide
+/// vibrant — `.toolbarBackground(Color, for: .windowToolbar)` COMPILE mais
+/// n'a AUCUN effet visuel observable dessus (vérifié sur un build fraîchement
+/// recompilé, pas seulement rapporté par l'utilisateur). Le fond d'écran de
+/// l'utilisateur continue de transparaître au travers, en haut ET en bas.
+///
+/// Contrairement au niveau 1 (inspecteur, `publishesInspectorChrome`), qui
+/// pose de VRAIS `ToolbarItem`s dans la barre système de `MainTabView` (une
+/// surface qui, elle, n'a jamais montré ce bug), une sheet de niveau 2+ est
+/// une fenêtre à part entière sans ce filet. Remède : ne plus jamais confier
+/// le titre/les boutons d'une sheet macOS à `.toolbar` — les dessiner en
+/// SwiftUI ordinaire, dont le compositing (`.background()`) fonctionne
+/// normalement (déjà prouvé par `.scrollContentBackground(.hidden)` sur les
+/// `List`, une classe de bug voisine).
+#if os(macOS)
+/// Non-`private` : réutilisé directement par `ImportEntryView`, qui a besoin
+/// d'appliquer cette chrome à UN SEUL de ses multiples cas de présentation
+/// (embarqué / inspecteur / sheet niveau 2) sans passer par le `.paneChrome`
+/// générique, qui ne modélise pas son axe `isEmbedded` additionnel.
+struct MacSheetTopBar: View {
+    @Environment(\.locale) private var locale
+    
+    let title: String
+    let cancel: PaneBarButton?
+
+    var body: some View {
+        return HStack {
+            if let cancel {
+                Button(action: cancel.action) {
+                    Image(systemName: cancel.systemImage ?? "xmark")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+                .localizedHelp(cancel.label)
+            }
+            Spacer()
+            // `title`/`.label` sont des `String` d'exécution — `Text(String)`
+            // est l'overload verbatim, sans aucun lookup. Enveloppé en
+            // `LocalizedStringKey`, SwiftUI résout contre `\.locale`, donc
+            // traduit ET réactif au picker de langue. Un titre dynamique (nom
+            // de compte, de position) n'est pas une clé de table : il retombe
+            // simplement sur lui-même, l'enveloppe est sans risque.
+            //
+            // ⚠️ `LocalizedStringKey`, PAS `LocalizedStringResource` : ce
+            // dernier porte sa propre locale et court-circuite l'environnement.
+            Text(LocalizedStringKey(title))
+                .font(.headline)
+                .foregroundStyle(AppTheme.Colors.textPrimary)
+            Spacer()
+            // Espaceur symétrique : centre visuellement le titre quand un
+            // bouton "Annuler" occupe le côté gauche.
+            if cancel != nil {
+                Color.clear.frame(width: 20, height: 20)
+            }
+        }
+        .padding(.horizontal, AppTheme.Spacing.lg)
+        .padding(.vertical, AppTheme.Spacing.md)
+        .background(AppTheme.Colors.background)
+    }
+}
+
+struct MacSheetBottomBar: View {
+    let destructive: PaneBarButton?
+    let confirm: PaneBarButton?
+
+    var body: some View {
+        HStack {
+            if let destructive {
+                Button(role: .destructive, action: destructive.action) {
+                    Label(LocalizedStringKey(destructive.label), systemImage: destructive.systemImage ?? "trash")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.Colors.danger)
+            }
+            Spacer()
+            if let confirm {
+                Button(LocalizedStringKey(confirm.label), action: confirm.action)
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.Colors.accent)
+                    .disabled(confirm.disabled)
+            }
+        }
+        .padding(.horizontal, AppTheme.Spacing.lg)
+        .padding(.vertical, AppTheme.Spacing.md)
+        .background(AppTheme.Colors.background)
+    }
+}
+
+/// Assemble le contenu entre les deux barres dessinées à la main. Partagé
+/// par `PaneChromeModifier` et `PaneChromeInlineModifier` — les deux
+/// variantes macOS-sheet doivent rester visuellement identiques.
+@MainActor
+func macSheetChrome<Content: View>(
+    title: String,
+    cancel: PaneBarButton?,
+    destructive: PaneBarButton?,
+    confirm: PaneBarButton?,
+    @ViewBuilder content: () -> Content
+) -> some View {
+    VStack(spacing: 0) {
+        MacSheetTopBar(title: title, cancel: cancel)
+        Divider()
+        content()
+        if destructive != nil || confirm != nil {
+            Divider()
+            MacSheetBottomBar(destructive: destructive, confirm: confirm)
+        }
+    }
+    .background(AppTheme.Colors.background)
+}
+
+/// Champ de recherche dessiné à la main, pour macOS uniquement.
+///
+/// `.searchable(text:)` bridge vers un `NSSearchToolbarItem` NATIF — une
+/// troisième surface AppKit, DISTINCTE de `.navigationTitle`/`.toolbar` (déjà
+/// neutralisés par `macSheetChrome`), qui continue de laisser transparaître
+/// le matériau translucide de la fenêtre même après leur suppression
+/// (confirmé par capture d'écran en direct : la bande du champ de recherche
+/// restait cuivrée alors que le titre et les boutons, eux, étaient corrigés
+/// — retour d'usage 2026-08-21). Remède identique : ne plus utiliser
+/// `.searchable` sur macOS pour une sheet, dessiner le champ nous-mêmes.
+private struct MacInlineSearchField: View {
+    @Binding var text: String
+    let prompt: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain)
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(AppTheme.Colors.surfaceSecondary, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, AppTheme.Spacing.lg)
+        .padding(.top, AppTheme.Spacing.sm)
+        .padding(.bottom, AppTheme.Spacing.xs)
+        .background(AppTheme.Colors.background)
+    }
+}
+#endif
+
+extension View {
+    /// `.searchable` sur iOS ; sur macOS, un champ dessiné à la main placé
+    /// AU-DESSUS du contenu (cf. `MacInlineSearchField`) — jamais le
+    /// `.searchable` natif, dont la barre reste cuivrée même une fois
+    /// `.navigationTitle`/`.toolbar` neutralisés.
+    ///
+    /// Pas de paramètre `placement:` : certains cas (`.navigationBarDrawer`)
+    /// n'existent que côté iOS dans `SearchFieldPlacement` — un paramètre
+    /// non gardé casserait la compilation macOS au premier appel qui s'en
+    /// sert. `.automatic` partout est un compromis assumé (perte mineure :
+    /// le champ peut se cacher au scroll sur iOS au lieu de rester "always").
+    @ViewBuilder
+    func paneSearchable(text: Binding<String>, prompt: String) -> some View {
+        #if os(macOS)
+        VStack(spacing: 0) {
+            MacInlineSearchField(text: text, prompt: prompt)
+            self
+        }
+        #else
+        self.searchable(text: text, prompt: prompt)
+        #endif
+    }
+}
 
 // MARK: - EntityDetailEditPane (cross-platform): read-only detail ⇄ edit
 
@@ -525,40 +742,48 @@ private struct PaneChromeModifier: ViewModifier {
                     PaneChromeModel(title: title, leading: cancel, trailing: trailing)
                 }
         } else {
-            navStack(content)
+            macSheetChrome(title: title, cancel: cancel, destructive: destructive, confirm: confirm) {
+                content
+            }
         }
         #else
         navStack(content)
         #endif
     }
 
+    #if !os(macOS)
     @ViewBuilder
     private func navStack(_ content: Content) -> some View {
+        // `title`/`.label` are runtime Strings — `.navigationTitle(String)`/
+        // `Button(String, action:)` hit the StringProtocol overload, which
+        // never does a Localizable.strings lookup. Dynamic titles (account/
+        // position names) aren't table keys, so the wrap is a no-op for them.
         NavigationStack {
             content
-                .navigationTitle(title)
+                .localizedNavigationTitle(title)
                 .toolbar {
                     if let cancel {
                         ToolbarItem(placement: .cancellationAction) {
-                            Button(cancel.label, action: cancel.action)
+                            Button(LocalizedStringKey(cancel.label), action: cancel.action)
                         }
                     }
                     if let destructive {
                         ToolbarItem(placement: .destructiveAction) {
                             Button(role: .destructive, action: destructive.action) {
-                                Label(destructive.label, systemImage: destructive.systemImage ?? "trash")
+                                Label(LocalizedStringKey(destructive.label), systemImage: destructive.systemImage ?? "trash")
                             }
                         }
                     }
                     if let confirm {
                         ToolbarItem(placement: .confirmationAction) {
-                            Button(confirm.label, action: confirm.action)
+                            Button(LocalizedStringKey(confirm.label), action: confirm.action)
                                 .disabled(confirm.disabled)
                         }
                     }
                 }
         }
     }
+    #endif
 }
 
 extension View {
@@ -636,31 +861,41 @@ private struct PaneChromeInlineModifier: ViewModifier {
                 PaneChromeModel(title: title, leading: cancel, trailing: confirm.map { [$0] } ?? [])
             }
         } else {
-            nativeChrome(content)
+            // Cf. PaneChromeModifier.macSheetChrome : le contenu conserve SA
+            // PROPRE `NavigationStack` interne (pour son push), on l'enrobe
+            // juste des barres dessinées à la main au lieu de lui laisser
+            // poser un `.navigationTitle`/`.toolbar` natif inefficace sur
+            // macOS-sheet.
+            macSheetChrome(title: title, cancel: cancel, destructive: nil, confirm: confirm) {
+                content
+            }
         }
         #else
         nativeChrome(content)
         #endif
     }
 
+    #if !os(macOS)
     @ViewBuilder
     private func nativeChrome(_ content: Content) -> some View {
+        // Same wrap as PaneChromeModifier.navStack — see its comment.
         content
-            .navigationTitle(title)
+            .localizedNavigationTitle(title)
             .toolbar {
                 if let cancel {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button(cancel.label, action: cancel.action)
+                        Button(LocalizedStringKey(cancel.label), action: cancel.action)
                     }
                 }
                 if let confirm {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button(confirm.label, action: confirm.action)
+                        Button(LocalizedStringKey(confirm.label), action: confirm.action)
                             .disabled(confirm.disabled)
                     }
                 }
             }
     }
+    #endif
 }
 
 extension View {
@@ -717,8 +952,13 @@ struct PaneToggleButton: View {
     @Binding var isOn: Bool
 
     var body: some View {
+        // `label` est une `String` d'exécution (libellés littéraux comme
+        // "Tags", et texte dynamique sur certains sites) — `Label(String, …)`
+        // est l'overload verbatim, sans lookup, contrairement à
+        // `Label(LocalizedStringKey, …)` qui résout contre `\.locale` et suit
+        // donc le picker de langue.
         Toggle(isOn: $isOn) {
-            Label(label, systemImage: systemImage)
+            Label(LocalizedStringKey(label), systemImage: systemImage)
         }
         .toggleStyle(.button)
         // `.toggleStyle(.button)` without an explicit `.tint` inherits the
@@ -729,8 +969,8 @@ struct PaneToggleButton: View {
         // `AppTheme.Colors.textSecondary`, a button in this state can read
         // as "active" when nothing is open. The tint now follows `isOn`.
         .tint(isOn ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary)
-        .help(label)
-        .accessibilityLabel(label)
+        .localizedHelp(label)
+        .localizedAccessibilityLabel(label)
     }
 }
 

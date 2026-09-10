@@ -21,7 +21,7 @@ enum InvestmentSyncTraceStore {
         let identifier: String
         let attemptedAt: Date
         let status: Status
-        let message: String         // Lisible par l'utilisateur
+        let message: LocalizedStringResource
         let symbolsTried: [String]  // Liste des symbols essayés sur Yahoo/Stooq
         let source: String?         // "yahoo" / "stooq" si success
         let pointsCount: Int        // Nb de points récupérés si success
@@ -110,7 +110,7 @@ extension InvestmentSyncTraceStore.Entry {
     /// "il y a 5 min" / "il y a 2 h" / "il y a 3 j"
     var humanizedAttemptedAt: String {
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "fr_FR")
+        formatter.locale = AppLocalization.locale
         formatter.unitsStyle = .full
         return formatter.localizedString(for: attemptedAt, relativeTo: Date())
     }

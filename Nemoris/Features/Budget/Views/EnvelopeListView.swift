@@ -29,7 +29,7 @@ struct EnvelopeListView: View {
                                 Text(env.name)
                                     .font(AppTheme.Typography.bodyMedium)
                                     .foregroundStyle(AppTheme.Colors.textPrimary)
-                                Text(env.period.label)
+                                Text(LocalizedStringKey(env.period.label))
                                     .font(AppTheme.Typography.labelMedium)
                                     .foregroundStyle(AppTheme.Colors.textSecondary)
                             }
@@ -43,13 +43,19 @@ struct EnvelopeListView: View {
                         .rowActions(trailing: [
                             RowAction("Supprimer", systemImage: "trash", role: .destructive) { vm.deleteEnvelope(id: env.id) }
                         ])
-                        .listRowBackground(AppTheme.Colors.surface)
+                        .macGroupedRow(first: env.id == active.first?.id, last: env.id == active.last?.id)
                     }
                 }
             }
+            #if os(macOS)
+            // Même politique que TricountListView/TransactionsView : .plain =
+            // base neutre pour les cartes custom dessinées par macGroupedRow.
+            .listStyle(.plain)
+            .macGroupedListTopGap()
+            #endif
             .scrollContentBackground(.hidden)
         }
-        .navigationTitle("Enveloppes")
+        .localizedNavigationTitle("Enveloppes")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {

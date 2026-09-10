@@ -136,7 +136,7 @@ struct SearchDetailsDisclosure: View {
         }
     }
 
-    private func detailLine(icon: String, title: String, detail: String) -> some View {
+    private func detailLine(icon: String, title: LocalizedStringKey, detail: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 10))

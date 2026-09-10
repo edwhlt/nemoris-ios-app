@@ -8,10 +8,13 @@ import CoreGraphics
 // comfortable to reduce visual fatigue).
 //
 // **Applied values**:
-//   - logo: MerchantLogo size (50% / 100% / 130% of the 52pt baseline)
+//   - logo: MerchantLogo size (24pt / 100% / 130% of the 52pt baseline —
+//     compact keeps a small icon rather than dropping it, cf. `logoSize`)
 //   - verticalPadding: row `.vertical(_:)` padding
 //   - rowMinHeight: minimum row height (= logo size, for centering)
-//   - showLogo: compact hides the logo to save ~36pt
+//   - showLogo: always true — even compact keeps the merchant icon, just
+//     shrunk (retour d'usage : un icône reste le repère visuel le plus
+//     rapide pour scanner une liste dense, plus utile que le gain d'espace)
 //   - showSecondaryInfo: compact hides the subtitle (user/category info) to
 //     condense to a single line
 
@@ -40,16 +43,16 @@ enum TransactionDensity: String, CaseIterable, Identifiable {
 
     var description: String {
         switch self {
-        case .compact:     return "Plus d'items à l'écran. Logo masqué."
+        case .compact:     return "Plus d'items à l'écran. Logo réduit."
         case .normal:      return "Équilibre par défaut."
         case .comfortable: return "Espacé pour confort de lecture."
         }
     }
 
-    /// Logo size in points. 0 when the logo is not shown.
+    /// Logo size in points. Compact keeps a small icon instead of dropping it.
     var logoSize: CGFloat {
         switch self {
-        case .compact:     return 0   // no logo
+        case .compact:     return 24  // small, still fits the 28pt row
         case .normal:      return 52  // baseline
         case .comfortable: return 64
         }
@@ -73,7 +76,7 @@ enum TransactionDensity: String, CaseIterable, Identifiable {
         }
     }
 
-    var showLogo: Bool { self != .compact }
+    var showLogo: Bool { true }
 
     /// In compact, the 2nd line (user info + running balance) is removed to
     /// get a strictly single-line dense row. The user can tap to see the

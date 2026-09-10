@@ -107,7 +107,27 @@ enum InvestmentTimeRange: String, CaseIterable, Identifiable {
     case all        = "Max"
 
     var id: String { rawValue }
-    var label: String { rawValue }
+
+    /// Abréviation affichée sur la chip — indépendante de `rawValue` (identité
+    /// interne uniquement) pour pouvoir varier par langue sans toucher à des
+    /// comparaisons/persistances qui s'appuieraient sur le rawValue.
+    /// `rawValue` reste toujours en français (1J/1S/1M…) — `label` suit
+    /// `AppLocalization.locale` pour l'affichage.
+    var label: String {
+        let isEnglish = AppLocalization.locale.language.languageCode?.identifier == "en"
+        guard isEnglish else { return rawValue }
+        switch self {
+        case .oneDay:     return "1D"
+        case .oneWeek:    return "1W"
+        case .oneMonth:   return "1M"
+        case .threeMonth: return "3M"
+        case .sixMonth:   return "6M"
+        case .oneYear:    return "1Y"
+        case .fiveYear:   return "5Y"
+        case .tenYear:    return "10Y"
+        case .all:        return "Max"
+        }
+    }
 
     /// Sélection des ranges qui font sens étant donnée une date la plus ancienne
     /// dispo (création du compte ou du portefeuille). Ex: compte ouvert il y a
@@ -166,7 +186,7 @@ struct TimeRangeChips: View {
                         selection = range
                     }
                 } label: {
-                    Text(range.label)
+                    Text(LocalizedStringKey(range.label))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(selection == range ? AppTheme.Colors.background : AppTheme.Colors.textSecondary)
                         .frame(maxWidth: .infinity)
@@ -257,10 +277,10 @@ struct ChartScrubReadout: View {
     /// Valeur mise en avant (point sous le doigt, ou dernier point au repos).
     let current: ChartReadoutPoint?
     var currency: String = "EUR"
-    var referenceLabel: String? = nil
-    var currentLabel: String = "Valeur"
+    var referenceLabel: LocalizedStringKey? = nil
+    var currentLabel: LocalizedStringKey = "Valeur"
     /// Précision affichée sous la variation, ex. « depuis le début de la plage ».
-    var deltaCaption: String? = nil
+    var deltaCaption: LocalizedStringKey? = nil
     /// `true` quand l'utilisateur parcourt la courbe : on met la valeur courante
     /// en avant (accent) pour signaler que c'est elle qui bouge.
     var isScrubbing: Bool = false
@@ -342,7 +362,7 @@ struct ChartScrubReadout: View {
     }
 
     @ViewBuilder
-    private func pointColumn(label: String, point: ChartReadoutPoint, emphasized: Bool) -> some View {
+    private func pointColumn(label: LocalizedStringKey, point: ChartReadoutPoint, emphasized: Bool) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(label)
                 .font(AppTheme.Typography.labelMedium)
@@ -379,12 +399,12 @@ struct ChartScrubReadout: View {
 /// Carte "hero" en haut d'un écran investments (Niveau Global ou Compte).
 /// Affiche la valorisation en très gros + variation absolue + variation % sur la plage sélectionnée.
 struct InvestmentHeroCard: View {
-    let title: String
+    let title: LocalizedStringResource
     let currentValue: Double
     let previousValue: Double?
     let currency: String
     /// Si fourni, label affiché à côté du %, ex : "sur 1 mois"
-    var rangeLabel: String? = nil
+    var rangeLabel: LocalizedStringResource? = nil
     /// valeur à utiliser COMME BASE pour le calcul de variation, distincte du
     /// `currentValue` cosmétique. Indispensable quand `currentValue` inclut la trésorerie
     /// (qui inflerait artificiellement la perf) — on passe ici la valeur des positions
@@ -512,12 +532,10 @@ struct EvolutionChart: View {
     }
 
     /// Domaine Y avec un padding visuel pour ne pas coller aux bords.
+    /// Recalculé à partir des SEULS points de la plage affichée : changer de
+    /// plage doit rééquilibrer l'ordonnée, pas seulement l'abscisse.
     private var yDomain: ClosedRange<Double> {
-        guard let lo = cleanPoints.map(\.value).min(),
-              let hi = cleanPoints.map(\.value).max() else { return 0...1 }
-        let span = max(hi - lo, 0.0001)
-        let pad = span * 0.12
-        return (lo - pad)...(hi + pad)
+        ChartYDomain.compute(values: cleanPoints.map(\.value))
     }
 
     /// Valeur minimale réelle des points (pas le min du yDomain qui inclut le padding visuel).

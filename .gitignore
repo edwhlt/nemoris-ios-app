@@ -1,8 +1,11 @@
 # Xcode
 DerivedData/
+.derivedData/
 .build/
-*.xcworkspace/xcuserdata/
-*.xcodeproj/xcuserdata/
+# Un motif contenant une barre oblique est ancré à la racine du dépôt : la forme
+# `*.xcworkspace/xcuserdata/` ne pouvait donc pas atteindre le xcuserdata niché
+# sous Nemoris.xcodeproj/project.xcworkspace/. Le préfixe `**/` lève l'ancrage.
+**/xcuserdata/
 *.xcuserstate
 
 # macOS

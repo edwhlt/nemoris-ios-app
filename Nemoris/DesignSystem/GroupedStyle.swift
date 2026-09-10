@@ -68,9 +68,21 @@ extension View {
     /// macOS (asymmetric bottom padding observed) — attaching the background
     /// to the content instead makes the geometry deterministic: the card
     /// exactly wraps content + paddings.
+    /// `divider`: draws the internal separator between this row and the next
+    /// one in the same group (when `!last`). Default `true` — the
+    /// `.insetGrouped`-like look most screens want. Set `false` for a short,
+    /// curated list (a handful of settings/preferences, not a scrollable
+    /// dataset) where the separator lines read as visual noise rather than
+    /// helping scan many rows — retour d'usage 2026-09 on
+    /// `ModulesSettingsView`/`DashboardCustomizeView` ("bien quand on a
+    /// énormément de données dans un scrollable, pas besoin de ça" pour ces
+    /// deux écrans courts). The row-to-row spacing (`.padding(.top/.bottom,
+    /// … xs`) still applies either way, so rows stay visually separated —
+    /// just without a hard rule between them.
     func macGroupedRow<Bg: View>(
         first: Bool = true,
         last: Bool = true,
+        divider: Bool = true,
         @ViewBuilder background: () -> Bg
     ) -> some View {
         #if os(macOS)
@@ -90,7 +102,7 @@ extension View {
                     ))
             )
             .overlay(alignment: .bottom) {
-                if !last {
+                if !last && divider {
                     Divider()
                         .padding(.horizontal, AppTheme.Spacing.lg)
                 }
@@ -110,17 +122,58 @@ extension View {
     }
 
     /// Variant with the standard `surface` background.
-    func macGroupedRow(first: Bool = true, last: Bool = true) -> some View {
-        macGroupedRow(first: first, last: last) { AppTheme.Colors.surface }
+    func macGroupedRow(first: Bool = true, last: Bool = true, divider: Bool = true) -> some View {
+        macGroupedRow(first: first, last: last, divider: divider) { AppTheme.Colors.surface }
     }
 
-    /// Aligns a section header with the left edge of `macGroupedRow` cards.
-    /// No-op on iOS.
+    /// Aligns a section header with the left/right edges of `macGroupedRow`
+    /// cards. No-op on iOS.
     func macGroupedSectionHeader() -> some View {
         #if os(macOS)
-        // Aligned with the left edge of the cards (same lateral margin as
-        // the outside-the-card padding of `macGroupedRow`).
-        return self.padding(.leading, AppTheme.Spacing.xl)
+        // Aligned with the edges of the cards (same lateral margin as the
+        // outside-the-card padding of `macGroupedRow`). Symmetric: a header
+        // with TRAILING content (a count, a total — `sectionHeader`'s
+        // `trailingNote`/`gainChip` in `PatrimoineView`) sat flush against
+        // the window's own edge without the trailing half, only the eyebrow
+        // on the left ever got any breathing room (retour d'usage
+        // 2026-08-27, capture iOS vs macOS à l'appui). Headers with no
+        // trailing content (the common case elsewhere) just gain unused
+        // right margin — invisible.
+        //
+        // ⚠️ PAS de `.padding(.bottom, …)` ici (essayé puis retiré, 2026-09) :
+        // sur un écran court et curaté (`ModulesSettingsView`, quelques
+        // modules) le surcroît d'espace lisait comme une ligne parasite sous
+        // le header plutôt qu'une respiration voulue — retour d'usage direct.
+        // Un header + première carte visuellement proches reste le bon défaut
+        // ici ; un écran qui aurait vraiment besoin de plus d'air peut ajouter
+        // son propre `.padding(.bottom, …)` localement plutôt que de changer
+        // ce comportement partagé par tous les appelants.
+        return self
+            .padding(.leading, AppTheme.Spacing.xl)
+            .padding(.trailing, AppTheme.Spacing.xl)
+        #else
+        return self
+        #endif
+    }
+
+    /// Reserves a bit of air between whatever sits above (a `Divider`, a
+    /// `paneChrome` header — both draw a hard edge) and the first
+    /// `macGroupedRow` card of a `List`, on macOS.
+    ///
+    /// Several screens used to do this via `.contentMargins(.top, …, for:
+    /// .scrollContent)` directly on the `List`. That's a `ScrollView`-content
+    /// API applied to a `.plain` macOS `List` (backed by `NSTableView`, not a
+    /// bare `ScrollView`) — inconsistent in practice (cf. the
+    /// `listRowInsets` unreliability already documented on `macGroupedRow`
+    /// below): some screens rendered the gap, others visually stayed flush
+    /// against the divider above despite the same modifier being present.
+    /// A real `.padding` on the List's own frame doesn't depend on that
+    /// internal behavior — it just reserves space in the parent stack — so
+    /// it renders the gap unconditionally. No-op on iOS (`insetGrouped`
+    /// already adds this space automatically).
+    func macGroupedListTopGap() -> some View {
+        #if os(macOS)
+        return self.padding(.top, AppTheme.Spacing.md)
         #else
         return self
         #endif

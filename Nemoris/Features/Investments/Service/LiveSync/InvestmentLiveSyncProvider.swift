@@ -104,16 +104,29 @@ enum LiveSyncError: LocalizedError, Sendable {
     case parseError(String)
     case providerNotImplemented
 
+    /// ⚠️ Chaque branche passe par `AppLocalization.string(...)` — cette enum
+    /// était ENTIÈREMENT en littéraux français bruts, jamais traduite quelle
+    /// que soit la langue de l'app (bug distinct de celui des `.sheet()` macOS :
+    /// ici il n'y avait même pas de tentative de résolution). `msg` (le seul
+    /// paramètre déjà localisé par l'appelant, cf. `LiveSyncRegistry`) doit
+    /// rester un fragment SÉPARÉ dans l'interpolation — jamais concaténé AVANT
+    /// l'appel à `AppLocalization.string`, sinon la clé de lookup change à
+    /// chaque valeur de `msg` et ne matche plus jamais la table.
     var errorDescription: String? {
         switch self {
-        case .missingCredentials:     return "Credentials manquants ou incomplets."
-        case .invalidCredentials:     return "Credentials invalides ou révoqués."
+        case .missingCredentials:
+            return AppLocalization.string("Credentials manquants ou incomplets.")
+        case .invalidCredentials:
+            return AppLocalization.string("Credentials invalides ou révoqués.")
         case .rateLimited(let r):
-            if let r { return "Limite de taux atteinte. Réessayez dans \(Int(r))s." }
-            return "Limite de taux atteinte. Réessayez plus tard."
-        case .networkError(let msg):  return "Erreur réseau : \(msg)"
-        case .parseError(let msg):    return "Erreur de lecture des données : \(msg)"
-        case .providerNotImplemented: return "Provider pas encore disponible (à venir)."
+            if let r { return AppLocalization.string("Limite de taux atteinte. Réessayez dans \(Int(r))s.") }
+            return AppLocalization.string("Limite de taux atteinte. Réessayez plus tard.")
+        case .networkError(let msg):
+            return AppLocalization.string("Erreur réseau : \(msg)")
+        case .parseError(let msg):
+            return AppLocalization.string("Erreur de lecture des données : \(msg)")
+        case .providerNotImplemented:
+            return AppLocalization.string("Provider pas encore disponible (à venir).")
         }
     }
 }

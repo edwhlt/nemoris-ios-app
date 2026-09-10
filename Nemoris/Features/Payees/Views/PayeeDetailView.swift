@@ -12,6 +12,11 @@ struct PayeeDetailView: View {
     @Environment(\.paneDismiss) private var dismiss
 
     let initialPayee: Tiers
+    /// `payee` était nil à l'init (création) : `save()` insère d'abord une
+    /// ligne minimale (pour obtenir un id), puis persiste tous les champs
+    /// remplis dans CETTE MÊME session — plutôt que forcer l'utilisateur à
+    /// créer un tiers minimal puis rouvrir cette fiche pour le compléter.
+    let isCreating: Bool
     let allCategories: [Category]
     let allAccounts: [Account]
     /// Callback appelé après une sauvegarde réussie. Le parent doit recharger sa liste.
@@ -50,12 +55,16 @@ struct PayeeDetailView: View {
 
     private let repository = TransactionRepository()
 
-    init(payee: Tiers,
+    /// `payee` nil = création (fiche vierge, tous les champs riches
+    /// disponibles dès la création — plus de form minimal séparé).
+    init(payee: Tiers? = nil,
          allCategories: [Category],
          allAccounts: [Account],
          onSave: @escaping () -> Void)
     {
+        let payee = payee ?? Tiers(id: 0, name: "")
         self.initialPayee = payee
+        self.isCreating = payee.id <= 0
         self.allCategories = allCategories
         self.allAccounts = allAccounts
         self.onSave = onSave
@@ -102,6 +111,9 @@ struct PayeeDetailView: View {
                     // se ferme à tort. On ne fait QUE stocker dans le tampon.
                     pendingPickedContact = picked
                 }
+                // Cf. CLAUDE.md §5 : ré-injection \.locale obligatoire — sur macOS,
+                // ce sheet montre un placeholder texte ("Bientôt sur Mac").
+                .environment(\.locale, AppLocalization.locale)
             }
             .alert("Résolution moteur", isPresented: $showResolveResult, presenting: resolveFeedback) { _ in
                 Button("OK", role: .cancel) {}
@@ -128,7 +140,7 @@ struct PayeeDetailView: View {
                 loadGroupName()
                 await loadContactPreview()
             }
-            .paneChrome("Tiers",
+            .paneChrome(isCreating ? "Nouveau tiers" : "Tiers",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
                         confirmLabel: "Enregistrer", confirmIcon: "checkmark",
                         confirmDisabled: name.trimmingCharacters(in: .whitespaces).isEmpty,
@@ -141,7 +153,7 @@ struct PayeeDetailView: View {
         Section {
             Picker("Type", selection: $tierType) {
                 ForEach(TierType.allCases) { type in
-                    Label(type.displayName, systemImage: type.systemIcon).tag(type)
+                    Label(LocalizedStringKey(type.displayName), systemImage: type.systemIcon).tag(type)
                 }
             }
             .pickerStyle(.menu)
@@ -400,6 +412,35 @@ struct PayeeDetailView: View {
         // (peut être nil si jamais lié). On ne garde le contact que si tier_type == .contact
         // pour éviter qu'un tier qu'on re-type en .merchant garde un lien orphelin.
         updated.contactIdentifier = (tierType == .contact) ? contactIdentifier : nil
+
+        if isCreating {
+            // `updatePayeeFull` fait un UPDATE par id — il faut d'abord une
+            // ligne réelle pour en obtenir un. Le reste des champs riches
+            // (localisation, groupe, type, note…) est ensuite persisté par
+            // le MÊME `updatePayeeFull` que le chemin édition, dans la
+            // foulée : pas de round-trip "créer minimal puis rouvrir".
+            // `id` est un `let` de `Tiers` — on reconstruit plutôt que muter.
+            guard let newId = repository.addTiersAndGetId(
+                name: cleanName, regex: updated.regex ?? "", categoryId: updated.categoryId
+            ) else { return }
+            updated = Tiers(
+                id: newId,
+                name: updated.name,
+                regex: updated.regex,
+                categoryId: updated.categoryId,
+                linkedCompteId: updated.linkedCompteId,
+                engineMerchantId: updated.engineMerchantId,
+                domain: updated.domain,
+                address: updated.address,
+                city: updated.city,
+                country: updated.country,
+                groupId: updated.groupId,
+                custom: updated.custom,
+                note: updated.note,
+                tierType: updated.tierType,
+                contactIdentifier: updated.contactIdentifier
+            )
+        }
 
         if repository.updatePayeeFull(updated) {
             onSave()

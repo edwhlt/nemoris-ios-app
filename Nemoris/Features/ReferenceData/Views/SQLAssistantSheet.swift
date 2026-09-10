@@ -6,6 +6,8 @@ import SwiftUI
 ///   - "Utiliser cette requête" → colle dans l'éditeur parent et dismiss
 ///   - "Tester maintenant" → exécute la requête et affiche le résultat tronqué inline
 struct SQLAssistantSheet: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.locale) private var locale
     /// Callback appelé quand l'utilisateur confirme "Utiliser cette requête" — après
     /// avoir éventuellement ajusté le titre suggéré dans l'alerte de confirmation.
     let onApply: (_ title: String, _ sql: String) -> Void
@@ -20,6 +22,12 @@ struct SQLAssistantSheet: View {
     /// requête"). Non-nil ⇒ l'alerte de titre est présentée.
     @State private var pendingApplySQL: String? = nil
     @State private var titleInput: String = ""
+    /// Instruction bloquée (modification de SCHÉMA) proposée par l'IA — jamais
+    /// exécutée par "Tester", cf. `SQLStatementGuard`.
+    @State private var blockedTestStatement: SQLStatementClassification? = nil
+    /// Requête en attente de confirmation (modification de DONNÉES) avant "Tester".
+    @State private var pendingTestConfirmation: (sql: String, messageId: UUID, summary: SQLStatementClassification)? = nil
+    @State private var testBackupFailure: (sql: String, messageId: UUID, message: String)? = nil
 
     private let repository = TransactionRepository()
 
@@ -89,6 +97,46 @@ struct SQLAssistantSheet: View {
             } message: {
                 Text("Devient l'en-tête « -- titre -- » de cette section dans le fichier .sql.")
             }
+            .alert(
+                "Modification de schéma bloquée",
+                isPresented: Binding(get: { blockedTestStatement != nil }, set: { if !$0 { blockedTestStatement = nil } })
+            ) {
+                Button("Compris", role: .cancel) { blockedTestStatement = nil }
+            } message: {
+                Text(SQLGuardMessages.blocked(blockedTestStatement.map { [$0] } ?? []))
+            }
+            .confirmationDialog(
+                "Cette requête modifie des données",
+                isPresented: Binding(get: { pendingTestConfirmation != nil }, set: { if !$0 { pendingTestConfirmation = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button("Sauvegarder puis tester") {
+                    guard let pending = pendingTestConfirmation else { return }
+                    pendingTestConfirmation = nil
+                    backupThenTest(pending.sql, in: pending.messageId)
+                }
+                Button("Tester sans sauvegarder", role: .destructive) {
+                    guard let pending = pendingTestConfirmation else { return }
+                    pendingTestConfirmation = nil
+                    runTestQuery(pending.sql, in: pending.messageId)
+                }
+                Button("Annuler", role: .cancel) { pendingTestConfirmation = nil }
+            } message: {
+                Text(SQLGuardMessages.confirmation(pendingTestConfirmation.map { [$0.summary] } ?? []))
+            }
+            .alert(
+                "La sauvegarde a échoué",
+                isPresented: Binding(get: { testBackupFailure != nil }, set: { if !$0 { testBackupFailure = nil } })
+            ) {
+                Button("Tester quand même", role: .destructive) {
+                    guard let failure = testBackupFailure else { return }
+                    testBackupFailure = nil
+                    runTestQuery(failure.sql, in: failure.messageId)
+                }
+                Button("Annuler", role: .cancel) { testBackupFailure = nil }
+            } message: {
+                Text((testBackupFailure?.message ?? "") + "\n\nTester quand même la requête sans sauvegarde préalable ?")
+            }
     }
 
     // MARK: - Chat body
@@ -157,12 +205,17 @@ struct SQLAssistantSheet: View {
                     "Solde total de tous mes comptes"
                 ], id: \.self) { example in
                     Button {
-                        inputText = example
+                        let resource = LocalizedStringResource(
+                            String.LocalizationValue(example),
+                            locale: locale
+                        )
+
+                        inputText = String(localized: resource)
                     } label: {
                         HStack {
                             Image(systemName: "arrow.up.left.circle")
                                 .font(.caption)
-                            Text(example)
+                            Text(LocalizedStringKey(example))
                                 .font(.caption)
                             Spacer()
                         }
@@ -314,7 +367,7 @@ struct SQLAssistantSheet: View {
             // ⌘Retour envoie, en plus du tap — convention macOS standard pour un
             // champ de texte multi-ligne où Retour seul reste un saut de ligne.
             .keyboardShortcut(.return, modifiers: [.command])
-            .help("Envoyer (⌘Retour)")
+            .localizedHelp("Envoyer (⌘Retour)")
         }
         .padding(AppTheme.Spacing.md)
         .background(AppTheme.Colors.surface)
@@ -341,7 +394,31 @@ struct SQLAssistantSheet: View {
         }
     }
 
+    /// "Tester" exécute pour de vrai sur la base live (ce n'est pas un dry-run) —
+    /// même garde-fou que la Console SQL avant d'y toucher (`SQLStatementGuard`).
     private func testQuery(_ sql: String, in messageId: UUID) {
+        let classification = SQLStatementGuard.classify(sql)
+        if classification.kind.isBlockedBySchemaGuard {
+            blockedTestStatement = classification
+            return
+        }
+        if classification.kind.requiresDataModificationConfirmation {
+            pendingTestConfirmation = (sql: sql, messageId: messageId, summary: classification)
+            return
+        }
+        runTestQuery(sql, in: messageId)
+    }
+
+    private func backupThenTest(_ sql: String, in messageId: UUID) {
+        do {
+            try BackupService.shared.createSnapshot()
+            runTestQuery(sql, in: messageId)
+        } catch {
+            testBackupFailure = (sql: sql, messageId: messageId, message: "Impossible de créer la sauvegarde : \(error.localizedDescription)")
+        }
+    }
+
+    private func runTestQuery(_ sql: String, in messageId: UUID) {
         guard let index = messages.firstIndex(where: { $0.id == messageId }) else { return }
         let repo = repository
         Task.detached(priority: .userInitiated) {
@@ -385,7 +462,7 @@ struct SQLAssistantSheet: View {
     // MARK: - Unavailable state
 
     @ViewBuilder
-    private func unavailableState(title: String, message: String) -> some View {
+    private func unavailableState(title: LocalizedStringKey, message: LocalizedStringKey) -> some View {
         VStack(spacing: AppTheme.Spacing.lg) {
             Image(systemName: "sparkles.slash")
                 .font(.system(size: 56, weight: .light))

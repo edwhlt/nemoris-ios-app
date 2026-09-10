@@ -1,0 +1,268 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Usage:
+#   ./run-ios
+#
+# Optional:
+#   XCODE_APP="/Applications/Xcode-26.4.app" ./run-ios
+#   SCHEME="MyApp" ./run-ios
+#   DEVICE_ID="00008140-..." ./run-ios
+#   CONFIGURATION=Debug ./run-ios
+#   CONSOLE=1 ./run-ios
+#
+# Put this script at the root of the Xcode project/workspace.
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+cd "$PROJECT_ROOT"
+
+XCODE_APP="${XCODE_APP:-/Applications/Xcode.app}"
+CONFIGURATION="${CONFIGURATION:-Debug}"
+DERIVED_DATA="${DERIVED_DATA:-$PROJECT_ROOT/.derivedData/ios}"
+CONSOLE="${CONSOLE:-0}"
+
+die() {
+  echo "❌ $*" >&2
+  exit 1
+}
+
+if [[ ! -d "$XCODE_APP/Contents/Developer" ]]; then
+  die "Xcode introuvable: $XCODE_APP
+Exemple:
+  XCODE_APP=\"/Applications/Xcode-26.4.app\" ./run-ios"
+fi
+
+export DEVELOPER_DIR="$XCODE_APP/Contents/Developer"
+
+echo "🛠  Xcode: $(xcodebuild -version | tr '\n' ' ')"
+
+
+# ---- Detect workspace/project ------------------------------------------------
+
+if [[ -n "${WORKSPACE:-}" ]]; then
+  CONTAINER_FLAG="-workspace"
+  CONTAINER_PATH="$WORKSPACE"
+elif [[ -n "${PROJECT:-}" ]]; then
+  CONTAINER_FLAG="-project"
+  CONTAINER_PATH="$PROJECT"
+else
+  shopt -s nullglob
+  workspaces=( *.xcworkspace )
+  projects=( *.xcodeproj )
+  shopt -u nullglob
+
+  if (( ${#workspaces[@]} == 1 )); then
+    CONTAINER_FLAG="-workspace"
+    CONTAINER_PATH="${workspaces[0]}"
+  elif (( ${#workspaces[@]} > 1 )); then
+    die "Plusieurs .xcworkspace trouvés. Relance avec:
+  WORKSPACE=\"MonApp.xcworkspace\" ./run-ios"
+  elif (( ${#projects[@]} == 1 )); then
+    CONTAINER_FLAG="-project"
+    CONTAINER_PATH="${projects[0]}"
+  elif (( ${#projects[@]} > 1 )); then
+    die "Plusieurs .xcodeproj trouvés. Relance avec:
+  PROJECT=\"MonApp.xcodeproj\" ./run-ios"
+  else
+    die "Aucun .xcworkspace ou .xcodeproj trouvé dans $PROJECT_ROOT"
+  fi
+fi
+
+[[ -e "$CONTAINER_PATH" ]] || die "Projet introuvable: $CONTAINER_PATH"
+
+echo "📦 Projet: $CONTAINER_PATH"
+
+
+# ---- Detect scheme -----------------------------------------------------------
+
+if [[ -z "${SCHEME:-}" ]]; then
+  LIST_JSON="$(mktemp -t xcode-schemes.XXXXXX)"
+  trap 'rm -f "${LIST_JSON:-}" "${DEVICE_JSON:-}"' EXIT
+
+  xcodebuild "$CONTAINER_FLAG" "$CONTAINER_PATH" -list -json > "$LIST_JSON"
+
+  PREFERRED="$(basename "$CONTAINER_PATH")"
+  PREFERRED="${PREFERRED%.xcworkspace}"
+  PREFERRED="${PREFERRED%.xcodeproj}"
+
+  SCHEME="$(
+    python3 - "$LIST_JSON" "$PREFERRED" <<'PY'
+import json, sys
+
+path, preferred = sys.argv[1], sys.argv[2]
+data = json.load(open(path))
+root = data.get("workspace") or data.get("project") or {}
+schemes = root.get("schemes") or []
+
+if preferred in schemes:
+    print(preferred)
+elif len(schemes) == 1:
+    print(schemes[0])
+else:
+    print("")
+PY
+  )"
+
+  if [[ -z "$SCHEME" ]]; then
+    echo "❌ Impossible de choisir automatiquement le scheme." >&2
+    echo "Schemes disponibles:" >&2
+    python3 - "$LIST_JSON" <<'PY' >&2
+import json, sys
+data = json.load(open(sys.argv[1]))
+root = data.get("workspace") or data.get("project") or {}
+for s in root.get("schemes") or []:
+    print(f"  - {s}")
+PY
+    echo >&2
+    echo "Relance par exemple avec:" >&2
+    echo "  SCHEME=\"MonScheme\" ./run-ios" >&2
+    exit 1
+  fi
+fi
+
+echo "🎯 Scheme: $SCHEME"
+
+
+# ---- Detect connected iPhone -------------------------------------------------
+
+if [[ -z "${DEVICE_ID:-}" ]]; then
+  DEVICE_JSON="$(mktemp -t xcode-devices.XXXXXX)"
+
+  xcrun devicectl list devices --json-output "$DEVICE_JSON" >/dev/null
+
+  DEVICE_INFO="$(
+    python3 - "$DEVICE_JSON" <<'PY'
+import json, sys
+
+data = json.load(open(sys.argv[1]))
+devices = data.get("result", {}).get("devices", [])
+candidates = []
+
+for d in devices:
+    props = d.get("deviceProperties") or {}
+    hw = d.get("hardwareProperties") or {}
+    conn = d.get("connectionProperties") or {}
+
+    platform = str(hw.get("platform") or "").lower()
+    dtype = str(hw.get("deviceType") or "").lower()
+
+    if platform != "ios" or dtype != "iphone":
+        continue
+
+    udid = str(hw.get("udid") or "")
+    if not udid:
+        continue
+
+    pairing = str(conn.get("pairingState") or "").lower()
+    tunnel = str(conn.get("tunnelState") or "").lower()
+    transport = str(conn.get("transportType") or "").lower()
+    ddi = props.get("ddiServicesAvailable") is True
+
+    connected = (
+        tunnel in {"connected", "available"}
+        or ddi
+        or (pairing == "paired" and transport in {"wired", "usb"})
+    )
+    if not connected:
+        continue
+
+    name = str(props.get("name") or "iPhone")
+    # Prefer a cable/USB device if several iPhones are known.
+    priority = 0 if transport in {"wired", "usb"} else 1
+    candidates.append((priority, name.lower(), udid, name))
+
+if not candidates:
+    sys.exit(0)
+
+candidates.sort()
+_, _, udid, name = candidates[0]
+print(f"{udid}\t{name}")
+PY
+  )"
+
+  [[ -n "$DEVICE_INFO" ]] || die "Aucun iPhone connecté détecté.
+Vérifie que:
+  • l'iPhone est déverrouillé
+  • Developer Mode est activé
+  • le Mac est approuvé sur l'iPhone
+
+Tu peux aussi imposer l'UDID:
+  DEVICE_ID=\"00008140-...\" ./run-ios"
+
+  DEVICE_ID="${DEVICE_INFO%%$'\t'*}"
+  DEVICE_NAME="${DEVICE_INFO#*$'\t'}"
+else
+  DEVICE_NAME="${DEVICE_NAME:-iPhone}"
+fi
+
+echo "📱 iPhone: $DEVICE_NAME ($DEVICE_ID)"
+
+
+# ---- Build -------------------------------------------------------------------
+
+mkdir -p "$DERIVED_DATA"
+
+echo "🔨 Build iOS…"
+
+xcodebuild \
+  "$CONTAINER_FLAG" "$CONTAINER_PATH" \
+  -scheme "$SCHEME" \
+  -configuration "$CONFIGURATION" \
+  -destination "platform=iOS,id=$DEVICE_ID" \
+  -derivedDataPath "$DERIVED_DATA" \
+  -allowProvisioningUpdates \
+  build
+
+
+# ---- Locate built .app -------------------------------------------------------
+
+PRODUCT_DIR="$DERIVED_DATA/Build/Products/${CONFIGURATION}-iphoneos"
+
+APP_PATH="$(
+  find "$PRODUCT_DIR" \
+    -maxdepth 1 \
+    -type d \
+    -name '*.app' \
+    ! -name '*Tests.app' \
+    ! -name '*UITests.app' \
+    -print \
+    | head -n 1
+)"
+
+[[ -n "$APP_PATH" && -d "$APP_PATH" ]] || die "Build réussi, mais aucun .app trouvé dans:
+  $PRODUCT_DIR"
+
+BUNDLE_ID="$(
+  /usr/libexec/PlistBuddy \
+    -c "Print :CFBundleIdentifier" \
+    "$APP_PATH/Info.plist"
+)"
+
+[[ -n "$BUNDLE_ID" ]] || die "Impossible de lire CFBundleIdentifier dans $APP_PATH"
+
+
+# ---- Install + launch --------------------------------------------------------
+
+echo "📲 Installation de $(basename "$APP_PATH")…"
+xcrun devicectl device install app \
+  --device "$DEVICE_ID" \
+  "$APP_PATH"
+
+echo "🚀 Lancement de $BUNDLE_ID…"
+
+if [[ "$CONSOLE" == "1" ]]; then
+  # Reste attaché au process et affiche stdout/stderr.
+  xcrun devicectl device process launch \
+    --device "$DEVICE_ID" \
+    --terminate-existing \
+    --console \
+    "$BUNDLE_ID"
+else
+  xcrun devicectl device process launch \
+    --device "$DEVICE_ID" \
+    --terminate-existing \
+    "$BUNDLE_ID"
+fi
+
+echo "✅ App lancée sur $DEVICE_NAME"

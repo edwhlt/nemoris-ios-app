@@ -15,8 +15,26 @@ import UIKit
 /// systemInstructions` → `SchemaDoc.llmSchemaPrompt`) : une colonne listée ici
 /// mais absente en base fait halluciner l'assistant sur une colonne inexistante.
 struct DatabaseSchemaView: View {
+    @Environment(AppState.self) private var appState
     @State private var expandedTables: Set<String> = []
     @State private var copiedQuery: String? = nil
+
+    /// Ne montre pas le schéma d'un module que l'utilisateur a désactivé —
+    /// autant de tables qu'il ne verra jamais ailleurs dans l'app (retour
+    /// d'usage 2026-08-19). Les domaines transverses (Core, Import) n'ont pas
+    /// de `requiredModule` et restent toujours visibles.
+    private var visibleDomains: [SchemaDomain] {
+        SchemaDoc.domains.filter { domain in
+            guard let module = domain.requiredModule else { return true }
+            switch module {
+            case .budget:      return appState.showBudget
+            case .tricount:    return appState.showTricount
+            case .investments: return appState.showInvestments
+            case .patrimoine:  return appState.showPatrimoine
+            default:           return true
+            }
+        }
+    }
 
     var body: some View {
         List {
@@ -26,8 +44,8 @@ struct DatabaseSchemaView: View {
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             } header: { Text("Vue d'ensemble") }
 
-            ForEach(SchemaDoc.domains, id: \.name) { domain in
-                Section(domain.name) {
+            ForEach(visibleDomains, id: \.name) { domain in
+                Section(LocalizedStringKey(domain.name)) {
                     ForEach(domain.tables, id: \.name) { table in
                         DisclosureGroup(
                             isExpanded: Binding(
@@ -62,7 +80,13 @@ struct DatabaseSchemaView: View {
                 .foregroundStyle(AppTheme.Colors.textSecondary)
             }
         }
-        .navigationTitle("Schéma de la base")
+        #if os(macOS)
+        // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS celui du
+        // panneau hôte — sans ce modificateur, le bureau de l'utilisateur
+        // transparaît (retour d'usage 2026-08-19).
+        .scrollContentBackground(.hidden)
+        #endif
+        .localizedNavigationTitle("Schéma de la base")
         .navigationBarTitleDisplayMode(.inline)
         .overlay(alignment: .bottom) {
             if let copied = copiedQuery {
@@ -89,7 +113,7 @@ struct DatabaseSchemaView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(table.name)
                     .font(.subheadline.monospaced().weight(.semibold))
-                Text(table.summary)
+                Text(LocalizedStringKey(table.summary))
                     .font(.caption2)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
                     .lineLimit(2)
@@ -101,7 +125,7 @@ struct DatabaseSchemaView: View {
     private func tableContent(_ table: SchemaTable) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             // Description
-            Text(table.description)
+            Text(LocalizedStringKey(table.description))
                 .font(.caption)
                 .foregroundStyle(AppTheme.Colors.textSecondary)
                 .padding(.top, 4)
@@ -143,7 +167,7 @@ struct DatabaseSchemaView: View {
                         }
                         .buttonStyle(.borderless)
                     }
-                    Text(example.title)
+                    Text(LocalizedStringKey(example.title))
                         .font(.caption.italic())
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                     Text(example.sql)
@@ -189,7 +213,7 @@ struct DatabaseSchemaView: View {
                     }
                 }
                 if !col.description.isEmpty {
-                    Text(col.description)
+                    Text(LocalizedStringKey(col.description))
                         .font(.caption2)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
@@ -205,7 +229,7 @@ struct DatabaseSchemaView: View {
             HStack {
                 Image(systemName: recipe.icon)
                     .foregroundStyle(AppTheme.Colors.accent)
-                Text(recipe.title).font(.subheadline.weight(.semibold))
+                Text(LocalizedStringKey(recipe.title)).font(.subheadline.weight(.semibold))
                 Spacer()
                 Button {
                     copy(recipe.sql)
@@ -274,6 +298,11 @@ struct SchemaTable {
 struct SchemaDomain {
     let name: String
     let tables: [SchemaTable]
+    /// Module dont ce domaine dépend, s'il en dépend d'un — `nil` pour les
+    /// domaines transverses (Core, Import) toujours pertinents quel que soit
+    /// l'état des modules optionnels. Sert à masquer les schémas des modules
+    /// désactivés dans `DatabaseSchemaView` (retour d'usage 2026-08-19).
+    var requiredModule: MainTabItem? = nil
 }
 
 struct SchemaRecipe {
@@ -293,7 +322,8 @@ enum SchemaDoc {
         tricountDomain,
         investmentsDomain,
         patrimoineDomain,
-        goalsDomain
+        goalsDomain,
+        coachDomain
     ]
 
     /// Toutes les tables aplaties (sans regroupement par domaine).
@@ -338,11 +368,12 @@ enum SchemaDoc {
                 name: "accounts",
                 systemImage: "creditcard",
                 summary: "Comptes bancaires (courant, épargne, etc.)",
-                description: "Chaque transaction est rattachée à un compte. Un compte de type EPARGNE est ignoré dans les graphiques principaux.",
+                description: "Chaque transaction est rattachée à un compte. `excluded_from_aggregates = 1` dissocie le compte de tous les calculs agrégés (cumuls par catégorie, budget, dashboard, coach IA, widget) — ses transactions restent consultables normalement en le sélectionnant explicitement (écran Transactions, recherche).",
                 columns: [
                     .init("id",   "INTEGER", nullable: false, pk: true, "Identifiant auto"),
                     .init("name", "TEXT", "Nom affiché (ex. « Compte BNP courant »)"),
                     .init("type", "TEXT", nullable: false, "COURANT | EPARGNE | DIFFERE | AUTRE"),
+                    .init("excluded_from_aggregates", "INTEGER", nullable: false, "0/1 — v51, exclut ce compte des calculs agrégés"),
                 ],
                 relations: ["transactions.account_id → accounts.id"],
                 example: .init(
@@ -612,6 +643,26 @@ enum SchemaDoc {
             // MapKit, LLM) est maintenant dans `Library/Caches/nemoris/enrichment_cache.json`
             // via `JSONFileCache`. Pas dans la DB user — ce sont des données récupérables
             // via APIs externes.
+            SchemaTable(
+                name: "pending_apple_pay_entries",
+                systemImage: "creditcard.and.123",
+                summary: "Dépenses Apple Pay en attente (automatisation Raccourcis)",
+                description: "Déposée en arrière-plan par l'automatisation personnelle Raccourcis « Apple Pay » (`ImportTransactionApplePayEntityIntent`, `openAppWhenRun = false` — l'app ne s'ouvre jamais). Affichée à part, jamais comptée dans les totaux Budget tant qu'elle n'est pas résolue. `matched_transaction_id` pointe vers `transactions` dans le sens inverse de l'habitude : c'est CETTE table qui n'est pas synchronisée (locale par appareil), donc le lien ne quitte jamais l'appareil.",
+                columns: [
+                    .init("id",                     "INTEGER", nullable: false, pk: true),
+                    .init("card",                    "TEXT", "Libellé de la carte fourni par Raccourcis"),
+                    .init("amount",                  "REAL", nullable: false, "Toujours négatif (convention dépense)"),
+                    .init("merchant",                "TEXT", nullable: false),
+                    .init("status",                  "TEXT", nullable: false, "pending | matched | dismissed"),
+                    .init("matched_transaction_id",  "INTEGER", fk: true, "Renseigné une fois rapprochée d'une vraie transaction"),
+                    .init("created_at",              "TEXT", nullable: false),
+                ],
+                relations: ["pending_apple_pay_entries.matched_transaction_id → transactions.id"],
+                example: .init(
+                    title: "Total en attente non catégorisé",
+                    sql: "SELECT COUNT(*), SUM(ABS(amount))\nFROM pending_apple_pay_entries\nWHERE status = 'pending';"
+                )
+            ),
         ]
     )
 
@@ -681,7 +732,8 @@ enum SchemaDoc {
                     sql: "SELECT bp.expected_date, rp.name, bp.amount, bp.status\nFROM budget_previsions bp\nJOIN recurring_patterns rp ON rp.id = bp.recurring_pattern_id\nWHERE strftime('%Y-%m', bp.expected_date) = strftime('%Y-%m', 'now')\nORDER BY bp.expected_date;"
                 )
             ),
-        ]
+        ],
+        requiredModule: .budget
     )
 
     // MARK: Tricount
@@ -744,7 +796,8 @@ enum SchemaDoc {
                 relations: ["→ tricount_entries.id"],
                 example: nil
             ),
-        ]
+        ],
+        requiredModule: .tricount
     )
 
     // MARK: Investments
@@ -850,7 +903,8 @@ enum SchemaDoc {
                 relations: [],
                 example: nil
             ),
-        ]
+        ],
+        requiredModule: .investments
     )
 
     // MARK: Patrimoine (v37-v38)
@@ -927,7 +981,8 @@ enum SchemaDoc {
                     sql: "SELECT name, asset_kind,\n       CASE WHEN linked_account_id IS NOT NULL OR linked_investment_account_id IS NOT NULL\n            THEN last_known_value\n            ELSE manual_value\n       END AS valeur\nFROM patrimoine_assets\nORDER BY valeur DESC;"
                 )
             ),
-        ]
+        ],
+        requiredModule: .patrimoine
     )
 
     // MARK: Goals (v39)
@@ -954,6 +1009,77 @@ enum SchemaDoc {
                 example: .init(
                     title: "État des objectifs",
                     sql: "SELECT name, kind, target_amount, deadline_date,\n       custom_current_amount\nFROM goals\nORDER BY deadline_date NULLS LAST;"
+                )
+            ),
+        ],
+        // Les Objectifs vivent dans le module Patrimoine (pas d'onglet dédié).
+        requiredModule: .patrimoine
+    )
+
+    // MARK: Coach IA
+
+    private static let coachDomain = SchemaDomain(
+        name: "Coach IA",
+        tables: [
+            SchemaTable(
+                name: "coach_profile",
+                systemImage: "target",
+                summary: "Objectifs écrits par l'utilisateur, un jeu par domaine (v47, v50) — SYNCHRONISÉ",
+                description: "Une ligne PAR DOMAINE depuis la v50 : `slot` vaut 'transactions' ou 'investments' (il valait 'default' avant, un texte unique partagé — un objectif « mieux diversifier » polluait alors l'analyse des dépenses, qui ne voit aucun portefeuille). C'est la seule table du coach qui soit synchronisée iCloud : de la prose écrite à la main, pénible à retaper sur un second appareil. `slot` est aussi la clé d'adoption d'identité de la sync (min(uuid) gagne) qui fusionne deux appareils ayant écrit chacun de leur côté.",
+                columns: [
+                    .init("id",         "INTEGER", nullable: false, pk: true),
+                    .init("slot",       "TEXT", nullable: false, "UNIQUE — 'transactions' | 'investments'"),
+                    .init("objectives", "TEXT", nullable: false, "Texte libre écrit par l'utilisateur"),
+                ],
+                relations: ["Aucune FK — table autonome"],
+                example: .init(
+                    title: "Objectifs par domaine",
+                    sql: "SELECT slot, objectives, updated_at FROM coach_profile ORDER BY slot;"
+                )
+            ),
+            SchemaTable(
+                name: "coach_analyses",
+                systemImage: "brain",
+                summary: "Dernière analyse IA par domaine (v47) — local, jamais synchronisé",
+                description: "Une ligne par domaine ('transactions' ou 'investments'). DÉRIVÉ : régénérable à tout moment depuis le ledger, donc hors sync — même statut qu'import_sessions. `generated_at` sert à décider de la péremption (7 jours) qui autorise une relance automatique.",
+                columns: [
+                    .init("domain",          "TEXT", nullable: false, pk: true, "'transactions' | 'investments'"),
+                    .init("profile_summary", "TEXT", "Le « profil type » rendu par le modèle"),
+                    .init("generated_at",    "TEXT", "ISO 8601 avec heure (UTC)"),
+                    .init("status",          "TEXT", nullable: false, "'ok' | 'error'"),
+                    .init("message",         "TEXT", "Raison de l'échec le cas échéant"),
+                    .init("backend",         "TEXT", "Backend qui a produit l'analyse"),
+                    .init("raw_response",    "TEXT", "v48 — extrait de la réponse brute, UNIQUEMENT en cas d'échec de lecture (diagnostic)"),
+                ],
+                relations: ["coach_recommendations.domain (pas une vraie FK)"],
+                example: .init(
+                    title: "État des deux coachs",
+                    sql: "SELECT domain, status, generated_at, backend FROM coach_analyses;"
+                )
+            ),
+            SchemaTable(
+                name: "coach_recommendations",
+                systemImage: "lightbulb",
+                summary: "Recommandations produites par le coach (v47) — local",
+                description: "DÉRIVÉ, non synchronisé. `ref` est une clé STABLE d'une analyse à l'autre : c'est ce qui permet à un « Pas pour moi » de survivre à une régénération (l'UPSERT conserve le status). Une ligne absente du nouveau lot est supprimée SAUF si elle est 'dismissed' — elle sert alors de pierre tombale, purgée au bout de 180 jours.",
+                columns: [
+                    .init("id",            "INTEGER", nullable: false, pk: true),
+                    .init("domain",        "TEXT", nullable: false, "'transactions' | 'investments'"),
+                    .init("ref",           "TEXT", nullable: false, "UNIQUE(domain, ref) — clé stable inter-analyses"),
+                    .init("title",         "TEXT", nullable: false),
+                    .init("detail",        "TEXT", nullable: false),
+                    .init("rationale",     "TEXT", "Les chiffres sur lesquels le modèle s'appuie"),
+                    .init("category",      "TEXT", "Libellé libre rendu par le modèle"),
+                    .init("annual_impact", "REAL", nullable: false, "EUR/an, 0 = non chiffrable"),
+                    .init("effort",        "INTEGER", nullable: false, "1..5, 5 = trivial"),
+                    .init("confidence",    "REAL", nullable: false, "0..1"),
+                    .init("status",        "TEXT", nullable: false, "'new' | 'seen' | 'done' | 'dismissed'"),
+                    .init("generated_at",  "TEXT", nullable: false),
+                ],
+                relations: ["coach_analyses.domain (logique, pas de contrainte)"],
+                example: .init(
+                    title: "Recommandations actives, les plus impactantes d'abord",
+                    sql: "SELECT domain, title, annual_impact, effort, confidence\nFROM coach_recommendations\nWHERE status IN ('new','seen')\nORDER BY annual_impact DESC;"
                 )
             ),
         ]

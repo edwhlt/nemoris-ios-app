@@ -33,6 +33,11 @@ struct MainTabView: View {
     /// iPhone : l'outil d'importation demandé par un module, présenté en feuille
     /// faute de sidebar où l'envoyer.
     @State private var requestedImport: RequestedImport?
+    /// Desktop : destination capturée pour `sidebarImportTag` (cf.
+    /// `.onChange(of: appState.importToolRequest)`) — `detailView(for:)` ne
+    /// peut pas relire `appState.importToolRequest` directement, il est déjà
+    /// remis à `nil` par le même handler avant le prochain rendu.
+    @State private var sidebarImportDestination: ImportDestination = .transactions
     #if os(macOS)
     /// Slot unique de l'inspecteur global desktop : les `.adaptivePane` de
     /// niveau 1 routent leur contenu ici (cf. doc `AdaptivePane.swift`).
@@ -155,13 +160,20 @@ struct MainTabView: View {
         // Un module a demandé l'outil d'importation : c'est la navigation
         // RACINE qui décide où l'afficher, pas le module.
         .onChange(of: appState.importToolRequest) { _, request in
-            guard request != nil else { return }
+            guard let request else { return }
             if useSidebar {
                 // Desktop : une destination à part entière, pas le volet
-                // latéral collé au module qu'on vient de quitter.
+                // latéral collé au module qu'on vient de quitter. La
+                // destination est capturée dans un `@State` DÉDIÉ (pas relue
+                // depuis `appState.importToolRequest` par `detailView(for:)`)
+                // — les deux mutations de ce handler sont coalescées dans le
+                // MÊME cycle de rendu par SwiftUI, donc `detailView` ne
+                // verrait jamais la valeur avant qu'elle soit remise à `nil`
+                // trois lignes plus bas.
+                sidebarImportDestination = request
                 state.selectedTab = sidebarImportTag
             } else {
-                requestedImport = RequestedImport(destination: request ?? .transactions)
+                requestedImport = RequestedImport(destination: request)
             }
             // La demande est consommée : elle a servi à choisir la destination,
             // la laisser rouvrirait l'import au prochain changement d'onglet.
@@ -305,7 +317,7 @@ struct MainTabView: View {
                         if iconOnlyMode {
                             Image(systemName: tab.systemImage)
                         } else {
-                            Label(tab.title, systemImage: tab.systemImage)
+                            Label(LocalizedStringKey(tab.title), systemImage: tab.systemImage)
                         }
                     }
                     .tag(tab.rawValue)
@@ -321,6 +333,11 @@ struct MainTabView: View {
                 }
                 .tag(moreTag)
         }
+        // Sans ce .id, UIKit réutilise les UITabBarItem des onglets dont la
+        // position n'a pas changé quand iconOnlyMode bascule (ex: 4→5 modules
+        // actifs) → certains gardent leur libellé texte, d'autres non (rendu
+        // incohérent). Forcer un remount complet du TabView évite ce diff partiel.
+        .id(iconOnlyMode)
         .tint(AppTheme.Colors.accent)
     }
 
@@ -346,6 +363,15 @@ struct MainTabView: View {
     /// vers le nouveau module. `.id()` force une identité de vue liée à l'onglet :
     /// au changement, SwiftUI démonte tout l'ancien sous-arbre (donc son
     /// `NavigationStack`/push interne) au lieu de tenter de le réutiliser.
+    ///
+    /// ⚠️ Cette identité NE dépend PAS de la langue, et ne doit pas le devenir.
+    /// Une version intermédiaire y avait ajouté `preferredLanguage` pour forcer
+    /// le rafraîchissement des `.navigationTitle` au changement de langue —
+    /// mauvais remède : ça détruisait tout l'état du module (navigation interne,
+    /// scroll, onglet courant) à chaque bascule, alors que la vraie cause était
+    /// ailleurs. `.localizedNavigationTitle` (cf. `AppLocalization`) résout la
+    /// langue contre le bon bundle ET se rafraîchit seul via
+    /// `@Environment(\.locale)`, sans rien reconstruire.
     #if os(macOS)
     /// macOS — **trois colonnes** : sidebar · module · panneau.
     ///
@@ -389,7 +415,7 @@ struct MainTabView: View {
         @Bindable var state = appState
         return NavigationSplitView {
             sidebarList
-                .navigationTitle("Nemoris")
+                .localizedNavigationTitle("Nemoris")
                 .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 280)
         } content: {
             detailView(for: state.selectedTab)
@@ -447,7 +473,7 @@ struct MainTabView: View {
         @Bindable var state = appState
         return NavigationSplitView {
             sidebarList
-                .navigationTitle("Nemoris")
+                .localizedNavigationTitle("Nemoris")
                 .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 280)
         } detail: {
             detailView(for: state.selectedTab)
@@ -470,7 +496,7 @@ struct MainTabView: View {
         List {
             Section("Modules") {
                 ForEach(availableTabs) { tab in
-                    sidebarRow(title: tab.title, systemImage: tab.systemImage, tag: tab.rawValue)
+                    sidebarRow(title: LocalizedStringKey(tab.title), systemImage: tab.systemImage, tag: tab.rawValue)
                 }
             }
             // ⚠️ Réglages n'est PAS un outil : c'est la configuration de l'app,
@@ -502,7 +528,7 @@ struct MainTabView: View {
         )) {
             Section("Modules") {
                 ForEach(availableTabs) { tab in
-                    sidebarLabel(tab.title, systemImage: tab.systemImage)
+                    sidebarLabel(LocalizedStringKey(tab.title), systemImage: tab.systemImage)
                         .tag(tab.rawValue)
                 }
             }
@@ -529,8 +555,15 @@ struct MainTabView: View {
     /// Sélection sur un `Button` (pas `onTapGesture`) : hit-testing immédiat et
     /// feedback au clic — l'`onTapGesture` sur une row de List donnait un ressenti
     /// "mou". Reste custom (pas de nav clavier ↑/↓, prix de la couleur non-bleue).
+    ///
+    /// ⚠️ La pastille de fond est un `.background` posé SUR le contenu du bouton,
+    /// pas un `.listRowBackground` — `.listRowBackground` remplit toute la largeur
+    /// de la row (jusqu'aux bords de la sidebar), ce qui donnait un highlight
+    /// plein-largeur au lieu de la pilule margée façon Mail. `.listRowInsets`
+    /// rétrécit la row elle-même (marge horizontale + petit espace vertical entre
+    /// rows) pour que la pastille ne touche jamais les bords de la sidebar.
     @ViewBuilder
-    private func sidebarRow(title: String, systemImage: String, tag: String) -> some View {
+    private func sidebarRow(title: LocalizedStringKey, systemImage: String, tag: String) -> some View {
         let isSelected = appState.selectedTab == tag
         Button {
             appState.selectedTab = tag
@@ -544,15 +577,17 @@ struct MainTabView: View {
                     .foregroundStyle(AppTheme.Colors.accent)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
-            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
             .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: AppTheme.Radius.sm, style: .continuous)
+                    .fill(isSelected ? Color.primary.opacity(0.12) : Color.clear)
+            )
         }
         .buttonStyle(.plain)
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isSelected ? Color.primary.opacity(0.12) : Color.clear)
-        )
+        .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+        .listRowBackground(Color.clear)
     }
     #endif
 
@@ -562,7 +597,7 @@ struct MainTabView: View {
     /// bleues malgré le `.tint(AppTheme.Colors.accent)` posé plus haut. Seul un
     /// `.foregroundStyle` explicite sur l'icône (natif, pas de hack AppKit) permet
     /// de forcer la couleur ADN ici.
-    private func sidebarLabel(_ title: String, systemImage: String) -> some View {
+    private func sidebarLabel(_ title: LocalizedStringKey, systemImage: String) -> some View {
         Label {
             Text(title)
         } icon: {
@@ -577,7 +612,7 @@ struct MainTabView: View {
             NavigationStack { SettingsView(isEmbedded: true) }
         } else if selection == sidebarImportTag {
             NavigationStack {
-                ImportEntryView(initialDestination: appState.importToolRequest ?? .transactions,
+                ImportEntryView(initialDestination: sidebarImportDestination,
                                   isEmbedded: true)
             }
         } else if let tab = MainTabItem(rawValue: selection) {
@@ -671,7 +706,7 @@ private struct MoreView: View {
                                     title: "Onglets",
                                     items: orderedHiddenTabs.map { tab in
                                         MoreItem(
-                                            label: tab.title,
+                                            label: LocalizedStringKey(tab.title),
                                             icon: tab.systemImage,
                                             color: AppTheme.Colors.accent,
                                             destination: { AnyView(destinationView(for: tab)) }
@@ -692,7 +727,7 @@ private struct MoreView: View {
                     .padding(.bottom, AppTheme.Spacing.xxxl)
                 }
             }
-            .navigationTitle("Plus")
+            .localizedNavigationTitle("Plus")
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $searchText, prompt: "Rechercher une fonctionnalité…")
             // Destination programmatique : consommée par MoreView quand une
@@ -755,9 +790,10 @@ private struct MoreView: View {
     // MARK: - Section Builder
 
     @ViewBuilder
-    private func moreSection(title: String, items: [MoreItem]) -> some View {
+    private func moreSection(title: LocalizedStringKey, items: [MoreItem]) -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-            Text(title.uppercased())
+            Text(title)
+                .textCase(.uppercase)
                 .font(AppTheme.Typography.labelSmall)
                 .foregroundStyle(AppTheme.Colors.textSecondary)
                 .padding(.horizontal, AppTheme.Spacing.xs)
@@ -892,10 +928,10 @@ private struct MoreView: View {
                     .foregroundStyle(entry.color)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.title)
+                Text(LocalizedStringKey(entry.title))
                     .font(AppTheme.Typography.bodyMedium)
                     .foregroundStyle(AppTheme.Colors.textPrimary)
-                Text(entry.description)
+                Text(LocalizedStringKey(entry.description))
                     .font(AppTheme.Typography.labelSmall)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
                     .lineLimit(2)
@@ -914,7 +950,7 @@ private struct MoreView: View {
 // MARK: - MoreItem model
 
 private struct MoreItem {
-    let label: String
+    let label: LocalizedStringKey
     let icon: String
     let color: Color
     let destination: () -> AnyView

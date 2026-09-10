@@ -19,7 +19,6 @@ struct TagPickerSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             List {
                 // Création rapide
                 Section {
@@ -71,15 +70,19 @@ struct TagPickerSheet: View {
                     }
                 }
             }
-            .searchable(text: $search, prompt: "Rechercher un tag…")
-            .navigationTitle("Tags")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("OK") { dismiss() }
-                }
-            }
-        }
+            #if os(macOS)
+            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
+            // celui du panneau hôte — sans ce modificateur, le bureau de
+            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            .scrollContentBackground(.hidden)
+            #endif
+            .paneSearchable(text: $search, prompt: "Rechercher un tag…")
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
+            // tentative précédente (`.toolbarBackground(for: .windowToolbar)`)
+            // compilait mais n'avait AUCUN effet visuel, confirmé par capture
+            // d'écran en direct (retour d'usage 2026-08-21). Cf. le
+            // commentaire de `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome("Tags", confirmLabel: "OK", onConfirm: { dismiss() })
     }
 
     private func createTag() {

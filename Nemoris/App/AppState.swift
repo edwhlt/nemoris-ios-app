@@ -75,6 +75,11 @@ final class AppState {
         : MainTabItem.dashboard.rawValue
     var selectedAccountId: Int? = nil
     var selectedAccountName: String = ""
+    /// Nom de tiers à injecter dans le filtre "Payee" de `TransactionsView`
+    /// au prochain chargement — écrit par `ReferenceDataView` (bouton "Voir
+    /// les transactions" de la fiche d'un tiers), consommé puis remis à
+    /// `nil` par `TransactionsView.loadInitialData()`.
+    var pendingPayeeFilterName: String? = nil
     var filterFromDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     var filterToDate: Date = Date()
     var importStatus: String = "Aucun import lance"
@@ -259,12 +264,12 @@ final class AppState {
 
     /// Order, visibility, and size of Dashboard cards.
     ///
-    /// This is a **stored** property with `didSet`, deliberately not a
-    /// computed get/set over UserDefaults like `mainTabOrder` just above:
-    /// the `@Observable` macro only instruments stored properties, so
-    /// mutating a computed property notifies no observer. This is invisible
-    /// for `mainTabOrder` because its settings screen keeps a local `@State`
-    /// copy, but here the grid must refresh live from the customization screen.
+    /// This is a **stored** property with `didSet` (same doctrine as
+    /// `mainTabOrder` below, since 2026-09 — see its doc for why a computed
+    /// get/set over `UserDefaults` doesn't work here): the `@Observable`
+    /// macro only instruments stored properties, so mutating a computed
+    /// property notifies no observer, and the grid must refresh live from
+    /// the customization screen.
     var dashboardLayout: [DashboardCardPreference] = DashboardLayoutStore.load() {
         didSet { DashboardLayoutStore.save(dashboardLayout) }
     }
@@ -368,16 +373,44 @@ final class AppState {
         }
     }
 
-    private let tabOrderKey = "mainTabOrder"
+    private static let tabOrderKey = "mainTabOrder"
 
-    var mainTabOrder: [MainTabItem] {
-        get {
-            let raw = UserDefaults.standard.stringArray(forKey: tabOrderKey) ?? []
-            return sanitizeTabOrder(raw.compactMap(MainTabItem.init(rawValue:)))
-        }
-        set {
-            let sanitized = sanitizeTabOrder(newValue)
-            UserDefaults.standard.set(sanitized.map(\.rawValue), forKey: tabOrderKey)
+    /// Order of the modules (sidebar on Mac/iPad, first 4 = tab bar on
+    /// iPhone).
+    ///
+    /// **Stored** property with `didSet`, NOT a computed get/set directly
+    /// over `UserDefaults` (as it was until 2026-09) — `@Observable` only
+    /// instruments STORED properties: a computed property's setter can
+    /// write to `UserDefaults` all it wants, nothing about that mutation is
+    /// ever seen as "the property changed" by any observer. That was masked
+    /// for `ModulesSettingsView` itself (its list is driven by a plain
+    /// `@State`, unaffected either way) but left every OTHER reader —
+    /// `MainTabView`'s `.onChange(of: appState.mainTabOrder)`, the macOS
+    /// sidebar order, `availableTabsResolved` — waiting for some UNRELATED
+    /// re-render to happen to "catch up" with the new order, since nothing
+    /// forced one right away. Retour d'usage 2026-09: reordering modules in
+    /// Settings felt like the app froze for a few seconds after releasing
+    /// the drag — that's the delay before some coincidental re-render
+    /// finally noticed the change. Storing it (same doctrine as
+    /// `dashboardLayout` above, which never had this problem) makes the
+    /// update immediate.
+    var mainTabOrder: [MainTabItem] = AppState.sanitizeTabOrder(
+        (UserDefaults.standard.stringArray(forKey: AppState.tabOrderKey) ?? []).compactMap(MainTabItem.init(rawValue:))
+    ) {
+        didSet {
+            // Self-correcting: any caller assigning an unsanitized array
+            // (duplicates, or missing a `MainTabItem` case added since the
+            // value was saved) gets normalized here — the computed setter
+            // used to guarantee this on every write, and callers (`.move(...)`
+            // in `ModulesSettingsView`) still rely on it never producing a
+            // malformed order. Re-`didSet`-ing with an already-sanitized
+            // value is idempotent, so this converges in at most one extra pass.
+            let sanitized = Self.sanitizeTabOrder(mainTabOrder)
+            guard sanitized == mainTabOrder else {
+                mainTabOrder = sanitized
+                return
+            }
+            UserDefaults.standard.set(mainTabOrder.map(\.rawValue), forKey: Self.tabOrderKey)
         }
     }
 
@@ -386,7 +419,6 @@ final class AppState {
         // Re-read AFTER seeding: the property was initialized earlier, with
         // the value of a key that may not have existed yet.
         showTransactions = UserDefaults.standard.bool(forKey: "featureTransactions")
-        mainTabOrder = sanitizeTabOrder(mainTabOrder)
     }
 
     /// Seeds the flags whose default is NOT `false`.
@@ -405,7 +437,7 @@ final class AppState {
         defaults.set(true, forKey: "featureTransactions")
     }
 
-    private func sanitizeTabOrder(_ input: [MainTabItem]) -> [MainTabItem] {
+    private static func sanitizeTabOrder(_ input: [MainTabItem]) -> [MainTabItem] {
         var unique: [MainTabItem] = []
         for tab in input where !unique.contains(tab) {
             unique.append(tab)

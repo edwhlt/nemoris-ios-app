@@ -18,9 +18,30 @@ struct EnvelopeEditSheet: View {
                 Section {
                     TextField("Nom (ex: Alimentation)", text: $name)
                     HStack {
-                        TextField("Montant", text: $amount).keyboardType(.decimalPad)
+                        // `LabeledContent` plutôt qu'un `TextField` nu : sur
+                        // macOS, le titre d'un `TextField` devient un LABEL à
+                        // gauche plutôt qu'un placeholder DANS le champ
+                        // (contrairement à iOS) — le champ n'avait alors
+                        // aucun label visible sur macOS. Un placeholder
+                        // "0,00" puis `.textFieldStyle(.roundedBorder)` ont
+                        // été essayés pour rendre le champ plus visiblement
+                        // "éditable", puis retirés à la demande — le style
+                        // natif (sans bordure ni placeholder, cohérent avec
+                        // le reste du Form) reste préférable. Cf.
+                        // PatternEditSheet (même symptôme). `.frame(minWidth:)`
+                        // sur le conteneur : sans lui, cette ligne partage
+                        // l'espace avec un Picker segmenté — sur macOS l'un
+                        // des deux peut se faire écraser à une largeur quasi
+                        // nulle (invisible, non cliquable) au lieu de se
+                        // répartir l'espace comme sur iOS (retour d'usage
+                        // 2026-08-19).
+                        LabeledContent("Montant") {
+                            TextField("", text: $amount)
+                                .keyboardType(.decimalPad)
+                        }
+                        .frame(minWidth: 140)
                         Picker("", selection: $period) {
-                            ForEach(BudgetPeriod.allCases, id: \.self) { p in Text(p.label).tag(p) }
+                            ForEach(BudgetPeriod.allCases, id: \.self) { p in Text(LocalizedStringKey(p.label)).tag(p) }
                         }
                         .pickerStyle(.segmented)
                     }

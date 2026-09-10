@@ -248,8 +248,8 @@ enum PositionSyncOutcome: Sendable, Equatable {
     case networkError(String)
     case invalidIdentifier
 
-    /// Libellé court FR pour affichage compact (chips, lignes de statut).
-    var shortLabel: String {
+    /// Libellé court pour affichage compact (chips, lignes de statut).
+    var shortLabel: LocalizedStringResource {
         switch self {
         case .success(let points, let source):
             return "\(points) points via \(source)"
@@ -264,6 +264,27 @@ enum PositionSyncOutcome: Sendable, Equatable {
             return "Erreur réseau"
         case .invalidIdentifier:
             return "Identifiant invalide"
+        }
+    }
+
+    /// Vrai pour tout ce qui n'est pas un succès franc — sert à isoler les
+    /// positions à surfacer dans le détail "?" (le reste est du bruit une fois
+    /// qu'on sait que la passe a globalement marché).
+    var isProblem: Bool {
+        switch self {
+        case .success, .upToDate: return false
+        case .noData, .rateLimited, .networkError, .invalidIdentifier: return true
+        }
+    }
+
+    var systemIcon: String {
+        switch self {
+        case .success:          return "checkmark.circle.fill"
+        case .upToDate:         return "checkmark.circle"
+        case .noData:           return "questionmark.circle.fill"
+        case .rateLimited:      return "hourglass.circle.fill"
+        case .networkError:     return "wifi.exclamationmark"
+        case .invalidIdentifier: return "xmark.octagon.fill"
         }
     }
 }

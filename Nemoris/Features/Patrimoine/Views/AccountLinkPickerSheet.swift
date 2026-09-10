@@ -45,7 +45,6 @@ struct AccountLinkPickerSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             List {
                 // ── Comptes & livrets ────────────────────────────────────
                 if !eligibleBankAccounts.isEmpty {
@@ -114,14 +113,18 @@ struct AccountLinkPickerSheet: View {
                     }
                 }
             }
-            .navigationTitle("Source de la valeur")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-            }
-        }
+            #if os(macOS)
+            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
+            // celui du panneau hôte — sans ce modificateur, le bureau de
+            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            .scrollContentBackground(.hidden)
+            #endif
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
+            // tentative précédente (`.toolbarBackground(for: .windowToolbar)`)
+            // compilait mais n'avait AUCUN effet visuel, confirmé par capture
+            // d'écran en direct (retour d'usage 2026-08-21). Cf. le
+            // commentaire de `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome("Source de la valeur", cancelLabel: "Annuler", onCancel: { dismiss() })
     }
 
     // MARK: - Rows
@@ -179,7 +182,7 @@ struct AccountLinkPickerSheet: View {
                         .foregroundStyle(conflict ? AppTheme.Colors.textSecondary : AppTheme.Colors.textPrimary)
                         .strikethrough(conflict)
                     HStack(spacing: 4) {
-                        Text(acc.accountType.label)
+                        Text(LocalizedStringKey(acc.accountType.label))
                             .font(AppTheme.Typography.labelMedium)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                         if conflict {

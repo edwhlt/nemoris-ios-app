@@ -140,7 +140,7 @@ struct PaywallView: View {
                         .frame(width: 26)
                         .foregroundStyle(AppTheme.Colors.accent)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(feature.title)
+                        Text(LocalizedStringKey(feature.title))
                             .font(.subheadline)
                             .fontWeight(.medium)
                         Text(feature.description)
@@ -417,7 +417,7 @@ struct PaywallOverlay: ViewModifier {
                     .foregroundStyle(AppTheme.Colors.textSecondary)
 
                 VStack(spacing: 4) {
-                    Text(feature.title)
+                    Text(LocalizedStringKey(feature.title))
                         .font(.title3)
                         .fontWeight(.semibold)
                     Text(feature.description)

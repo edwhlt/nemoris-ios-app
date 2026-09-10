@@ -30,7 +30,7 @@ struct PatternDetailPane: View {
                         .background((pattern.isExpense ? AppTheme.Colors.danger : AppTheme.Colors.success).opacity(0.12), in: Circle())
                     VStack(alignment: .leading, spacing: 2) {
                         Text(pattern.name).font(AppTheme.Typography.bodyMedium)
-                        Text(pattern.frequency.label)
+                        Text(LocalizedStringKey(pattern.frequency.label))
                             .font(AppTheme.Typography.labelSmall)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
@@ -43,8 +43,12 @@ struct PatternDetailPane: View {
             }
 
             Section("Détails") {
-                LabeledContent("Fréquence", value: pattern.frequency.label)
-                if pattern.frequency == .monthly, let day = pattern.anchorDay {
+                LabeledContent {
+                    Text(LocalizedStringKey(pattern.frequency.label))
+                } label: {
+                    Text("Fréquence")
+                }
+                if pattern.frequency.usesDayOfMonthAnchor, let day = pattern.anchorDay {
                     LabeledContent("Jour du mois", value: "\(day)")
                 }
                 if let categoryName {

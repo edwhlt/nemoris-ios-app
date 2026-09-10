@@ -135,16 +135,39 @@ final class ImportSessionViewModel {
         // disponible offline (sans hop main actor par row).
         let tiersForLookup = allTiers
 
+        // AutoDiscovery : observe chaque résolution .unknown / .picker faible pendant
+        // l'import (le principal pourvoyeur de volume) pour promouvoir un marchand
+        // "learned" après N occurrences récurrentes (cf. NemorisEngine/Learning/AutoDiscovery).
+        // Réutilise engine.db/engine.store — aucune donnée n'est dupliquée, la config
+        // par défaut (3 occurrences / 60 jours) est celle du moteur.
+        let discovery = AutoDiscovery(db: engine.db, store: engine.store)
+
         for chunk in chunks {
             let labels = chunk.map { session.rows[$0].rawLabel }
             // Résolution du batch en background (CPU-bound).
-            let snapshots: [TierResolutionSnapshot] = await Task.detached(priority: .userInitiated) {
-                labels.map { label in
-                    (try? engine.resolve(label)).map {
-                        Self.snapshot(from: $0, allTiers: tiersForLookup)
-                    } ?? .needsManualPick(reason: "error", topMerchantId: nil, topName: nil, topScore: nil)
+            let (snapshots, promotedInBatch): ([TierResolutionSnapshot], Bool) = await Task.detached(priority: .userInitiated) {
+                var promoted = false
+                let snaps = labels.map { label -> TierResolutionSnapshot in
+                    guard let resolved = try? engine.resolve(label) else {
+                        return .needsManualPick(reason: "error", topMerchantId: nil, topName: nil, topScore: nil)
+                    }
+                    // Silencieux par design (comme le `try?` de la résolution ci-dessus) :
+                    // une erreur d'écriture dans engine.sqlite ne doit jamais faire échouer
+                    // l'import, l'apprentissage est un bonus, pas une dépendance critique.
+                    if (try? discovery.observe(resolved)) != nil {
+                        promoted = true
+                    }
+                    return Self.snapshot(from: resolved, allTiers: tiersForLookup)
                 }
+                return (snaps, promoted)
             }.value
+
+            // Un marchand a été promu "learned" pendant ce batch → recharge le snapshot
+            // du moteur pour que les labels similaires des batches SUIVANTS (même import,
+            // ou un import futur) soient reconnus dès maintenant.
+            if promotedInBatch {
+                try? engine.reloadMerchantSnapshot()
+            }
 
             // Apply sur MainActor + update progress après chaque batch.
             for (i, rowIdx) in chunk.enumerated() {
@@ -180,6 +203,7 @@ final class ImportSessionViewModel {
     /// L'étape 0 (regex) court-circuite tout le reste — pas d'appel engine, pas de risque
     /// de faux positif du moteur. C'est ce qui permet à l'utilisateur d'écraser une
     /// mauvaise détection engine en collant simplement une regex sur son tier.
+    ///
     private nonisolated static func snapshot(from r: ResolvedTransaction, allTiers: [Tiers]) -> TierResolutionSnapshot {
         // === ÉTAPE 0 : REGEX-FIRST ===
         // L'utilisateur a explicitement défini un pattern → on lui fait confiance.
@@ -576,8 +600,11 @@ final class ImportSessionViewModel {
             return
         }
         let resolver: TierResolver? = {
-            guard let engine = EngineBootstrap.shared.engine else { return nil }
-            return TierResolver(engine: engine, dbPath: DatabaseManager.shared.sqliteURL().path)
+            // Gate historique : on n'écrit un payee suggéré que si le moteur est prêt
+            // (TierResolver lui-même n'a plus besoin de l'engine depuis le cleanup
+            // du chemin resolve() mort — cf. TierResolver.swift).
+            guard EngineBootstrap.shared.engine != nil else { return nil }
+            return TierResolver(dbPath: DatabaseManager.shared.sqliteURL().path)
         }()
 
         var summary = ImportCommitSummary()
@@ -612,6 +639,27 @@ final class ImportSessionViewModel {
                 _ = txRepo.updatePayeeFull(updated)
                 resolvedByEngineId[eid] = existing.id
                 resolvedByNameKey[needle] = existing.id
+                return existing.id
+            }
+            return nil
+        }
+
+        // Helper local : même principe que findOrLink mais pour les contacts P2P,
+        // qui n'ont pas d'engine_merchant_id (le moteur détecte QUE c'est un virement
+        // nominatif, jamais QUI). Sans ce lookup, "Papa" recevait un nouveau tier à
+        // chaque import. Restreint à tierType == .contact pour ne jamais accrocher
+        // un homonyme marchand (ex. une boutique qui porterait le même nom).
+        // Préfixe "contact:" pour ne pas partager le namespace de resolvedByNameKey
+        // avec les noms de marchands (needle identique possible entre les deux).
+        func findContactByName(_ name: String) -> Int? {
+            let needle = name.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+            let cacheKey = "contact:" + needle
+            if let pid = resolvedByNameKey[cacheKey] { return pid }
+            if let existing = allTiers.first(where: {
+                $0.tierType == .contact &&
+                $0.name.folding(options: .diacriticInsensitive, locale: .current).lowercased() == needle
+            }) {
+                resolvedByNameKey[cacheKey] = existing.id
                 return existing.id
             }
             return nil
@@ -655,18 +703,28 @@ final class ImportSessionViewModel {
                         }
                     }
                 case .suggestContact(let name, _):
-                    if let newId = txRepo.addTiersAndGetId(name: name, regex: "", categoryId: nil) {
+                    // Lie d'abord à un contact déjà créé (même personne détectée sur un
+                    // import précédent, ou sur une row précédente de CE commit) avant
+                    // d'en créer un nouveau — sinon "Papa" se dupliquait à chaque import.
+                    if let existingId = findContactByName(name) {
+                        payeeId = existingId
+                    } else if let newId = txRepo.addTiersAndGetId(name: name, regex: "", categoryId: nil) {
                         // Marquer comme custom (personne) sans re-fetcher toute la table.
+                        // tierType: .contact — sans quoi le payee gardait le défaut .merchant
+                        // (mauvaise icône de repli, mauvais tri dans Données).
                         let contactTiers = Tiers(
                             id: newId, name: name, regex: nil,
                             categoryId: nil, linkedCompteId: nil,
                             engineMerchantId: nil, domain: nil,
                             address: nil, city: nil, country: nil,
-                            groupId: nil, custom: true, note: nil
+                            groupId: nil, custom: true, note: nil,
+                            tierType: .contact
                         )
                         _ = txRepo.updatePayeeFull(contactTiers)
                         payeeId = newId
                         summary.newContacts += 1
+                        let needle = name.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+                        resolvedByNameKey["contact:" + needle] = newId
                     }
                 case .systemOperation, .needsManualPick, .pending:
                     // payee_id reste nil — la transaction sera insérée sans tier

@@ -64,6 +64,12 @@ struct TagQuickSheet: View {
                     }
                 }
             }
+            #if os(macOS)
+            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
+            // celui du panneau hôte — sans ce modificateur, le bureau de
+            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            .scrollContentBackground(.hidden)
+            #endif
             .onAppear {
                 guard !isLoaded else { return }
                 selectedTagIds = Set(repository.fetchTags(forTransaction: transactionId).map(\.id))

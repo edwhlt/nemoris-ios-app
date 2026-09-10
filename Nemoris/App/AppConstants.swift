@@ -3,18 +3,6 @@ import Foundation
 /// Global application constants.
 enum AppConstants {
 
-    // MARK: - Store (StoreKit product IDs)
-    //
-    // These identifiers must match exactly what is configured in
-    // App Store Connect > app > In-App Purchases.
-    //
-    // Subscriptions ("Finance Pro" group):
-    //   - monthlyID  → Auto-Renewable Subscription, duration: 1 month
-    //   - yearlyID   → Auto-Renewable Subscription, duration: 1 year
-    //
-    // One-time purchase:
-    //   - lifetimeID → Non-Consumable
-
     enum Store {
         static let monthlyID  = "fr.hedwin.nemoris.subscription.monthly"
         static let yearlyID   = "fr.hedwin.nemoris.subscription.yearly"
@@ -26,7 +14,16 @@ enum AppConstants {
     }
 
     enum Legal {
-        static let privacyPolicyURL = URL(string: "https://nemoris.hedwin.fr/en/privacy")!
-        static let termsOfUseURL    = URL(string: "https://nemoris.hedwin.fr/en/terms")!
+        static let privacyPolicyURL = URL(string: "https://nemorisapp.com/en/privacy")!
+        static let termsOfUseURL    = URL(string: "https://nemorisapp.com/en/terms")!
+    }
+
+    enum Shortcuts {
+        /// Lien iCloud du raccourci "Importer une transaction Apple Pay"
+        /// (automatisation personnelle Raccourcis → `ImportTransactionApplePayEntityIntent`).
+        /// ⚠️ Se fige à l'export : si le raccourci est modifié côté Raccourcis,
+        /// il faut le repartager (Partager → Copier le lien iCloud) et mettre
+        /// à jour cette constante — Apple ne republie pas le même lien.
+        static let applePayInstallURL = URL(string: "https://www.icloud.com/shortcuts/d43dedc201014857859c6b5204535233")!
     }
 }

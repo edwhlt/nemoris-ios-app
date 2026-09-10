@@ -12,8 +12,8 @@ struct DashboardCardContext {
 
     /// Sous-titre de période, partagé par les cartes qui affichent un agrégat borné
     /// dans le temps (« Sur juillet 2026 » / « Sur l'année 2026 »).
-    var periodSubtitle: String {
-        period.monthLabel.map { "Sur \($0)" } ?? "Sur l'année \(period.year)"
+    var periodSubtitle: LocalizedStringResource {
+        period.monthLabel.map { "Sur \($0)" } ?? "Sur l'année \(period.year.yearLabel)"
     }
 }
 

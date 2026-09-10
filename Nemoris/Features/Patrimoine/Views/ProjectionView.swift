@@ -90,7 +90,7 @@ struct ProjectionView: View {
     @ViewBuilder private var scenarioPicker: some View {
         Picker("Scenario", selection: $scenario) {
             ForEach(ProjectionScenario.allCases) { s in
-                Text(s.label).tag(s)
+                Text(LocalizedStringKey(s.label)).tag(s)
             }
         }
         .pickerStyle(.segmented)
@@ -255,7 +255,7 @@ struct ProjectionView: View {
                 Image(systemName: scenario.systemIcon)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(AppTheme.Colors.accent)
-                Text(scenario.label)
+                Text(LocalizedStringKey(scenario.label))
                     .font(AppTheme.Typography.titleSmall)
                     .foregroundStyle(AppTheme.Colors.textPrimary)
             }
@@ -277,7 +277,7 @@ struct ProjectionView: View {
     }
 
     @ViewBuilder
-    private func inputRow(label: String, value: Double, suffix: String = "", color: Color) -> some View {
+    private func inputRow(label: LocalizedStringKey, value: Double, suffix: String = "", color: Color) -> some View {
         HStack {
             Text(label)
                 .font(AppTheme.Typography.bodyMedium)

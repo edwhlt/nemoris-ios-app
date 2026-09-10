@@ -23,7 +23,6 @@ struct PayeeGroupPickerView: View {
     }
 
     var body: some View {
-        NavigationStack {
             List {
                 Button {
                     onSelect(nil)
@@ -47,14 +46,12 @@ struct PayeeGroupPickerView: View {
                                 dismiss()
                             } label: {
                                 HStack {
-                                    Image(systemName: g.engineMerchantId == nil ? "person.crop.rectangle" : "building.2")
+                                    // `engineMerchantId` : cf. commentaire de
+                                    // `PayeeGroupManagerView.row` — toujours
+                                    // `nil` en pratique, icône constante.
+                                    Image(systemName: "building.2")
                                         .foregroundStyle(AppTheme.Colors.accent)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(g.displayName).foregroundStyle(AppTheme.Colors.textPrimary)
-                                        if let eid = g.engineMerchantId {
-                                            Text(eid).font(.caption2.monospaced()).foregroundStyle(AppTheme.Colors.textSecondary)
-                                        }
-                                    }
+                                    Text(g.displayName).foregroundStyle(AppTheme.Colors.textPrimary)
                                     Spacer()
                                     if currentGroupId == g.id {
                                         Image(systemName: "checkmark").foregroundStyle(AppTheme.Colors.accent)
@@ -66,19 +63,27 @@ struct PayeeGroupPickerView: View {
                     }
                 }
             }
-            .searchable(text: $search, prompt: "Rechercher un groupe…")
-            .navigationTitle("Groupe de marque")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { showCreateForm = true } label: {
-                        Image(systemName: "plus")
-                    }
-                }
-            }
+            #if os(macOS)
+            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
+            // celui du panneau hôte — sans ce modificateur, le bureau de
+            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            .scrollContentBackground(.hidden)
+            // ⚠️ Vérifié en direct (2026-08-26) sur `ImportActionsHelpSheet` :
+            // un `.frame(maxWidth: .infinity, maxHeight: .infinity)` seul
+            // (« greedy », qui ne fait que remplir l'espace déjà offert) NE
+            // SUFFIT PAS à empêcher un `List` de s'effondrer quand cette vue
+            // est atteinte via un `.sheet()` brut SANS `.adaptivePaneFrame()`
+            // externe (ex. `TierUpdateSheet`, `PayeeCreationFormSheet`) —
+            // macOS calcule alors la hauteur de la fenêtre depuis la taille
+            // "naturelle" du contenu, et un `List` ne la reporte pas de façon
+            // fiable dans ce contexte. Le `minHeight` NUMÉRIQUE est ce qui
+            // force réellement une hauteur — même valeur que
+            // `AdaptivePane.adaptivePaneFrame()` (`minHeight: 520`), pour
+            // rester cohérent avec les panes qui, eux, obtiennent cette
+            // contrainte de l'extérieur.
+            .frame(maxWidth: .infinity, minHeight: 520, maxHeight: .infinity)
+            #endif
+            .paneSearchable(text: $search, prompt: "Rechercher un groupe…")
             .sheet(isPresented: $showCreateForm) {
                 CreatePayeeGroupSheet(prefilledName: search.trimmingCharacters(in: .whitespaces)) { name in
                     if let id = repository.addPayeeGroup(displayName: name) {
@@ -89,9 +94,29 @@ struct PayeeGroupPickerView: View {
                         dismiss()
                     }
                 }
+                // Cf. CLAUDE.md §5 : ré-injection \.locale obligatoire pour toute
+                // `.sheet()` niveau 2+ atteignable sur macOS. `\.paneHostContext`
+                // itou : ce picker peut lui-même être hébergé dans l'inspecteur
+                // macOS (`.inspector`, atteint via `.adaptivePane` depuis
+                // `PayeeDetailView`) — sans reset à `.modal`, le `.paneChrome`
+                // de `CreatePayeeGroupSheet` publierait ses boutons dans la
+                // barre système au lieu de les dessiner dans CETTE fenêtre
+                // séparée (aucun bouton visible dans le sheet lui-même).
+                .environment(\.locale, AppLocalization.locale)
+                .environment(\.paneHostContext, .modal)
             }
             .task { loadGroups() }
-        }
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
+            // tentative précédente (`.toolbarBackground(for: .windowToolbar)`)
+            // compilait mais n'avait AUCUN effet visuel, confirmé par capture
+            // d'écran en direct (retour d'usage 2026-08-21). Cf. le
+            // commentaire de `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome(
+                "Groupe de marque",
+                cancelLabel: "Annuler", onCancel: { dismiss() },
+                confirmLabel: "Créer", confirmIcon: "plus",
+                onConfirm: { showCreateForm = true }
+            )
     }
 
     private func loadGroups() {
@@ -113,7 +138,6 @@ private struct CreatePayeeGroupSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section {
                     TextField("Ex. : Carrefour", text: $name)
@@ -123,21 +147,21 @@ private struct CreatePayeeGroupSheet: View {
                 }
             }
             .nemorisFormStyle()
-            .navigationTitle("Nouveau groupe")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
+            // tentative précédente (`.toolbarBackground(for: .windowToolbar)`)
+            // compilait mais n'avait AUCUN effet visuel, confirmé par capture
+            // d'écran en direct (retour d'usage 2026-08-21). Cf. le
+            // commentaire de `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome(
+                "Nouveau groupe",
+                cancelLabel: "Annuler", onCancel: { dismiss() },
+                confirmLabel: "Créer",
+                confirmDisabled: name.trimmingCharacters(in: .whitespaces).isEmpty,
+                onConfirm: {
+                    let trimmed = name.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.isEmpty else { return }
+                    onCreate(trimmed)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Créer") {
-                        let trimmed = name.trimmingCharacters(in: .whitespaces)
-                        guard !trimmed.isEmpty else { return }
-                        onCreate(trimmed)
-                    }
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-        }
+            )
     }
 }

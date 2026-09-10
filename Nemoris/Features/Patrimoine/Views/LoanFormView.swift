@@ -113,10 +113,10 @@ struct LoanFormView: View {
                 Section {
                     Picker("Type", selection: $loanType) {
                         ForEach(LoanType.allCases, id: \.self) { t in
-                            Text(t.label).tag(t)
+                            Text(LocalizedStringKey(t.label)).tag(t)
                         }
                     }
-                    Text(loanType.explanation)
+                    Text(LocalizedStringKey(loanType.explanation))
                         .font(AppTheme.Typography.bodySmall)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 } header: {
@@ -129,7 +129,9 @@ struct LoanFormView: View {
                         Text(loanType == .revolving ? "Capital restant" : "Capital emprunté")
                             .font(AppTheme.Typography.bodyMedium)
                         Spacer()
-                        TextField("0,00", text: $principalText)
+                        // Titre vide : la row a déjà son label — cf.
+                        // TransactionEditSheet pour la raison macOS.
+                        TextField("", text: $principalText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(maxWidth: 160)
@@ -140,7 +142,7 @@ struct LoanFormView: View {
                             Text("Taux annuel")
                                 .font(AppTheme.Typography.bodyMedium)
                             Spacer()
-                            TextField("0,00", text: $annualRatePercentText)
+                            TextField("", text: $annualRatePercentText)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(maxWidth: 100)
@@ -195,7 +197,7 @@ struct LoanFormView: View {
                         Text("Assurance / mois")
                             .font(AppTheme.Typography.bodyMedium)
                         Spacer()
-                        TextField("0,00", text: $insuranceMonthlyText)
+                        TextField("", text: $insuranceMonthlyText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(maxWidth: 160)
@@ -324,7 +326,7 @@ struct LoanFormView: View {
     // MARK: - Helpers UI
 
     @ViewBuilder
-    private func previewRow(label: String, value: Double, tint: Color) -> some View {
+    private func previewRow(label: LocalizedStringKey, value: Double, tint: Color) -> some View {
         HStack {
             Text(label)
                 .font(AppTheme.Typography.bodyMedium)

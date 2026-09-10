@@ -44,6 +44,8 @@ struct InvestmentsView: View {
     /// en crée un dédié à la volée. Pour lier une source à un compte EXISTANT,
     /// voir `InvestmentAccountFormView.linkedSourcesSection`.
     @State private var showLiveSyncCatalog = false
+    /// Coach investissement — présenté en panneau, comme les autres outils du module.
+    @State private var showCoach = false
 
     // Phase 2 : import devient un sheet dédié, plus un onglet.
     @State private var showImportSheet = false
@@ -62,6 +64,8 @@ struct InvestmentsView: View {
 
     /// Skeleton tant que le 1er `viewModel.load()` n'est pas terminé.
     @State private var hasLoaded = false
+    /// Détail "?" du statut de sync — liste TOUTES les positions, tous comptes confondus.
+    @State private var showSyncDetail = false
 
     var isEmbedded: Bool = false
 
@@ -152,7 +156,7 @@ struct InvestmentsView: View {
             // L'import CSV est accessible via le toolbar Menu (anciennement onglet).
             dashboardTab
         }
-        .navigationTitle("Investissements")
+        .localizedNavigationTitle("Investissements")
         .toolbar {
             #if os(macOS)
             // macOS : les 2 actions du menu "⋯" deviennent des boutons icône
@@ -160,6 +164,7 @@ struct InvestmentsView: View {
             // `ToolbarItemGroup` (le groupement natif — `ControlGroup` rendait
             // des boutons isolés).
             ToolbarItemGroup(placement: .topBarTrailing) {
+                PaneToggleButton(label: "Coach investissement", systemImage: "lightbulb", isOn: $showCoach)
                 PaneToggleButton(label: "Ajouter un compte", systemImage: "building.columns", isOn: $showAddAccountForm)
                 // Entrée d'import UNIQUE : le parcours intelligent gère déjà
                 // PDF / capture d'écran / image / CSV (cf. branche iOS).
@@ -172,18 +177,23 @@ struct InvestmentsView: View {
                 } label: {
                     Label("Importer un relevé…", systemImage: "square.and.arrow.down")
                 }
-                .help("Importer un relevé…")
+                .localizedHelp("Importer un relevé…")
                 // Déplacé depuis Settings : c'est une option du
                 // module, pas un réglage global. `ToolbarPaywallGate` gère le
                 // même verrouillage Pro que l'ancienne entrée Settings.
                 ToolbarPaywallGate(feature: .investmentsLiveSync) {
                     PaneToggleButton(label: "Lier un exchange / wallet", systemImage: "arrow.triangle.2.circlepath", isOn: $showLiveSyncCatalog)
                 }
-                .help("Lier un exchange / wallet")
+                .localizedHelp("Lier un exchange / wallet")
             }
             #else
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Button {
+                        showCoach = true
+                    } label: {
+                        Label("Coach investissement", systemImage: "lightbulb")
+                    }
                     Button {
                         showAddAccountForm = true
                     } label: {
@@ -231,6 +241,9 @@ struct InvestmentsView: View {
         // compte dédié est créé par `LiveSyncLinkFormView.save()`. `onDismiss`
         // recharge la liste des comptes pour que le nouveau compte (créé même
         // si la 1ʳᵉ sync échoue) apparaisse immédiatement.
+        .adaptivePane(isPresented: $showCoach) {
+            CoachView(domain: .investments)
+        }
         .adaptivePane(isPresented: $showLiveSyncCatalog, onDismiss: { viewModel.load() }) {
             NavigationStack {
                 LiveSyncProviderPickerView()
@@ -265,6 +278,9 @@ struct InvestmentsView: View {
             InvestmentPositionFormView(accountId: position.accountId, position: position) { updated, isNew in
                 viewModel.savePosition(updated, isNew: isNew)
             }
+        }
+        .adaptivePane(isPresented: $showSyncDetail) {
+            InvestmentSyncDetailSheet(content: .list(summary: nil, positions: allSyncPositionStatuses))
         }
         .adaptivePane(isPresented: $showImportSheet) {
             importTab
@@ -320,7 +336,7 @@ struct InvestmentsView: View {
     @MainActor
     private static let syncRelativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "fr_FR")
+        formatter.locale = AppLocalization.locale
         formatter.unitsStyle = .short
         return formatter
     }()
@@ -340,15 +356,36 @@ struct InvestmentsView: View {
             } else if let last = service.lastSyncAt {
                 Text("Actualisé \(Self.syncRelativeFormatter.localizedString(for: last, relativeTo: Date()))")
                 // Erreurs éventuelles de la dernière passe, en une ligne discrète.
-                if let summary = service.lastSummary,
-                   summary.contains("limité") || summary.contains("erreur") || summary.contains("KO") {
-                    Text("· \(summary)")
+                // `lastSyncHadIssues` (pas un `.contains("erreur")` sur le texte
+                // résolu — cassé dès que l'app n'est plus en français).
+                if let summary = service.lastSummary, service.lastSyncHadIssues {
+                    (Text("· ") + Text(summary))
                         .lineLimit(1)
                 }
+            }
+            if !viewModel.allPositions.isEmpty {
+                Spacer(minLength: 4)
+                SyncInfoButton(isPresented: $showSyncDetail)
             }
         }
         .font(AppTheme.Typography.labelSmall)
         .foregroundStyle(AppTheme.Colors.textSecondary)
+    }
+
+    /// Statut de sync de TOUTES les positions, tous comptes confondus — même
+    /// source (`outcomesByIdentifier`) que les niveaux compte/position, alimentée
+    /// par n'importe quel déclencheur de sync (passe globale, "Synchroniser
+    /// tout" d'un compte, pull-to-refresh d'une position).
+    private var allSyncPositionStatuses: [SyncPositionStatus] {
+        let outcomes = InvestmentAutoSyncService.shared.outcomesByIdentifier
+        return viewModel.allPositions.map { position in
+            let key = position.bestSyncIdentifier.uppercased()
+            return SyncPositionStatus(
+                id: position.id,
+                name: position.assetName.isEmpty ? position.ticker : position.assetName,
+                outcome: outcomes[key]
+            )
+        }
     }
 
     /// Ligne KPI compacte "Investi X · Plus-value Y" (remplace la carte 2 badges).
@@ -398,8 +435,9 @@ struct InvestmentsView: View {
                         previousValue: viewModel.portfolioStartValue,
                         currency: "EUR",
                         rangeLabel: variationRangeLabel(viewModel.selectedTimeRange),
-                        // basis variation = positions seules pour cohérence avec portfolioStartValue
-                        variationBasisValue: viewModel.portfolioCurrentValue
+                        // basis variation = positions PRICED seules, même sous-ensemble
+                        // que portfolioStartValue (cf. portfolioVariationBasisValue)
+                        variationBasisValue: viewModel.portfolioVariationBasisValue
                     )
 
                     // KPI en ligne discrète (remplace la carte 2 StatBadge).
@@ -595,17 +633,25 @@ struct InvestmentsView: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             SectionHeader(title: "Comptes (\(viewModel.accounts.count))")
                 .padding(.horizontal, AppTheme.Spacing.sm)
-            #if os(macOS)
-            // macOS : le détail compte s'ouvre dans le PANNEAU (adaptivePane),
-            // pas un push — cohérent avec le reste du drill-down de l'app
-            // (Tricount, tiers, transactions…) et ça évite intégralement la
-            // récursion AutoLayout documentée sur le push profondeur 1→2 (le
-            // détail position, niveau 2 depuis ce panneau, retombe déjà en
-            // sheet automatiquement via \.paneHostContext — plus besoin du
-            // traitement spécial `panePosition` dans InvestmentAccountDetailView).
-            // Ni List imbriquée (boucle de contraintes AutoLayout documentée).
+            // ⚠️ PAS de `List` sur AUCUNE des deux plateformes — cf. le
+            // commentaire détaillé équivalent dans
+            // `InvestmentAccountDetailView.positionsCard` : une `List`
+            // `.scrollDisabled(true)` imbriquée dans un `ScrollView` VIRTUALISE
+            // ses rows, donc toute hauteur devinée OU mesurée depuis son
+            // propre contenu (les deux ont été essayés) est structurellement
+            // fragile — la variante "mesurée" entre même en boucle de
+            // rétroaction (rétrécir la List rend moins de rows, donc mesure
+            // moins, donc rétrécit encore). Un `VStack` n'a besoin d'aucune
+            // hauteur devinée : SwiftUI le dimensionne à son contenu réel.
+            // Contrepartie assumée sur iOS : le swipe natif disparaît, les
+            // mêmes actions restent joignables par appui long (`.contextMenu`,
+            // déjà branché par `.rowActions` sur les deux plateformes).
             VStack(spacing: 0) {
                 ForEach(viewModel.accounts) { account in
+                    #if os(macOS)
+                    // macOS : le détail compte s'ouvre dans le PANNEAU
+                    // (adaptivePane), pas un push — cohérent avec le reste du
+                    // drill-down de l'app (Tricount, tiers, transactions…).
                     Button {
                         pushedAccount = account
                     } label: {
@@ -619,6 +665,21 @@ struct InvestmentsView: View {
                         leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingAccount = account }],
                         trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { accountToDelete = account }]
                     )
+                    #else
+                    NavigationLink {
+                        InvestmentAccountDetailView(viewModel: viewModel, account: account)
+                    } label: {
+                        accountRow(account)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, AppTheme.Spacing.sm)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .rowActions(
+                        leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingAccount = account }],
+                        trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { accountToDelete = account }]
+                    )
+                    #endif
                     if account.id != viewModel.accounts.last?.id {
                         Divider()
                             .overlay(AppTheme.Colors.textSecondary.opacity(0.12))
@@ -626,46 +687,14 @@ struct InvestmentsView: View {
                     }
                 }
             }
-            // Carte unique (pas de List possible ici, cf. commentaire ci-dessus) :
-            // même langage visuel que .macGroupedRow ailleurs dans l'app — un seul
-            // fond arrondi enveloppant toutes les rows, séparées par de simples
-            // Divider. Pas de first/last par row : un seul groupe, pas de section.
+            // Carte unique, même langage visuel que .macGroupedRow ailleurs
+            // dans l'app — un seul fond arrondi enveloppant toutes les rows,
+            // séparées par de simples Divider. Pas de first/last par row : un
+            // seul groupe, pas de section.
             .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
-            // Pas de présentation ici : `pushedAccount` bascule le CONTENU du
-            // module (cf. `dashboardContent`) — le compte s'affiche en pleine
-            // largeur, pas dans le panneau.
-            #else
-            // iOS : List conservée pour le swipe natif (RowActions → .swipeActions).
-            List {
-                ForEach(viewModel.accounts) { account in
-                    NavigationLink {
-                        InvestmentAccountDetailView(viewModel: viewModel, account: account)
-                    } label: {
-                        accountRow(account)
-                    }
-                    .listRowBackground(AppTheme.Colors.surface)
-                    .listRowInsets(EdgeInsets(top: 6, leading: AppTheme.Spacing.sm, bottom: 6, trailing: AppTheme.Spacing.sm))
-                    .listRowSeparatorTint(AppTheme.Colors.textSecondary.opacity(0.12))
-                    .rowActions(
-                        // .sheet(item:) s'ouvre dès qu'editingAccount devient non-nil
-                        leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingAccount = account }],
-                        trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { accountToDelete = account }],
-                        leadingFullSwipe: false,
-                        trailingFullSwipe: false
-                    )
-                }
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .scrollDisabled(true)
-            // Hauteur estimée : ~64pt par row (titre + sous-titre + paddings aérés).
-            .frame(height: CGFloat(viewModel.accounts.count) * 64)
-            // .plain (nécessaire pour le calcul de hauteur ci-dessus) désactive le
-            // groupement insetGrouped natif dont dépend .macGroupedRow ailleurs —
-            // on arrondit donc la List entière en un seul bloc, même langage visuel
-            // que la branche macOS juste au-dessus (un seul fond, pas de first/last).
-            .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
-            #endif
+            // Pas de présentation ici (macOS) : `pushedAccount` bascule le
+            // CONTENU du module (cf. `dashboardContent`) — le compte s'affiche
+            // en pleine largeur, pas dans le panneau.
         }
     }
 
@@ -723,7 +752,7 @@ struct InvestmentsView: View {
     }
 
     /// Label affiché à côté du % de variation dans le hero ("sur 1 mois", etc.)
-    private func variationRangeLabel(_ range: InvestmentTimeRange) -> String {
+    private func variationRangeLabel(_ range: InvestmentTimeRange) -> LocalizedStringResource {
         switch range {
         case .oneDay:     return "sur 1 jour"
         case .oneWeek:    return "sur 1 semaine"
@@ -969,7 +998,7 @@ struct InvestmentAccountFormView: View {
                         .textInputAutocapitalization(.characters)
                     Picker("Type", selection: $accountType) {
                         ForEach(InvestmentAccountType.allCases, id: \.rawValue) { type in
-                            Text(type.label).tag(type.rawValue)
+                            Text(LocalizedStringKey(type.label)).tag(type.rawValue)
                         }
                     }
                     DatePicker("Date d'ouverture", selection: $openedAt, displayedComponents: .date)
@@ -1181,7 +1210,7 @@ struct InvestmentPositionFormView: View {
                 Section {
                     Picker("Type", selection: $assetType) {
                         ForEach(InvestmentAssetType.allCases, id: \.rawValue) { type in
-                            Text(type.label).tag(type.rawValue)
+                            Text(LocalizedStringKey(type.label)).tag(type.rawValue)
                         }
                     }
                     TextField("Nom actif", text: $assetName)

@@ -25,7 +25,7 @@ struct SavingsBreakdownRow: View {
         }
     }
 
-    private func miniStat(title: String, value: Double, color: Color) -> some View {
+    private func miniStat(title: LocalizedStringKey, value: Double, color: Color) -> some View {
         VStack(spacing: 1) {
             Text(value, format: .currency(code: "EUR").precision(.fractionLength(0)))
                 .font(.system(size: 11, weight: .semibold, design: .rounded))

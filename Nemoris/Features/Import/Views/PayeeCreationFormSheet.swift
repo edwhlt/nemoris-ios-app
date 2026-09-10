@@ -109,7 +109,6 @@ struct PayeeCreationFormSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 contextSection
                 identitySection
@@ -119,28 +118,34 @@ struct PayeeCreationFormSheet: View {
                 searchHelperSection
             }
             .nemorisFormStyle()
-            .navigationTitle("Nouveau tier")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: {
-                        Label("Annuler", systemImage: "xmark")
-                    }
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet — un
+            // `NavigationStack`+`.toolbar` natif laisse le bureau de
+            // l'utilisateur transparaître au travers du titre ET des boutons
+            // (retour d'usage 2026-08-21, capture "New Payee"). Cf. le
+            // commentaire de `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome(
+                "Nouveau tier",
+                cancelLabel: "Annuler", onCancel: { dismiss() },
+                confirmLabel: "Créer", confirmIcon: "plus",
+                confirmDisabled: name.trimmingCharacters(in: .whitespaces).isEmpty,
+                onConfirm: {
+                    onCreate(buildPayee())
+                    dismiss()
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        onCreate(buildPayee())
-                        dismiss()
-                    } label: {
-                        Label("Créer", systemImage: "plus")
-                    }
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
+            )
+            // Cf. CLAUDE.md §5 : ré-injection \.locale obligatoire pour toute
+            // `.sheet()` niveau 2+ atteignable sur macOS. `\.paneHostContext`
+            // itou : cette fiche est elle-même atteinte via un `.sheet()`
+            // ouvert depuis l'inspecteur (`ImportSessionView`), donc hérite
+            // `.inspector` — sans reset à `.modal`, le `.paneChrome` de la
+            // vue présentée ici publierait ses boutons dans la barre système
+            // au lieu de les dessiner dans cette fenêtre séparée.
             .sheet(isPresented: $showGroupPicker) {
                 PayeeGroupPickerView(currentGroupId: groupId) { group in
                     groupId = group?.id
                 }
+                .environment(\.locale, AppLocalization.locale)
+                .environment(\.paneHostContext, .modal)
             }
             .sheet(isPresented: $showFullscreenMap) {
                 EnrichmentMapFullscreenSheet(
@@ -150,6 +155,8 @@ struct PayeeCreationFormSheet: View {
                 ) { picked in
                     applyCandidate(picked)
                 }
+                .environment(\.locale, AppLocalization.locale)
+                .environment(\.paneHostContext, .modal)
             }
             // Tap sur un pin ÉTABLISSEMENT de la mini-carte → pré-remplit la fiche
             // (les pins Sirene ne sont pas dans `resultsList`, le tap-liste ne les
@@ -183,7 +190,6 @@ struct PayeeCreationFormSheet: View {
             .task {
                 if payeeGroups.isEmpty { payeeGroups = repository.fetchPayeeGroups() }
             }
-        }
     }
 
     // MARK: - Sections
@@ -773,7 +779,7 @@ struct PayeeCreationFormSheet: View {
 
     // MARK: - Style helpers
 
-    private static func style(for s: MerchantEnrichmentSource) -> (String, String, Color) {
+    private static func style(for s: MerchantEnrichmentSource) -> (LocalizedStringKey, String, Color) {
         switch s {
         case .sirene:   return ("SIRENE", "building.2.fill", .blue)
         case .mapkit:   return ("MAPS",   "map.fill",        .green)

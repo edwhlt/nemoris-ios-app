@@ -20,6 +20,11 @@ struct Account: Identifiable, Hashable {
     let id: Int
     var name: String
     var type: String = "COURANT"
+    /// v51 — exclut ce compte de tous les calculs agrégés (cumuls par catégorie,
+    /// budget, dashboard, coach IA, widget). Ses propres transactions restent
+    /// consultables normalement sur l'écran du compte. Usage type : compte de
+    /// remboursements santé/mutuelle qu'on ne veut pas voir peser sur le budget.
+    var excludedFromAggregates: Bool = false
 
     var accountType: AccountType { AccountType(rawValue: type) ?? .courant }
 }
@@ -163,6 +168,18 @@ struct CategoryNode: Identifiable {
     /// Returns all IDs in the subtree (self + descendants).
     func allIds() -> [Int] {
         [category.id] + children.flatMap { $0.allIds() }
+    }
+
+    /// Pre-order traversal (self, then each subtree) with the depth of each
+    /// node — for surfaces that can't render a real tree (a `Picker`'s menu)
+    /// but can still convey hierarchy via indentation.
+    func flattened(depth: Int = 0) -> [(node: CategoryNode, depth: Int)] {
+        [(self, depth)] + children.flatMap { $0.flattened(depth: depth + 1) }
+    }
+
+    /// Same traversal over a forest (list of roots).
+    static func flattenedForest(_ roots: [CategoryNode]) -> [(node: CategoryNode, depth: Int)] {
+        roots.flatMap { $0.flattened() }
     }
 }
 
@@ -426,14 +443,20 @@ struct TransactionFilter {
     var accountName: String
     var from: Date
     var to: Date
-    var tiersSearchText: String = ""
+    /// Filtre sur le NOM DU TIERS uniquement (payee). Distinct de
+    /// `labelSearchText` depuis la scission des deux champs dans
+    /// `TransactionFiltersSheet` — avant, un seul champ matchait l'un OU
+    /// l'autre ; désormais les deux, quand renseignés, sont exigés ensemble.
+    var payeeSearchText: String = ""
+    /// Filtre sur le libellé brut (`transactions.information`) uniquement.
+    var labelSearchText: String = ""
     var categoryId: Int = -1
     var categoryName: String = ""
     var tagNames: [String] = []
     var tagFilteredTxIds: Set<Int>? = nil
 
     var hasActiveFilters: Bool {
-        !tiersSearchText.isEmpty || categoryId != -1 || tagFilteredTxIds != nil
+        !payeeSearchText.isEmpty || !labelSearchText.isEmpty || categoryId != -1 || tagFilteredTxIds != nil
     }
 }
 
@@ -598,6 +621,23 @@ enum InvestmentAssetType: String, CaseIterable {
         case .crypto: return "Crypto"
         case .fund: return "Fonds"
         }
+    }
+
+    /// Résolution tolérante d'un `asset_type` brut stocké en base (casse/espaces non garantis —
+    /// données legacy ou édition manuelle via la Console SQL). À utiliser PARTOUT où `asset_type`
+    /// sert de clé de groupement (allocation, couleur) pour que deux variantes du même type
+    /// (ex. "stock" vs "STOCK") ne produisent jamais deux entrées distinctes côté UI.
+    init?(looselyMatching raw: String) {
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        self.init(rawValue: normalized)
+    }
+
+    /// Clé de groupement canonique pour un `asset_type` brut : le rawValue de l'enum s'il est
+    /// reconnu (quelle que soit sa casse/espacement d'origine), sinon la version normalisée
+    /// telle quelle — garantit que le groupement et l'affichage retombent toujours sur la même clé.
+    static func canonicalKey(for raw: String) -> String {
+        InvestmentAssetType(looselyMatching: raw)?.rawValue
+            ?? raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
     }
 }
 

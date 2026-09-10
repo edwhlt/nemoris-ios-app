@@ -8,19 +8,6 @@
 import WidgetKit
 import SwiftUI
 
-// MARK: - Nemoris palette (widget-local, no AppTheme access from extension)
-
-private extension Color {
-    /// Nemoris forest-teal — income, positive balance, under-budget
-    static let nSuccess = Color(red: 0.239, green: 0.667, blue: 0.510)
-    /// Nemoris terracotta — expense, negative balance, over-budget
-    static let nDanger  = Color(red: 0.761, green: 0.353, blue: 0.275)
-    /// Nemoris amber — budget warning threshold (80-100 %)
-    static let nWarning = Color(red: 0.769, green: 0.604, blue: 0.353)
-    /// Nemoris accent teal — progress bars, arc fill (healthy)
-    static let nAccent  = Color(red: 0.322, green: 0.722, blue: 0.588)
-}
-
 // MARK: - Timeline entry
 
 struct BalanceEntry: TimelineEntry {
@@ -211,7 +198,7 @@ struct NemorisWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: kind, intent: WidgetAccountIntent.self, provider: BalanceProvider()) { entry in
             NemorisWidgetEntryView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(.background, for: .widget)
         }
         .configurationDisplayName("Solde mensuel")
         .description("Dépenses et revenus du mois en cours.")
@@ -239,6 +226,11 @@ struct BudgetEntry: TimelineEntry {
     let date: Date
     let data: BudgetWidgetData
     let configuration: BudgetWidgetIntent
+    /// Le module Budget est Pro dans son ensemble (`AppFeature.budget`) — un
+    /// widget déjà posé sur l'écran d'accueil ne doit pas continuer à fuiter les
+    /// montants si l'abonnement expire. Résolu à chaque timeline, jamais mis en
+    /// cache localement (cf. `WidgetAccessGate`).
+    var isLocked: Bool = false
 }
 
 struct BudgetProvider: AppIntentTimelineProvider {
@@ -249,10 +241,12 @@ struct BudgetProvider: AppIntentTimelineProvider {
         BudgetEntry(date: Date(), data: .placeholder, configuration: BudgetWidgetIntent())
     }
     func snapshot(for configuration: BudgetWidgetIntent, in context: Context) async -> BudgetEntry {
-        BudgetEntry(date: Date(), data: loadData(), configuration: configuration)
+        let isPro = WidgetAccessGate.isPro(await WidgetAccessGate.currentAccessLevel())
+        return BudgetEntry(date: Date(), data: loadData(), configuration: configuration, isLocked: !isPro)
     }
     func timeline(for configuration: BudgetWidgetIntent, in context: Context) async -> Timeline<BudgetEntry> {
-        let entry = BudgetEntry(date: Date(), data: loadData(), configuration: configuration)
+        let isPro = WidgetAccessGate.isPro(await WidgetAccessGate.currentAccessLevel())
+        let entry = BudgetEntry(date: Date(), data: loadData(), configuration: configuration, isLocked: !isPro)
         let next = Calendar.current.date(byAdding: .minute, value: 30, to: Date()) ?? Date()
         return Timeline(entries: [entry], policy: .after(next))
     }
@@ -301,9 +295,13 @@ struct BudgetWidgetView: View {
     private var data: BudgetWidgetData { entry.data }
 
     var body: some View {
-        switch family {
-        case .systemSmall: smallView
-        default:           mediumView
+        if entry.isLocked {
+            WidgetLockedView(title: "Budget mensuel")
+        } else {
+            switch family {
+            case .systemSmall: smallView
+            default:           mediumView
+            }
         }
     }
 
@@ -400,10 +398,14 @@ struct BudgetLockView: View {
     private var ratio: Double { min(data.ratio, 1.0) }
 
     var body: some View {
-        switch family {
-        case .accessoryCircular:    circularView
-        case .accessoryRectangular: rectangularView
-        default:                    inlineView
+        if entry.isLocked {
+            WidgetLockedView(title: "Budget mensuel")
+        } else {
+            switch family {
+            case .accessoryCircular:    circularView
+            case .accessoryRectangular: rectangularView
+            default:                    inlineView
+            }
         }
     }
 
@@ -456,7 +458,7 @@ struct BudgetWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: kind, intent: BudgetWidgetIntent.self, provider: BudgetProvider()) { entry in
             BudgetWidgetView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(.background, for: .widget)
         }
         .configurationDisplayName("Budget mensuel")
         .description("Dépenses réelles vs budget prévisionnel du mois.")
@@ -469,7 +471,7 @@ struct BudgetLockWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: kind, intent: BudgetWidgetIntent.self, provider: BudgetProvider()) { entry in
             BudgetLockView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(.background, for: .widget)
         }
         .configurationDisplayName("Budget (verrouillage)")
         .description("Aperçu rapide de votre budget sur l'écran de verrouillage.")

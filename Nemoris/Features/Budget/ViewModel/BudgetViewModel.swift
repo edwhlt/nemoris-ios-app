@@ -100,6 +100,15 @@ final class BudgetViewModel {
         applyCachedOrReloadPrevisions()
     }
 
+    /// Saut direct à un mois arbitraire (pas forcément ±1) — sélecteur
+    /// mois/année, scrubber. `month` peut être n'importe quel jour DU mois
+    /// visé, normalisé au 1er.
+    func setDisplayedMonth(_ month: Date) {
+        let cal = Calendar.current
+        displayedMonth = cal.date(from: cal.dateComponents([.year, .month], from: month)) ?? month
+        applyCachedOrReloadPrevisions()
+    }
+
     /// Change le mois affiché de `delta` mois. Si les prévisions du mois cible sont
     /// déjà en cache (pré-chargées pendant qu'on regardait le mois précédent),
     /// `previsions` est réaffecté de façon SYNCHRONE — aucun aller-retour SQL entre
@@ -164,14 +173,25 @@ final class BudgetViewModel {
             }.value
 
             let candidates = RecurringDetector.detect(from: txs)
-            // Filtrer ceux deja connus
-            let knownPayeeIds = Set(patterns.compactMap { $0.payeeId })
-            let knownNames = Set(patterns.map { $0.name.lowercased() })
-            self.detectionResults = candidates.filter { c in
-                if let pid = c.payeeId, knownPayeeIds.contains(pid) { return false }
-                return !knownNames.contains(c.name.lowercased())
+            // On garde TOUS les candidats, y compris ceux qui correspondent a
+            // un motif deja existant (actif ou non) : les exclure en
+            // silence les faisait disparaitre sans explication — un retour
+            // terrain a lu ca comme "la detection ne marche pas". Le
+            // panneau les affiche grises, avec un lien vers le motif
+            // existant, plutot que de les escamoter. Tri stable : nouveaux
+            // d'abord (dans l'ordre de confiance de RecurringDetector),
+            // deja-suivis ensuite.
+            self.detectionResults = candidates.sorted { a, b in
+                let aKnown = a.existingMatch(in: patterns) != nil
+                let bKnown = b.existingMatch(in: patterns) != nil
+                return (aKnown ? 1 : 0) < (bKnown ? 1 : 0)
             }
-            self.showDetectionSheet = !self.detectionResults.isEmpty
+            // Toujours ouvrir le panneau, même sans résultat : sinon un clic sur
+            // "Détecter les récurrents" qui ne trouve rien ne fait RIEN de
+            // visible, ce qui se lit comme "le bouton ne marche plus" plutôt
+            // que "aucun récurrent ne remplit les 4 critères". Le panneau
+            // affiche alors un état vide explicite (DetectionResultsSheet).
+            self.showDetectionSheet = true
         }
     }
 
@@ -299,6 +319,30 @@ final class BudgetViewModel {
         // Skip → cancel la notif j-3 (sinon on rappelle une échéance que l'utilisateur a ignorée)
         BudgetNotificationService.cancel(forPrevisionId: prevision.id)
         refresh()
+    }
+
+    /// Arrête un récurrent à partir de cette échéance : pose `endDate` la veille
+    /// du jour attendu, régénère les prévisions (celle-ci et toutes celles après
+    /// disparaissent, aucune nouvelle ne sera générée) et réconcilie les notifs.
+    /// Contrairement à `skipPrevision` (ignore UNE occurrence, le récurrent
+    /// continue), c'est l'équivalent de modifier la date de fin du motif.
+    func stopPatternAfter(_ prevision: BudgetPrevision) {
+        guard let patternId = prevision.recurringPatternId,
+              let pattern = patterns.first(where: { $0.id == patternId }) else { return }
+        let cal = Calendar.current
+        let newEnd = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: prevision.expectedDate))
+            ?? prevision.expectedDate
+        let updated = RecurringPattern(
+            id: pattern.id, name: pattern.name, amountAvg: pattern.amountAvg,
+            amountTolerance: pattern.amountTolerance, categoryId: pattern.categoryId,
+            payeeId: pattern.payeeId, frequency: pattern.frequency, anchorDay: pattern.anchorDay,
+            isActive: pattern.isActive, isManual: pattern.isManual,
+            createdAt: pattern.createdAt, lastDetectedAt: pattern.lastDetectedAt,
+            startDate: pattern.startDate, endDate: newEnd
+        )
+        // updatePattern() persiste, régénère les previsions dans la nouvelle
+        // plage (donc plus rien après newEnd) et reschedule les notifs.
+        updatePattern(updated)
     }
 
     func matchPrevision(_ prevision: BudgetPrevision, to transactionId: Int) {
@@ -441,21 +485,59 @@ final class BudgetViewModel {
     ///    appel à `isoDate` construisait un `DateFormatter` neuf, ce qui est
     ///    coûteux, et il y en avait des dizaines de milliers.
     func calendarDays(transactions: [FinanceTransaction]) -> [CalendarDay] {
-        let cal = Calendar.current
-        let (start, _) = monthRange(displayedMonth)
-        guard let range = cal.dateInterval(of: .month, for: displayedMonth) else { return [] }
+        calendarDays(for: displayedMonth, transactions: transactions, previsions: enrichedPrevisions)
+    }
 
+    /// Variante pure adressée à un mois EXPLICITE — ne lit ni `displayedMonth`
+    /// ni `previsions`/`enrichedPrevisions`, contrairement à la surcharge
+    /// ci-dessus. Nécessaire pour le carrousel de pages du calendrier
+    /// (`BudgetView`) : les pages voisines (M-1/M+1) doivent pouvoir être
+    /// pré-rendues à partir du cache SANS que ça dépende du mois
+    /// actuellement affiché — sinon elles montreraient soit la plage de
+    /// jours du mauvais mois, soit les prévisions du mois affiché appliquées
+    /// aux transactions d'un autre mois.
+    func calendarDays(for month: Date, transactions: [FinanceTransaction], previsions: [EnrichedPrevision]) -> [CalendarDay] {
+        let cal = Calendar.current
+        guard let range = cal.dateInterval(of: .month, for: month) else { return [] }
         let totalDays = cal.dateComponents([.day], from: range.start, to: range.end).day ?? 30
-        let prevByDay = Dictionary(grouping: enrichedPrevisions) { cal.startOfDay(for: $0.expectedDate) }
+        let prevByDay = Dictionary(grouping: previsions) { cal.startOfDay(for: $0.expectedDate) }
         let txByDay = Dictionary(grouping: transactions) { cal.startOfDay(for: $0.date) }
 
         return (0..<totalDays).compactMap { offset in
-            guard let day = cal.date(byAdding: .day, value: offset, to: start) else { return nil }
+            guard let day = cal.date(byAdding: .day, value: offset, to: range.start) else { return nil }
             let key = cal.startOfDay(for: day)
             return CalendarDay(date: day,
                                previsions: prevByDay[key] ?? [],
                                transactions: txByDay[key] ?? [])
         }
+    }
+
+    /// Enrichit une liste de prévisions BRUTES (ex : `previsionsCache[key]`)
+    /// avec le nom du récurrent/de la catégorie — même logique que
+    /// `rebuildEnrichedPrevisions()`, mais pure (ne mute pas `self.enrichedPrevisions`,
+    /// ne dépend pas de `self.previsions`). Utilisée pour enrichir les
+    /// prévisions déjà pré-chargées d'un mois voisin sans y attacher celles
+    /// du mois affiché.
+    func enrichPrevisions(_ raw: [BudgetPrevision]) -> [EnrichedPrevision] {
+        let patternsById = Dictionary(patterns.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let categoryNameById = Dictionary(categories.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        return raw.compactMap { prev in
+            let pattern = prev.recurringPatternId.flatMap { patternsById[$0] }
+            let catName = pattern?.categoryId.flatMap { categoryNameById[$0] }
+            return EnrichedPrevision(
+                prevision: prev,
+                patternName: pattern?.name ?? "Manuel",
+                categoryName: catName,
+                frequency: pattern?.frequency ?? .monthly
+            )
+        }
+        .sorted { $0.expectedDate < $1.expectedDate }
+    }
+
+    /// Prévisions brutes déjà en cache pour `month` (`previsionsCache`, rempli
+    /// par `prefetchAdjacentPrevisions`) — `nil` si pas encore pré-chargées.
+    func cachedPrevisions(for month: Date) -> [BudgetPrevision]? {
+        previsionsCache[monthKey(month)]
     }
 
     // MARK: - Duplicate Matching

@@ -78,7 +78,7 @@ final class AppLockService {
         case touchID
         case opticID
 
-        var displayName: String {
+        var displayName: LocalizedStringResource {
             switch self {
             case .none:     return "Indisponible"
             case .passcode: return "Code d'accès"

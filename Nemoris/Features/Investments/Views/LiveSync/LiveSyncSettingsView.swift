@@ -148,7 +148,7 @@ struct LiveSyncLinkFormView: View {
                     Section("Chaîne") {
                         Picker("Chaîne", selection: $selectedChain) {
                             ForEach(providerType.supportedChains) { chain in
-                                Label(chain.displayName, systemImage: chain.icon).tag(chain.id)
+                                Label(LocalizedStringKey(chain.displayName), systemImage: chain.icon).tag(chain.id)
                             }
                         }
                         .pickerStyle(.menu)
@@ -436,7 +436,10 @@ struct LiveSyncLinkDetailView: View {
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
                 }
-                if let message = liveLink.lastSyncMessage, !message.isEmpty {
+                // `LocalizedStringResource` n'a pas de `.isEmpty` — inutile de
+                // toute façon : `persistPositions`/`persistTransactions`
+                // renvoient `nil` (pas `""`) quand il n'y a rien à dire.
+                if let message = liveLink.lastSyncMessage {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Statut")
                         Text(message)

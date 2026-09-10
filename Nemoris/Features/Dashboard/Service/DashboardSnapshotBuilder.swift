@@ -46,7 +46,7 @@ enum DashboardSnapshotBuilder {
 
         var snapshot = DashboardSnapshot()
         for unit in DashboardAggregate.evaluationOrder where units.contains(unit) {
-            apply(unit, sources: sources, into: &snapshot)
+            apply(unit, sources: sources, store: store, into: &snapshot)
         }
         return snapshot
     }
@@ -131,6 +131,7 @@ enum DashboardSnapshotBuilder {
     private nonisolated static func apply(
         _ unit: DashboardAggregate,
         sources: Sources,
+        store: SQLiteStore,
         into snapshot: inout DashboardSnapshot
     ) {
         switch unit {
@@ -173,6 +174,11 @@ enum DashboardSnapshotBuilder {
 
         case .insights:
             snapshot.insights = InsightEngine.compute()
+
+        case .pendingApplePay:
+            let pending = PendingApplePayRepository(store: store).fetchEntries(status: .pending)
+            snapshot.pendingApplePayCount = pending.count
+            snapshot.pendingApplePayTotal = pending.reduce(0) { $0 + abs($1.amount) }
         }
     }
 

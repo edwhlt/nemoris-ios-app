@@ -31,6 +31,31 @@ struct SkeletonTransactionRow: View {
     }
 }
 
+// MARK: Tricount entry row (matches TricountEntryRow)
+//
+// Distinct from `SkeletonTransactionRow`: `TricountEntryRow` has no avatar
+// (a small monochrome SF Symbol in a 28pt frame, not a 52pt logo circle) and
+// its second line is a plain "payer · date" caption, not a chip row — reusing
+// the transaction skeleton here made the loading state visibly jump/resize
+// once the real content replaced it (retour d'usage).
+struct SkeletonTricountEntryRow: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            SkeletonCircle(size: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                SkeletonLine(width: 150, height: 15)
+                SkeletonLine(width: 90, height: 11)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 4) {
+                SkeletonLine(width: 60, height: 15)
+                SkeletonLine(width: 40, height: 10)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 // MARK: Reference list row (matches ReferenceDataView tier/category/payment row)
 
 struct SkeletonReferenceListRow: View {
@@ -164,20 +189,28 @@ struct SkeletonPositionRow: View {
 // MARK: Calendar grid (matches BudgetView.calendarGridContent)
 
 struct SkeletonCalendarGrid: View {
+    /// `false` quand un ancêtre rend déjà sa propre ligne de jours de la
+    /// semaine — cf. `BudgetView.calendarCarousel`, qui l'affiche UNE fois
+    /// au-dessus du carrousel plutôt que par page (les pages voisines pas
+    /// encore en cache l'auraient sinon dupliquée).
+    var showsHeader: Bool = true
+
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 1), count: 7)
     private let weekdaySymbols = ["L", "M", "M", "J", "V", "S", "D"]
 
     var body: some View {
         VStack(spacing: AppTheme.Spacing.xs) {
-            HStack(spacing: 1) {
-                ForEach(weekdaySymbols, id: \.self) { d in
-                    Text(d)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                        .frame(maxWidth: .infinity)
+            if showsHeader {
+                HStack(spacing: 1) {
+                    ForEach(weekdaySymbols, id: \.self) { d in
+                        Text(d)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
+                .padding(.horizontal, AppTheme.Spacing.md)
             }
-            .padding(.horizontal, AppTheme.Spacing.md)
 
             LazyVGrid(columns: columns, spacing: 4) {
                 ForEach(0..<35, id: \.self) { _ in

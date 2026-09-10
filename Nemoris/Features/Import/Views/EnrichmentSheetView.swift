@@ -45,7 +45,6 @@ struct EnrichmentSheetView: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 contextSection
                 querySection
@@ -60,16 +59,11 @@ struct EnrichmentSheetView: View {
                 }
             }
             .nemorisFormStyle()
-            .navigationTitle("Enrichir cette ligne")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: {
-                        Label("Fermer", systemImage: "xmark")
-                    }
-                }
-            }
-        }
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
+            // barre d'outils native laisse le bureau de l'utilisateur
+            // transparaître (retour d'usage 2026-08-21). Cf. le commentaire
+            // de `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome("Enrichir cette ligne", cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 
     /// Candidats ayant des coordonnées GPS (utilisable sur la map).
@@ -293,7 +287,7 @@ struct EnrichmentSheetView: View {
         }
     }
 
-    private func establishmentBadge(_ label: String, color: Color) -> some View {
+    private func establishmentBadge(_ label: LocalizedStringKey, color: Color) -> some View {
         Text(label)
             .font(.caption2.weight(.bold))
             .padding(.horizontal, 6).padding(.vertical, 1)
@@ -403,7 +397,7 @@ struct EnrichmentSheetView: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    private static func style(for s: MerchantEnrichmentSource) -> (String, String, Color) {
+    private static func style(for s: MerchantEnrichmentSource) -> (LocalizedStringKey, String, Color) {
         switch s {
         case .sirene:   return ("SIRENE", "building.2.fill", .blue)
         case .mapkit:   return ("MAPS",   "map.fill",        .green)

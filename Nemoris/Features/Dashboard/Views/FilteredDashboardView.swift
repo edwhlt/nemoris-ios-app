@@ -83,8 +83,11 @@ struct FilteredDashboardView: View {
                         icon: "calendar",
                         color: AppTheme.Colors.accentSecondary
                     )
-                    if !filter.tiersSearchText.isEmpty {
-                        InfoBadge(label: "\"\(filter.tiersSearchText)\"", icon: "magnifyingglass", color: AppTheme.Colors.textSecondary)
+                    if !filter.payeeSearchText.isEmpty {
+                        InfoBadge(label: "\"\(filter.payeeSearchText)\"", icon: "person", color: AppTheme.Colors.textSecondary)
+                    }
+                    if !filter.labelSearchText.isEmpty {
+                        InfoBadge(label: "\"\(filter.labelSearchText)\"", icon: "text.magnifyingglass", color: AppTheme.Colors.textSecondary)
                     }
                     if !filter.categoryName.isEmpty {
                         InfoBadge(label: filter.categoryName, icon: "folder", color: AppTheme.Colors.accent)

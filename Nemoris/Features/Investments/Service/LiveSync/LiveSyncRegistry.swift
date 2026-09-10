@@ -44,16 +44,22 @@ final class LiveSyncRegistry {
 
     /// Lance la sync d'un lien spécifique. Met à jour `last_sync_*` après exécution.
     /// Retourne nil si succès, sinon le message d'erreur user-friendly.
+    ///
+    /// ⚠️ Renvoie une `String` (pas un `LocalizedStringResource`) : ce retour
+    /// n'est utilisé QUE pour un toast affiché immédiatement (même passe de
+    /// rendu, donc déjà dans la bonne langue — pas de risque de figer une
+    /// traduction). `repo.updateSyncStatus`, lui, PERSISTE le message —
+    /// c'est CE chemin qui doit rester un `LocalizedStringResource`.
     func syncLink(_ link: InvestmentLiveSyncLink) async -> String? {
         guard let providerType = Self.provider(for: link.providerId) else {
-            let msg = "Provider inconnu : \(link.providerId)"
+            let msg = LocalizedStringResource("Provider inconnu : \(link.providerId)")
             repo.updateSyncStatus(linkId: link.id, status: .error, message: msg)
-            return msg
+            return String(localized: msg)
         }
         guard let creds = credentialStore.load(linkId: link.id, providerId: link.providerId) else {
-            let msg = "Credentials manquants pour ce lien."
+            let msg = LocalizedStringResource("Credentials manquants pour ce lien.")
             repo.updateSyncStatus(linkId: link.id, status: .error, message: msg)
-            return msg
+            return String(localized: msg)
         }
 
         // Marquer pending avant l'appel (utile pour l'UI loader)
@@ -80,7 +86,7 @@ final class LiveSyncRegistry {
             // Seulement si le provider supporte (Binance pour l'instant — les wallets
             // blockchain renvoient toujours [] car leurs fetchTransactions sont stubs).
             // Les transactions persistent dans investment_orders avec external_id pour dédup.
-            var transactionsSummary = ""
+            var transactionsSummary: LocalizedStringResource?
             let transactions = (try? await providerInstance.fetchTransactions(
                 credentials: creds, config: link.config, since: nil
             )) ?? []
@@ -88,20 +94,17 @@ final class LiveSyncRegistry {
                 transactionsSummary = persistTransactions(transactions, link: linkWithAccount)
             }
 
-            let summary = [positionsSummary, transactionsSummary]
-                .filter { !$0.isEmpty }
-                .joined(separator: " · ")
-            let msg = summary.isEmpty ? nil : summary
+            let msg = Self.joinLocalized([positionsSummary, transactionsSummary].compactMap { $0 }, separator: " · ")
             repo.updateSyncStatus(linkId: link.id, status: .ok, message: msg)
             return nil
         } catch let err as LiveSyncError {
-            let msg = err.errorDescription ?? "Erreur de sync."
+            let msg = err.errorDescription.map { LocalizedStringResource(stringLiteral: $0) } ?? LocalizedStringResource("Erreur de sync.")
             repo.updateSyncStatus(linkId: link.id, status: .error, message: msg)
-            return msg
+            return String(localized: msg)
         } catch {
-            let msg = error.localizedDescription
+            let msg = LocalizedStringResource(stringLiteral: error.localizedDescription)
             repo.updateSyncStatus(linkId: link.id, status: .error, message: msg)
-            return msg
+            return error.localizedDescription
         }
     }
 
@@ -139,7 +142,7 @@ final class LiveSyncRegistry {
         _ positions: [LiveSyncPosition],
         link: InvestmentLiveSyncLink,
         providerType: InvestmentLiveSyncProvider.Type
-    ) throws -> (summary: String, accountId: Int) {
+    ) throws -> (summary: LocalizedStringResource?, accountId: Int) {
         // 1. Résoudre / créer le compte cible
         //
         // ⚠️ Ce chemin ne devrait normalement plus JAMAIS s'emprunter pour un
@@ -165,7 +168,7 @@ final class LiveSyncRegistry {
                 accountType: accountType,
                 openedAt: Date()
             ) else {
-                throw LiveSyncError.parseError("Impossible de créer le compte de sync.")
+                throw LiveSyncError.parseError(AppLocalization.string("Impossible de créer le compte de sync."))
             }
             // Lier le live_sync au compte créé pour la prochaine sync
             var updated = link
@@ -256,11 +259,11 @@ final class LiveSyncRegistry {
             zeroedCount += 1
         }
 
-        var parts: [String] = []
-        if insertedCount > 0 { parts.append("+\(insertedCount) nouvelles") }
-        if updatedCount > 0  { parts.append("\(updatedCount) maj") }
-        if zeroedCount > 0   { parts.append("\(zeroedCount) à zéro") }
-        return (parts.joined(separator: ", "), accountId)
+        var parts: [LocalizedStringResource] = []
+        if insertedCount > 0 { parts.append(LocalizedStringResource("+\(insertedCount) nouvelles")) }
+        if updatedCount > 0  { parts.append(LocalizedStringResource("\(updatedCount) maj")) }
+        if zeroedCount > 0   { parts.append(LocalizedStringResource("\(zeroedCount) à zéro")) }
+        return (Self.joinLocalized(parts, separator: ", "), accountId)
     }
 
     /// Détermine le type de compte à créer selon le provider (pour affichage user).
@@ -307,8 +310,8 @@ final class LiveSyncRegistry {
     private func persistTransactions(
         _ transactions: [LiveSyncTransaction],
         link: InvestmentLiveSyncLink
-    ) -> String {
-        guard let accountId = link.accountId else { return "" }
+    ) -> LocalizedStringResource? {
+        guard let accountId = link.accountId else { return nil }
         let positions = investmentRepo.fetchPositions(accountId: accountId)
 
         // Index par ticker (case insensitive) pour lookup O(1)
@@ -364,13 +367,24 @@ final class LiveSyncRegistry {
             deletedSynthetics += investmentRepo.deleteSyntheticOrders(positionId: positionId)
         }
 
-        var parts: [String] = []
-        if insertedCount > 0 { parts.append("+\(insertedCount) trades") }
-        if skippedDupCount > 0 { parts.append("\(skippedDupCount) déjà connus") }
-        if deletedSynthetics > 0 { parts.append("-\(deletedSynthetics) snapshot") }
+        var parts: [LocalizedStringResource] = []
+        if insertedCount > 0 { parts.append(LocalizedStringResource("+\(insertedCount) trades")) }
+        if skippedDupCount > 0 { parts.append(LocalizedStringResource("\(skippedDupCount) déjà connus")) }
+        if deletedSynthetics > 0 { parts.append(LocalizedStringResource("-\(deletedSynthetics) snapshot")) }
         // skippedNoPositionCount n'est pas affiché (verbose pour rien — l'utilisateur veut juste savoir
         // si la sync a marché). On garde le compteur en cas de debug futur.
-        return parts.joined(separator: ", ")
+        return Self.joinLocalized(parts, separator: ", ")
+    }
+
+    /// `LocalizedStringResource` n'a pas de `.joined()` — repli manuel par
+    /// imbrication (testé, supporté : cf. `AppLocalization`/CLAUDE.md §5), qui
+    /// préserve la clé + les arguments de chaque fragment au lieu de figer du
+    /// texte résolu. `nil` si `parts` est vide.
+    private static func joinLocalized(_ parts: [LocalizedStringResource], separator: String) -> LocalizedStringResource? {
+        guard let first = parts.first else { return nil }
+        return parts.dropFirst().reduce(first) { acc, part in
+            LocalizedStringResource("\(acc)\(separator)\(part)")
+        }
     }
 }
 

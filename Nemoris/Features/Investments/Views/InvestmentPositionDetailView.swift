@@ -36,8 +36,11 @@ struct InvestmentPositionDetailView: View {
         case unavailable(String)
     }
     @State private var isSyncing = false
-    @State private var statusMessage: String?
+    @State private var statusMessage: LocalizedStringResource?
     @State private var showEditForm = false
+    /// Détail de la dernière synchro (ouvert par le bouton "?" sous le chart) —
+    /// a remplacé la carte "Dernière synchro du cours" en pleine largeur.
+    @State private var showSyncDetail = false
 
     // ordres
     // Pour éviter le bug "tap pour modifier crée un nouveau ordre", on utilise
@@ -199,29 +202,31 @@ struct InvestmentPositionDetailView: View {
         return cleaned.isEmpty ? points : cleaned
     }
 
-    /// Domaine Y du chart calculé à partir des valeurs MEANINGFUL pour le cours :
-    /// les `close` des price points + les `unitPrice` des BUY/SELL visibles + le PRU.
-    /// On EXCLUT volontairement les dividendes (qui valent quelques centimes à
-    /// quelques euros par titre, écrasaient l'axe Y vers 0 si inclus).
-    /// Padding de ±8% pour ne pas coller aux bords.
+    /// Repères secondaires du chart : PRU + cours des BUY/SELL visibles.
+    /// Les dividendes en sont EXCLUS (quelques centimes par titre : les inclure
+    /// écrasait l'axe Y vers 0).
+    ///
+    /// ⚠️ Ce sont des repères, PAS la série : ils n'ont pas le droit de fixer
+    /// l'échelle. Un titre acheté 250 € qui cote 40 € imposerait sinon un
+    /// domaine 0–270 à toutes les plages, et le mouvement du mois (39 → 41 €)
+    /// se lirait comme une droite. `ChartYDomain` ne les retient que s'ils
+    /// tombent à portée de la courbe ; hors champ, c'est le repère qu'on masque
+    /// (cf. `chartYDomain.contains(...)` au rendu), pas la courbe qu'on écrase.
+    private var chartYReferences: [Double] {
+        var refs = visibleOrders
+            .filter { $0.orderType != .dividend }
+            .map(\.unitPrice)
+        if currentWeightedPRU > 0 { refs.append(currentWeightedPRU) }
+        return refs
+    }
+
+    /// Domaine Y calculé sur la série TRACÉE (`chartPoints`, et pas
+    /// `positionPricePoints` : en 1J le domaine doit suivre la série intraday).
     private var chartYDomain: ClosedRange<Double> {
-        // chartPoints (et pas positionPricePoints) : en 1J le domaine doit
-        // suivre la série intraday effectivement tracée.
-        var values: [Double] = chartPoints.map(\.close)
-        values.append(contentsOf:
-            visibleOrders
-                .filter { $0.orderType != .dividend }
-                .map(\.unitPrice)
-        )
-        if currentWeightedPRU > 0 { values.append(currentWeightedPRU) }
-        guard let lo = values.min(), let hi = values.max(), hi > lo else {
-            return 0...100  // fallback safe
-        }
-        // Padding 8% en bas / 8% en haut. Si lo*0.92 < 0, on borne à 0 (les
-        // cours sont positifs).
-        let padded_lo = max(0, lo * 0.92)
-        let padded_hi = hi * 1.08
-        return padded_lo...padded_hi
+        ChartYDomain.compute(values: chartPoints.map(\.close),
+                             references: chartYReferences,
+                             padding: 0.08,
+                             clampToZero: true)
     }
 
     /// Indique si la date d'achat est visible dans la plage actuelle.
@@ -266,7 +271,7 @@ struct InvestmentPositionDetailView: View {
     }
 
     /// Titre du hero adapté au cycle de vie de la position.
-    private var heroTitle: String {
+    private var heroTitle: LocalizedStringResource {
         if isClosedPosition { return "P&L réalisé sur la position" }
         if valuationIsEstimated { return "Valeur estimée (PRU × qty)" }
         return "Valeur de la position"
@@ -351,7 +356,6 @@ struct InvestmentPositionDetailView: View {
                         kpisCard
                         ordersCard       // — historique des ordres BUY/SELL/DIV
                         detailsCard
-                        syncTraceCard    // Diagnostic dernière tentative de sync
                         if let statusMessage {
                             AppCard {
                                 Text(statusMessage)
@@ -434,6 +438,9 @@ struct InvestmentPositionDetailView: View {
                 viewModel.load()
                 appState.dataRefreshToken = UUID()
             }
+        }
+        .adaptivePane(isPresented: $showSyncDetail) {
+            InvestmentSyncDetailSheet(content: .single(syncTrace))
         }
         .confirmationDialog(
             "Supprimer cette position ?",
@@ -642,8 +649,33 @@ struct InvestmentPositionDetailView: View {
                     .font(AppTheme.Typography.labelMedium)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             }
+
+            if let trace = syncTrace {
+                HStack(spacing: 6) {
+                    Image(systemName: trace.status.icon)
+                        .font(.system(size: 11))
+                        .foregroundStyle(syncTraceColor(trace.status))
+                    (Text(LocalizedStringKey(trace.status.label)) + Text(" — \(trace.humanizedAttemptedAt)"))
+                        .font(AppTheme.Typography.labelMedium)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    SyncInfoButton(isPresented: $showSyncDetail)
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(.horizontal, AppTheme.Spacing.sm)
+    }
+
+    /// Identifiers utilisés pour retrouver la trace de sync (ISIN prioritaire,
+    /// même logique que `bestSyncIdentifier`).
+    private var syncTraceIdentifiers: [String] {
+        [position.isin, position.ticker].filter { !$0.isEmpty }
+    }
+
+    private var syncTrace: InvestmentSyncTraceStore.Entry? {
+        InvestmentSyncTraceStore.fetchBest(identifiers: syncTraceIdentifiers)
     }
 
     /// Bougie lue par le bandeau : celle sous le doigt pendant le scrub, la
@@ -776,7 +808,10 @@ struct InvestmentPositionDetailView: View {
 
                 // Ligne horizontale au PRU = seuil de break-even visuel.
                 // Au-dessus = profit zone, en-dessous = loss zone.
-                if pru > 0 {
+                // Masqué quand il sort du domaine : le PRU est un repère, il
+                // ne justifie pas d'aplatir la courbe pour rester visible. Il
+                // reste lisible dans les KPIs et la carte Détails.
+                if pru > 0, chartYDomain.contains(pru) {
                     RuleMark(y: .value("PRU", pru))
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.55))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
@@ -816,22 +851,28 @@ struct InvestmentPositionDetailView: View {
                         .foregroundStyle(annotationColor(order.orderType).opacity(0.5))
                         .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
 
-                    PointMark(
-                        x: .value("Ordre", order.executedAt),
-                        y: .value("Cours", markerY)
-                    )
-                    .foregroundStyle(annotationColor(order.orderType))
-                    .symbol {
-                        ZStack {
-                            Circle()
-                                .fill(AppTheme.Colors.surface)
-                                .frame(width: 10, height: 10)
-                            Circle()
-                                .strokeBorder(annotationColor(order.orderType), lineWidth: 2)
-                                .frame(width: 10, height: 10)
+                    // La pastille n'est posée que si son cours tient dans le
+                    // domaine ; sinon la règle verticale porte seule l'info
+                    // utile (la DATE de l'ordre) plutôt que de forcer l'échelle
+                    // à s'ouvrir jusqu'à un cours devenu très éloigné.
+                    if chartYDomain.contains(markerY) {
+                        PointMark(
+                            x: .value("Ordre", order.executedAt),
+                            y: .value("Cours", markerY)
+                        )
+                        .foregroundStyle(annotationColor(order.orderType))
+                        .symbol {
+                            ZStack {
+                                Circle()
+                                    .fill(AppTheme.Colors.surface)
+                                    .frame(width: 10, height: 10)
+                                Circle()
+                                    .strokeBorder(annotationColor(order.orderType), lineWidth: 2)
+                                    .frame(width: 10, height: 10)
+                            }
                         }
+                        .symbolSize(70)
                     }
-                    .symbolSize(70)
                 }
 
                 // Indicateur visuel quand l'utilisateur scrub la chart (vertical line + dot
@@ -1026,7 +1067,7 @@ struct InvestmentPositionDetailView: View {
     }
 
     @ViewBuilder
-    private func breakdownRow(label: String, value: Double, currency: String) -> some View {
+    private func breakdownRow(label: LocalizedStringKey, value: Double, currency: String) -> some View {
         HStack {
             Text(label)
                 .font(AppTheme.Typography.labelMedium)
@@ -1044,44 +1085,12 @@ struct InvestmentPositionDetailView: View {
                 SectionHeader(title: "Détails")
                 detailRow("Ticker", value: position.ticker.isEmpty ? "—" : position.ticker)
                 detailRow("ISIN", value: position.isin.isEmpty ? "— (à renseigner pour sync fiable)" : position.isin)
-                detailRow("Type", value: InvestmentAssetType(rawValue: position.assetType)?.label ?? position.assetType)
+                detailRow("Type", value: InvestmentAssetType(looselyMatching: position.assetType)?.label ?? position.assetType)
                 detailRow("Quantité", value: String(format: "%.6f", position.quantity).trimmedZeros)
                 detailRow("PRU", value: position.averageBuyPrice.formatted(.currency(code: account.currency).locale(appState.locale)))
                 detailRow("Investi", value: position.investedAmount.formatted(.currency(code: account.currency).locale(appState.locale)))
                 detailRow("Date d'achat", value: position.purchaseDate.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(appState.locale)))
                 detailRow("Compte", value: "\(account.name) · \(account.accountType)", isLast: true)
-            }
-        }
-    }
-
-    /// Card "Dernière sync" — visible seulement si une tentative a été
-    /// enregistrée. Sinon on n'encombre pas l'UI.
-    @ViewBuilder
-    private var syncTraceCard: some View {
-        let identifiers = [position.isin, position.ticker].filter { !$0.isEmpty }
-        if let trace = InvestmentSyncTraceStore.fetchBest(identifiers: identifiers) {
-            AppCard {
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                    SectionHeader(title: "Dernière synchro du cours")
-                    HStack(spacing: AppTheme.Spacing.sm) {
-                        Image(systemName: trace.status.icon)
-                            .foregroundStyle(syncTraceColor(trace.status))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(trace.status.label) — \(trace.humanizedAttemptedAt)")
-                                .font(AppTheme.Typography.titleSmall)
-                                .foregroundStyle(AppTheme.Colors.textPrimary)
-                            Text(trace.message)
-                                .font(AppTheme.Typography.bodySmall)
-                                .foregroundStyle(AppTheme.Colors.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            if !trace.symbolsTried.isEmpty {
-                                Text("Symbole(s) essayé(s) : \(trace.symbolsTried.joined(separator: ", "))")
-                                    .font(AppTheme.Typography.labelMedium)
-                                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -1095,7 +1104,7 @@ struct InvestmentPositionDetailView: View {
         }
     }
 
-    private func detailRow(_ label: String, value: String, isLast: Bool = false) -> some View {
+    private func detailRow(_ label: LocalizedStringKey, value: String, isLast: Bool = false) -> some View {
         VStack(spacing: 0) {
             HStack {
                 Text(label)
@@ -1190,13 +1199,20 @@ struct InvestmentPositionDetailView: View {
                     // Pas de tap volontaire : un ordre affecte le PnL, on évite les
                     // modifications par tap accidentel.
                     let reversed = orders.reversed().map { $0 }
-                    #if os(macOS)
-                    // ⚠️ macOS : pas de List imbriquée — une List (= NSTableView)
-                    // scrollDisabled à hauteur figée dans le ScrollView de la fiche
-                    // provoque une boucle de contraintes AutoLayout → beachball puis
-                    // crash NSException _postWindowNeedsUpdateConstraints. Même mine
-                    // que positionsCard (cf. InvestmentAccountDetailView, fix 22/07).
-                    // → VStack simple + RowActions (clic droit).
+                    // ⚠️ PAS de `List` sur AUCUNE des deux plateformes — même
+                    // mine que `positionsCard` (InvestmentAccountDetailView) :
+                    // macOS y crashait (boucle de contraintes AutoLayout,
+                    // NSException _postWindowNeedsUpdateConstraints) ; iOS a
+                    // ensuite montré qu'une `List` `.scrollDisabled(true)`
+                    // imbriquée dans un `ScrollView` VIRTUALISE ses rows, donc
+                    // toute hauteur devinée OU mesurée depuis son propre
+                    // contenu est structurellement fragile (mesurer entre
+                    // même en boucle de rétroaction : rétrécir la List rend
+                    // moins de rows, donc mesure moins, donc rétrécit
+                    // encore). Un `VStack` n'a besoin d'aucune hauteur
+                    // devinée — sain sur les deux plateformes, sans branche
+                    // `#if` nécessaire ici (pas de tap sur la row, seulement
+                    // RowActions swipe/clic droit, déjà cross-plateforme).
                     VStack(spacing: 0) {
                         ForEach(reversed) { order in
                             orderRowContent(order)
@@ -1212,27 +1228,6 @@ struct InvestmentPositionDetailView: View {
                             }
                         }
                     }
-                    #else
-                    List {
-                        ForEach(reversed) { order in
-                            orderRowContent(order)
-                                .listRowBackground(AppTheme.Colors.surface)
-                                .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                                .listRowSeparatorTint(AppTheme.Colors.textSecondary.opacity(0.1))
-                                .rowActions(
-                                    leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingOrder = order }],
-                                    trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive) { deleteOrder(order) }],
-                                    leadingFullSwipe: false,
-                                    trailingFullSwipe: false
-                                )
-                        }
-                    }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .scrollDisabled(true)
-                    // ~62pt par ligne d'ordre (icône + label + sous-titre + montant)
-                    .frame(height: CGFloat(reversed.count) * 62)
-                    #endif
                 }
             }
         }
@@ -1248,7 +1243,7 @@ struct InvestmentPositionDetailView: View {
                 .foregroundStyle(orderColor(order.orderType))
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 3) {
-                Text(order.orderType.label)
+                Text(LocalizedStringKey(order.orderType.label))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppTheme.Colors.textPrimary)
                 HStack(spacing: 4) {
@@ -1301,7 +1296,7 @@ struct InvestmentPositionDetailView: View {
         // selon que l'identifier soit reconnu comme crypto ou pas.
         let identifier = position.bestSyncIdentifier
         guard !identifier.isEmpty else {
-            statusMessage = "Aucun ISIN ni ticker — impossible de synchroniser."
+            statusMessage = LocalizedStringResource("Aucun ISIN ni ticker — impossible de synchroniser.")
             return
         }
         await viewModel.syncMarketHistory(for: identifier)
@@ -1309,7 +1304,7 @@ struct InvestmentPositionDetailView: View {
         loadCachedHistory()
     }
 
-    private func variationRangeLabel(_ range: InvestmentTimeRange) -> String {
+    private func variationRangeLabel(_ range: InvestmentTimeRange) -> LocalizedStringResource {
         switch range {
         case .oneDay:     return "sur 1 jour"
         case .oneWeek:    return "sur 1 semaine"

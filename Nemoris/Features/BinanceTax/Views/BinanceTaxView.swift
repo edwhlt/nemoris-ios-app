@@ -669,7 +669,7 @@ struct BinanceTaxView: View {
             disclaimerSection
         }
         .nemorisFormStyle()
-        .navigationTitle("Fiscal Binance")
+        .localizedNavigationTitle("Fiscal Binance")
         .navigationBarTitleDisplayMode(.large)
     }
 

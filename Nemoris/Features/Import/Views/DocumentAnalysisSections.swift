@@ -46,7 +46,7 @@ struct DocumentAnalysisProgressSection: View {
     let done: Int
     let total: Int
     /// Phrase d'attente adaptée au type d'import.
-    var subtitle: String
+    var subtitle: LocalizedStringKey
 
     private var showsDeterminate: Bool { total > 1 }
 
@@ -127,7 +127,7 @@ struct ImportSourceBreakdownSection: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(AppTheme.Colors.accent)
-                        .accessibilityLabel("Inspecter les données lues")
+                        .localizedAccessibilityLabel("Inspecter les données lues")
                     }
                 }
             } header: {
@@ -136,7 +136,15 @@ struct ImportSourceBreakdownSection: View {
                 Text("Vérifie qu'aucun fichier n'a été laissé de côté. L'icône { } montre les données brutes lues pour ce fichier.")
             }
             .sheet(item: $inspected) { summary in
+                // Ré-injection \.locale obligatoire (CLAUDE.md §5) et
+                // `\.paneHostContext` itou : cette section vit dans une vue
+                // elle-même hébergée dans l'inspecteur macOS (`.inspector`) —
+                // sans reset à `.modal`, le `.paneChrome` d'`ImportDebugJSONView`
+                // publierait ses boutons dans la barre système au lieu de les
+                // dessiner dans CETTE fenêtre séparée (aucun bouton visible).
                 ImportDebugJSONView(title: summary.sourceName, json: debugJSON(summary))
+                    .environment(\.locale, AppLocalization.locale)
+                    .environment(\.paneHostContext, .modal)
             }
         }
     }
@@ -160,7 +168,6 @@ struct ImportDebugJSONView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
             ScrollView([.vertical, .horizontal]) {
                 Text(json)
                     .font(.system(size: 11, design: .monospaced))
@@ -169,17 +176,12 @@ struct ImportDebugJSONView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(AppTheme.Colors.background.ignoresSafeArea())
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
             .tint(AppTheme.Colors.accent)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Label("Fermer", systemImage: "xmark")
-                    }
-                }
-            }
-        }
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
+            // barre d'outils native laisse le bureau de l'utilisateur
+            // transparaître (retour d'usage 2026-08-21). Cf. le commentaire
+            // de `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome(title, cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 }
 

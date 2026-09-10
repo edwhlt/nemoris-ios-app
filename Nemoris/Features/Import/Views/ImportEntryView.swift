@@ -148,14 +148,29 @@ struct ImportEntryView: View {
         if case .mapping(let index) = step,
            index < pendingMappings.count,
            let accountId = selectedAccountId {
-            mappingView(index: index, accountId: accountId)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button { step = nil } label: {
-                            Label("Retour", systemImage: "chevron.left")
+            // Cf. `formContent` : seul le cas `.sheet` niveau 2+ a besoin de
+            // la chrome dessinée à la main (matériau translucide natif
+            // inopérant sur cette surface, retour d'usage 2026-08-21) —
+            // embarquée et inspecteur restent sur leur toolbar native, saine.
+            if !isEmbedded, paneHostContext == .modal {
+                macSheetChrome(
+                    title: "Mapping des colonnes",
+                    cancel: PaneBarButton(label: "Retour", systemImage: "chevron.left", showsTitle: false, action: { step = nil }),
+                    destructive: nil,
+                    confirm: nil
+                ) {
+                    mappingView(index: index, accountId: accountId)
+                }
+            } else {
+                mappingView(index: index, accountId: accountId)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button { step = nil } label: {
+                                Label("Retour", systemImage: "chevron.left")
+                            }
                         }
                     }
-                }
+            }
         } else {
             formContent
         }
@@ -190,7 +205,63 @@ struct ImportEntryView: View {
         .id(pending.id)
     }
 
+    /// Chrome (titre + "Annuler") au-dessus de `formBody`, adaptée aux
+    /// multiples contextes de présentation de cette vue :
+    /// - Embarquée (sidebar/MoreView/Settings) : le bouton retour du stack
+    ///   parent suffit, aucune chrome supplémentaire.
+    /// - Panneau macOS niveau 1 (inspecteur) : chrome publiée dans la barre
+    ///   système via `ImportEntryInspectorChrome` (surface native saine, pas
+    ///   de bug).
+    /// - `.sheet` macOS niveau 2+ (`.adaptivePane` imbriqué dans un autre
+    ///   panneau déjà ouvert) : SEUL cas où un `.toolbar` natif atterrirait
+    ///   sur la fenêtre séparée dont le matériau translucide laisse le
+    ///   bureau transparaître (retour d'usage 2026-08-21) — chrome dessinée
+    ///   à la main via `macSheetChrome`, réutilisée depuis `AdaptivePane.swift`
+    ///   plutôt qu'un `.paneChrome` générique qui ne connaît pas l'axe
+    ///   `isEmbedded` propre à cette vue.
+    /// - iOS non-embarquée (sheet) : `.toolbar` natif, jamais affecté (bug
+    ///   macOS-only).
     @ViewBuilder private var formContent: some View {
+        #if os(macOS)
+        if !isEmbedded, paneHostContext == .modal {
+            macSheetChrome(
+                title: "Importer",
+                cancel: PaneBarButton(label: "Annuler", systemImage: "xmark", showsTitle: false, action: cancelFunnel),
+                destructive: nil,
+                confirm: nil
+            ) {
+                formBody
+            }
+        } else {
+            formBody
+                .localizedNavigationTitle("Importer")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    // Le seul autre cas où ce toolbar peut afficher un bouton
+                    // est déjà couvert par `!isEmbedded, host == .modal`
+                    // ci-dessus (routé vers `macSheetChrome`) — ici il ne
+                    // reste donc que l'inspecteur (chrome publiée à part,
+                    // pas de bouton natif) ou l'embarqué (rien à afficher).
+                }
+                .modifier(ImportEntryInspectorChrome(isEmbedded: isEmbedded, dismiss: cancelFunnel))
+        }
+        #else
+        formBody
+            .localizedNavigationTitle("Importer")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if !isEmbedded {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button { cancelFunnel() } label: {
+                            Label("Annuler", systemImage: "xmark")
+                        }
+                    }
+                }
+            }
+        #endif
+    }
+
+    @ViewBuilder private var formBody: some View {
             Form {
                 Section {
                     Picker("Destination", selection: Binding(
@@ -198,7 +269,7 @@ struct ImportEntryView: View {
                         set: { newValue in destination = newValue }
                     )) {
                         ForEach(ImportDestination.allCases) { dest in
-                            Label(dest.displayName, systemImage: dest.icon)
+                            Label(LocalizedStringKey(dest.displayName), systemImage: dest.icon)
                                 .tag(dest)
                         }
                     }
@@ -206,7 +277,7 @@ struct ImportEntryView: View {
                 } header: {
                     Text("Destination")
                 } footer: {
-                    Text(activeDestination.hint)
+                    Text(LocalizedStringKey(activeDestination.hint))
                 }
 
                 Section("Compte cible") {
@@ -352,36 +423,6 @@ struct ImportEntryView: View {
             // son appelant — sans ça, ses contrôles système reprennent la
             // couleur d'accentuation du système, d'où des icônes bleues.
             .tint(AppTheme.Colors.accent)
-            .navigationTitle("Importer des transactions")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                // Poussée (module direct, sidebar/MoreView/Settings) : le bouton
-                // retour du stack parent suffit. En sheet iOS OU panneau macOS
-                // (adaptivePane) : on fournit "Annuler" — publié dans la barre
-                // système sur macOS via `paneHostContext == .inspector` (pas de
-                // `.toolbar` natif qui remonterait dans la barre du module),
-                // rendu natif ici sinon.
-                #if os(macOS)
-                if !isEmbedded, paneHostContext != .inspector {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button { cancelFunnel() } label: {
-                            Label("Annuler", systemImage: "xmark")
-                        }
-                    }
-                }
-                #else
-                if !isEmbedded {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button { cancelFunnel() } label: {
-                            Label("Annuler", systemImage: "xmark")
-                        }
-                    }
-                }
-                #endif
-            }
-            #if os(macOS)
-            .modifier(ImportEntryInspectorChrome(isEmbedded: isEmbedded, dismiss: cancelFunnel))
-            #endif
             .fileImporter(
                 isPresented: $showFilePicker,
                 allowedContentTypes: [.commaSeparatedText, .tabSeparatedText, .plainText, .utf8PlainText,
@@ -438,7 +479,7 @@ struct ImportEntryView: View {
     /// pré-remplie par le point d'entrée.
     private var activeDestination: ImportDestination { destination ?? initialDestination }
 
-    private var importButtonLabel: String {
+    private var importButtonLabel: LocalizedStringKey {
         switch stagedFiles.count {
         case 0:  return "Importer"
         case 1:  return "Importer 1 document"

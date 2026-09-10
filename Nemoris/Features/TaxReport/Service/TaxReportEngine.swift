@@ -86,7 +86,7 @@ struct PEASnapshotEntry: Identifiable, Hashable {
     }
 
     /// Avertissement fiscal selon l'âge.
-    var taxStatusLabel: String {
+    var taxStatusLabel: LocalizedStringResource {
         if ageYears < 5 { return "Retrait avant 5 ans : clôture obligatoire + IR" }
         if ageYears < 8 { return "Retraits possibles (5-8 ans, sans clôture)" }
         return "8 ans+ : retraits/rentes exonérés (hors prélèvements sociaux)"

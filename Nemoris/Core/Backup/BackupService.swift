@@ -92,7 +92,7 @@ final class BackupService {
 
         var displayName: String {
             let fmt = DateFormatter()
-            fmt.locale = Locale(identifier: "fr_FR")
+            fmt.locale = AppLocalization.locale
             fmt.dateStyle = .medium
             fmt.timeStyle = .short
             return fmt.string(from: createdAt)
@@ -182,17 +182,8 @@ final class BackupService {
     func restore(snapshot: Snapshot) throws {
         let dbURL = DatabaseManager.shared.sqliteURL()
 
-        // 1) Safety backup of the current DB BEFORE any other operation.
-        if FileManager.default.fileExists(atPath: dbURL.path) {
-            let safetyDir = try ensureLocalBackupDir()
-            let safetyName = "nemoris-pre-restore-\(Self.filenameTimestampFormatter.string(from: Date())).sqlite"
-            let safetyURL = safetyDir.appendingPathComponent(safetyName)
-            try copyDatabase(from: dbURL, to: safetyURL)
-            Self.log.info("Sauvegarde de sécurité créée : \(safetyName)")
-        }
-
-        // 2) For iCloud: force the file to download if it isn't present
-        //    locally yet (otherwise copyItem would fail).
+        // 1) For iCloud: force the file to download if it isn't present
+        //    locally yet — needed for the schema check below AND the copy.
         if snapshot.isICloud, !FileManager.default.fileExists(atPath: snapshot.url.path) {
             try FileManager.default.startDownloadingUbiquitousItem(at: snapshot.url)
             // Waits for the download to complete (30s timeout). This blocks
@@ -201,11 +192,47 @@ final class BackupService {
             try waitForFile(at: snapshot.url, timeout: 30)
         }
 
-        // 3) Replaces the current DB with the snapshot.
+        // 2) Schema-drift check — refuse a file whose TABLE STRUCTURE was
+        //    altered outside the versioned migration chain (e.g. by hand via
+        //    the SQL console: an ALTER/DROP/CREATE never wrapped in a real
+        //    migration). Row DATA differences are irrelevant here and never
+        //    block the restore — only structure is compared. Runs on a
+        //    DISPOSABLE scratch copy: `detectSchemaDrift` migrates it in
+        //    place, and the snapshot file itself must never be mutated.
+        //    Checked BEFORE anything else touches the live database, so a
+        //    refusal here leaves the app exactly as it was.
+        let scratchURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nemoris-restore-check-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: scratchURL) }
+        try FileManager.default.copyItem(at: snapshot.url, to: scratchURL)
+        // Backups are written read-only (cf. `copyDatabase`) and `copyItem`
+        // preserves that mode — this scratch copy needs to be writable for
+        // `detectSchemaDrift` to migrate it.
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: scratchURL.path)
+        if case .drifted(let missing, let extra, let changed) = DatabaseManager.detectSchemaDrift(at: scratchURL) {
+            Self.log.error("Restauration refusée (dérive de schéma) : manquantes=\(missing), en trop=\(extra), modifiées=\(changed)")
+            throw BackupError.schemaDrifted(missingTables: missing, extraTables: extra, changedTables: changed)
+        }
+
+        // 3) Safety backup of the current DB BEFORE any other operation.
+        if FileManager.default.fileExists(atPath: dbURL.path) {
+            let safetyDir = try ensureLocalBackupDir()
+            let safetyName = "nemoris-pre-restore-\(Self.filenameTimestampFormatter.string(from: Date())).sqlite"
+            let safetyURL = safetyDir.appendingPathComponent(safetyName)
+            try copyDatabase(from: dbURL, to: safetyURL)
+            Self.log.info("Sauvegarde de sécurité créée : \(safetyName)")
+        }
+
+        // 4) Replaces the current DB with the snapshot.
         try? FileManager.default.removeItem(at: dbURL)
         try FileManager.default.copyItem(at: snapshot.url, to: dbURL)
+        // Snapshots are read-only (cf. `copyDatabase`) and `copyItem`
+        // preserves that mode — without restoring write access here, the
+        // LIVE database would come out read-only and the app couldn't
+        // record another transaction until manually fixed.
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: dbURL.path)
 
-        // 4) Re-applies migrations (covers a snapshot made on an older
+        // 5) Re-applies migrations (covers a snapshot made on an older
         //    version). Migrations are idempotent by design.
         DatabaseManager.shared.migrateIfNeeded()
 
@@ -270,9 +297,16 @@ final class BackupService {
     /// SQLite copy: the database uses on-demand connections rather than a
     /// persistent one, so no explicit WAL checkpoint is needed before
     /// copying — a plain file copy is used directly.
+    ///
+    /// The destination is set READ-ONLY once written: a snapshot is a
+    /// restore point, never something the app (or the user, via Finder)
+    /// should be able to edit or truncate in place. Deleting it during
+    /// pruning still works — removing a file only needs write access to its
+    /// PARENT directory, not the file itself.
     private func copyDatabase(from src: URL, to dest: URL) throws {
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.copyItem(at: src, to: dest)
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: dest.path)
     }
 
     /// Filename format (`nemoris-backup-yyyy-MM-dd-HHmmss.sqlite`,
@@ -362,6 +396,10 @@ enum BackupError: LocalizedError {
     case iCloudUnavailable
     case downloadTimeout
     case writeFailed(String)
+    /// The snapshot's table structure doesn't match what the app's
+    /// migration chain alone would produce — refused rather than risk
+    /// loading a file the app isn't guaranteed to work with.
+    case schemaDrifted(missingTables: [String], extraTables: [String], changedTables: [String])
 
     var errorDescription: String? {
         switch self {
@@ -369,6 +407,13 @@ enum BackupError: LocalizedError {
         case .iCloudUnavailable: return "iCloud indisponible. La sauvegarde reste locale."
         case .downloadTimeout:   return "Téléchargement iCloud trop long. Réessayez avec une meilleure connexion."
         case .writeFailed(let m): return "Écriture impossible : \(m)"
+        case .schemaDrifted(let missing, let extra, let changed):
+            var parts: [String] = []
+            if !missing.isEmpty { parts.append("tables manquantes : \(missing.joined(separator: ", "))") }
+            if !extra.isEmpty   { parts.append("tables en trop : \(extra.joined(separator: ", "))") }
+            if !changed.isEmpty { parts.append("tables modifiées : \(changed.joined(separator: ", "))") }
+            let detail = parts.joined(separator: " · ")
+            return "Ce fichier a un schéma qui ne correspond pas à celui attendu par l'app (probablement modifié en dehors d'une migration versionnée) — restauration refusée par sécurité. \(detail)"
         }
     }
 }

@@ -12,6 +12,12 @@ struct TricountDetailView: View {
     // paneDismiss : ferme la présentation quand la vue est en sheet (niveau 2,
     // depuis TransactionsView). No-op en pleine page, où c'est `onBack` qui sert.
     @Environment(\.paneDismiss) private var paneDismiss
+    // iOS : distingue "poussée depuis TricountListView" (.root, ambiante déjà
+    // gérée par la NavigationStack du parent) de "présentée en sheet depuis
+    // TransactionsView" (.modal, cf. `.adaptivePane(item:)` dans
+    // AdaptivePaneItemModifier). C'est ce qui pilote le `if` de `body`
+    // ci-dessous — cf. son commentaire pour le bug que ça corrige.
+    @Environment(\.paneHostContext) private var hostContext
     @Environment(AppState.self) private var appState
     @State private var entries: [TricountEntry] = []
     @State private var shares: [TricountShare] = []
@@ -31,6 +37,22 @@ struct TricountDetailView: View {
     @State private var bulkEntryTagInitialStates: [Int: TagSelectionState] = [:]
     @State private var allTiers: [Tiers] = []
     @State private var hasLoaded = false
+
+    // Tri & filtres de la liste des dépenses — état volontairement NON
+    // persisté (comme la recherche texte de TransactionsView) : un tri/filtre
+    // laissé actif d'une session à l'autre serait plus surprenant qu'utile.
+    @State private var showEntryFilters = false
+    @State private var entrySort: TricountEntrySort = .dateDesc
+    @State private var entryTitleSearch = ""
+    @State private var entryLinkFilter: TricountLinkFilter = .all
+    /// "" = tous les payeurs.
+    @State private var entryPayerFilter = ""
+    @State private var entryMinShareText = ""
+    @State private var entryMaxShareText = ""
+    @State private var entryDateFilterEnabled = false
+    @State private var entryFromDate = Date()
+    @State private var entryToDate = Date()
+
     private let repo = TricountRepository()
     private let txRepo = TransactionRepository()
     private let reimbursementRepo = ReimbursementRepository()
@@ -89,13 +111,146 @@ struct TricountDetailView: View {
     // positif = on me doit / négatif = je dois
     private var myBalance: Double { mySpentTotal - myNetShare + mySettlementsNet }
 
+    // MARK: - Tri & filtres des dépenses
+
+    /// "Moi" pour le nom du membre courant, le nom brut sinon — même
+    /// convention que `TricountEntryRow.isPaidByMe`.
+    private func payerDisplayName(_ name: String) -> String {
+        name == group.myName ? "Moi" : name
+    }
+
+    /// Noms bruts des payeurs présents dans le groupe, dédupliqués et triés
+    /// sur leur libellé affiché (donc "Moi" trié à sa place alphabétique réelle).
+    private var entryPayerOptions: [String] {
+        Array(Set(entries.map(\.whoPaid))).sorted {
+            payerDisplayName($0).localizedCaseInsensitiveCompare(payerDisplayName($1)) == .orderedAscending
+        }
+    }
+
+    private var entryMinShareValue: Double? {
+        Double(entryMinShareText.replacingOccurrences(of: ",", with: "."))
+    }
+
+    private var entryMaxShareValue: Double? {
+        Double(entryMaxShareText.replacingOccurrences(of: ",", with: "."))
+    }
+
+    /// Bornes réelles des dates de dépenses du groupe — cadre le `DatePicker`
+    /// du filtre et sert de défaut à son activation (période complète plutôt
+    /// que "aujourd'hui" des deux côtés, qui masquerait tout).
+    private var entryDateBounds: (min: Date, max: Date) {
+        let dates = entries.map(\.date)
+        return (dates.min() ?? Date(), dates.max() ?? Date())
+    }
+
+    private var activeEntryFiltersCount: Int {
+        (entryTitleSearch.isEmpty ? 0 : 1)
+        + (entryLinkFilter == .all ? 0 : 1)
+        + (entryPayerFilter.isEmpty ? 0 : 1)
+        + (entryMinShareText.isEmpty && entryMaxShareText.isEmpty ? 0 : 1)
+        + (entryDateFilterEnabled ? 1 : 0)
+    }
+
+    private func sortableTitle(_ entry: TricountEntry) -> String {
+        entry.description.isEmpty ? entry.category : entry.description
+    }
+
+    /// Dépenses filtrées + triées pour l'affichage. `entries` (brut, ordre SQL)
+    /// reste la source des totaux du header — filtrer ne doit jamais changer
+    /// le solde affiché, seulement la liste visible.
+    private var filteredSortedEntries: [TricountEntry] {
+        let byEntry = Dictionary(grouping: shares, by: { $0.entryId })
+        let minShare = entryMinShareValue
+        let maxShare = entryMaxShareValue
+        let cal = Calendar.current
+        // Bornes inclusives par JOUR calendaire — `entry.date` peut porter une
+        // heure (import bancaire) alors que le `DatePicker` ne choisit qu'un
+        // jour ; sans normaliser "Au" à la fin de journée, une dépense datée
+        // en fin d'après-midi du jour sélectionné serait exclue à tort.
+        let dayStart = cal.startOfDay(for: entryFromDate)
+        let dayEnd = cal.date(byAdding: DateComponents(day: 1, second: -1), to: cal.startOfDay(for: entryToDate)) ?? entryToDate
+        let filtered = entries.filter { entry in
+            let titleMatch = entryTitleSearch.isEmpty
+                || entry.description.localizedCaseInsensitiveContains(entryTitleSearch)
+            let dateMatch = !entryDateFilterEnabled
+                || (entry.date >= dayStart && entry.date <= dayEnd)
+            let linkMatch: Bool
+            switch entryLinkFilter {
+            case .all:       linkMatch = true
+            case .linked:    linkMatch = entry.linkedTransactionId != nil
+            case .notLinked: linkMatch = entry.linkedTransactionId == nil
+            }
+            let payerMatch = entryPayerFilter.isEmpty || entry.whoPaid == entryPayerFilter
+            let shareMatch: Bool
+            if minShare == nil && maxShare == nil {
+                shareMatch = true
+            } else if let myShare = byEntry[entry.id]?.first(where: { $0.memberName == group.myName })?.amount {
+                let absShare = abs(myShare)
+                shareMatch = (minShare.map { absShare >= $0 } ?? true) && (maxShare.map { absShare <= $0 } ?? true)
+            } else {
+                // Pas de part connue pour cette dépense (ex. TRANSFER/BALANCE) :
+                // ne peut pas satisfaire une borne demandée.
+                shareMatch = false
+            }
+            return titleMatch && dateMatch && linkMatch && payerMatch && shareMatch
+        }
+        switch entrySort {
+        case .dateDesc:
+            return filtered.sorted { $0.date != $1.date ? $0.date > $1.date : $0.id > $1.id }
+        case .dateAsc:
+            return filtered.sorted { $0.date != $1.date ? $0.date < $1.date : $0.id < $1.id }
+        case .titleAsc:
+            return filtered.sorted { sortableTitle($0).localizedCaseInsensitiveCompare(sortableTitle($1)) == .orderedAscending }
+        case .titleDesc:
+            return filtered.sorted { sortableTitle($0).localizedCaseInsensitiveCompare(sortableTitle($1)) == .orderedDescending }
+        }
+    }
+
     var body: some View {
         #if os(macOS)
         // Contenu de module en pleine page (drill-down depuis TricountListView) :
-        // toolbar NATIVE, avec le retour vers la liste. Présentée en sheet
-        // (niveau 2, depuis TransactionsView) : même toolbar native, sans retour
-        // — c'est « Fermer » qui sort.
+        // toolbar NATIVE, avec le retour vers la liste (fenêtre principale, jamais
+        // affectée par le bug ci-dessous). Présentée en sheet (niveau 2, depuis
+        // TransactionsView) : la barre d'outils native d'une `.sheet` macOS a son
+        // propre matériau translucide qui laisse le bureau de l'utilisateur
+        // transparaître, quel que soit son contenu — chrome dessinée à la main à
+        // la place (retour d'usage 2026-08-21, cf. `macSheetChrome` dans
+        // AdaptivePane.swift). Le contenu du menu (mode sélection, actions groupées)
+        // est mirroré plutôt que routé via `.paneChrome` : trop dynamique pour son
+        // modèle à 3 boutons cancel/destructive/confirm.
         if onBack != nil {
+            detailContent
+                .navigationTitle(group.title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { nativeToolbarContent }
+        } else {
+            VStack(spacing: 0) {
+                sheetTopBar
+                Divider()
+                detailContent
+            }
+            .background(AppTheme.Colors.background)
+        }
+        #else
+        // ⚠️ iOS — ne JAMAIS envelopper `detailContent` dans une `NavigationStack`
+        // propre quand cette vue est POUSSÉE (retour d'usage : ouvrir un tricount
+        // pour la première fois éjecte vers "Plus", uniquement quand Tricount vit
+        // dans le menu "Plus"). Cause : `TricountListView` pousse cette vue via un
+        // `NavigationLink(destination:)` classique sur SA propre pile ambiante
+        // (celle de l'onglet Tricount, ou celle de `MoreView` s'il est caché) —
+        // exactement le même mécanisme, une fois de plus, que le bug déjà
+        // documenté et corrigé dans `TricountListView.body` (mélange de styles de
+        // navigation sur une même pile). Y ajouter ICI une SECONDE
+        // `NavigationStack`, imbriquée dans le contenu qui vient d'être poussé,
+        // reproduit le même anti-pattern un niveau plus bas : UIKit peut alors
+        // avaler le tout premier push de la session et faire retomber la pile
+        // ambiante jusqu'à sa racine. `\.paneHostContext` distingue les deux
+        // usages réels de cette vue : `.root` = poussée depuis `TricountListView`
+        // (la pile ambiante gère déjà titre/back/toolbar, rien à envelopper) ;
+        // `.modal` = présentée en sheet depuis `TransactionsView` via
+        // `.adaptivePane(item:)`, qui N'INJECTE aucune `NavigationStack` pour son
+        // contenu — celle-ci reste nécessaire pour que titre/toolbar s'affichent.
+        if hostContext == .root {
             detailContent
                 .navigationTitle(group.title)
                 .navigationBarTitleDisplayMode(.inline)
@@ -108,13 +263,6 @@ struct TricountDetailView: View {
                     .toolbar { nativeToolbarContent }
             }
         }
-        #else
-        NavigationStack {
-            detailContent
-                .navigationTitle(group.title)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { nativeToolbarContent }
-        }
         #endif
     }
 
@@ -125,11 +273,12 @@ struct TricountDetailView: View {
                 // Skeleton de la liste d'entrées en attendant le chargement local.
                 List {
                     ForEach(0..<6, id: \.self) { _ in
-                        SkeletonTransactionRow()
+                        SkeletonTricountEntryRow()
                             .listRowBackground(AppTheme.Colors.surface)
                     }
                 }
                 .listStyle(.plain)
+                .macGroupedListTopGap()
                 .scrollContentBackground(.hidden)
             } else {
                 summaryHeader
@@ -156,6 +305,24 @@ struct TricountDetailView: View {
         // au lieu du fond neutre AppTheme (). C'est l'écran
         // exact du retour d'usage (détail Tricount, ex. « Vietnam »).
         .background(AppTheme.Colors.background.ignoresSafeArea())
+        .adaptivePane(isPresented: $showEntryFilters) {
+            TricountEntryFiltersSheet(
+                payerOptions: entryPayerOptions,
+                payerDisplayName: payerDisplayName,
+                currency: group.currency,
+                minDate: entryDateBounds.min,
+                maxDate: entryDateBounds.max,
+                titleSearchText: $entryTitleSearch,
+                linkFilter: $entryLinkFilter,
+                payerFilter: $entryPayerFilter,
+                minShareText: $entryMinShareText,
+                maxShareText: $entryMaxShareText,
+                dateFilterEnabled: $entryDateFilterEnabled,
+                fromDate: $entryFromDate,
+                toDate: $entryToDate,
+                onApply: {}
+            )
+        }
         .adaptivePane(isPresented: $showBulkEntryTagPicker) {
             BulkTagSheet(
                 allTags: allTags,
@@ -273,6 +440,95 @@ struct TricountDetailView: View {
 
     // MARK: - Toolbar (retour/fermer + sélection ou actions groupées)
 
+    #if os(macOS)
+    /// Mirroir de `nativeToolbarContent`, en vues ordinaires plutôt qu'en
+    /// `ToolbarContent`, pour le SEUL cas `.sheet` niveau 2 (`onBack == nil`).
+    /// Même logique de mode (sélection / normal), mêmes actions — mais
+    /// dessiné à la main, cf. le commentaire de `body` ci-dessus.
+    @ViewBuilder
+    private var sheetTopBar: some View {
+        HStack {
+            Button { paneDismiss() } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(AppTheme.Colors.textSecondary)
+            .localizedHelp("Fermer")
+
+            Spacer()
+            Text(group.title)
+                .font(.headline)
+                .foregroundStyle(AppTheme.Colors.textPrimary)
+            Spacer()
+
+            if isSelectingEntries {
+                if !selectedEntryIds.isEmpty {
+                    if reimbursementsEnabled {
+                        PaneToggleButton(label: "Remboursement", systemImage: "arrow.uturn.left.circle", isOn: $showBulkEntryReimburse)
+                    }
+                    PaneToggleButton(label: "Tags", systemImage: "tag", isOn: Binding(
+                        get: { showBulkEntryTagPicker },
+                        set: { newValue in
+                            if newValue { bulkEntryTagInitialStates = computeBulkEntryTagStates() }
+                            showBulkEntryTagPicker = newValue
+                        }
+                    ))
+                }
+                Button {
+                    isSelectingEntries = false
+                    selectedEntryIds.removeAll()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .localizedHelp("Annuler la sélection")
+                .localizedAccessibilityLabel("Annuler la sélection")
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+            } else {
+                if selectedTab == 0 {
+                    Menu {
+                        ForEach(TricountEntrySort.allCases) { s in
+                            Button {
+                                entrySort = s
+                            } label: {
+                                if entrySort == s {
+                                    Label(s.rawValue, systemImage: "checkmark")
+                                } else {
+                                    Text(s.rawValue)
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+                    .localizedHelp("Trier")
+
+                    PaneToggleButton(
+                        label: "Filtrer",
+                        systemImage: activeEntryFiltersCount > 0
+                            ? "line.3.horizontal.decrease.circle.fill"
+                            : "line.3.horizontal.decrease.circle",
+                        isOn: $showEntryFilters
+                    )
+                }
+                Button {
+                    isSelectingEntries = true
+                } label: {
+                    Image(systemName: "checkmark.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+                .localizedHelp("Sélectionner")
+            }
+        }
+        .padding(.horizontal, AppTheme.Spacing.lg)
+        .padding(.vertical, AppTheme.Spacing.md)
+        .background(AppTheme.Colors.background)
+    }
+    #endif
+
     @ToolbarContentBuilder
     private var nativeToolbarContent: some ToolbarContent {
         #if os(macOS)
@@ -280,16 +536,20 @@ struct TricountDetailView: View {
         // système. En sheet (niveau 2) : « Fermer ». Jamais les deux.
         ToolbarItem(placement: .navigation) {
             if isSelectingEntries {
-                Button("Annuler") {
+                Button {
                     isSelectingEntries = false
                     selectedEntryIds.removeAll()
+                } label: {
+                    Image(systemName: "xmark.circle")
                 }
+                .localizedHelp("Annuler la sélection")
+                .localizedAccessibilityLabel("Annuler la sélection")
             } else if let onBack {
                 Button(action: onBack) {
                     Image(systemName: "chevron.left")
                 }
-                .help("Tous les tricounts")
-                .accessibilityLabel("Tous les tricounts")
+                .localizedHelp("Tous les tricounts")
+                .localizedAccessibilityLabel("Tous les tricounts")
             } else {
                 Button("Fermer") { paneDismiss() }
             }
@@ -312,12 +572,38 @@ struct TricountDetailView: View {
                     ))
                 }
             } else {
+                if selectedTab == 0 {
+                    Menu {
+                        ForEach(TricountEntrySort.allCases) { s in
+                            Button {
+                                entrySort = s
+                            } label: {
+                                if entrySort == s {
+                                    Label(s.rawValue, systemImage: "checkmark")
+                                } else {
+                                    Text(s.rawValue)
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                    .localizedHelp("Trier")
+
+                    PaneToggleButton(
+                        label: "Filtrer",
+                        systemImage: activeEntryFiltersCount > 0
+                            ? "line.3.horizontal.decrease.circle.fill"
+                            : "line.3.horizontal.decrease.circle",
+                        isOn: $showEntryFilters
+                    )
+                }
                 Button {
                     isSelectingEntries = true
                 } label: {
                     Image(systemName: "checkmark.circle")
                 }
-                .help("Sélectionner")
+                .localizedHelp("Sélectionner")
             }
         }
         #else
@@ -347,6 +633,32 @@ struct TricountDetailView: View {
                     }
                 }
             } else {
+                if selectedTab == 0 {
+                    Menu {
+                        ForEach(TricountEntrySort.allCases) { s in
+                            Button {
+                                entrySort = s
+                            } label: {
+                                if entrySort == s {
+                                    Label(s.rawValue, systemImage: "checkmark")
+                                } else {
+                                    Text(s.rawValue)
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                    .localizedHelp("Trier")
+
+                    PaneToggleButton(
+                        label: "Filtrer",
+                        systemImage: activeEntryFiltersCount > 0
+                            ? "line.3.horizontal.decrease.circle.fill"
+                            : "line.3.horizontal.decrease.circle",
+                        isOn: $showEntryFilters
+                    )
+                }
                 Button {
                     isSelectingEntries = true
                 } label: {
@@ -393,7 +705,7 @@ struct TricountDetailView: View {
         .background(AppTheme.Colors.surfaceSecondary)
     }
 
-    private func summaryCell(label: String, value: String, color: Color = .primary) -> some View {
+    private func summaryCell(label: LocalizedStringKey, value: String, color: Color = .primary) -> some View {
         VStack(spacing: 2) {
             Text(value).font(.headline).foregroundStyle(color)
             Text(label).font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
@@ -405,8 +717,18 @@ struct TricountDetailView: View {
     private var entriesTab: some View {
         let byEntry = Dictionary(grouping: shares, by: { $0.entryId })
         let reimbursementByEntry = Dictionary(grouping: reimbursementGroups.flatMap(\.items), by: { $0.tricountEntryId ?? -1 })
+        let displayedEntries = filteredSortedEntries
         return List {
-            ForEach(entries) { entry in
+            if displayedEntries.isEmpty {
+                EmptyStateView(
+                    icon: entries.isEmpty ? "creditcard" : "line.3.horizontal.decrease.circle",
+                    title: entries.isEmpty ? "Aucune dépense" : "Aucun résultat",
+                    message: entries.isEmpty
+                        ? "Les dépenses de ce Tricount apparaîtront ici."
+                        : "Aucune dépense ne correspond aux filtres actifs."
+                )
+            }
+            ForEach(displayedEntries) { entry in
                 let reimbursementNames = Array(
                     Set((reimbursementByEntry[entry.id] ?? []).map(\.payeeName))
                 ).sorted()
@@ -445,7 +767,7 @@ struct TricountDetailView: View {
                     leadingFullSwipe: false,
                     trailingFullSwipe: false
                 )
-                .macGroupedRow(first: entry.id == entries.first?.id, last: entry.id == entries.last?.id)
+                .macGroupedRow(first: entry.id == displayedEntries.first?.id, last: entry.id == displayedEntries.last?.id)
             }
         }
         #if os(macOS)
@@ -454,7 +776,7 @@ struct TricountDetailView: View {
         // remboursements) ou du picker (chemin avec) — même correctif que
         // TransactionsView. Appliqué ici, dans la List elle-même, pour couvrir
         // les deux points d'appel de `entriesTab` uniformément.
-        .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+        .macGroupedListTopGap()
         #endif
         .scrollContentBackground(.hidden)
     }

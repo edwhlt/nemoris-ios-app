@@ -11,6 +11,10 @@ struct NemorisApp: App {
     /// sidebar detail pane), and two separate caches would mean computing
     /// everything twice.
     @State private var dashboardStore = DashboardSnapshotStore()
+    /// Injecté UNE SEULE FOIS, comme `dashboardStore` : `DashboardView` est
+    /// instanciée deux fois (TabView iOS + volet détail macOS), et deux copies
+    /// lanceraient deux analyses IA en parallèle sur le même domaine.
+    @State private var coachStore = CoachStore()
     @State private var hasDatabase: Bool
     /// Unlock state. Starts at `false` if the lock is enabled AND there is a
     /// pending auth request (typical case: resuming from background).
@@ -25,6 +29,26 @@ struct NemorisApp: App {
         }
         SimulatorSeeder.seedIfNeeded()
         #endif
+        #if DEBUG
+        // Marketing-screenshot automation: seeds a fully-populated demo database
+        // (redirected to an isolated `FinanceMobileIOS-Screenshots` folder by
+        // `DatabaseManager.fallbackURL()` — never touches a real user database,
+        // notably on native macOS) and unlocks every paid module so XCUITest can
+        // navigate the whole app headlessly. Debug-only, opt-in via a launch
+        // argument, mirrors the existing `-nemorisCrashRepro` convention.
+        // (Feature-flag enabling lives further down: it touches `self.appState`,
+        // which isn't definitely initialized yet at this point in a struct init.)
+        let screenshotMode = CommandLine.arguments.contains("-nemorisScreenshotMode")
+        if screenshotMode {
+            #if os(macOS)
+            if !DatabaseManager.shared.hasDatabase() {
+                try? DatabaseManager.shared.createNewDatabase()
+            }
+            SimulatorSeeder.seedIfNeeded()
+            #endif
+            PurchaseManager.shared.devOverrideEnabled = true
+        }
+        #endif
         // Applies any pending migrations to an existing database.
         if DatabaseManager.shared.hasDatabase() {
             DatabaseManager.shared.migrateIfNeeded()
@@ -37,6 +61,29 @@ struct NemorisApp: App {
         // to also cover warm launches (see the scenePhase handler).
         let lockEnabled = UserDefaults.standard.bool(forKey: "appLockEnabled")
         _isUnlocked = State(initialValue: !lockEnabled)
+        #if DEBUG
+        // `self` is fully initialized past this point — safe to touch `appState`.
+        if screenshotMode {
+            appState.showTransactions = true
+            appState.showTricount = true
+            appState.showInvestments = true
+            appState.showBudget = true
+            appState.showPatrimoine = true
+            appState.showSQLConsole = true
+            // Driven from the app's OWN language/theme overrides rather than
+            // `simctl ui appearance` or `-AppleLanguages`: `xcodebuild test` runs
+            // UI tests against a cloned simulator that doesn't reliably inherit
+            // either, but these two `AppState` properties are read directly by
+            // `.environment(\.locale, …)` / `.preferredColorScheme(…)` in this
+            // file's `body`, so they always take effect regardless of the host
+            // simulator's own settings.
+            let args = CommandLine.arguments
+            if args.contains("-nemorisLangEN") { appState.preferredLanguage = "en" }
+            if args.contains("-nemorisLangFR") { appState.preferredLanguage = "fr" }
+            if args.contains("-nemorisThemeDark") { appState.colorSchemeRaw = "dark" }
+            if args.contains("-nemorisThemeLight") { appState.colorSchemeRaw = "light" }
+        }
+        #endif
         try? Tips.configure([
             .datastoreLocation(.applicationDefault),
             .displayFrequency(.immediate)
@@ -57,12 +104,36 @@ struct NemorisApp: App {
     var body: some Scene {
         WindowGroup {
             if hasDatabase {
+                // ⚠️ `.environment(\.locale, …)` posé ICI, sur la racine RÉELLE du
+                // contenu de la fenêtre (ce `ZStack`) — PAS sur `MainTabView()` (un
+                // enfant du ZStack) comme avant. Deux bugs réels distincts,
+                // trouvés le 2026-08-25 :
+                //
+                // 1. `AppLockGate` est un SIBLING de `MainTabView` dans ce `ZStack`,
+                //    pas un descendant — il n'héritait de RIEN posé seulement sur
+                //    `MainTabView`. "Verrouillé" restait affiché en anglais système
+                //    quelle que soit la langue choisie dans l'app.
+                // 2. Plus insidieux : même posé sur `MainTabView()` (donc au-dessus
+                //    d'`AppLockGate`), `\.locale` n'atteignait PAS de façon fiable le
+                //    contenu des `.sheet()` niveau 2+ ouvertes depuis un panneau macOS
+                //    (ex. "Détails de la synchronisation" depuis la fiche position) —
+                //    vérifié avec un `@Environment(\.locale)` de debug affichant
+                //    `en_US` sur un Mac en anglais système alors que l'app était
+                //    réglée en français. Une sheet macOS est backée par une VRAIE
+                //    `NSWindow` séparée (contrairement à iOS, où elle partage la même
+                //    fenêtre) — l'héritage d'environnement pour ce genre de fenêtre
+                //    semble se calculer par rapport à la racine RÉELLE du contenu de
+                //    la `WindowGroup`, pas par rapport au nœud où le modificateur a
+                //    été posé si celui-ci est un ENFANT de cette racine. Remonter le
+                //    modificateur sur le `ZStack` (la vraie racine) corrige les deux
+                //    bugs d'un coup et évite la duplication précédente sur chaque
+                //    sibling.
                 ZStack {
                     MainTabView()
                         .environment(appState)
                         .environment(purchaseManager)
                         .environment(dashboardStore)
-                        .environment(\.locale, appState.locale)
+                        .environment(coachStore)
                         .preferredColorScheme(appState.preferredColorScheme)
                         .tipViewStyle(NemorisTipViewStyle())
 
@@ -76,6 +147,7 @@ struct NemorisApp: App {
                             .zIndex(100)
                     }
                 }
+                .environment(\.locale, appState.locale)
                     .onChange(of: scenePhase) { _, newPhase in
                         if newPhase == .background {
                             // CloudKit sync: pushes local writes accumulated
@@ -102,7 +174,7 @@ struct NemorisApp: App {
                             // Pushes a fresh snapshot to the widget.
                             let prefId = appState.defaultAccountId > 0 ? appState.defaultAccountId : nil
                             Task.detached(priority: .utility) {
-                                WidgetDataStore.refresh(preferredAccountId: prefId)
+                                await WidgetDataStore.refresh(preferredAccountId: prefId)
                             }
                             // Daily auto-backup (24h gate internal to the
                             // service). Deferred to background priority so it
@@ -119,6 +191,12 @@ struct NemorisApp: App {
                             // feature off, toggle off, already running, or
                             // last pass < 4h ago.
                             Task { await InvestmentAutoSyncService.shared.autoSyncIfNeeded(trigger: .appActive) }
+                            // Prévient le Dashboard si de nouvelles dépenses
+                            // Apple Pay sont arrivées en arrière-plan
+                            // (automatisation Raccourcis) depuis le dernier
+                            // passage au premier plan. Pas de résolution
+                            // automatique (retirée pour l'instant, à revoir plus tard).
+                            ApplePayDashboardSync.syncIfNeeded()
                             // An investment document dropped by a Siri
                             // shortcut (ImportInvestmentDocumentIntent) is
                             // consumed here, opening the smart import flow
@@ -147,6 +225,14 @@ struct NemorisApp: App {
                     .onReceive(NotificationCenter.default.publisher(for: .nemorisSyncDidApplyRemoteChanges)) { _ in
                         // CloudKit sync: REMOTE changes have been applied to
                         // the database → invalidate all VMs.
+                        appState.dataRefreshToken = UUID()
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .nemorisApplePayDataDidChange)) { _ in
+                        // Une dépense Apple Pay vient d'être déposée (par
+                        // l'automatisation Raccourcis, en arrière-plan — ce
+                        // process séparé ne peut pas bumper `dataRefreshToken`
+                        // lui-même), écartée, ou purgée : le bandeau du
+                        // Dashboard doit refléter le changement.
                         appState.dataRefreshToken = UUID()
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .nemorisImportSessionsDidChange)) { _ in

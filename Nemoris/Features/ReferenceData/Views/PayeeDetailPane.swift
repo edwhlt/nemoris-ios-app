@@ -7,6 +7,9 @@ struct PayeeDetailPane: View {
     let payeeGroups: [PayeeGroup]
     let accounts: [Account]
     let transactionCount: Int
+    let onShowTransactions: () -> Void
+
+    @Environment(\.paneDismiss) private var paneDismiss
 
     var body: some View {
         Form {
@@ -17,7 +20,7 @@ struct PayeeDetailPane: View {
                         Text(tiers.name)
                             .font(AppTheme.Typography.bodyMedium)
                             .lineLimit(2)
-                        Text(tiers.tierType.displayName)
+                        Text(LocalizedStringKey(tiers.tierType.displayName))
                             .font(AppTheme.Typography.labelSmall)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
@@ -70,6 +73,15 @@ struct PayeeDetailPane: View {
             if let note = tiers.note, !note.isEmpty {
                 Section("Note") {
                     Text(note).font(AppTheme.Typography.bodySmall)
+                }
+            }
+
+            Section {
+                Button {
+                    onShowTransactions()
+                    paneDismiss()
+                } label: {
+                    Label("Voir les transactions", systemImage: "list.bullet.rectangle")
                 }
             }
         }

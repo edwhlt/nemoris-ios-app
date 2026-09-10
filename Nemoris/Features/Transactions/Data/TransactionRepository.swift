@@ -15,7 +15,7 @@ struct TransactionRepository {
 
     func fetchAccounts() -> [Account] {
         query(read: { db in
-            let sql = "SELECT id, COALESCE(name, ''), COALESCE(type, 'COURANT') FROM accounts ORDER BY name COLLATE NOCASE;"
+            let sql = "SELECT id, COALESCE(name, ''), COALESCE(type, 'COURANT'), COALESCE(excluded_from_aggregates, 0) FROM accounts ORDER BY name COLLATE NOCASE;"
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
                 return []
@@ -27,12 +27,24 @@ struct TransactionRepository {
                 items.append(Account(
                     id: Int(sqlite3_column_int(stmt, 0)),
                     name: string(from: stmt, index: 1),
-                    type: string(from: stmt, index: 2)
+                    type: string(from: stmt, index: 2),
+                    excludedFromAggregates: sqlite3_column_int(stmt, 3) != 0
                 ))
             }
             return items
         }) ?? []
     }
+
+    /// Fragment SQL partagé : exclut les transactions rattachées à un compte
+    /// marqué "hors calculs agrégés" (v51). Même convention que le fragment
+    /// d'exclusion des virements internes juste en dessous — jointure sur
+    /// `accounts` plutôt qu'une sous-requête, pour rester un simple `AND` collable
+    /// dans un WHERE existant. `IS NULL` couvre les lignes orphelines (compte
+    /// supprimé) : on ne les exclut pas silencieusement, ce n'est pas leur rôle.
+    private static let excludedAccountsClause =
+        "(a.excluded_from_aggregates IS NULL OR a.excluded_from_aggregates = 0)"
+    private static let excludedAccountsJoin =
+        "LEFT JOIN accounts a ON a.id = t.account_id"
 
     /// `accountId == 0` est traité comme le sentinel "Tous les comptes" : la clause
     /// `t.account_id = ?` est alors retirée du WHERE. Cohérent avec le picker
@@ -387,6 +399,187 @@ struct TransactionRepository {
         return Int(sqlite3_last_insert_rowid(db))
     }
 
+    /// Nombre de tiers rattachés à chaque groupe (id groupe → compte).
+    func countPayeesByGroup() -> [Int: Int] {
+        query(read: { db in
+            let sql = "SELECT group_id, COUNT(*) FROM payees WHERE group_id IS NOT NULL GROUP BY group_id;"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return [:] }
+            defer { sqlite3_finalize(stmt) }
+            var counts: [Int: Int] = [:]
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                counts[Int(sqlite3_column_int(stmt, 0))] = Int(sqlite3_column_int(stmt, 1))
+            }
+            return counts
+        }) ?? [:]
+    }
+
+    @discardableResult
+    func updatePayeeGroup(id: Int, displayName: String) -> Bool {
+        writeSingle(sql: "UPDATE payee_groups SET display_name = ? WHERE id = ?;") { stmt in
+            sqlite3_bind_text(stmt, 1, displayName, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int(stmt, 2, Int32(id))
+        }
+    }
+
+    /// Supprime un groupe. Les tiers qui y étaient rattachés perdent
+    /// simplement leur `group_id` (mis à `NULL`) — ils ne sont pas touchés.
+    @discardableResult
+    func deletePayeeGroup(id: Int) -> Bool {
+        guard store.databaseExists else { return false }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+            sqlite3_close(db); return false
+        }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
+        sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
+
+        var nullGroupStmt: OpaquePointer?
+        var delGroupStmt: OpaquePointer?
+        sqlite3_prepare_v2(db, "UPDATE payees SET group_id = NULL WHERE group_id = ?;", -1, &nullGroupStmt, nil)
+        sqlite3_prepare_v2(db, "DELETE FROM payee_groups WHERE id = ?;", -1, &delGroupStmt, nil)
+        defer {
+            sqlite3_finalize(nullGroupStmt)
+            sqlite3_finalize(delGroupStmt)
+        }
+
+        if let s = nullGroupStmt { sqlite3_bind_int(s, 1, Int32(id)); sqlite3_step(s) }
+        var deleted = false
+        if let s = delGroupStmt {
+            sqlite3_bind_int(s, 1, Int32(id))
+            deleted = sqlite3_step(s) == SQLITE_DONE
+        }
+
+        guard deleted, sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            return false
+        }
+        return true
+    }
+
+    /// Fusionne `sourceId` dans `intoId` : tous les tiers du groupe source
+    /// rejoignent le groupe cible, puis le groupe source est supprimé.
+    @discardableResult
+    func mergePayeeGroups(sourceId: Int, intoId: Int) -> Bool {
+        guard sourceId != intoId, store.databaseExists else { return false }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+            sqlite3_close(db); return false
+        }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
+        sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
+
+        var reassignStmt: OpaquePointer?
+        var delGroupStmt: OpaquePointer?
+        sqlite3_prepare_v2(db, "UPDATE payees SET group_id = ? WHERE group_id = ?;", -1, &reassignStmt, nil)
+        sqlite3_prepare_v2(db, "DELETE FROM payee_groups WHERE id = ?;", -1, &delGroupStmt, nil)
+        defer {
+            sqlite3_finalize(reassignStmt)
+            sqlite3_finalize(delGroupStmt)
+        }
+
+        if let s = reassignStmt {
+            sqlite3_bind_int(s, 1, Int32(intoId))
+            sqlite3_bind_int(s, 2, Int32(sourceId))
+            sqlite3_step(s)
+        }
+        var deleted = false
+        if let s = delGroupStmt {
+            sqlite3_bind_int(s, 1, Int32(sourceId))
+            deleted = sqlite3_step(s) == SQLITE_DONE
+        }
+
+        guard deleted, sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            return false
+        }
+        return true
+    }
+
+    /// Fusionne des tiers DOUBLONS : chaque `sourceIds` rejoint `intoId`
+    /// (transactions, récurrents budget, remboursements réaffectés), puis
+    /// les sources sont supprimées. Contrairement à `deleteTiers`, les
+    /// transactions ne perdent PAS leur tiers — elles sont réaffectées à la
+    /// cible, c'est tout l'intérêt d'une fusion plutôt qu'une suppression.
+    ///
+    /// Les 3 seules tables qui référencent `payees(id)` sont réaffectées
+    /// (source unique : `SyncPayloadStore.foreignKeys`) : `transactions`,
+    /// `recurring_patterns`, `reimbursements`.
+    @discardableResult
+    func mergeTiers(sourceIds: Set<Int>, intoId: Int) -> Bool {
+        let sources = sourceIds.subtracting([intoId])
+        guard !sources.isEmpty, store.databaseExists else { return false }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(store.databaseURL.path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db else {
+            sqlite3_close(db); return false
+        }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 3000)
+        sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
+
+        var reassignTxStmt: OpaquePointer?
+        var reassignPatternStmt: OpaquePointer?
+        var dropConflictingReimbStmt: OpaquePointer?
+        var reassignReimbStmt: OpaquePointer?
+        var deletePayeeStmt: OpaquePointer?
+
+        sqlite3_prepare_v2(db, "UPDATE transactions SET payee_id = ? WHERE payee_id = ?;", -1, &reassignTxStmt, nil)
+        sqlite3_prepare_v2(db, "UPDATE recurring_patterns SET payee_id = ? WHERE payee_id = ?;", -1, &reassignPatternStmt, nil)
+        // Un remboursement Tricount est unique par (tricount_entry_id, payee_id) :
+        // si la cible a déjà une ligne pour un entry où la source en a une
+        // aussi, la ligne de la cible cède la place (fusion d'identité — les
+        // deux "personnes" deviennent la même) au lieu de faire échouer le
+        // UPDATE qui suit avec une violation de contrainte UNIQUE.
+        sqlite3_prepare_v2(db, """
+            DELETE FROM reimbursements
+            WHERE payee_id = ?
+              AND tricount_entry_id IS NOT NULL
+              AND tricount_entry_id IN (
+                  SELECT tricount_entry_id FROM reimbursements
+                  WHERE payee_id = ? AND tricount_entry_id IS NOT NULL
+              );
+            """, -1, &dropConflictingReimbStmt, nil)
+        sqlite3_prepare_v2(db, "UPDATE reimbursements SET payee_id = ? WHERE payee_id = ?;", -1, &reassignReimbStmt, nil)
+        sqlite3_prepare_v2(db, "DELETE FROM payees WHERE id = ?;", -1, &deletePayeeStmt, nil)
+        defer {
+            sqlite3_finalize(reassignTxStmt)
+            sqlite3_finalize(reassignPatternStmt)
+            sqlite3_finalize(dropConflictingReimbStmt)
+            sqlite3_finalize(reassignReimbStmt)
+            sqlite3_finalize(deletePayeeStmt)
+        }
+
+        @discardableResult
+        func run2(_ stmt: OpaquePointer?, _ a: Int, _ b: Int) -> Bool {
+            guard let stmt else { return false }
+            sqlite3_reset(stmt)
+            sqlite3_bind_int(stmt, 1, Int32(a))
+            sqlite3_bind_int(stmt, 2, Int32(b))
+            return sqlite3_step(stmt) == SQLITE_DONE
+        }
+
+        var ok = true
+        for sourceId in sources {
+            ok = run2(reassignTxStmt, intoId, sourceId) && ok
+            ok = run2(reassignPatternStmt, intoId, sourceId) && ok
+            ok = run2(dropConflictingReimbStmt, intoId, sourceId) && ok
+            ok = run2(reassignReimbStmt, intoId, sourceId) && ok
+
+            guard let s = deletePayeeStmt else { ok = false; continue }
+            sqlite3_reset(s)
+            sqlite3_bind_int(s, 1, Int32(sourceId))
+            ok = (sqlite3_step(s) == SQLITE_DONE) && ok
+        }
+
+        guard ok, sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            return false
+        }
+        return true
+    }
+
     func fetchPaymentTypes() -> [PaymentType] {
         query(read: { db in
             let sql = "SELECT id, COALESCE(name, ''), COALESCE(regex, '') FROM payment_types ORDER BY name COLLATE NOCASE;"
@@ -706,19 +899,21 @@ struct TransactionRepository {
     // MARK: - Reference Data CRUD
 
     @discardableResult
-    func updateAccount(id: Int, name: String, type: String = "COURANT") -> Bool {
-        writeSingle(sql: "UPDATE accounts SET name = ?, type = ? WHERE id = ?") { stmt in
+    func updateAccount(id: Int, name: String, type: String = "COURANT", excludedFromAggregates: Bool = false) -> Bool {
+        writeSingle(sql: "UPDATE accounts SET name = ?, type = ?, excluded_from_aggregates = ? WHERE id = ?") { stmt in
             sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT)
             sqlite3_bind_text(stmt, 2, type, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_int(stmt, 3, Int32(id))
+            sqlite3_bind_int(stmt, 3, excludedFromAggregates ? 1 : 0)
+            sqlite3_bind_int(stmt, 4, Int32(id))
         }
     }
 
     @discardableResult
-    func addAccount(name: String, type: String = "COURANT") -> Bool {
-        writeSingle(sql: "INSERT INTO accounts (name, type) VALUES (?, ?)") { stmt in
+    func addAccount(name: String, type: String = "COURANT", excludedFromAggregates: Bool = false) -> Bool {
+        writeSingle(sql: "INSERT INTO accounts (name, type, excluded_from_aggregates) VALUES (?, ?, ?)") { stmt in
             sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT)
             sqlite3_bind_text(stmt, 2, type, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int(stmt, 3, excludedFromAggregates ? 1 : 0)
         }
     }
 
@@ -897,6 +1092,16 @@ struct TransactionRepository {
                 "DELETE FROM tricount_entry_tags WHERE tag_id = ?;"
             ]
         )
+    }
+
+    /// Supprime plusieurs tags en une fois (sélection multiple, Données →
+    /// Tags). Boucle sur `deleteTag` — le nombre de tags sélectionnés à la
+    /// fois reste faible (quelques dizaines au plus), pas besoin de la même
+    /// transaction dédiée que `deleteTiers`. Retourne le nombre effectivement
+    /// supprimé.
+    @discardableResult
+    func deleteTags(ids: Set<Int>) -> Int {
+        ids.reduce(0) { count, id in deleteTag(id: id) ? count + 1 : count }
     }
 
     /// Supprime un compte SEULEMENT s'il ne porte aucune transaction (garde-fou :
@@ -1087,6 +1292,8 @@ struct TransactionRepository {
                     SELECT tt.tag_id, SUM(tr.amount) AS total
                     FROM transaction_tags tt
                     JOIN transactions tr ON tr.id = tt.transaction_id
+                    LEFT JOIN accounts a ON a.id = tr.account_id
+                    WHERE (a.excluded_from_aggregates IS NULL OR a.excluded_from_aggregates = 0)
                     GROUP BY tt.tag_id
                 ) tx_s ON tx_s.tag_id = t.id
                 LEFT JOIN (
@@ -1480,15 +1687,21 @@ struct TransactionRepository {
         let fromRaw = fmt.string(from: min(from, to)); let toRaw = fmt.string(from: max(from, to))
         return query(read: { db in
             let accountClause = accountId != nil ? "AND t.account_id = ?" : ""
+            // Un compte explicite = l'utilisateur consulte CE compte : jamais exclu.
+            // "Tous comptes" (accountId == nil) exclut les comptes marqués "autres".
+            let excludedAccountsJoin = accountId == nil ? Self.excludedAccountsJoin : ""
+            let excludedAccountsClause = accountId == nil ? "AND \(Self.excludedAccountsClause)" : ""
             let sql = """
             SELECT strftime('%Y-%m', t.tx_date) AS mois,
                    SUM(CASE WHEN t.amount > 0 THEN t.amount ELSE 0 END),
                    SUM(CASE WHEN t.amount < 0 THEN t.amount ELSE 0 END)
             FROM transactions t
             LEFT JOIN payees ti ON ti.id = t.payee_id
+            \(excludedAccountsJoin)
             WHERE t.tx_date >= ? AND t.tx_date <= ?
               \(accountClause)
               AND (t.payee_id IS NULL OR ti.linked_account_id IS NULL)
+              \(excludedAccountsClause)
             GROUP BY mois ORDER BY mois ASC;
             """
             var stmt: OpaquePointer?
@@ -1515,6 +1728,8 @@ struct TransactionRepository {
         let fromRaw = fmt.string(from: min(from, to)); let toRaw = fmt.string(from: max(from, to))
         return query(read: { db in
             let accountClause = accountId != nil ? "AND t.account_id = ?" : ""
+            let excludedAccountsJoin = accountId == nil ? Self.excludedAccountsJoin : ""
+            let excludedAccountsClause = accountId == nil ? "AND \(Self.excludedAccountsClause)" : ""
             let sql = """
             SELECT
                 COALESCE(c.name, 'Non catégorisé') as name,
@@ -1524,9 +1739,11 @@ struct TransactionRepository {
             LEFT JOIN categories c ON c.id = t.category_id
             LEFT JOIN categories p ON p.id = c.parent_id
             LEFT JOIN payees ti ON ti.id = t.payee_id
+            \(excludedAccountsJoin)
             WHERE t.tx_date >= ? AND t.tx_date <= ?
               \(accountClause)
               AND (t.payee_id IS NULL OR ti.linked_account_id IS NULL)
+              \(excludedAccountsClause)
             GROUP BY t.category_id
             ORDER BY ABS(SUM(t.amount)) DESC LIMIT 20;
             """
@@ -1679,10 +1896,17 @@ struct TransactionRepository {
         let toRaw   = fmt.string(from: max(from, to))
         return query(read: { db in
             let accountClause = accountId == 0 ? "" : "account_id = ? AND"
+            // "Tous comptes" (0) exclut les comptes marqués "autres" ; un compte
+            // précis reste inchangé, l'utilisateur consulte CE compte.
+            let excludedAccountsClause = accountId == 0
+                ? "AND (a.excluded_from_aggregates IS NULL OR a.excluded_from_aggregates = 0)"
+                : ""
             let sql = """
             SELECT COUNT(*) FROM transactions
+            LEFT JOIN accounts a ON a.id = transactions.account_id
             WHERE \(accountClause) tx_date >= ? AND tx_date <= ?
               AND category_id IS NULL
+              \(excludedAccountsClause)
             """
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return 0 }
@@ -1740,15 +1964,19 @@ struct TransactionRepository {
         let fromRaw = fmt.string(from: min(from, to)); let toRaw = fmt.string(from: max(from, to))
         return query(read: { db in
             let accountClause = accountId != nil ? "AND t.account_id = ?" : ""
+            let excludedAccountsJoin = accountId == nil ? Self.excludedAccountsJoin : ""
+            let excludedAccountsClause = accountId == nil ? "AND \(Self.excludedAccountsClause)" : ""
             let sql = """
             SELECT tg.id, tg.name, tg.color, SUM(t.amount) as total
             FROM tags tg
             JOIN transaction_tags tt ON tt.tag_id = tg.id
             JOIN transactions t ON t.id = tt.transaction_id
             LEFT JOIN payees ti ON ti.id = t.payee_id
+            \(excludedAccountsJoin)
             WHERE t.tx_date >= ? AND t.tx_date <= ?
               \(accountClause)
               AND (t.payee_id IS NULL OR ti.linked_account_id IS NULL)
+              \(excludedAccountsClause)
             GROUP BY tg.id
             ORDER BY ABS(SUM(t.amount)) DESC
             LIMIT 15;
@@ -1771,7 +1999,11 @@ struct TransactionRepository {
 
     // MARK: - Fetch all filtered transactions (filtered dashboard)
 
-    func fetchAllFilteredTransactions(filter: TransactionFilter, excludeInternalTransfers: Bool = false) -> [FinanceTransaction] {
+    /// `excludeOtherAccounts` : opt-in, comme `excludeInternalTransfers` — seuls les
+    /// appelants "calcul agrégé" (ex. `FilteredDashboardViewModel`) le passent à `true`.
+    /// L'explorateur Transactions et la recherche globale ne sont PAS des calculs :
+    /// un compte marqué "hors calculs" doit y rester visible/recherchable normalement.
+    func fetchAllFilteredTransactions(filter: TransactionFilter, excludeInternalTransfers: Bool = false, excludeOtherAccounts: Bool = false) -> [FinanceTransaction] {
         let fmt = DateFormatter(); fmt.locale = Locale(identifier: "en_US_POSIX"); fmt.dateFormat = "yyyy-MM-dd"
         let fromRaw = fmt.string(from: min(filter.from, filter.to))
         let toRaw   = fmt.string(from: max(filter.from, filter.to))
@@ -1787,12 +2019,16 @@ struct TransactionRepository {
                 let placeholders = txIds.map { _ in "?" }.joined(separator: ",")
                 conditions.append("t.id IN (\(placeholders))")
             }
-            if !filter.tiersSearchText.isEmpty {
-                conditions.append("(COALESCE(ti.name,'') LIKE ? OR COALESCE(t.information,'') LIKE ?)")
+            if !filter.payeeSearchText.isEmpty {
+                conditions.append("COALESCE(ti.name,'') LIKE ?")
+            }
+            if !filter.labelSearchText.isEmpty {
+                conditions.append("COALESCE(t.information,'') LIKE ?")
             }
             if excludeInternalTransfers {
                 conditions.append("(t.payee_id IS NULL OR ti.linked_account_id IS NULL)")
             }
+            if excludeOtherAccounts { conditions.append(Self.excludedAccountsClause) }
             let whereClause = conditions.joined(separator: " AND ")
             let sql = """
             SELECT t.id, t.account_id,
@@ -1806,6 +2042,7 @@ struct TransactionRepository {
             LEFT JOIN payment_types m ON m.id = t.payment_type_id
             LEFT JOIN reimbursements rb ON rb.transaction_id = t.id
             LEFT JOIN payees tr ON tr.id = rb.payee_id
+            \(excludeOtherAccounts ? Self.excludedAccountsJoin : "")
             WHERE \(whereClause)
             ORDER BY t.tx_date ASC, t.id ASC;
             """
@@ -1823,10 +2060,11 @@ struct TransactionRepository {
             if let txIds = filter.tagFilteredTxIds, !txIds.isEmpty {
                 for id in txIds { sqlite3_bind_int(stmt, col, Int32(id)); col += 1 }
             }
-            if !filter.tiersSearchText.isEmpty {
-                let pattern = "%\(filter.tiersSearchText)%"
-                sqlite3_bind_text(stmt, col, pattern, -1, SQLITE_TRANSIENT); col += 1
-                sqlite3_bind_text(stmt, col, pattern, -1, SQLITE_TRANSIENT); col += 1
+            if !filter.payeeSearchText.isEmpty {
+                sqlite3_bind_text(stmt, col, "%\(filter.payeeSearchText)%", -1, SQLITE_TRANSIENT); col += 1
+            }
+            if !filter.labelSearchText.isEmpty {
+                sqlite3_bind_text(stmt, col, "%\(filter.labelSearchText)%", -1, SQLITE_TRANSIENT); col += 1
             }
 
             func optInt(_ c: Int32) -> Int? {
@@ -1927,9 +2165,11 @@ struct TransactionRepository {
             LEFT JOIN payment_types m ON m.id = t.payment_type_id
             LEFT JOIN reimbursements rb ON rb.transaction_id = t.id
             LEFT JOIN payees tr ON tr.id = rb.payee_id
+            \(Self.excludedAccountsJoin)
             WHERE t.tx_date >= ?
               AND t.tx_date <= ?
               AND (t.payee_id IS NULL OR ti.linked_account_id IS NULL)
+              AND \(Self.excludedAccountsClause)
             ORDER BY t.tx_date DESC, t.id DESC
             LIMIT ? OFFSET ?;
             """

@@ -1,5 +1,36 @@
 import SwiftUI
 
+// MARK: - DayCellButtonStyle
+
+/// Léger enfoncement au tap — `DayCell` était juste un `.onTapGesture` sans
+/// AUCUN retour visuel à l'appui (contrairement à Apple Calendar, dont
+/// chaque case réagit tactilement). Convertir en vrai `Button` donne ce
+/// retour gratuitement via `configuration.isPressed`, sur iOS ET au clic
+/// sur macOS.
+struct DayCellButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.88 : 1.0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+// MARK: - CalendarDetailCaret
+
+/// Petit triangle plein pointant vers le haut — rattache visuellement
+/// `DayDetailPanel` à la colonne du jour sélectionné quand il s'ouvre
+/// inline entre deux lignes de semaine du calendrier.
+struct CalendarDetailCaret: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.closeSubpath()
+        return p
+    }
+}
+
 // MARK: - DayCell
 
 struct DayCell: View {
@@ -18,6 +49,18 @@ struct DayCell: View {
     var body: some View {
         VStack(spacing: 4) {
             ZStack {
+                // Fond léger présent sur TOUTES les cases, pas seulement
+                // aujourd'hui/sélectionné — sans lui rien ne distingue
+                // visuellement un jour "bouton" d'un simple chiffre, et
+                // "cliquable" ne se devine qu'en essayant (retour d'usage :
+                // "à première vue on sait pas que les jours sont
+                // cliquables"). Recouvert par le cercle accent quand
+                // aujourd'hui/sélectionné (dessiné après, donc au-dessus).
+                if !isToday && !isSelected {
+                    Circle()
+                        .fill(AppTheme.Colors.surfaceSecondary.opacity(0.6))
+                        .frame(width: 32, height: 32)
+                }
                 if isToday {
                     Circle()
                         .fill(AppTheme.Colors.accent)
@@ -69,6 +112,7 @@ struct DayDetailPanel: View {
     @Bindable var vm: BudgetViewModel
     var allTiers: [Tiers] = []
     var allCategories: [Category] = []
+    @State private var previsionPendingChoice: BudgetPrevision?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -119,20 +163,22 @@ struct DayDetailPanel: View {
                             // Bouton skip inline sur .pending (calendrier)
                             if ep.status == .pending {
                                 Button {
-                                    vm.skipPrevision(ep.prevision)
+                                    previsionPendingChoice = ep.prevision
                                 } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 18))
-                                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.6))
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                                        .frame(width: 20, height: 20)
+                                        .background(AppTheme.Colors.surfaceSecondary, in: Circle())
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel("Ignorer cette échéance")
+                                .localizedAccessibilityLabel("Ignorer cette échéance")
                             }
                         }
                         .contextMenu {
                             if ep.status == .pending {
                                 Button(role: .destructive) {
-                                    vm.skipPrevision(ep.prevision)
+                                    previsionPendingChoice = ep.prevision
                                 } label: {
                                     Label("Ignorer", systemImage: "xmark")
                                 }
@@ -175,6 +221,7 @@ struct DayDetailPanel: View {
             RoundedRectangle(cornerRadius: AppTheme.Radius.lg)
                 .strokeBorder(AppTheme.Colors.surfaceSecondary, lineWidth: 1)
         )
+        .previsionDeletionConfirmation(target: $previsionPendingChoice, vm: vm)
     }
 }
 

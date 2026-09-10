@@ -81,8 +81,21 @@ final class EnrichmentLLMService {
     /// ⚠️ `FoundationModels.Attachment` / `ImageAttachmentContent` sont
     /// `@available(iOS 27.0, macOS 27.0)` — un cran APRÈS le reste du framework
     /// (iOS 26). Vérifié dans le SDK, pas déduit.
+    ///
+    /// ⚠️ **`@available` ne suffit pas ici** : le SDK d'Xcode 26 (Swift 6.3,
+    /// iOS 26) ne DÉCLARE MÊME PAS `Attachment` — ce n'est pas juste marqué
+    /// indisponible, le symbole n'existe pas du tout dans ce SDK. `#if
+    /// canImport(FoundationModels)` passe quand même (le MODULE existe depuis
+    /// iOS 26), donc `if #available` seul laisse le compilateur essayer de
+    /// résoudre `Attachment` et échouer avec « Cannot find 'Attachment' in
+    /// scope » — sur Xcode 26 précisément, pas sur Xcode 27 (Swift 6.4, SDK
+    /// iOS 27, où le type existe). D'où le garde de COMPILATION `#if
+    /// compiler(>=6.4)` en plus du garde d'exécution : il retire le bloc du
+    /// programme AVANT que le type-checker n'ait à résoudre `Attachment`.
+    /// Seuil vérifié empiriquement (`xcrun swift --version` de chaque
+    /// toolchain) : Xcode 26.6 → Swift 6.3.3, Xcode 27.0 → Swift 6.4.
     var supportsImageInput: Bool {
-        #if canImport(FoundationModels)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         if #available(iOS 27.0, macOS 27.0, *) {
             return SystemLanguageModel.default.isAvailable
         }
@@ -96,8 +109,13 @@ final class EnrichmentLLMService {
     /// regroupements par date, sous-titres de catégorie) porte du sens que le
     /// texte OCR aplati détruit, et qu'aucune heuristique d'ordre de lignes ne
     /// reconstitue de façon générale.
+    ///
+    /// ⚠️ Même garde `#if compiler(>=6.4)` que `supportsImageInput` ci-dessus —
+    /// `Attachment` n'existe pas dans le SDK d'Xcode 26. Sur ce toolchain,
+    /// cette fonction se réduit à `return nil` : `supportsImageInput` vaut déjà
+    /// `false` à cet endroit, donc aucun appelant ne devrait l'atteindre.
     func complete(system: String, user: String, image: CGImage) async -> String? {
-        #if canImport(FoundationModels)
+        #if compiler(>=6.4) && canImport(FoundationModels)
         if #available(iOS 27.0, macOS 27.0, *) {
             guard SystemLanguageModel.default.isAvailable else { return nil }
             let session = LanguageModelSession(instructions: system)

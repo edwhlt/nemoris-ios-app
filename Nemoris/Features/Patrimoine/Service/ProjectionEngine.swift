@@ -232,10 +232,13 @@ enum ProjectionInputs {
 
     private static func monthlyEquivalent(amount: Double, frequency: RecurrenceFrequency) -> Double {
         switch frequency {
-        case .daily:   return amount * 30.42  // 365.25 / 12
-        case .weekly:  return amount * 4.33   // 52 / 12
-        case .monthly: return amount
-        case .yearly:  return amount / 12.0
+        case .daily:      return amount * 30.42  // 365.25 / 12
+        case .weekly:     return amount * 4.33   // 52 / 12
+        case .biweekly:   return amount * 2.17   // 26 / 12
+        case .monthly:    return amount
+        case .quarterly:  return amount / 3.0
+        case .semiannual: return amount / 6.0
+        case .yearly:     return amount / 12.0
         }
     }
 }

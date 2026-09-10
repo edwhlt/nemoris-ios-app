@@ -233,7 +233,7 @@ struct CategoryIconPicker: View {
 
             // Icon grid grouped by theme
             ForEach(filteredGroups, id: \.title) { group in
-                Text(group.title)
+                Text(LocalizedStringKey(group.title))
                     .font(.caption2)
                     .fontWeight(.semibold)
                     .foregroundStyle(AppTheme.Colors.textSecondary)

@@ -66,15 +66,29 @@ struct PatrimoineView: View {
                 // éditée par swipe-leading. Les rows gardent leur look "card flottante"
                 // grâce à `listRowBackground(.clear)` + `listRowSeparator(.hidden)`.
                 List {
-                    // Hero global Patrimoine net (1ère section, scroll naturel)
+                    // Hero global Patrimoine net (1ère section, scroll naturel).
+                    // ⚠️ `.macGroupedRow` (PAS un `.listRowInsets`/`.background` custom) :
+                    // c'est le MÊME mécanisme que les rows objectifs/mobilier/immobilier/
+                    // prêts en dessous (et que Tricount/ReferenceData/Investments) —
+                    // garantit que cette carte a exactement le même bord gauche/droit et
+                    // le même rayon d'arrondi que toutes les autres de l'écran (retour
+                    // terrain 2026-08-15 : les cartes n'étaient pas alignées entre elles,
+                    // chaque section réinventait sa propre marge/arrondi). Le dégradé
+                    // devient le fond de la carte, comme `AppTheme.Colors.surface` l'est
+                    // pour une row normale.
                     Section {
                         heroSection
-                            .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: AppTheme.Spacing.lg,
-                                                      leading: AppTheme.Spacing.lg,
-                                                      bottom: AppTheme.Spacing.md,
-                                                      trailing: AppTheme.Spacing.lg))
+                            .macGroupedRow(first: true, last: true) {
+                                LinearGradient(
+                                    colors: [
+                                        AppTheme.Colors.accent.opacity(0.18),
+                                        AppTheme.Colors.accent.opacity(0.04)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            }
                     }
                     // Bannière "liens rompus" si au moins 1 asset linké a perdu son
                     // compte source (cascade SET NULL). Affichée entre hero et donut
@@ -82,12 +96,10 @@ struct PatrimoineView: View {
                     if vm.hasBrokenLinks {
                         Section {
                             brokenLinksBanner
-                                .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 0,
-                                                          leading: AppTheme.Spacing.lg,
-                                                          bottom: AppTheme.Spacing.md,
-                                                          trailing: AppTheme.Spacing.lg))
+                                .macGroupedRow(first: true, last: true) {
+                                    AppTheme.Colors.warning.opacity(0.08)
+                                }
                         }
                     }
                     // Objectifs financiers — affichés en priorité haute (juste sous
@@ -97,12 +109,8 @@ struct PatrimoineView: View {
                     if vm.snapshot.totalAssets > 0 {
                         Section {
                             allocationCard
-                                .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 0,
-                                                          leading: AppTheme.Spacing.lg,
-                                                          bottom: AppTheme.Spacing.md,
-                                                          trailing: AppTheme.Spacing.lg))
+                                .macGroupedRow(first: true, last: true)
                         }
                     }
                     mobilierListSection
@@ -115,13 +123,20 @@ struct PatrimoineView: View {
                 // internes). iOS garde son insetGrouped natif — macGroupedRow n'y
                 // pose que le listRowBackground (cf. TransactionsView, même pattern).
                 .listStyle(.plain)
-                .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+                .macGroupedListTopGap()
+                #else
+                // iOS : l'écran empile 7 `Section` (hero, liens rompus, objectifs,
+                // donut, mobilier, immobilier, prêts) — sans ce modifier, l'espacement
+                // système entre sections d'un `.insetGrouped` (~35pt) se cumule à
+                // chaque frontière et donne un écran "décousu" comparé aux modules
+                // qui regroupent davantage leur contenu (retour terrain 2026-08-15).
+                .listSectionSpacing(.compact)
                 #endif
                 .scrollContentBackground(.hidden)
                 .background(AppTheme.Colors.background)
             }
         }
-        .navigationTitle("Patrimoine")
+        .localizedNavigationTitle("Patrimoine")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             #if os(macOS)
@@ -327,7 +342,9 @@ struct PatrimoineView: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
             // Eyebrow daté — donne le contexte temporel sans avoir besoin d'un sélecteur
             // de période (le snapshot reflète toujours "maintenant").
-            Text(eyebrowLabel.uppercased())
+            let now = Date().formatted(.dateTime.month(.wide).year().locale(AppLocalization.locale))
+            Text("Patrimoine net · \(now)")
+                .textCase(.uppercase)
                 .font(.system(size: 11, weight: .semibold))
                 .tracking(0.8)
                 .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -396,34 +413,22 @@ struct PatrimoineView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(AppTheme.Spacing.lg)
-        .background(
-            // Dégradé éditorial subtil — cohérent avec le DashboardView. Accent à 0.18
-            // qui s'évanouit vers transparent, donne du "poids" au hero sans bandeau coloré.
-            LinearGradient(
-                colors: [
-                    AppTheme.Colors.accent.opacity(0.18),
-                    AppTheme.Colors.accent.opacity(0.04)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: AppTheme.Radius.lg)
-                .strokeBorder(AppTheme.Colors.accent.opacity(0.12), lineWidth: 1)
-        )
-    }
-
-    /// Eyebrow daté — "Patrimoine net · juin 2026" (locale FR).
-    private var eyebrowLabel: String {
-        let now = Date().formatted(.dateTime.month(.wide).year().locale(Locale(identifier: "fr_FR")))
-        return "Patrimoine net · \(now)"
+        // ⚠️ Le fond (dégradé) est fourni par `.macGroupedRow(...)` AU CALL SITE,
+        // PAS ici — cf. commentaire à l'appel dans `coreContent`. Avant, ce fond
+        // était dessiné en interne (`.background` + `.overlay` de bordure) pendant
+        // que le call site posait EN PLUS son propre `.listRowInsets` custom : deux
+        // mécanismes de marge/arrondi différents pour la même carte, jamais
+        // garantis identiques à ceux des rows `.macGroupedRow` en dessous (goals,
+        // mobilier…) — d'où des cartes visiblement pas alignées/pas au même rayon
+        // sur iOS (retour terrain 2026-08-15 : "pas le même rounded, pas le même
+        // alignement"). En passant par `.macGroupedRow`, le hero partage
+        // EXACTEMENT le même mécanisme de marge/arrondi que toutes les autres
+        // cartes de l'écran (et que Tricount/ReferenceData/Investments).
     }
 
     /// Sous-totaux Brut / Dettes du hero — icône colorée + label uppercased + valeur.
     @ViewBuilder
-    private func heroSubtotal(icon: String, label: String, value: Double, color: Color) -> some View {
+    private func heroSubtotal(icon: String, label: LocalizedStringKey, value: Double, color: Color) -> some View {
         HStack(spacing: AppTheme.Spacing.sm) {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .semibold))
@@ -431,7 +436,8 @@ struct PatrimoineView: View {
                 .frame(width: 26, height: 26)
                 .background(color.opacity(0.13), in: Circle())
             VStack(alignment: .leading, spacing: 1) {
-                Text(label.uppercased())
+                Text(label)
+                    .textCase(.uppercase)
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(0.4)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -456,7 +462,7 @@ struct PatrimoineView: View {
         }()
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(String(format: "Dette / actif brut · %.1f %%", ratioPercent))
+                Text("Dette / actif brut · \(ratioPercent.formatted(.number.precision(.fractionLength(1)))) %")
                     .font(AppTheme.Typography.labelMedium)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
                 Spacer()
@@ -509,11 +515,8 @@ struct PatrimoineView: View {
                     .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.6))
             }
             .padding(AppTheme.Spacing.md)
-            .background(AppTheme.Colors.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: AppTheme.Radius.md))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                    .strokeBorder(AppTheme.Colors.warning.opacity(0.3), lineWidth: 1)
-            )
+            // Fond fourni par `.macGroupedRow(...)` au call site — cf. commentaire
+            // détaillé sur `heroSection`, même remède.
         }
         .buttonStyle(.plain)
     }
@@ -544,7 +547,9 @@ struct PatrimoineView: View {
             }
         }
         .padding(AppTheme.Spacing.lg)
-        .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
+        // Fond fourni par `.macGroupedRow(...)` au call site — cf. commentaire
+        // détaillé sur `heroSection`, même remède (et c'est déjà exactement le
+        // fond par défaut de `.macGroupedRow()`, `AppTheme.Colors.surface`).
     }
 
     /// Construit les slices pour le donut. On regroupe Mobilier (tous les assets,
@@ -564,26 +569,17 @@ struct PatrimoineView: View {
 
     // MARK: - Empty state
 
+    // `EmptyStateView` (icône/titre/message) est le mécanisme unique pour les
+    // écrans vides — cf. CLAUDE.md §5. Patrimoine a besoin de deux CTA en plus
+    // (Actif/Bien), d'où le slot `actions` plutôt qu'un état vide custom qui
+    // dépareillait (cercle teinté 88pt vs icône plate, titleLarge vs
+    // titleMedium) des autres modules (retour d'usage).
     @ViewBuilder private var emptyState: some View {
-        VStack(spacing: AppTheme.Spacing.lg) {
-            ZStack {
-                Circle()
-                    .fill(AppTheme.Colors.accent.opacity(0.12))
-                    .frame(width: 88, height: 88)
-                Image(systemName: "house.fill")
-                    .font(.system(size: 36, weight: .light))
-                    .foregroundStyle(AppTheme.Colors.accent)
-            }
-            VStack(spacing: AppTheme.Spacing.xs) {
-                Text("Construisez votre patrimoine")
-                    .font(AppTheme.Typography.titleLarge)
-                    .foregroundStyle(AppTheme.Colors.textPrimary)
-                Text("Commencez par ajouter un actif liquide (livret, compte épargne, PEA…) en mode lié pour suivre automatiquement sa valeur, ou saisissez-le à la main.")
-                    .font(AppTheme.Typography.bodySmall)
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, AppTheme.Spacing.xl)
-            }
+        EmptyStateView(
+            icon: "house.fill",
+            title: "Construisez votre patrimoine",
+            message: "Commencez par ajouter un actif liquide (livret, compte épargne, PEA…) en mode lié pour suivre automatiquement sa valeur, ou saisissez-le à la main."
+        ) {
             HStack(spacing: AppTheme.Spacing.md) {
                 Button {
                     showCreateAsset = true
@@ -612,8 +608,6 @@ struct PatrimoineView: View {
                 .buttonStyle(.plain)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, AppTheme.Spacing.xxxl)
     }
 
     /// Header de section uniformisé : eyebrow uppercased + total en `moneyMedium`
@@ -622,7 +616,7 @@ struct PatrimoineView: View {
     ///
     /// Centralisé ici plutôt que dupliqué dans chaque section.
     @ViewBuilder
-    private func sectionHeader(eyebrow: String,
+    private func sectionHeader(eyebrow: LocalizedStringKey,
                                total: Double,
                                accent: Color,
                                trailingNote: Text? = nil,
@@ -722,7 +716,7 @@ struct PatrimoineView: View {
                             .font(AppTheme.Typography.titleSmall)
                             .foregroundStyle(AppTheme.Colors.textPrimary)
                             .lineLimit(1)
-                        Text(goalSubtitle(goal: goal, progress: progress))
+                        goalSubtitle(goal: goal, progress: progress)
                             .font(AppTheme.Typography.bodySmall)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                             .lineLimit(1)
@@ -798,29 +792,31 @@ struct PatrimoineView: View {
     /// Sous-titre row goal : kind label + statut deadline + hint contextuel.
     /// Pour debt_payoff à 0% on ajoute une note explicative ("Baseline capturée…")
     /// pour éviter que l'utilisateur pense que c'est cassé.
-    private func goalSubtitle(goal: Goal, progress: GoalProgress?) -> String {
-        var parts: [String] = [goal.kind.label]
+    private func goalSubtitle(goal: Goal, progress: GoalProgress?) -> Text {
+        var parts: [Text] = [Text(LocalizedStringKey(goal.kind.label))]
         if let progress, progress.isCompleted {
-            parts.append("Atteint ✓")
+            parts.append(Text("Atteint ✓"))
         } else if let days = progress?.daysRemaining {
             if days < 0 {
-                parts.append("En retard de \(abs(days)) j")
+                parts.append(Text("En retard de \(abs(days)) j"))
             } else if days == 0 {
-                parts.append("Échéance aujourd'hui")
+                parts.append(Text("Échéance aujourd'hui"))
             } else if days < 365 {
-                parts.append("Dans \(days) j")
+                parts.append(Text("Dans \(days) j"))
             } else {
                 let years = days / 365
-                parts.append("Dans ~\(years) an\(years > 1 ? "s" : "")")
+                parts.append(Text("Dans ~\(years) an\(years > 1 ? "s" : "")"))
             }
         }
         // Hint pédagogique pour debt_payoff à 0% : le calcul est correct mais
         // contre-intuitif (vous avez 0% car vous n'avez encore rien remboursé
         // **depuis la création du goal**, pas depuis le début du prêt).
         if goal.kind == .debtPayoff, let progress, progress.ratio == 0 {
-            parts.append("Point de départ")
+            parts.append(Text("Point de départ"))
         }
-        return parts.joined(separator: " · ")
+        return parts.dropFirst().reduce(parts.first ?? Text("")) { result, part in
+                result + Text(" · ") + part
+        }
     }
 
     // MARK: - Section Mobilier & Liquidités (List native)
@@ -1016,7 +1012,7 @@ struct PatrimoineView: View {
                             .font(AppTheme.Typography.titleSmall)
                             .foregroundStyle(AppTheme.Colors.textPrimary)
                             .lineLimit(1)
-                        Text(loanSubtitle(loan))
+                        loanSubtitle(loan)
                             .font(AppTheme.Typography.bodySmall)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                             .lineLimit(1)
@@ -1067,7 +1063,7 @@ struct PatrimoineView: View {
                     }
                     .frame(height: 4)
                     HStack {
-                        Text(String(format: "%.0f %% remboursé", state.progressRatio * 100))
+                        Text("\(Int((state.progressRatio * 100).rounded())) % remboursé")
                             .font(AppTheme.Typography.labelMedium)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                         Spacer()
@@ -1084,26 +1080,28 @@ struct PatrimoineView: View {
     }
 
     /// Sous-titre row prêt : type + durée + bien lié si applicable.
-    private func loanSubtitle(_ loan: PatrimoineLoan) -> String {
-        var parts: [String] = [loan.loanType.label]
+    private func loanSubtitle(_ loan: PatrimoineLoan) -> Text {
+        var parts: [Text] = [Text(LocalizedStringKey(loan.loanType.label))]
         if loan.loanType != .revolving {
             let years = loan.durationMonths / 12
             let rem = loan.durationMonths % 12
             if years > 0 && rem == 0 {
-                parts.append("\(years) an\(years > 1 ? "s" : "")")
+                parts.append(Text("\(years) an\(years > 1 ? "s" : "")"))
             } else if years > 0 {
-                parts.append("\(years) an\(years > 1 ? "s" : "") \(rem) mois")
+                parts.append(Text("\(years) an\(years > 1 ? "s" : "") \(rem) mois"))
             } else {
-                parts.append("\(loan.durationMonths) mois")
+                parts.append(Text("\(loan.durationMonths) mois"))
             }
             if loan.annualRate > 0 {
-                parts.append(String(format: "%.2f %%", loan.annualRate * 100))
+                parts.append(Text(String(format: "%.2f %%", loan.annualRate * 100)))
             }
         }
         if let realEstateName = vm.realEstateName(forLoanLinked: loan.linkedRealEstateId) {
-            parts.append("→ \(realEstateName)")
+            parts.append(Text("→ \(realEstateName)"))
         }
-        return parts.joined(separator: " · ")
+        return parts.dropFirst().reduce(parts.first ?? Text("")) { result, part in
+                result + Text(" · ") + part
+        }
     }
 
     // (addAssetCard retiré — création via le toolbar Menu `+` uniquement.)
@@ -1132,7 +1130,7 @@ struct PatrimoineView: View {
                         // Badge contextuel selon la source résolue.
                         sourceBadge(source)
                     }
-                    Text(vm.sourceLabel(for: asset))
+                    vm.sourceLabel(for: asset)
                         .font(AppTheme.Typography.bodySmall)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .lineLimit(1)
@@ -1217,7 +1215,7 @@ private struct AssetDetailPane: View {
                         .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
                     VStack(alignment: .leading, spacing: 2) {
                         Text(asset.name).font(AppTheme.Typography.bodyMedium)
-                        Text(asset.assetKind.label)
+                        Text(LocalizedStringKey(asset.assetKind.label))
                             .font(AppTheme.Typography.labelSmall)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
@@ -1323,7 +1321,7 @@ private struct LoanDetailPane: View {
                         .background(AppTheme.Colors.warning.opacity(0.12), in: Circle())
                     VStack(alignment: .leading, spacing: 2) {
                         Text(loan.name).font(AppTheme.Typography.bodyMedium)
-                        Text(loan.loanType.label)
+                        Text(LocalizedStringKey(loan.loanType.label))
                             .font(AppTheme.Typography.labelSmall)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
@@ -1336,10 +1334,18 @@ private struct LoanDetailPane: View {
             }
 
             Section("Conditions") {
-                LabeledContent("Type", value: loan.loanType.label)
+                LabeledContent {
+                    Text(LocalizedStringKey(loan.loanType.label))
+                } label: {
+                    Text("Type")
+                }
                 LabeledContent("Capital emprunté") { Text(loan.principal, format: .currency(code: "EUR")) }
                 LabeledContent("Taux annuel", value: String(format: "%.2f %%", loan.annualRate * 100))
-                LabeledContent("Durée", value: "\(loan.durationMonths) mois")
+                LabeledContent {
+                    Text("\(loan.durationMonths) mois")
+                } label: {
+                    Text("Durée")
+                }
                 if loan.deferralMonths > 0 {
                     LabeledContent("Différé", value: "\(loan.deferralMonths) mois")
                 }
@@ -1380,7 +1386,7 @@ private struct GoalDetailPane: View {
                         .background(AppTheme.Colors.accent.opacity(0.12), in: Circle())
                     VStack(alignment: .leading, spacing: 2) {
                         Text(goal.name).font(AppTheme.Typography.bodyMedium)
-                        Text(goal.kind.label)
+                        Text(LocalizedStringKey(goal.kind.label))
                             .font(AppTheme.Typography.labelSmall)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
@@ -1393,7 +1399,11 @@ private struct GoalDetailPane: View {
             }
 
             Section("Détails") {
-                LabeledContent("Type", value: goal.kind.label)
+                LabeledContent {
+                    Text(LocalizedStringKey(goal.kind.label))
+                } label: {
+                    Text("Type")
+                }
                 LabeledContent("Objectif") { Text(goal.targetAmount, format: .currency(code: "EUR")) }
                 if goal.kind == .custom {
                     LabeledContent("Montant atteint") { Text(goal.customCurrentAmount, format: .currency(code: "EUR")) }

@@ -83,6 +83,11 @@ final class DatabaseManager: @unchecked Sendable {
         let dest = fallbackURL()
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.copyItem(at: pickerURL, to: dest)
+        // `copyItem` preserves the SOURCE's permission bits — if the picked
+        // file happened to be read-only (common for files synced down from
+        // some cloud providers), the live database would come out read-only
+        // and every write would silently fail from here on.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: dest.path)
 
         migrateIfNeeded()
     }
@@ -264,6 +269,150 @@ final class DatabaseManager: @unchecked Sendable {
         }
 
         return errors.isEmpty ? nil : errors.joined(separator: "\n")
+    }
+
+    // MARK: - Schema drift detection
+
+    /// Result of comparing a candidate database's TABLE structure against a
+    /// pristine, migrations-only reference. Row DATA is never inspected —
+    /// only `CREATE TABLE` text.
+    enum SchemaDriftResult: Equatable {
+        case clean
+        case drifted(missingTables: [String], extraTables: [String], changedTables: [String])
+        /// The comparison itself couldn't run (unreadable file, migration
+        /// failure…) — treated as non-blocking by callers, since refusing a
+        /// restore over an inconclusive check would be worse than the risk
+        /// it's meant to catch.
+        case inconclusive(reason: String)
+    }
+
+    /// Migrates the database at `url` in place, then compares its resulting
+    /// table structure against a freshly-built reference database (pure
+    /// migration chain, no legacy data) at the SAME final version. A
+    /// mismatch means some table was created/altered/dropped OUTSIDE the
+    /// versioned migration chain — e.g. by hand via the SQL console — which
+    /// the app has no guarantee of handling correctly.
+    ///
+    /// ⚠️ `url` is mutated (migrated) by this call — callers MUST pass a
+    /// disposable scratch copy, never the live database or an original
+    /// backup file.
+    static func detectSchemaDrift(at url: URL) -> SchemaDriftResult {
+        if let migrationError = migrate(at: url) {
+            return .inconclusive(reason: migrationError)
+        }
+        guard let candidateSchema = schemaFingerprint(at: url) else {
+            return .inconclusive(reason: "Lecture du schéma du fichier impossible.")
+        }
+
+        let refURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nemoris-schema-ref-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: refURL) }
+        guard createEmptyDatabase(at: refURL), migrate(at: refURL) == nil,
+              let referenceSchema = schemaFingerprint(at: refURL)
+        else {
+            return .inconclusive(reason: "Construction du schéma de référence impossible.")
+        }
+
+        if candidateSchema == referenceSchema { return .clean }
+
+        let missing = Set(referenceSchema.keys).subtracting(candidateSchema.keys).sorted()
+        let extra   = Set(candidateSchema.keys).subtracting(referenceSchema.keys).sorted()
+        let changed = referenceSchema.keys
+            .filter { candidateSchema[$0] != nil && candidateSchema[$0] != referenceSchema[$0] }
+            .sorted()
+        return .drifted(missingTables: missing, extraTables: extra, changedTables: changed)
+    }
+
+    @discardableResult
+    private static func createEmptyDatabase(at url: URL) -> Bool {
+        var db: OpaquePointer?
+        let ok = sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK
+        sqlite3_close(db)
+        return ok
+    }
+
+    /// Table name → normalized `CREATE TABLE` text. Indexes/triggers are
+    /// deliberately excluded: triggers are reinstalled fresh on every boot
+    /// regardless of the migration chain (`SyncSchema.installTriggers`), and
+    /// an index is a performance detail, not a structural risk — including
+    /// either would produce false positives unrelated to "will the app work
+    /// with this file".
+    private static func schemaFingerprint(at url: URL) -> [String: String]? {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            sqlite3_close(db)
+            return nil
+        }
+        defer { sqlite3_close(db) }
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        let sql = "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name;"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        var result: [String: String] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let namePtr = sqlite3_column_text(stmt, 0) else { continue }
+            let name = String(cString: namePtr)
+            let ddl = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            result[name] = normalizeDDL(ddl)
+        }
+        return result
+    }
+
+    /// Strips comments, then collapses whitespace/newlines and lowercases —
+    /// SQLite echoes back `CREATE TABLE` text close to verbatim, comments
+    /// included. Without stripping them first, a purely cosmetic edit to a
+    /// comment INSIDE a migration's SQL string (e.g. a FR→EN wording pass)
+    /// makes an unchanged table look "modified" — caught for real on
+    /// `transaction_metadata_keys` (v46) right after such a pass: byte-for-
+    /// byte identical columns/types/order, only the comment text differed.
+    private static func normalizeDDL(_ sql: String) -> String {
+        stripSQLComments(sql)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .lowercased()
+    }
+
+    /// Removes `-- line` and `/* block */` SQL comments, respecting single-
+    /// quoted string literals (so a `--`/`/*` inside a quoted default value
+    /// is never mistaken for a comment start). Migration SQL is first-party
+    /// and trusted, so this doesn't need to handle escaped quotes beyond
+    /// SQL's own `''` doubling.
+    private static func stripSQLComments(_ sql: String) -> String {
+        var result = ""
+        result.reserveCapacity(sql.count)
+        let chars = Array(sql)
+        var i = 0
+        var inSingleQuote = false
+        while i < chars.count {
+            let c = chars[i]
+            if inSingleQuote {
+                result.append(c)
+                if c == "'" { inSingleQuote = false }
+                i += 1
+                continue
+            }
+            if c == "'" {
+                inSingleQuote = true
+                result.append(c)
+                i += 1
+                continue
+            }
+            if c == "-", i + 1 < chars.count, chars[i + 1] == "-" {
+                i += 2
+                while i < chars.count, chars[i] != "\n" { i += 1 }
+                continue
+            }
+            if c == "/", i + 1 < chars.count, chars[i + 1] == "*" {
+                i += 2
+                while i + 1 < chars.count, !(chars[i] == "*" && chars[i + 1] == "/") { i += 1 }
+                i = min(i + 2, chars.count)
+                continue
+            }
+            result.append(c)
+            i += 1
+        }
+        return result
     }
 
     /// Current schema version (0 = blank or pre-versioned database).
@@ -1439,6 +1588,159 @@ final class DatabaseManager: @unchecked Sendable {
               AND COALESCE((SELECT value FROM sync_meta WHERE key = 'sync_enabled'), '0') = '1';
             """,
         ]),
+
+        // v47 — AI financial coach (AXE AC).
+        //
+        // Three tables, and they do NOT share the same lifecycle — which is
+        // why they are not one table:
+        //
+        //  • `coach_profile`   — the objectives the user WRITES. Authored
+        //    prose, painful to retype ⇒ SYNCED (see SyncSchema.syncedTables).
+        //  • `coach_analyses`  — one row per domain: the model's read of the
+        //    user's situation + when it ran. DERIVED ⇒ never synced.
+        //  • `coach_recommendations` — DERIVED, regenerable at any time from
+        //    the ledger ⇒ never synced, same class as `import_sessions`.
+        //
+        // ⚠️ `coach_profile.slot` exists ONLY to give the singleton a UNIQUE
+        // key. Without it, two devices each writing their objectives create
+        // two rows with different uuids and nothing ever reconciles them.
+        // With it, the sync's identity adoption (min(uuid) wins, cf.
+        // `SyncPayloadStore.uniqueAdoptionKeys`) merges them deterministically.
+        // No row is seeded here: an empty profile is the absence of a row, so
+        // a fresh install has nothing to push.
+        Migration(version: 47, statements: [
+            """
+            CREATE TABLE IF NOT EXISTS coach_profile (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                slot       TEXT NOT NULL DEFAULT 'default',
+                objectives TEXT NOT NULL DEFAULT '',
+                uuid       TEXT,
+                updated_at TEXT
+            );
+            """,
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_coach_profile_slot ON coach_profile(slot);",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_coach_profile_uuid ON coach_profile(uuid);",
+
+            """
+            CREATE TABLE IF NOT EXISTS coach_analyses (
+                domain          TEXT PRIMARY KEY,
+                profile_summary TEXT,
+                generated_at    TEXT,
+                status          TEXT NOT NULL DEFAULT 'ok',
+                message         TEXT,
+                backend         TEXT
+            );
+            """,
+
+            """
+            CREATE TABLE IF NOT EXISTS coach_recommendations (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                domain        TEXT NOT NULL,
+                -- Stable key ACROSS runs, supplied by the model (slugified
+                -- from the title as a fallback). This is what lets a
+                -- "dismissed" verdict survive a regeneration: same subject
+                -- re-proposed next week keeps its status instead of coming
+                -- back as new.
+                ref           TEXT NOT NULL,
+                title         TEXT NOT NULL,
+                detail        TEXT NOT NULL,
+                rationale     TEXT,
+                category      TEXT,
+                annual_impact REAL NOT NULL DEFAULT 0,
+                effort        INTEGER NOT NULL DEFAULT 3,
+                confidence    REAL NOT NULL DEFAULT 0.5,
+                status        TEXT NOT NULL DEFAULT 'new',
+                generated_at  TEXT NOT NULL
+            );
+            """,
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_coach_reco_ref ON coach_recommendations(domain, ref);",
+            "CREATE INDEX IF NOT EXISTS idx_coach_reco_domain ON coach_recommendations(domain, status);",
+        ]),
+
+        // v48 — trace de la réponse brute du modèle (AXE AC).
+        //
+        // Retour d'usage immédiat : « La réponse du modèle n'a pas pu être
+        // exploitée » — un message exact, mais INDIAGNOSTICABLE. Ni
+        // l'utilisateur ni le développeur ne pouvaient voir ce que le modèle
+        // avait réellement renvoyé, donc impossible de dire si le modèle avait
+        // refusé, répondu à côté, ou été coupé en plein JSON.
+        //
+        // Même leçon que l'import de documents et son dépliant « Voir le texte
+        // lu (N caractères) » : une extraction ratée n'est exploitable que si
+        // on peut confronter ce que l'app a reçu à ce qu'elle en a fait.
+        Migration(version: 48, statements: [
+            "ALTER TABLE coach_analyses ADD COLUMN raw_response TEXT;",
+        ]),
+
+        // v49 — staging Apple Pay (automatisation Raccourcis, déclenchement
+        // silencieux `openAppWhenRun = false`). Table LOCALE, jamais
+        // synchronisée (cf. SyncSchema.swift) : c'est un tampon éphémère,
+        // pas un registre à faire coexister entre appareils — chaque
+        // appareil reçoit ses propres notifications Apple Pay.
+        //
+        // `matched_transaction_id` référence `transactions`, mais dans le
+        // sens INVERSE de ce qu'on ferait d'habitude (une colonne sur
+        // `transactions` pointant vers cette table) : `transactions` EST
+        // synchronisée, et une FK vers une table non synchronisée y serait
+        // sérialisée comme un entier local brut, sans traduction uuid —
+        // corruption silencieuse sur un 2e appareil. En gardant le lien sur
+        // CETTE table (non synchronisée), il ne quitte jamais l'appareil.
+        Migration(version: 49, statements: [
+            """
+            CREATE TABLE IF NOT EXISTS pending_apple_pay_entries (
+                id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                card                   TEXT,
+                amount                 REAL NOT NULL,
+                merchant               TEXT NOT NULL,
+                status                 TEXT NOT NULL DEFAULT 'pending',
+                matched_transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+                created_at             TEXT NOT NULL
+            );
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_pending_apple_pay_status ON pending_apple_pay_entries(status, created_at);",
+        ]),
+
+        // v50 — one set of coach objectives PER DOMAIN.
+        //
+        // A single shared text made every analysis carry irrelevant baggage:
+        // "spend less and diversify better" asks the spending coach to comment
+        // on diversification (which it cannot see) and the portfolio coach to
+        // comment on spending (which it cannot see either). Both then bend
+        // their recommendations towards an objective the dossier in front of
+        // them says nothing about — user report 2026-09-02.
+        //
+        // `slot` was already the singleton key, and it is what the sync adopts
+        // on (`SyncPayloadStore.uniqueAdoptionKeys`), so the domain simply
+        // BECOMES the slot. No new column, no new index, and the merge between
+        // devices keeps working unchanged.
+        //
+        // ⚠️ `uuid`/`updated_at` are deliberately left to the sync TRIGGERS
+        // (they are reinstalled at every boot, after migrations): filling them
+        // here would bypass the change tracking these triggers exist for.
+        Migration(version: 50, statements: [
+            """
+            INSERT INTO coach_profile (slot, objectives)
+            SELECT 'transactions', objectives FROM coach_profile WHERE slot = 'default'
+              AND NOT EXISTS (SELECT 1 FROM coach_profile WHERE slot = 'transactions');
+            """,
+            """
+            INSERT INTO coach_profile (slot, objectives)
+            SELECT 'investments', objectives FROM coach_profile WHERE slot = 'default'
+              AND NOT EXISTS (SELECT 1 FROM coach_profile WHERE slot = 'investments');
+            """,
+            "DELETE FROM coach_profile WHERE slot = 'default';",
+        ]),
+
+        // v51 — comptes "autres" : dissociation des calculs agrégés.
+        //
+        // Retour user : besoin d'un compte (ex. remboursements mutuelle/santé)
+        // dont les transactions restent consultables sur son propre écran mais
+        // n'entrent JAMAIS dans les cumuls automatiques (catégories, budget,
+        // dashboard, coach IA, widget). Défaut à 0 : aucun compte existant n'est
+        // affecté par cette migration.
+        Migration(version: 51, statements: [
+            "ALTER TABLE accounts ADD COLUMN excluded_from_aggregates INTEGER NOT NULL DEFAULT 0;",
+        ]),
     ]
 
     // MARK: - Private helpers
@@ -1452,7 +1754,14 @@ final class DatabaseManager: @unchecked Sendable {
 
     private func fallbackURL() -> URL {
         let supportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appDir = supportDir.appendingPathComponent("FinanceMobileIOS", isDirectory: true)
+        // Marketing-screenshot automation (`-nemorisScreenshotMode`, see NemorisApp.init):
+        // isolates the seeded demo database in its own folder so it can never read from or
+        // write into a real user's `FinanceMobileIOS` — this matters most on native macOS,
+        // which is unsandboxed and would otherwise resolve to the user's actual database.
+        let folderName = CommandLine.arguments.contains("-nemorisScreenshotMode")
+            ? "FinanceMobileIOS-Screenshots"
+            : "FinanceMobileIOS"
+        let appDir = supportDir.appendingPathComponent(folderName, isDirectory: true)
         try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
         return appDir.appendingPathComponent(fallbackFileName)
     }

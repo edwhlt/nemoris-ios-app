@@ -16,7 +16,9 @@ final class InvestmentsViewModel {
     var isEnrichingPreview = false
     var marketHistory: [InvestmentPricePoint] = []
     var isSyncingMarketData = false
-    var marketStatusMessage: String?
+    /// ⚠️ `LocalizedStringResource`, pas `String` — miroir direct de
+    /// `InvestmentSyncTraceStore.Entry.message`, même raison.
+    var marketStatusMessage: LocalizedStringResource?
 
     // état pour le nouveau dashboard graphique
     /// Plage temporelle sélectionnée pour le chart d'évolution.
@@ -28,6 +30,14 @@ final class InvestmentsViewModel {
     /// et l'UI affiche cette explication plutôt qu'une ligne fabriquée à partir
     /// de clôtures quotidiennes.
     var oneDayUnavailableNote: String?
+    /// Positions exclues de `portfolioEvolution` faute de cours sur la plage
+    /// sélectionnée (`PortfolioEvolutionBuilder.unpricedPositionIds`). Sert à
+    /// restreindre `portfolioVariationBasisValue` aux mêmes positions que
+    /// `portfolioStartValue` — sinon une position sans historique est comptée
+    /// dans la valeur courante mais absente du point de départ, ce qui gonfle
+    /// artificiellement le % de variation affiché (cf. AXE Q, ne jamais laisser
+    /// deux bases de calcul diverger).
+    var portfolioPositionsWithoutHistory: [InvestmentPosition] = []
     /// Toggle UI : affiche allocation par type ou par compte.
     var allocationGroupByAccount: Bool = false
     /// Cache de TOUTES les positions de TOUS les comptes (chargé dans `load()`).
@@ -81,7 +91,7 @@ final class InvestmentsViewModel {
                 let val = positionsByAccount[account.id]?.reduce(0) { $0 + $1.currentValue } ?? 0
                 // Locale forcée fr_FR : le ViewModel n'a pas accès à l'environnement
                 // SwiftUI ici — cf. commentaire équivalent dans InsightEngine.swift.
-                return InvestmentAllocationItem(name: account.openedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Locale(identifier: "fr_FR"))), value: val)
+                return InvestmentAllocationItem(name: account.openedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(AppLocalization.locale)), value: val)
             }
             .sorted { $0.name < $1.name }
 
@@ -341,6 +351,7 @@ final class InvestmentsViewModel {
         let allPositions = accounts.flatMap { repository.fetchPositions(accountId: $0.id) }
         guard !allPositions.isEmpty else {
             portfolioEvolution = []
+            portfolioPositionsWithoutHistory = []
             return
         }
 
@@ -360,7 +371,7 @@ final class InvestmentsViewModel {
             PortfolioSeriesInput(
                 positionId: position.id,
                 quantity: position.quantity,
-                history: seriesHistory(for: position, range: selectedTimeRange)
+                history: PositionHistoryResolver.seriesHistory(for: position, range: selectedTimeRange)
             )
         }
 
@@ -372,9 +383,10 @@ final class InvestmentsViewModel {
         // version agrégée du « 1J n'affiche que 2 points ». Un message clair
         // vaut mieux qu'une courbe fabriquée dans une autre granularité.
         if selectedTimeRange == .oneDay {
-            let withIntraday = allPositions.filter { !intradaySeries(for: $0).isEmpty }.count
+            let withIntraday = allPositions.filter { !PositionHistoryResolver.intradaySeries(for: $0).isEmpty }.count
             if withIntraday == 0 && !allPositions.isEmpty {
                 portfolioEvolution = []
+                portfolioPositionsWithoutHistory = allPositions
                 oneDayUnavailableNote = "Aucun cours intrajournalier disponible pour ce portefeuille. Les titres à valeur liquidative quotidienne (fonds, ETF peu liquides) n'en publient pas ; les autres arrivent à la prochaine synchronisation."
                 return
             }
@@ -383,78 +395,15 @@ final class InvestmentsViewModel {
             oneDayUnavailableNote = nil
         }
 
-        portfolioEvolution = PortfolioEvolutionBuilder
-            .build(inputs: inputs, range: selectedTimeRange)
-            .points
-    }
-
-    /// Historique à agréger pour une position sur une plage donnée.
-    /// Granularité adaptée : la vue 1J utilise la série INTRADAY 30 min (la série
-    /// quotidienne n'a qu'un point sur 24 h glissantes). Si l'intraday manque
-    /// pour cette position, on retombe sur son QUOTIDIEN (non filtré) : le
-    /// builder la maintiendra à plat sur son dernier cours réel — jamais sur le PRU.
-    private func seriesHistory(for position: InvestmentPosition,
-                               range: InvestmentTimeRange) -> [InvestmentPricePoint] {
-        if range == .oneDay {
-            let intraday = intradaySeries(for: position)
-            if !intraday.isEmpty { return intraday }
-            // Repli quotidien conservé UNIQUEMENT quand d'autres positions ont
-            // de l'intraday : le builder maintient alors celle-ci à plat sur son
-            // dernier cours réel, ce qui est correct (elle n'a pas bougé). Si
-            // AUCUNE position n'a d'intraday, l'appelant coupe court et
-            // n'affiche pas de courbe du tout.
-            return resolveHistory(for: position, cutoff: nil, resolution: .daily)
-        }
-        return resolveHistory(for: position, cutoff: range.startDate, resolution: .daily)
-    }
-
-    /// Série intrajournalière d'une position, bornée aux dernières 24 h COTÉES.
-    ///
-    /// ⚠️ Pas de `cutoff: range.startDate` : une fenêtre calée sur `Date()` est
-    /// VIDE dès qu'on consulte hors séance (le samedi, la dernière cotation du
-    /// vendredi a plus de 24 h). On lit la série entière (rétention 96 h) puis
-    /// on garde les dernières 24 h ancrées sur le dernier point réel.
-    private func intradaySeries(for position: InvestmentPosition) -> [InvestmentPricePoint] {
-        resolveHistory(for: position, cutoff: nil, resolution: .intraday30m)
-            .lastQuotedWindow()
-    }
-
-    /// Résolution ROBUSTE de l'historique de cours d'une position.
-    /// Essaie dans l'ordre : ISIN → ticker → symboles retenus par la dernière
-    /// synchro réussie (ex. un ISIN résolu en "PUST.PA" via OpenFIGI est stocké
-    /// sous ce symbole). Source unique utilisée par TOUS les niveaux de chart
-    /// (global, compte, position) — sinon le parent peut rester vide alors que
-    /// l'enfant s'affiche.
-    private func resolveHistory(for position: InvestmentPosition, cutoff: Date?,
-                                resolution: PriceResolution = .daily) -> [InvestmentPricePoint] {
-        func load(_ identifier: String) -> [InvestmentPricePoint] {
-            PriceHistoryCache.shared.fetch(identifier: identifier, resolution: resolution)
-                .sorted { $0.date < $1.date }
-                .filter { point in
-                    guard let cutoff else { return true }
-                    return point.date >= cutoff
-                }
-        }
-
-        let candidates = [position.isin, position.ticker].filter { !$0.isEmpty }
-        for candidate in candidates {
-            let history = load(candidate)
-            if !history.isEmpty { return history }
-        }
-        if let trace = InvestmentSyncTraceStore.fetchBest(identifiers: candidates),
-           trace.status == .success {
-            for symbol in trace.symbolsTried {
-                let history = load(symbol)
-                if !history.isEmpty { return history }
-            }
-        }
-        return []
+        let result = PortfolioEvolutionBuilder.build(inputs: inputs, range: selectedTimeRange)
+        portfolioEvolution = result.points
+        portfolioPositionsWithoutHistory = allPositions.filter { result.unpricedPositionIds.contains($0.id) }
     }
 
     /// Allocation par type d'actif (toutes positions confondues) — pour le donut chart.
     /// utilise le cache `allPositions` (au lieu de fetcher la DB à chaque render).
     var allocationByAssetType: [AllocationSlice] {
-        Dictionary(grouping: allPositions, by: { $0.assetType })
+        Dictionary(grouping: allPositions, by: { InvestmentAssetType.canonicalKey(for: $0.assetType) })
             .map { key, positions in
                 AllocationSlice(name: assetTypeDisplayName(key),
                                 value: positions.reduce(0) { $0 + $1.currentValue })
@@ -491,6 +440,20 @@ final class InvestmentsViewModel {
         allPositions.reduce(0) { $0 + $1.currentValue }
     }
 
+    /// Base de comparaison pour le % de variation du hero card — restreinte
+    /// aux positions effectivement valorisées dans `portfolioEvolution` (donc
+    /// dans `portfolioStartValue`). À utiliser à la place de
+    /// `portfolioCurrentValue` comme `variationBasisValue`, sinon une position
+    /// sans historique sur la plage sélectionnée est comptée d'un côté et pas
+    /// de l'autre, ce qui gonfle artificiellement le %.
+    var portfolioVariationBasisValue: Double {
+        guard !portfolioPositionsWithoutHistory.isEmpty else { return portfolioCurrentValue }
+        let excludedIds = Set(portfolioPositionsWithoutHistory.map(\.id))
+        return allPositions
+            .filter { !excludedIds.contains($0.id) }
+            .reduce(0) { $0 + $1.currentValue }
+    }
+
     /// Total cash (trésorerie) sur tous les comptes. À ajouter au `portfolioCurrentValue`
     /// dans le hero global UNIQUEMENT pour affichage cosmétique quand l'utilisateur
     /// a activé `investmentsIncludeCashInTotal` — JAMAIS pour le calcul de variation%.
@@ -499,7 +462,7 @@ final class InvestmentsViewModel {
     }
 
     private func assetTypeDisplayName(_ raw: String) -> String {
-        InvestmentAssetType(rawValue: raw)?.label ?? raw.capitalized
+        InvestmentAssetType(looselyMatching: raw)?.label ?? raw.capitalized
     }
 
     // MARK: - Phase 2 — Évolutions par compte / par position
@@ -537,7 +500,7 @@ final class InvestmentsViewModel {
         // identifiants, ni sur l'algorithme d'agrégation.
         // Même garde qu'au niveau global : en 1J sans aucune cotation en
         // continu, ne pas fabriquer de courbe à partir de clôtures quotidiennes.
-        if range == .oneDay, positions.allSatisfy({ intradaySeries(for: $0).isEmpty }) {
+        if range == .oneDay, positions.allSatisfy({ PositionHistoryResolver.intradaySeries(for: $0).isEmpty }) {
             return AccountEvolutionResult(
                 points: [], positionsWithoutHistory: [],
                 oneDayUnavailableNote: "Aucun cours intrajournalier disponible pour ce compte. Les titres à valeur liquidative quotidienne n'en publient pas ; les autres arrivent à la prochaine synchronisation."
@@ -548,7 +511,7 @@ final class InvestmentsViewModel {
             PortfolioSeriesInput(
                 positionId: position.id,
                 quantity: position.quantity,
-                history: seriesHistory(for: position, range: range)
+                history: PositionHistoryResolver.seriesHistory(for: position, range: range)
             )
         }
         let result = PortfolioEvolutionBuilder.build(inputs: inputs, range: range)
@@ -575,7 +538,7 @@ final class InvestmentsViewModel {
     /// Allocation par type d'actif au sein d'un compte (pour le donut sur AccountDetailView).
     func allocationByAssetType(accountId: Int) -> [AllocationSlice] {
         let positions = repository.fetchPositions(accountId: accountId)
-        let grouped = Dictionary(grouping: positions, by: { $0.assetType })
+        let grouped = Dictionary(grouping: positions, by: { InvestmentAssetType.canonicalKey(for: $0.assetType) })
         return grouped.map { key, items in
             AllocationSlice(name: assetTypeDisplayName(key),
                             value: items.reduce(0) { $0 + $1.currentValue })
@@ -600,6 +563,7 @@ final class InvestmentsViewModel {
         defer { isSyncingMarketData = false }
 
         let outcome = await InvestmentAutoSyncService.shared.syncHistory(identifier: identifier)
+        InvestmentAutoSyncService.shared.recordOutcome(identifier: identifier, outcome: outcome)
 
         let clean = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         // Les messages détaillés (symboles essayés, source, nb de points) sont

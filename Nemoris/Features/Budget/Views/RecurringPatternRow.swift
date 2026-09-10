@@ -17,7 +17,7 @@ struct RecurringPatternRow: View {
                     .font(AppTheme.Typography.bodyMedium)
                     .foregroundStyle(pattern.isActive ? AppTheme.Colors.textPrimary : AppTheme.Colors.textSecondary)
                 HStack(spacing: 4) {
-                    Text(pattern.frequency.label)
+                    Text(LocalizedStringKey(pattern.frequency.label))
                     if let catId = pattern.categoryId,
                        let cat = categories.first(where: { $0.id == catId }) {
                         Text("·")

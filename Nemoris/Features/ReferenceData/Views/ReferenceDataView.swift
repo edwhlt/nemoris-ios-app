@@ -4,6 +4,7 @@ struct ReferenceDataView: View {
     @Environment(AppState.self) private var appState
     @Environment(PurchaseManager.self) private var store
     private let repository = TransactionRepository()
+    private let metadataRepository = TransactionMetadataRepository()
 
     enum ReferenceTab: String, CaseIterable, Identifiable {
         case comptes        = "Comptes"
@@ -21,6 +22,10 @@ struct ReferenceDataView: View {
         case metadata       = "Métadonnées"
         case tags           = "Tags"
         var id: String { rawValue }
+
+        /// Libellé affiché — distinct de `rawValue` (identité interne du
+        /// `Picker`) pour pouvoir traduire sans toucher à cette identité.
+        var label: LocalizedStringKey { LocalizedStringKey(rawValue) }
     }
 
     @State private var selectedTab: ReferenceTab = .comptes
@@ -30,6 +35,7 @@ struct ReferenceDataView: View {
     @State private var paymentTypes: [PaymentType] = []
     @State private var tags: [Tag] = []
     @State private var payeeGroups: [PayeeGroup] = []
+    @State private var metadataKeys: [TransactionMetadataKey] = []
     /// Skeleton tant que le 1er `loadReferenceData()` n'est pas terminé.
     @State private var hasLoaded = false
 
@@ -51,24 +57,61 @@ struct ReferenceDataView: View {
     // Recherche
     @State private var searchText = ""
 
+    // Filtre structuré de l'onglet Tiers (groupe / catégorie / ville / pays)
+    // — distinct de la recherche texte ci-dessus (nom/regex, via `.searchable`).
+    // Cf. `TiersFilterSheet`. `tiersFilterGroupId` double aussi de mécanisme
+    // pour "voir les tiers d'un groupe" (déclenché depuis
+    // `PayeeGroupManagerView.onSelectGroup`) — pas besoin d'un écran séparé,
+    // c'est la même question posée avec un critère déjà rempli.
+    @State private var showTiersFilters = false
+    @State private var tiersFilterGroupId: Int? = nil
+    @State private var tiersFilterCategoryId: Int? = nil
+    @State private var tiersFilterCity: String = ""
+    @State private var tiersFilterCountry: String = ""
+
+    private var tiersActiveFiltersCount: Int {
+        (tiersFilterGroupId == nil ? 0 : 1)
+        + (tiersFilterCategoryId == nil ? 0 : 1)
+        + (tiersFilterCity.isEmpty ? 0 : 1)
+        + (tiersFilterCountry.isEmpty ? 0 : 1)
+    }
+
     // Édition / ajout
     @State private var showEditSheet = false
-    @State private var editDraftName  = ""
-    @State private var editDraftRegex = ""
-    @State private var editDraftCategoryId: Int? = nil
-    @State private var editDraftParentCategoryId: Int? = nil  // pour l'édition de catégorie
-    @State private var editDraftIcon: String? = nil           // pour l'édition de catégorie
-    @State private var editDraftAccountType: String = "COURANT"
-    @State private var editDraftLinkedCompteId: Int? = nil
+    /// Valeurs initiales transmises à `ReferenceEditFormPane` à l'ouverture. Le
+    /// `@State` VIVANT pendant la saisie appartient à ce view dédié, pas ici —
+    /// cf. son commentaire de tête pour la raison (staleness du panneau racine
+    /// macOS).
+    @State private var editInitialDraft = ReferenceEditDraft()
     @State private var editItemId: Int? = nil   // nil = nouvel élément
-    /// Sélecteur d'icône catégorie : présentation par état (pas un `NavigationLink`
-    /// push) — un push depuis un formulaire hébergé dans le panneau macOS n'a pas
-    /// de `NavigationStack` ambiante fiable (cf. CLAUDE.md, crashs NavigationLink
-    /// macOS). Fonctionne identiquement sur iOS.
-    @State private var showIconPicker = false
 
     // édition complète d'un payee via PayeeDetailView.
     @State private var editingPayee: Tiers? = nil
+    /// Création d'un tiers : passe directement par `PayeeDetailView` (fiche
+    /// riche) plutôt que par `ReferenceEditFormPane` — même parcours qu'à
+    /// l'édition, pas de form minimal séparé à compléter après coup.
+    @State private var creatingPayee = false
+
+    // Gestion des clés de métadonnées (onglet "Métadonnées") : même parcours
+    // swipeable/inspecteur que les autres onglets (Comptes/Tiers/Tags) — tap
+    // ou swipe "Modifier" → `editingMetadataKey` (détail ⇄ édition via
+    // `adaptiveEntityPane`, cf. `metadataRow`) ; "+" de la toolbar →
+    // `creatingMetadataKey` (`MetadataKeyFormView(key: nil, …)`). Remplace
+    // l'ancien bouton "Gérer les métadonnées" (retour d'usage : "il sert à
+    // rien") + `MetadataKeyManagerView`, qui reste néanmoins en service
+    // ailleurs — cf. son commentaire de tête dans `TransactionMetadataSection.swift`.
+    @State private var editingMetadataKey: TransactionMetadataKey? = nil
+    @State private var creatingMetadataKey = false
+
+    // Gestion des groupes de tiers (onglet "Tiers") : ajouter/renommer/
+    // supprimer/fusionner — cf. `PayeeGroupManagerView`. Présenté ICI, hors de
+    // la `List`, pour la même raison structurelle que les autres panes de cet
+    // écran (`showEditSheet`, `creatingPayee`, `detailTarget`…) : un
+    // `.sheet`/`.adaptivePane` attaché à une vue qui EST elle-même du contenu
+    // de row à l'intérieur d'une `List` (a fortiori une `List` avec
+    // `.searchable`, comme ici) peut être annulé par le système au tout
+    // premier essai (bug SwiftUI connu, retour d'usage).
+    @State private var showGroupManager = false
 
     // Nombre de transactions associées, par entité (id → count).
     @State private var categoryCounts: [Int: Int] = [:]
@@ -76,6 +119,7 @@ struct ReferenceDataView: View {
     @State private var paymentTypeCounts: [Int: Int] = [:]
     @State private var accountCounts: [Int: Int] = [:]
     @State private var tagCounts: [Int: Int] = [:]
+    @State private var metadataKeyCounts: [Int: Int] = [:]
 
     // Suppression unitaire par swipe (toutes les tables).
     @State private var pendingDelete: DeleteTarget? = nil
@@ -106,10 +150,53 @@ struct ReferenceDataView: View {
                                  sort: sortOrder == .creation ? .creation : .alphabetical)
     }
 
-    // Sélection / suppression tiers
+    /// Catégories PARENTES actuellement REPLIÉES — vide par défaut (tout
+    /// déplié, comportement historique du `DisclosureGroup` avant lui).
+    @State private var collapsedCategoryIds: Set<Int> = []
+
+    /// Aplatissement préfixe de `categoryForest`, en ne descendant dans les
+    /// enfants que si le parent n'est PAS replié — même doctrine que
+    /// `SQLConsoleView.visibleRows` (cf. commentaire de tête de
+    /// `CategoryTreeRow`). C'est cette liste PLATE, et elle seule, qui donne
+    /// à `first`/`last` un sens global cohérent avec le reste de l'app.
+    private var visibleCategoryRows: [(node: CategoryNode, depth: Int)] {
+        var rows: [(node: CategoryNode, depth: Int)] = []
+        func walk(_ nodes: [CategoryNode], depth: Int) {
+            for node in nodes {
+                rows.append((node, depth))
+                if !node.isLeaf, !collapsedCategoryIds.contains(node.id) {
+                    walk(node.children, depth: depth + 1)
+                }
+            }
+        }
+        walk(categoryForest, depth: 0)
+        return rows
+    }
+
+    // Sélection / suppression tiers — l'ancre permet le maj+clic (plage),
+    // cf. `RangeSelection` (DesignSystem/MultiSelect.swift).
     @State private var isSelectingTiers = false
     @State private var selectedTiersIds: Set<Int> = []
+    @State private var tiersSelectionAnchor: Int? = nil
+
+    // Sélection / suppression tags — même mécanique que Tiers, état séparé
+    // (changer d'onglet ne doit pas mélanger les deux sélections).
+    @State private var isSelectingTags = false
+    @State private var selectedTagIds: Set<Int> = []
+    @State private var tagsSelectionAnchor: Int? = nil
+
     @State private var showDeleteConfirm = false
+
+    /// Fusion de tiers DOUBLONS — 2 chemins vers le même résolveur final :
+    /// - swipe "Fusionner…" d'UNE row → `mergeTierSearchSourceId` (recherche
+    ///   d'un second tier, cf. `PayeeMergeTargetPicker`) → une fois choisi,
+    ///   les 2 ids alimentent `mergeTierCandidateIds`.
+    /// - bouton "Fusionner (N)" en sélection groupée (2+ déjà cochés) →
+    ///   `mergeTierCandidateIds` directement, PAS de recherche : demander de
+    ///   choisir une cible parmi une liste n'a pas de sens quand l'utilisateur
+    ///   a déjà désigné les tiers en question (retour d'usage).
+    @State private var mergeTierSearchSourceId: Int? = nil
+    @State private var mergeTierCandidateIds: [Int] = []
 
     // Import CSV des tiers : retiré lors d'un nettoyage (cluster SmartImport legacy supprimé).
 
@@ -125,6 +212,7 @@ struct ReferenceDataView: View {
     @State private var filteredTiers: [Tiers] = []
     @State private var filteredPaymentTypes: [PaymentType] = []
     @State private var filteredTags: [Tag] = []
+    @State private var filteredMetadataKeys: [TransactionMetadataKey] = []
 
     /// Recherche réellement appliquée aux listes = `searchText` debouncé
     /// (cf. `.task(id: searchText)`), pour ne pas refiltrer à chaque caractère.
@@ -165,13 +253,24 @@ struct ReferenceDataView: View {
                       : categories.filter { $0.name.localizedCaseInsensitiveContains(q) },
             name: \.name)
 
-        filteredTiers = sorted(
-            q.isEmpty ? tiers
-                      : tiers.filter {
-                            $0.name.localizedCaseInsensitiveContains(q)
-                            || ($0.regex?.localizedCaseInsensitiveContains(q) == true)
-                        },
-            name: \.name)
+        var tiersBase = q.isEmpty ? tiers
+            : tiers.filter {
+                $0.name.localizedCaseInsensitiveContains(q)
+                || ($0.regex?.localizedCaseInsensitiveContains(q) == true)
+            }
+        if let gid = tiersFilterGroupId {
+            tiersBase = tiersBase.filter { $0.groupId == gid }
+        }
+        if let cid = tiersFilterCategoryId {
+            tiersBase = tiersBase.filter { $0.categoryId == cid }
+        }
+        if !tiersFilterCity.isEmpty {
+            tiersBase = tiersBase.filter { ($0.city ?? "").localizedCaseInsensitiveContains(tiersFilterCity) }
+        }
+        if !tiersFilterCountry.isEmpty {
+            tiersBase = tiersBase.filter { ($0.country ?? "").localizedCaseInsensitiveContains(tiersFilterCountry) }
+        }
+        filteredTiers = sorted(tiersBase, name: \.name)
 
         filteredPaymentTypes = sorted(
             q.isEmpty ? paymentTypes
@@ -184,6 +283,11 @@ struct ReferenceDataView: View {
         filteredTags = sorted(
             q.isEmpty ? tags
                       : tags.filter { $0.name.localizedCaseInsensitiveContains(q) },
+            name: \.name)
+
+        filteredMetadataKeys = sorted(
+            q.isEmpty ? metadataKeys
+                      : metadataKeys.filter { $0.name.localizedCaseInsensitiveContains(q) },
             name: \.name)
 
         if resetPaging {
@@ -206,13 +310,11 @@ struct ReferenceDataView: View {
             VStack(spacing: 0) {
                 Picker("Table", selection: $selectedTab) {
                     ForEach(ReferenceTab.allCases) { tab in
-                        Text(tab.rawValue).tag(tab)
+                        Text(tab.label).tag(tab)
                     }
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal).padding(.vertical, 8)
-
-                Divider()
 
                 List {
                     if !hasLoaded {
@@ -222,112 +324,11 @@ struct ReferenceDataView: View {
                         }
                     } else {
                     switch selectedTab {
-                    case .comptes:
-                        if filteredAccounts.isEmpty { emptyRow
-                        } else if sortOrder == .alphabetical && searchText.isEmpty {
-                            // Groupé par type, trié alphabétiquement
-                            ForEach(accounts.groupedByType, id: \.type) { group in
-                                Section(group.type.label) {
-                                    ForEach(group.accounts) { a in
-                                        accountRow(a)
-                                            .macGroupedRow(first: a.id == group.accounts.first?.id, last: a.id == group.accounts.last?.id)
-                                    }
-                                }
-                            }
-                        } else {
-                            // Plat : résultats de recherche ou tri par création
-                            ForEach(filteredAccounts) { a in
-                                accountRow(a)
-                                    .macGroupedRow(first: a.id == filteredAccounts.first?.id, last: a.id == filteredAccounts.last?.id)
-                            }
-                        }
-                    case .categories:
-                        if categories.isEmpty {
-                            emptyRow
-                        } else if !searchText.isEmpty {
-                            // Mode recherche : liste plate avec indicateur visuel
-                            ForEach(filteredCategories) { c in
-                                flatCategoryRow(c)
-                                    .macGroupedRow(first: c.id == filteredCategories.first?.id, last: c.id == filteredCategories.last?.id)
-                            }
-                        } else {
-                            // Mode normal : arbre hiérarchique
-                            ForEach(categoryForest) { node in
-                                CategoryTreeRow(
-                                    node: node,
-                                    countFor: { categoryCounts[$0.id] ?? 0 },
-                                    onEdit: { c in
-                                        startEdit(id: c.id, name: c.name, regex: "", parentCategoryId: c.parentId, icon: c.icon)
-                                    },
-                                    onDelete: { n in pendingDelete = deleteTargetForNode(n) },
-                                    onSelect: { c in detailTarget = .category(c) }
-                                )
-                            }
-                        }
-                    case .tiers:
-                        if filteredTiers.isEmpty { emptyRow } else {
-                            ForEach(visibleTiers) { t in
-                                TierRow(tiers: t,
-                                        allCategories: categories,
-                                        subtitle: tierSubtitle(t),
-                                        count: tierCounts[t.id] ?? 0,
-                                        isSelecting: isSelectingTiers,
-                                        isSelected: selectedTiersIds.contains(t.id))
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        if isSelectingTiers {
-                                            if selectedTiersIds.contains(t.id) { selectedTiersIds.remove(t.id) }
-                                            else { selectedTiersIds.insert(t.id) }
-                                        } else {
-                                            editingPayee = t
-                                        }
-                                    }
-                                    .rowActions(
-                                        leading: isSelectingTiers ? [] : [editAction { editingPayee = t }],
-                                        trailing: isSelectingTiers ? [] : [deleteAction(DeleteTarget(tab: .tiers, entityId: t.id, name: t.name,
-                                                                                                     count: tierCounts[t.id] ?? 0, childIds: [], blocked: false))],
-                                        leadingFullSwipe: false,
-                                        trailingFullSwipe: false
-                                    )
-                                    .macGroupedRow(first: t.id == visibleTiers.first?.id, last: t.id == visibleTiers.last?.id)
-                            }
-                            // Sentinelle de pagination : son apparition à l'écran
-                            // déclenche le chargement de la page suivante.
-                            if filteredTiers.count > visibleTiers.count {
-                                HStack {
-                                    Spacer()
-                                    ProgressView()
-                                    Spacer()
-                                }
-                                .listRowBackground(AppTheme.Colors.surface)
-                                .onAppear { tiersDisplayLimit += tiersPageSize }
-                            }
-                        }
-                    case .metadata:
-                        // ⚠️ Contenu extrait dans sa propre vue : ce `switch`
-                        // atteignait la limite de type-check du compilateur.
-                        MetadataKeysTabContent(searchText: searchText)
-                    case .tags:
-                        if filteredTags.isEmpty { emptyRow } else {
-                            ForEach(filteredTags) { tag in
-                                HStack(spacing: 10) {
-                                    Circle()
-                                        .fill(tag.displayColor)
-                                        .frame(width: 10, height: 10)
-                                    Text(tag.name)
-                                    Spacer()
-                                    EntityIdCountBadge(id: tag.id, count: tagCounts[tag.id] ?? 0)
-                                }
-                                .contentShape(Rectangle())
-                                .macDetailTap { detailTarget = .tag(tag) }
-                                .rowActions(
-                                    trailing: [deleteAction(DeleteTarget(tab: .tags, entityId: tag.id, name: tag.name,
-                                                                         count: tagCounts[tag.id] ?? 0, childIds: [], blocked: false))],
-                                    trailingFullSwipe: false
-                                )
-                                .macGroupedRow(first: tag.id == filteredTags.first?.id, last: tag.id == filteredTags.last?.id)
-                            }
-                        }
+                    case .comptes:    accountsTabContent
+                    case .categories: categoriesTabContent
+                    case .tiers:      tiersTabContent
+                    case .metadata:   metadataTabContent
+                    case .tags:       tagsTabContent
                     }
                     }  // end else (hasLoaded)
                 }
@@ -340,7 +341,7 @@ struct ReferenceDataView: View {
                 // que TransactionsView (macGroupedRow ne pose pas de marge
                 // extérieure en haut de la 1ère row, seulement en bas de la
                 // dernière). Cf. retour d'usage.
-                .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+                .macGroupedListTopGap()
                 #endif
                 .scrollContentBackground(.hidden)
                 .searchable(text: $searchText, prompt: "Rechercher…")
@@ -351,97 +352,292 @@ struct ReferenceDataView: View {
             // pas le fond neutre AppTheme. Même correctif que TricountListView/
             // TricountDetailView/SQLConsoleView ().
             .background(AppTheme.Colors.background.ignoresSafeArea())
-            .safeAreaInset(edge: .bottom) {
-                if isSelectingTiers && !selectedTiersIds.isEmpty {
-                    HStack(spacing: 16) {
-                        Button {
-                            selectedTiersIds = Set(filteredTiers.map(\.id))
-                        } label: {
-                            Text("Tout sélectionner").font(.callout)
-                        }
-                        Spacer()
-                        Button(role: .destructive) {
-                            showDeleteConfirm = true
-                        } label: {
-                            Label("Supprimer \(selectedTiersIds.count)", systemImage: "trash")
-                                .fontWeight(.semibold)
-                        }
+            // ⌘A : sélectionne tout ce qui est déjà chargé pour l'onglet
+            // affiché. Un seul bouton caché, dispatché par `selectedTab` —
+            // les DEUX ne peuvent jamais être dans l'arbre en même temps
+            // (switch sur l'onglet actif), donc pas d'ambiguïté de raccourci.
+            .background(
+                Group {
+                    switch selectedTab {
+                    case .tiers:
+                        SelectAllShortcut(isSelecting: $isSelectingTiers, selected: $selectedTiersIds, allIds: filteredTiers.map(\.id))
+                    case .tags:
+                        SelectAllShortcut(isSelecting: $isSelectingTags, selected: $selectedTagIds, allIds: filteredTags.map(\.id))
+                    default:
+                        EmptyView()
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .background(.regularMaterial)
-                    .overlay(alignment: .top) { Divider() }
                 }
-            }
-            .navigationTitle("Données")
+            )
+            // ⚠️ Résolution explicite, jamais un littéral nu : `.navigationTitle`
+            // ponte vers la chrome native (barre de titre macOS), qui ne respecte
+            // pas fiablement `\.locale` forcé par l'app (contrairement à un `Text`
+            // de contenu). Cf. CLAUDE.md §5.
+            .localizedNavigationTitle("Données")
             .toolbar {
-                // Bouton Sélectionner/Annuler (tiers uniquement, leading)
-                if selectedTab == .tiers {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button(isSelectingTiers ? "Annuler" : "Sélectionner") {
-                            isSelectingTiers.toggle()
-                            selectedTiersIds = []
-                        }
-                        .foregroundStyle(isSelectingTiers ? AppTheme.Colors.danger : AppTheme.Colors.accent)
-                    }
-                }
                 // Actions secondaires + bouton + groupés dans UNE pilule sur macOS.
                 // `ToolbarItemGroup` (et NON `ControlGroup`, qui rendait des boutons
                 // isolés) : c'est le groupement natif de la barre d'outils.
                 // Icônes seules + tooltip natif `.help`, cohérent avec le reste.
                 #if os(macOS)
+                // Retour d'usage : réorganisé en 2 groupes séparés par un
+                // `Spacer()` — filtre/groupes/tri (ou, en sélection, les
+                // actions de groupe) à gauche, bascule de sélection + ajouter
+                // collés au bord droit. `Spacer()` dans un `ToolbarItemGroup`
+                // est déjà le pattern utilisé par `TransactionsView`.
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    // Binding custom : `startAdd()` réinitialise plusieurs champs
-                    // brouillon — doit rester déclenché à l'OUVERTURE, pas à
-                    // chaque bascule (la fermeture n'a rien à réinitialiser).
-                    PaneToggleButton(label: "Ajouter", systemImage: "plus", isOn: Binding(
-                        get: { showEditSheet },
-                        set: { newValue in
-                            if newValue { startAdd() } else { showEditSheet = false }
+                    if !isCurrentlySelecting {
+                        // Filtre + groupes : n'ont de sens que sur l'onglet Tiers.
+                        if selectedTab == .tiers {
+                            PaneToggleButton(
+                                label: "Filtrer",
+                                systemImage: tiersActiveFiltersCount > 0
+                                    ? "line.3.horizontal.decrease.circle.fill"
+                                    : "line.3.horizontal.decrease.circle",
+                                isOn: $showTiersFilters
+                            )
+                            PaneToggleButton(label: "Gérer les groupes", systemImage: "rectangle.3.group", isOn: $showGroupManager)
                         }
-                    ))
-                        .opacity(isSelectingTiers ? 0 : 1)
-                        .disabled(isSelectingTiers)
-                    Button {
-                        sortOrder = sortOrder == .alphabetical ? .creation : .alphabetical
-                    } label: {
-                        Image(systemName: sortOrder == .alphabetical ? "clock" : "textformat.abc")
-                    }
-                    .help(sortOrder == .alphabetical ? "Trier par création" : "Trier par nom")
-                    .opacity(isSelectingTiers ? 0 : 1)
-                    .disabled(isSelectingTiers)
-                }
-                #else
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    PaneToggleButton(label: "Ajouter", systemImage: "plus", isOn: Binding(
-                        get: { showEditSheet },
-                        set: { newValue in
-                            if newValue { startAdd() } else { showEditSheet = false }
-                        }
-                    ))
-                        .opacity(isSelectingTiers ? 0 : 1)
-                        .disabled(isSelectingTiers)
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
                         Button {
                             sortOrder = sortOrder == .alphabetical ? .creation : .alphabetical
                         } label: {
-                            Label(
-                                sortOrder == .alphabetical ? "Trier par création" : "Trier par ordre alphabétique",
-                                systemImage: sortOrder == .alphabetical ? "clock" : "textformat.abc"
+                            Image(systemName: sortOrder == .alphabetical ? "clock" : "textformat.abc")
+                        }
+                        .localizedHelp(sortOrder == .alphabetical ? "Trier par création" : "Trier par nom")
+                    } else if currentSelectionCount > 0 {
+                        // En sélection, ce même emplacement porte les actions
+                        // de groupe — filtre/groupes/tri n'ont plus de sens ici.
+                        Button {
+                            selectAllInCurrentTab()
+                        } label: {
+                            Image(systemName: "checklist")
+                        }
+                        .localizedHelp("Tout sélectionner")
+                        .localizedAccessibilityLabel("Tout sélectionner")
+                        // Fusion de doublons — n'a de sens que pour les tiers
+                        // (pas les tags), et à partir de 2 sélectionnés.
+                        if selectedTab == .tiers && currentSelectionCount >= 2 {
+                            Button {
+                                mergeTierCandidateIds = Array(selectedTiersIds)
+                            } label: {
+                                Image(systemName: "arrow.triangle.merge")
+                            }
+                            .localizedHelp("Fusionner (\(currentSelectionCount))")
+                            .localizedAccessibilityLabel("Fusionner \(currentSelectionCount) tiers")
+                        }
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("Supprimer (\(currentSelectionCount))", systemImage: "trash")
+                                .foregroundStyle(AppTheme.Colors.danger)
+                        }
+                    }
+
+                    Spacer()
+
+                    // Bascule de sélection — retour d'usage : c'était un
+                    // bouton TEXTE ("Sélectionner"/"Annuler") à gauche de la
+                    // barre ; icône, collée au bord droit avec "Ajouter".
+                    if selectedTab == .tiers || selectedTab == .tags {
+                        Button {
+                            toggleCurrentSelectionMode()
+                        } label: {
+                            Image(systemName: isCurrentlySelecting ? "xmark.circle" : "checkmark.circle")
+                        }
+                        .localizedHelp(isCurrentlySelecting ? "Annuler la sélection" : "Sélectionner")
+                        .localizedAccessibilityLabel(isCurrentlySelecting ? "Annuler la sélection" : "Sélectionner")
+                    }
+                    // ⚠️ Retrait CONDITIONNEL (`if !isCurrentlySelecting`), pas
+                    // `.opacity(0).disabled(...)` (retour d'usage : le système
+                    // dessine une pilule/fond autour du GROUPE de boutons de la
+                    // toolbar — masquer juste le CONTENU d'un bouton laisse sa
+                    // pilule vide visible, une "bulle" fantôme à la place
+                    // d'"Ajouter" pendant la sélection). Un `if` retire le
+                    // bouton du groupe, pas seulement son contenu.
+                    if !isCurrentlySelecting {
+                        // Binding custom : `startAdd()` réinitialise plusieurs
+                        // champs brouillon — doit rester déclenché à
+                        // l'OUVERTURE, pas à chaque bascule (la fermeture n'a
+                        // rien à réinitialiser).
+                        PaneToggleButton(label: "Ajouter", systemImage: "plus", isOn: Binding(
+                            get: { showEditSheet },
+                            set: { newValue in
+                                if newValue { startAdd() } else { showEditSheet = false }
+                            }
+                        ))
+                    }
+                }
+                #else
+                // Retour d'usage : filtre + tri restent des icônes de premier
+                // niveau (accès direct) ; groupes/sélectionner/ajouter — des
+                // actions plus rares — vont dans le menu "…", groupes séparé
+                // du reste par un `Divider()` (question distincte : organiser
+                // les tiers vs. agir sur la liste courante). En sélection,
+                // la bascule + les actions de groupe restent au 1er niveau
+                // (on ne veut pas enterrer "Annuler la sélection").
+                if isCurrentlySelecting {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            toggleCurrentSelectionMode()
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                        }
+                        .localizedHelp("Annuler la sélection")
+                        .localizedAccessibilityLabel("Annuler la sélection")
+                    }
+                    if currentSelectionCount > 0 {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button {
+                                selectAllInCurrentTab()
+                            } label: {
+                                Image(systemName: "checklist")
+                            }
+                            .localizedHelp("Tout sélectionner")
+                            .localizedAccessibilityLabel("Tout sélectionner")
+                        }
+                        // Fusion de doublons — n'a de sens que pour les tiers
+                        // (pas les tags), et à partir de 2 sélectionnés.
+                        if selectedTab == .tiers && currentSelectionCount >= 2 {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button {
+                                    mergeTierCandidateIds = Array(selectedTiersIds)
+                                } label: {
+                                    Image(systemName: "arrow.triangle.merge")
+                                }
+                                .localizedHelp("Fusionner (\(currentSelectionCount))")
+                                .localizedAccessibilityLabel("Fusionner \(currentSelectionCount) tiers")
+                            }
+                        }
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button(role: .destructive) {
+                                showDeleteConfirm = true
+                            } label: {
+                                Label("Supprimer (\(currentSelectionCount))", systemImage: "trash")
+                                    .foregroundStyle(AppTheme.Colors.danger)
+                            }
+                        }
+                    }
+                } else {
+                    if selectedTab == .tiers {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            PaneToggleButton(
+                                label: "Filtrer",
+                                systemImage: tiersActiveFiltersCount > 0
+                                    ? "line.3.horizontal.decrease.circle.fill"
+                                    : "line.3.horizontal.decrease.circle",
+                                isOn: $showTiersFilters
                             )
                         }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
                     }
-                    .opacity(isSelectingTiers ? 0 : 1)
-                    .disabled(isSelectingTiers)
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            sortOrder = sortOrder == .alphabetical ? .creation : .alphabetical
+                        } label: {
+                            Image(systemName: sortOrder == .alphabetical ? "clock" : "textformat.abc")
+                        }
+                        .localizedHelp(sortOrder == .alphabetical ? "Trier par création" : "Trier par nom")
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Menu {
+                            if selectedTab == .tiers {
+                                Button {
+                                    showGroupManager = true
+                                } label: {
+                                    Label("Gérer les groupes", systemImage: "rectangle.3.group")
+                                }
+                                Divider()
+                            }
+                            if selectedTab == .tiers || selectedTab == .tags {
+                                Button {
+                                    toggleCurrentSelectionMode()
+                                } label: {
+                                    Label("Sélectionner", systemImage: "checkmark.circle")
+                                }
+                            }
+                            Button {
+                                startAdd()
+                            } label: {
+                                Label("Ajouter", systemImage: "plus")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                    }
                 }
                 #endif
             }
             .adaptivePane(isPresented: $showEditSheet) {
                 editSheet
+            }
+            .adaptivePane(isPresented: $creatingPayee) {
+                PayeeDetailView(
+                    payee: nil,
+                    allCategories: categories,
+                    allAccounts: accounts,
+                    onSave: { loadReferenceData(); appState.dataRefreshToken = UUID() }
+                )
+            }
+            .adaptivePane(isPresented: $creatingMetadataKey) {
+                MetadataKeyFormView(key: nil, onSave: { loadReferenceData(); appState.dataRefreshToken = UUID() })
+            }
+            .adaptivePane(isPresented: $showGroupManager) {
+                PayeeGroupManagerView(
+                    onChange: { loadReferenceData(); appState.dataRefreshToken = UUID() },
+                    onSelectGroup: { group in
+                        showGroupManager = false
+                        tiersFilterGroupId = group.id
+                        recomputeFiltered(resetPaging: true)
+                    }
+                )
+            }
+            .adaptivePane(isPresented: $showTiersFilters) {
+                TiersFilterSheet(
+                    allCategories: categories,
+                    payeeGroups: payeeGroups,
+                    groupId: $tiersFilterGroupId,
+                    categoryId: $tiersFilterCategoryId,
+                    city: $tiersFilterCity,
+                    country: $tiersFilterCountry,
+                    onApply: { recomputeFiltered(resetPaging: true) }
+                )
+            }
+            .adaptivePane(isPresented: Binding(
+                get: { mergeTierSearchSourceId != nil },
+                set: { if !$0 { mergeTierSearchSourceId = nil } }
+            )) {
+                if let sourceId = mergeTierSearchSourceId, let source = tiers.first(where: { $0.id == sourceId }) {
+                    PayeeMergeTargetPicker(
+                        sourceName: source.name,
+                        candidates: tiers.filter { $0.id != sourceId },
+                        onSelect: { target in
+                            mergeTierSearchSourceId = nil
+                            // ⚠️ Ne PAS ouvrir le résolveur dans le même cycle
+                            // que la fermeture de ce picker — présenter un
+                            // `.adaptivePane` en fermer un autre exige de
+                            // différer le second (cf. CLAUDE.md §N.1).
+                            Task { @MainActor in
+                                mergeTierCandidateIds = [sourceId, target.id]
+                            }
+                        }
+                    )
+                }
+            }
+            .adaptivePane(isPresented: Binding(
+                get: { !mergeTierCandidateIds.isEmpty },
+                set: { if !$0 { mergeTierCandidateIds = [] } }
+            )) {
+                PayeeMergeResolverView(
+                    candidates: tiers.filter { mergeTierCandidateIds.contains($0.id) },
+                    allCategories: categories,
+                    payeeGroups: payeeGroups,
+                    transactionCounts: tierCounts,
+                    onMerged: {
+                        isSelectingTiers = false
+                        selectedTiersIds = []
+                        tiersSelectionAnchor = nil
+                        loadReferenceData()
+                        appState.dataRefreshToken = UUID()
+                    }
+                )
             }
             .adaptiveEntityPane(
                 item: $editingPayee,
@@ -457,7 +653,8 @@ struct ReferenceDataView: View {
                     allCategories: categories,
                     payeeGroups: payeeGroups,
                     accounts: accounts,
-                    transactionCount: tierCounts[t.id] ?? 0
+                    transactionCount: tierCounts[t.id] ?? 0,
+                    onShowTransactions: { showTransactionsFor(t) }
                 )
             } edit: { payee in
                 PayeeDetailView(
@@ -466,6 +663,22 @@ struct ReferenceDataView: View {
                     allAccounts: accounts,
                     onSave: { loadReferenceData(); appState.dataRefreshToken = UUID() }
                 )
+            }
+            .adaptiveEntityPane(
+                item: $editingMetadataKey,
+                title: "Métadonnée",
+                // Lecture fraîche en base, jamais depuis `metadataKeys` (cache
+                // local) — même doctrine que le `refresh` des Tiers juste
+                // au-dessus.
+                refresh: { k in metadataRepository.fetchKeys().first { $0.id == k.id } },
+                onDelete: { k in
+                    pendingDelete = DeleteTarget(tab: .metadata, entityId: k.id, name: k.name,
+                                                 count: metadataKeyCounts[k.id] ?? 0, childIds: [], blocked: false)
+                }
+            ) { k in
+                MetadataKeyDetailPane(key: k, usageCount: metadataKeyCounts[k.id] ?? 0)
+            } edit: { k in
+                MetadataKeyFormView(key: k, onSave: { loadReferenceData(); appState.dataRefreshToken = UUID() })
             }
             .adaptivePane(item: $detailTarget) { target in
                 ReferenceDetailPane(
@@ -482,20 +695,14 @@ struct ReferenceDataView: View {
                 )
             }
             .confirmationDialog(
-                "Supprimer \(selectedTiersIds.count) tiers ?",
+                bulkDeleteTitle,
                 isPresented: $showDeleteConfirm,
                 titleVisibility: .visible
             ) {
-                Button("Supprimer", role: .destructive) {
-                    repository.deleteTiers(ids: selectedTiersIds)
-                    loadReferenceData()
-                    appState.dataRefreshToken = UUID()
-                    isSelectingTiers = false
-                    selectedTiersIds = []
-                }
+                Button("Supprimer", role: .destructive) { performBulkDelete() }
                 Button("Annuler", role: .cancel) {}
             } message: {
-                Text("Les transactions associées seront conservées mais sans tiers assigné.")
+                bulkDeleteMessage
             }
             .confirmationDialog(
                 pendingDelete.map { "Supprimer « \($0.name) » ?" } ?? "",
@@ -513,11 +720,15 @@ struct ReferenceDataView: View {
                     Button("Annuler", role: .cancel) {}
                 }
             } message: { target in
-                Text(deleteMessage(target))
+                deleteMessage(target)
             }
             .onChange(of: selectedTab) { _, _ in
                 isSelectingTiers = false
                 selectedTiersIds = []
+                tiersSelectionAnchor = nil
+                isSelectingTags = false
+                selectedTagIds = []
+                tagsSelectionAnchor = nil
                 tiersDisplayLimit = tiersPageSize
             }
             .onChange(of: sortOrder) { _, _ in
@@ -543,144 +754,274 @@ struct ReferenceDataView: View {
             .refreshable { loadReferenceData() }
     }
 
-    // MARK: Edit sheet
+    // MARK: - Contenus d'onglet (extraits de `navBody` pour le type-check, cf. commentaire ci-dessus)
+
+    @ViewBuilder private var accountsTabContent: some View {
+        if filteredAccounts.isEmpty { emptyRow
+        } else if sortOrder == .alphabetical && searchText.isEmpty {
+            // Groupé par type, trié alphabétiquement.
+            let groups = accounts.groupedByType
+            ForEach(groups, id: \.type) { group in
+                Section {
+                    ForEach(group.accounts) { a in
+                        accountRow(a)
+                            .macGroupedRow(first: a.id == group.accounts.first?.id, last: a.id == group.accounts.last?.id)
+                    }
+                } header: {
+                    Text(LocalizedStringKey(group.type.label))
+                        .macGroupedSectionHeader()
+                }
+                .listSectionSeparator(.hidden)
+                .listRowSeparator(.hidden)
+            }
+        } else {
+            // Plat : résultats de recherche ou tri par création
+            ForEach(filteredAccounts) { a in
+                accountRow(a)
+                    .macGroupedRow(first: a.id == filteredAccounts.first?.id, last: a.id == filteredAccounts.last?.id)
+            }
+        }
+    }
+
+    @ViewBuilder private var categoriesTabContent: some View {
+        if categories.isEmpty {
+            emptyRow
+        } else if !searchText.isEmpty {
+            // Mode recherche : liste plate avec indicateur visuel
+            ForEach(filteredCategories) { c in
+                flatCategoryRow(c)
+                    .macGroupedRow(first: c.id == filteredCategories.first?.id, last: c.id == filteredCategories.last?.id)
+            }
+        } else {
+            // Mode normal : arbre hiérarchique, aplati en une liste plate des
+            // nœuds VISIBLES (cf. `visibleCategoryRows` et le commentaire de
+            // tête de `CategoryTreeRow`) — first/last globaux à cette liste,
+            // pas par groupe de frères, pour UNE seule carte continue.
+            let rows = visibleCategoryRows
+            ForEach(Array(rows.enumerated()), id: \.element.node.id) { index, entry in
+                CategoryTreeRow(
+                    node: entry.node,
+                    depth: entry.depth,
+                    isExpanded: entry.node.isLeaf ? nil : !collapsedCategoryIds.contains(entry.node.id),
+                    onToggleExpand: {
+                        withAnimation(.snappy) {
+                            if collapsedCategoryIds.contains(entry.node.id) {
+                                collapsedCategoryIds.remove(entry.node.id)
+                            } else {
+                                collapsedCategoryIds.insert(entry.node.id)
+                            }
+                        }
+                    },
+                    countFor: { categoryCounts[$0.id] ?? 0 },
+                    onEdit: { c in
+                        startEdit(id: c.id, name: c.name, parentCategoryId: c.parentId, icon: c.icon)
+                    },
+                    onDelete: { n in pendingDelete = deleteTargetForNode(n) },
+                    onSelect: { c in detailTarget = .category(c) },
+                    isFirst: index == 0,
+                    isLast: index == rows.count - 1
+                )
+            }
+        }
+    }
+
+    @ViewBuilder private var tiersTabContent: some View {
+        if filteredTiers.isEmpty { emptyRow } else {
+            let allIds = visibleTiers.map(\.id)
+            ForEach(Array(visibleTiers.enumerated()), id: \.element.id) { index, t in
+                TierRow(tiers: t,
+                        allCategories: categories,
+                        subtitle: tierSubtitle(t),
+                        count: tierCounts[t.id] ?? 0,
+                        isSelecting: isSelectingTiers,
+                        isSelected: selectedTiersIds.contains(t.id))
+                    .selectableRow(
+                        id: t.id, index: index, allIds: allIds,
+                        isSelecting: $isSelectingTiers, selected: $selectedTiersIds, anchor: $tiersSelectionAnchor
+                    ) {
+                        editingPayee = t
+                    }
+                    .rowActions(
+                        selection: selectionRowActions(
+                            isSelecting: isSelectingTiers,
+                            isSelected: selectedTiersIds.contains(t.id),
+                            selectionCount: selectedTiersIds.count,
+                            toggle: { RangeSelection.toggle(t.id, index: index, selected: &selectedTiersIds, anchor: &tiersSelectionAnchor) },
+                            selectAll: selectAllInCurrentTab,
+                            clearSelection: { selectedTiersIds = [] },
+                            deleteSelection: { showDeleteConfirm = true }
+                        ),
+                        leading: isSelectingTiers ? [] : [editAction { editingPayee = t }],
+                        trailing: isSelectingTiers ? [] : (
+                            tiers.count > 1
+                                ? [
+                                    RowAction("Fusionner…", systemImage: "arrow.triangle.merge", tint: AppTheme.Colors.textSecondary) { mergeTierSearchSourceId = t.id },
+                                    deleteAction(DeleteTarget(tab: .tiers, entityId: t.id, name: t.name,
+                                                               count: tierCounts[t.id] ?? 0, childIds: [], blocked: false))
+                                  ]
+                                : [deleteAction(DeleteTarget(tab: .tiers, entityId: t.id, name: t.name,
+                                                              count: tierCounts[t.id] ?? 0, childIds: [], blocked: false))]
+                        ),
+                        leadingFullSwipe: false,
+                        trailingFullSwipe: false
+                    )
+                    .macGroupedRow(first: t.id == visibleTiers.first?.id, last: t.id == visibleTiers.last?.id)
+            }
+            // Sentinelle de pagination : son apparition à l'écran
+            // déclenche le chargement de la page suivante.
+            if filteredTiers.count > visibleTiers.count {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .listRowBackground(AppTheme.Colors.surface)
+                .onAppear { tiersDisplayLimit += tiersPageSize }
+            }
+        }
+    }
+
+    @ViewBuilder private var tagsTabContent: some View {
+        if filteredTags.isEmpty { emptyRow } else {
+            let allIds = filteredTags.map(\.id)
+            ForEach(Array(filteredTags.enumerated()), id: \.element.id) { index, tag in
+                HStack(spacing: 10) {
+                    if isSelectingTags {
+                        Image(systemName: selectedTagIds.contains(tag.id) ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(selectedTagIds.contains(tag.id) ? AppTheme.Colors.danger : AppTheme.Colors.textSecondary)
+                            .imageScale(.large)
+                    }
+                    Circle()
+                        .fill(tag.displayColor)
+                        .frame(width: 10, height: 10)
+                    Text(tag.name)
+                    Spacer()
+                    EntityIdCountBadge(id: tag.id, count: tagCounts[tag.id] ?? 0)
+                }
+                .selectableRow(
+                    id: tag.id, index: index, allIds: allIds,
+                    isSelecting: $isSelectingTags, selected: $selectedTagIds, anchor: $tagsSelectionAnchor
+                ) {
+                    detailTarget = .tag(tag)
+                }
+                .rowActions(
+                    selection: selectionRowActions(
+                        isSelecting: isSelectingTags,
+                        isSelected: selectedTagIds.contains(tag.id),
+                        selectionCount: selectedTagIds.count,
+                        toggle: { RangeSelection.toggle(tag.id, index: index, selected: &selectedTagIds, anchor: &tagsSelectionAnchor) },
+                        selectAll: selectAllInCurrentTab,
+                        clearSelection: { selectedTagIds = [] },
+                        deleteSelection: { showDeleteConfirm = true }
+                    ),
+                    trailing: isSelectingTags ? [] : [deleteAction(DeleteTarget(tab: .tags, entityId: tag.id, name: tag.name,
+                                                         count: tagCounts[tag.id] ?? 0, childIds: [], blocked: false))],
+                    trailingFullSwipe: false
+                )
+                .macGroupedRow(first: tag.id == filteredTags.first?.id, last: tag.id == filteredTags.last?.id)
+            }
+        }
+    }
+
+    /// Onglet Métadonnées — même parcours que Comptes/Tiers/Tags : tap ou
+    /// swipe "Modifier" ouvrent le détail (`editingMetadataKey`, cf.
+    /// `adaptiveEntityPane`), swipe "Supprimer" la confirmation générique
+    /// (`pendingDelete`). Remplace l'ancien bouton "Gérer les métadonnées"
+    /// (retour d'usage : "il sert à rien").
+    @ViewBuilder private var metadataTabContent: some View {
+        if filteredMetadataKeys.isEmpty { emptyRow } else {
+            ForEach(filteredMetadataKeys) { key in
+                metadataRow(key)
+                    .macGroupedRow(first: key.id == filteredMetadataKeys.first?.id, last: key.id == filteredMetadataKeys.last?.id)
+            }
+        }
+    }
 
     @ViewBuilder
+    private func metadataRow(_ key: TransactionMetadataKey) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: key.displayIcon)
+                .foregroundStyle(AppTheme.Colors.accent)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(key.name).foregroundStyle(AppTheme.Colors.textPrimary)
+                if let role = key.role {
+                    Text(LocalizedStringKey(role.displayName))
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                }
+            }
+            Spacer()
+            EntityIdCountBadge(id: key.id, count: metadataKeyCounts[key.id] ?? 0)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { editingMetadataKey = key }
+        .rowActions(
+            leading: [editAction { editingMetadataKey = key }],
+            trailing: [deleteAction(DeleteTarget(tab: .metadata, entityId: key.id, name: key.name,
+                                                 count: metadataKeyCounts[key.id] ?? 0, childIds: [], blocked: false))],
+            leadingFullSwipe: false,
+            trailingFullSwipe: false
+        )
+    }
+
+    // MARK: Edit sheet
+
     private var editSheet: some View {
-            Form {
-                Section {
-                    TextField("Nom", text: $editDraftName)
-                        .autocorrectionDisabled()
-                    if selectedTab == .tiers {
-                        TextField("Regex (optionnel)", text: $editDraftRegex)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                    }
-                }
-                if selectedTab == .comptes {
-                    Section("Type de compte") {
-                        Picker("Type", selection: $editDraftAccountType) {
-                            ForEach(AccountType.allCases, id: \.rawValue) { t in
-                                Text(t.label).tag(t.rawValue)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
-                }
-                if selectedTab == .tiers {
-                    Section {
-                        TipView(TiersRegexTip(), arrowEdge: .none)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                    }
-                    Section("Catégorie par défaut") {
-                        Picker("Catégorie", selection: $editDraftCategoryId) {
-                            Text("Non catégorisé").tag(Int?.none)
-                            ForEach(categories) { c in
-                                Text(c.name).tag(Int?.some(c.id))
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
-                    Section("Virement interne") {
-                        Picker("Compte lié", selection: $editDraftLinkedCompteId) {
-                            Text("Aucun (tiers externe)").tag(Int?.none)
-                            ForEach(accounts.groupedByType, id: \.type) { group in
-                                Section(group.type.label) {
-                                    ForEach(group.accounts) { a in
-                                        Text(a.name).tag(Int?.some(a.id))
-                                    }
-                                }
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
-                }
-                if selectedTab == .categories {
-                    Section {
-                        TipView(CategoryHierarchyTip(), arrowEdge: .none)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                    }
-                    Section("Catégorie parente") {
-                        // Seules les racines (sans parent) peuvent être choisies comme parent
-                        let roots = categories.filter { $0.parentId == nil && $0.id != editItemId }
-                        Picker("Parent", selection: $editDraftParentCategoryId) {
-                            Text("Aucun (catégorie racine)").tag(Int?.none)
-                            ForEach(roots) { c in
-                                Label(c.name, systemImage: c.displayIcon).tag(Int?.some(c.id))
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
-                    Section {
-                        Button {
-                            showIconPicker = true
-                        } label: {
-                            HStack(spacing: 12) {
-                                ZStack {
-                                    Circle()
-                                        .fill(AppTheme.Colors.accent.opacity(0.15))
-                                        .frame(width: 32, height: 32)
-                                    // Affiche l'icône RÉELLEMENT utilisée — soit celle stockée,
-                                    // soit le fallback auto calculé sur le nom.
-                                    Image(systemName: previewCategoryIcon)
-                                        .font(.system(size: 15, weight: .semibold))
-                                        .foregroundStyle(AppTheme.Colors.accent)
-                                }
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text("Icône")
-                                        .font(.body)
-                                    Text(editDraftIcon == nil
-                                         ? "Auto (selon le nom) — tap pour personnaliser"
-                                         : "Personnalisée — tap pour modifier")
-                                        .font(.caption2)
-                                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption)
-                                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    } header: { Text("Icône") }
-                    footer: {
-                        if editDraftIcon == nil {
-                            Text("Si tu ne choisis rien, l'icône est calculée automatiquement depuis le nom. Toute icône choisie est mémorisée et a la priorité.")
-                        }
-                    }
-                }
-            }
-            .nemorisFormStyle()
-            .adaptivePane(isPresented: $showIconPicker) {
-                ScrollView {
-                    CategoryIconPicker(
-                        selectedIcon: $editDraftIcon,
-                        categoryName: editDraftName,
-                        isParent: editDraftParentCategoryId == nil
-                    )
-                    .padding()
-                }
-                .background(Color(.systemGroupedBackground))
-                .paneChrome("Choisir une icône",
-                            cancelLabel: "Fermer", onCancel: { showIconPicker = false })
-            }
-            .paneChrome(editItemId == nil ? "Ajouter" : "Modifier",
-                        cancelLabel: "Annuler", onCancel: { showEditSheet = false },
-                        confirmLabel: "Enregistrer", confirmIcon: "checkmark",
-                        confirmDisabled: editDraftName.trimmingCharacters(in: .whitespaces).isEmpty,
-                        onConfirm: { saveEdit() })
+        ReferenceEditFormPane(
+            kind: selectedTab,
+            editItemId: editItemId,
+            initial: editInitialDraft,
+            categories: categories,
+            onCancel: { showEditSheet = false },
+            onSave: { draft in saveEdit(draft) }
+        )
     }
 
     // MARK: Helpers
 
-    private var emptyRow: some View {
-        Text(searchText.isEmpty
-             ? "Aucune donnée. Importe d'abord un fichier sqlite ou commence à les ajouter."
-             : "Aucun résultat pour « \(searchText) »")
-            .foregroundStyle(AppTheme.Colors.textSecondary)
+    // `EmptyStateView` (icône/titre/message) est le mécanisme unique pour les
+    // écrans vides — cf. CLAUDE.md §5. C'était jusqu'ici un simple `Text` sans
+    // icône, seul écran vide de l'app dans ce cas (retour d'usage). Toujours
+    // UNE row dans la `List` (pas un plein écran), donc le fond/séparateur par
+    // défaut de la row sont retirés pour laisser l'état vide se centrer
+    // proprement, comme les autres modules.
+    @ViewBuilder private var emptyRow: some View {
+        Group {
+            if !searchText.isEmpty {
+                EmptyStateView(
+                    icon: "magnifyingglass",
+                    title: "Aucun résultat",
+                    verbatimMessage: "Aucun résultat pour « \(searchText) »"
+                )
+            } else if selectedTab == .tiers && tiersActiveFiltersCount > 0 {
+                // Distinct du cas "base vide" ci-dessous : des tiers existent,
+                // seuls les filtres structurés (groupe/catégorie/ville/pays)
+                // ne renvoient rien.
+                EmptyStateView(
+                    icon: "line.3.horizontal.decrease.circle",
+                    title: "Aucun résultat",
+                    message: "Aucun tier ne correspond à ces filtres."
+                )
+            } else if selectedTab == .metadata {
+                // Une base neuve n'a AUCUNE métadonnée par design (§ AXE Y) —
+                // pas "importe d'abord", contrairement au cas générique.
+                EmptyStateView(
+                    icon: "tag",
+                    title: "Aucune métadonnée",
+                    message: "Définis tes propres étiquettes — « Projet », « Pro / Perso »… — depuis le bouton + en haut."
+                )
+            } else {
+                EmptyStateView(
+                    icon: "tray",
+                    title: "Aucune donnée",
+                    message: "Importe d'abord un fichier sqlite ou commence à les ajouter."
+                )
+            }
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets())
     }
 
     @ViewBuilder
@@ -698,9 +1039,15 @@ struct ReferenceDataView: View {
         } label: {
             HStack {
                 Text(a.name).foregroundStyle(AppTheme.Colors.textPrimary)
+                if a.excludedFromAggregates {
+                    Image(systemName: "eye.slash")
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                        .localizedAccessibilityLabel("Exclu des calculs agrégés")
+                }
                 Spacer()
                 if a.accountType != .courant {
-                    Text(a.accountType.label)
+                    Text(LocalizedStringKey(a.accountType.label))
                         .font(.caption2).fontWeight(.medium)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6).padding(.vertical, 2)
@@ -715,8 +1062,14 @@ struct ReferenceDataView: View {
                     .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
             }
         }
+        // Sans ça, macOS applique le chrome de bouton par défaut (teinté par
+        // l'accent de l'app) — un surlignement vert par-dessus une carte déjà
+        // verte (`macGroupedRow`). iOS n'a pas ce style par défaut au même
+        // endroit, d'où l'écart jamais remarqué avant (retour d'usage
+        // 2026-08-21).
+        .buttonStyle(.plain)
         .rowActions(
-            leading: [editAction { startEdit(id: a.id, name: a.name, regex: "", accountType: a.type) }],
+            leading: [editAction { startEdit(id: a.id, name: a.name, accountType: a.type, excludedFromAggregates: a.excludedFromAggregates) }],
             trailing: [deleteAction(DeleteTarget(tab: .comptes, entityId: a.id, name: a.name,
                                                  count: accountCounts[a.id] ?? 0, childIds: [],
                                                  blocked: (accountCounts[a.id] ?? 0) > 0))],
@@ -725,54 +1078,71 @@ struct ReferenceDataView: View {
         )
     }
 
+    /// "Voir les transactions" d'un tiers (`PayeeDetailPane`) : bascule sur
+    /// l'onglet Transactions, filtré par son nom, tous comptes confondus (un
+    /// tiers n'est pas rattaché à un compte particulier) — même mécanique
+    /// que `accountRow` pour un compte, via `AppState.pendingPayeeFilterName`
+    /// (consommé par `TransactionsView.loadInitialData()`).
+    private func showTransactionsFor(_ payee: Tiers) {
+        appState.pendingPayeeFilterName = payee.name
+        appState.dataRefreshToken = UUID()
+        appState.selectedTab = MainTabItem.transactions.rawValue
+    }
+
     /// Action "Modifier" adaptative (swipe iOS / clic droit macOS via RowActions).
     private func editAction(_ action: @escaping () -> Void) -> RowAction {
         RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent, action: action)
     }
 
-    private func startEdit(id: Int, name: String, regex: String, categoryId: Int? = nil, parentCategoryId: Int? = nil, icon: String? = nil, accountType: String = "COURANT", linkedCompteId: Int? = nil) {
+    private func startEdit(id: Int, name: String, parentCategoryId: Int? = nil, icon: String? = nil, accountType: String = "COURANT", excludedFromAggregates: Bool = false) {
         editItemId = id
-        editDraftName = name
-        editDraftRegex = regex
-        editDraftCategoryId = categoryId
-        editDraftParentCategoryId = parentCategoryId
-        editDraftIcon = icon
-        editDraftAccountType = accountType
-        editDraftLinkedCompteId = linkedCompteId
+        editInitialDraft = ReferenceEditDraft(
+            name: name,
+            parentCategoryId: parentCategoryId,
+            icon: icon,
+            accountType: accountType,
+            excludedFromAggregates: excludedFromAggregates
+        )
         showEditSheet = true
     }
 
     private func startAdd() {
-        editItemId = nil
-        editDraftName = ""
-        editDraftRegex = ""
-        editDraftCategoryId = nil
-        editDraftParentCategoryId = nil
-        editDraftIcon = nil
-        editDraftAccountType = "COURANT"
-        editDraftLinkedCompteId = nil
-        showEditSheet = true
+        switch selectedTab {
+        case .tiers:
+            // Fiche riche directement (mêmes champs qu'à l'édition), pas le
+            // form minimal de `ReferenceEditFormPane`.
+            creatingPayee = true
+        case .metadata:
+            creatingMetadataKey = true
+        case .comptes, .categories, .tags:
+            editItemId = nil
+            editInitialDraft = ReferenceEditDraft()
+            showEditSheet = true
+        }
     }
 
-    private func saveEdit() {
-        let name  = editDraftName.trimmingCharacters(in: .whitespaces)
-        let regex = editDraftRegex.trimmingCharacters(in: .whitespaces)
+    private func saveEdit(_ draft: ReferenceEditDraft) {
+        let name  = draft.name.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
         switch selectedTab {
         case .comptes:
-            if let id = editItemId { repository.updateAccount(id: id, name: name, type: editDraftAccountType) }
-            else { repository.addAccount(name: name, type: editDraftAccountType) }
+            if let id = editItemId { repository.updateAccount(id: id, name: name, type: draft.accountType, excludedFromAggregates: draft.excludedFromAggregates) }
+            else { repository.addAccount(name: name, type: draft.accountType, excludedFromAggregates: draft.excludedFromAggregates) }
         case .categories:
-            if let id = editItemId { repository.updateCategory(id: id, name: name, parentId: editDraftParentCategoryId, icon: editDraftIcon) }
-            else { repository.addCategory(name: name, parentId: editDraftParentCategoryId, icon: editDraftIcon) }
+            if let id = editItemId { repository.updateCategory(id: id, name: name, parentId: draft.parentCategoryId, icon: draft.icon) }
+            else { repository.addCategory(name: name, parentId: draft.parentCategoryId, icon: draft.icon) }
         case .tiers:
-            if let id = editItemId { repository.updateTiers(id: id, name: name, regex: regex, categoryId: editDraftCategoryId, linkedCompteId: editDraftLinkedCompteId) }
-            else { repository.addTiers(name: name, regex: regex, categoryId: editDraftCategoryId, linkedCompteId: editDraftLinkedCompteId) }
+            // Mort en pratique : `startAdd()` route désormais `.tiers` vers
+            // `PayeeDetailView` (fiche riche) AVANT de jamais ouvrir ce
+            // panneau, et aucun tiers n'est édité via `startEdit` (l'édition
+            // passe par `editingPayee`/`PayeeDetailView`). Garder ce cas —
+            // requis par l'exhaustivité du switch sur `ReferenceTab`, utilisé
+            // pour bien d'autres choses dans cette vue.
+            break
         case .metadata:
-            // Création et suppression se font dans `MetadataKeyManagerView`,
-            // atteignable depuis la fiche transaction ET depuis cet onglet :
-            // une clé se crée au moment où on en a besoin, pas dans un
-            // référentiel qu'on visite exprès.
+            // Mort en pratique, comme `.tiers` ci-dessus : `startAdd()` route
+            // `.metadata` vers `MetadataKeyFormView` AVANT de jamais ouvrir ce
+            // panneau, et l'édition passe par `editingMetadataKey`.
             break
         case .tags:
             break  // Les tags ne sont pas éditables ici
@@ -788,6 +1158,7 @@ struct ReferenceDataView: View {
         paymentTypes    = repository.fetchPaymentTypes()
         tags            = repository.fetchAllTags()
         payeeGroups     = repository.fetchPayeeGroups()
+        metadataKeys    = metadataRepository.fetchKeys()
 
         // Compteurs de transactions associées (une passe GROUP BY par table).
         categoryCounts    = repository.countTransactionsByCategory()
@@ -795,6 +1166,11 @@ struct ReferenceDataView: View {
         paymentTypeCounts = repository.countTransactionsByPaymentType()
         accountCounts     = repository.countTransactionsByAccount()
         tagCounts         = repository.countTransactionsByTag()
+        // Pas de comptage groupé côté métadonnées (peu de clés en pratique,
+        // contrairement aux ~1000 tiers) : une requête par clé suffit.
+        metadataKeyCounts = Dictionary(uniqueKeysWithValues: metadataKeys.map {
+            ($0.id, metadataRepository.transactionIds(keyId: $0.id, value: nil).count)
+        })
 
         recomputeFiltered(resetPaging: false)
     }
@@ -811,33 +1187,43 @@ struct ReferenceDataView: View {
         case .comptes:        repository.deleteAccount(id: target.entityId)
         case .categories:     repository.deleteCategory(id: target.entityId, includingChildren: target.childIds)
         case .tiers:          repository.deleteTiers(ids: [target.entityId])
-        case .metadata:       TransactionMetadataRepository().deleteKey(id: target.entityId)
+        case .metadata:       metadataRepository.deleteKey(id: target.entityId)
         case .tags:           repository.deleteTag(id: target.entityId)
         }
         loadReferenceData()
         appState.dataRefreshToken = UUID()
     }
 
-    private func deleteMessage(_ target: DeleteTarget) -> String {
+    private func deleteMessage(_ target: DeleteTarget) -> Text {
         if target.blocked {
-            return "« \(target.name) » porte \(target.count) transaction\(target.count > 1 ? "s" : ""). Réassigne-les à un autre compte avant de le supprimer."
+            return Text("« \(target.name) » porte \(target.count) transaction\(target.count > 1 ? "s" : ""). Réassigne-les à un autre compte avant de le supprimer.")
         }
         if target.count == 0 && target.childIds.isEmpty {
-            return "« \(target.name) » n'est associé à aucune transaction."
+            return Text("« \(target.name) » n'est associé à aucune transaction.")
         }
-        var parts: [String] = []
+        var parts: [Text] = []
         if !target.childIds.isEmpty {
-            parts.append("\(target.childIds.count) sous-catégorie\(target.childIds.count > 1 ? "s" : "") supprimée\(target.childIds.count > 1 ? "s" : "")")
+            parts.append(Text("\(target.childIds.count) sous-catégorie\(target.childIds.count > 1 ? "s" : "") supprimée\(target.childIds.count > 1 ? "s" : "")"))
         }
         if target.count > 0 {
-            let noun: String
+            let nounKey: String
             switch target.tab {
-            case .tags:    noun = "détaguée"
-            default:       noun = "conservée"
+            case .tags:     nounKey = "détaguée"
+            // ⚠️ Contrairement aux autres tabs, supprimer une métadonnée
+            // EFFACE la valeur (CASCADE) — pas "conservée", pour ne pas
+            // laisser croire à tort que les transactions gardent la valeur.
+            case .metadata: nounKey = target.count > 1 ? "qui perdront cette métadonnée" : "qui perdra cette métadonnée"
+            default:        nounKey = "conservée"
             }
-            parts.append("\(target.count) transaction\(target.count > 1 ? "s" : "") \(noun)\(target.count > 1 ? "s" : "")")
+            parts.append(Text("\(target.count) transaction\(target.count > 1 ? "s" : "") ") + Text(nounKey))
         }
-        return parts.isEmpty ? "Supprimer « \(target.name) » ?" : parts.joined(separator: " · ") + "."
+        return parts.isEmpty ? Text("Supprimer « \(target.name) » ?") : joinedText(parts, separator: " · ") + Text(".")
+    }
+    
+    private func joinedText(_ parts: [Text], separator: String) -> Text {
+        parts.dropFirst().reduce(parts.first ?? Text("")) { result, part in
+                result + Text(separator) + part
+        }
     }
 
     /// Bouton de suppression (swipe leading = « glisser à droite »).
@@ -847,6 +1233,94 @@ struct ReferenceDataView: View {
         }
     }
 
+    // MARK: - Sélection multiple (Tiers / Tags)
+    //
+    // Deux onglets seulement (les autres — Comptes groupés, Catégories en
+    // arbre — n'ont pas la structure plate qu'un maj+clic/⌘A suppose). L'état
+    // reste séparé par onglet (`isSelectingTiers`/`isSelectingTags`…) ; ces
+    // helpers dispatchent juste sur `selectedTab` pour éviter de dupliquer
+    // les mêmes 4 branches dans la toolbar, la barre du bas et le dialogue.
+
+    private var isCurrentlySelecting: Bool {
+        switch selectedTab {
+        case .tiers: return isSelectingTiers
+        case .tags:  return isSelectingTags
+        default:     return false
+        }
+    }
+
+    private var currentSelectionCount: Int {
+        switch selectedTab {
+        case .tiers: return selectedTiersIds.count
+        case .tags:  return selectedTagIds.count
+        default:     return 0
+        }
+    }
+
+    private func toggleCurrentSelectionMode() {
+        switch selectedTab {
+        case .tiers:
+            isSelectingTiers.toggle()
+            selectedTiersIds = []
+            tiersSelectionAnchor = nil
+        case .tags:
+            isSelectingTags.toggle()
+            selectedTagIds = []
+            tagsSelectionAnchor = nil
+        default:
+            break
+        }
+    }
+
+    private func selectAllInCurrentTab() {
+        switch selectedTab {
+        case .tiers:
+            isSelectingTiers = true
+            selectedTiersIds = Set(filteredTiers.map(\.id))
+        case .tags:
+            isSelectingTags = true
+            selectedTagIds = Set(filteredTags.map(\.id))
+        default:
+            break
+        }
+    }
+
+    private var bulkDeleteTitle: String {
+        switch selectedTab {
+        case .tags: return "Supprimer \(selectedTagIds.count) tag(s) ?"
+        default:    return "Supprimer \(selectedTiersIds.count) tiers ?"
+        }
+    }
+
+    @ViewBuilder private var bulkDeleteMessage: some View {
+        switch selectedTab {
+        case .tags: Text("Les transactions et dépenses Tricount associées perdront ce tag.")
+        default:    Text("Les transactions associées seront conservées mais sans tiers assigné.")
+        }
+    }
+
+    private func performBulkDelete() {
+        switch selectedTab {
+        case .tiers:
+            repository.deleteTiers(ids: selectedTiersIds)
+            isSelectingTiers = false
+            selectedTiersIds = []
+            tiersSelectionAnchor = nil
+        case .tags:
+            repository.deleteTags(ids: selectedTagIds)
+            isSelectingTags = false
+            selectedTagIds = []
+            tagsSelectionAnchor = nil
+        default:
+            break
+        }
+        loadReferenceData()
+        appState.dataRefreshToken = UUID()
+    }
+
+    /// Fusionne `sourceIds` dans `target` (cf. `PayeeMergeTargetPicker`) et
+    /// nettoie tout état qui pourrait encore pointer vers un tiers qui vient
+    /// de disparaître — la sélection groupée notamment.
     // MARK: - Panneau détail macOS (helpers)
 
     private func countsFor(_ target: ReferenceDetailTarget) -> Int {
@@ -865,11 +1339,11 @@ struct ReferenceDataView: View {
     private func startEditFor(_ target: ReferenceDetailTarget) {
         switch target {
         case .account(let a):
-            startEdit(id: a.id, name: a.name, regex: "", accountType: a.type)
+            startEdit(id: a.id, name: a.name, accountType: a.type, excludedFromAggregates: a.excludedFromAggregates)
         case .category(let c):
-            startEdit(id: c.id, name: c.name, regex: "", parentCategoryId: c.parentId, icon: c.icon)
+            startEdit(id: c.id, name: c.name, parentCategoryId: c.parentId, icon: c.icon)
         case .paymentType(let p):
-            startEdit(id: p.id, name: p.name, regex: p.regex ?? "")
+            startEdit(id: p.id, name: p.name)
         case .tag:
             break   // Les tags n'ont pas d'édition (pas de rename en base).
         }
@@ -895,15 +1369,6 @@ struct ReferenceDataView: View {
 
     /// Icône à afficher dans la preview de la sheet d'édition : reflète l'icône RÉELLE
     /// utilisée à l'affichage (custom si définie, sinon fallback auto sur le nom).
-    private var previewCategoryIcon: String {
-        Category(
-            id: editItemId ?? 0,
-            name: editDraftName,
-            parentId: editDraftParentCategoryId,
-            icon: editDraftIcon
-        ).displayIcon
-    }
-
     /// Sous-titre d'un tier dans la liste : ville · pays · groupe (les champs vides sont skip).
     private func tierSubtitle(_ t: Tiers) -> String? {
         var parts: [String] = []
@@ -941,18 +1406,27 @@ struct ReferenceDataView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(c.parentId == nil ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary)
             }
-            if c.parentId != nil {
-                Text("↳").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(c.name)
+                    .fontWeight(c.parentId == nil ? .semibold : .regular)
+                // Le filtre aplatit l'arbre — un enfant peut apparaître sans
+                // son parent. Le nom du parent en sous-titre remplace l'ancien
+                // "↳" : la profondeur seule ne disait pas DE QUI c'est la
+                // sous-catégorie (retour d'usage).
+                if let parentId = c.parentId,
+                   let parentName = categories.first(where: { $0.id == parentId })?.name {
+                    Text(parentName)
+                        .font(.caption2)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                }
             }
-            Text(c.name)
-                .fontWeight(c.parentId == nil ? .semibold : .regular)
             Spacer()
             EntityIdCountBadge(id: c.id, count: categoryCounts[c.id] ?? 0)
         }
         .contentShape(Rectangle())
         .macDetailTap { detailTarget = .category(c) }
         .rowActions(
-            leading: [editAction { startEdit(id: c.id, name: c.name, regex: "", parentCategoryId: c.parentId, icon: c.icon) }],
+            leading: [editAction { startEdit(id: c.id, name: c.name, parentCategoryId: c.parentId, icon: c.icon) }],
             trailing: [deleteAction(deleteTargetForCategory(c))],
             leadingFullSwipe: false,
             trailingFullSwipe: false

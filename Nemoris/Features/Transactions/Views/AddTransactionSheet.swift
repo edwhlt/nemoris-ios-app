@@ -61,7 +61,7 @@ struct AddTransactionSheet: View {
                 Section("Compte") {
                     Picker("Compte", selection: $accountId) {
                         ForEach(accounts.groupedByType, id: \.type) { group in
-                            Section(group.type.label) {
+                            Section(LocalizedStringKey(group.type.label)) {
                                 ForEach(group.accounts) { a in Text(a.name).tag(a.id) }
                             }
                         }
@@ -82,7 +82,10 @@ struct AddTransactionSheet: View {
                                 .background(Circle().fill(type == .expense ? AppTheme.Colors.danger.opacity(0.12) : AppTheme.Colors.success.opacity(0.12)))
                         }
                         .buttonStyle(.plain)
-                        TextField("0.00", text: $amountText)
+                        // Titre vide : cf. TransactionEditSheet — la row a déjà
+                        // son label ("Montant"), un titre non-vide s'affiche en
+                        // permanence sur macOS au lieu de servir de placeholder.
+                        TextField("", text: $amountText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 90)

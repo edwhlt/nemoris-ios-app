@@ -54,9 +54,9 @@ struct Insight: Identifiable, Hashable {
     let kind: InsightKind
     /// Titre court (1 ligne max) prêt à être affiché. Wording de base statistique
     /// — sera potentiellement remplacé par le LLM (Couche 3) en V2.
-    let title: String
+    let title: LocalizedStringResource
     /// Détail développé (2-3 lignes) avec chiffres et action concrète.
-    let detail: String
+    let detail: LocalizedStringResource
     /// Gain potentiel annuel estimé (€). 0 si l'insight est purement informatif.
     let annualImpact: Double
     /// Faisabilité 1-5. 5 = changement marginal trivial (1 clic), 1 = drastique.
@@ -69,6 +69,14 @@ struct Insight: Identifiable, Hashable {
     /// — donne plus de poids aux actions à fort impact ET faciles à appliquer.
     var compositeScore: Double {
         annualImpact * Double(actionability) * confidence
+    }
+    
+    static func == (lhs: Insight, rhs: Insight) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
     }
 
     /// `true` si l'insight a une recommandation actionable (vs purement informatif).

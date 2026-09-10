@@ -125,9 +125,9 @@ enum BudgetNotificationService {
 
     private static func formatAmount(_ amount: Double) -> String {
         let f = NumberFormatter()
-        // Locale forcée fr_FR : service statique, pas d'accès à l'environnement
-        // SwiftUI — cf. commentaire équivalent dans InsightEngine.swift.
-        f.locale = Locale(identifier: "fr_FR")
+        // Service statique, pas d'accès à l'environnement SwiftUI — AppLocalization
+        // relit la même préférence de langue directement depuis UserDefaults.
+        f.locale = AppLocalization.locale
         f.numberStyle = .currency
         f.currencyCode = "EUR"
         f.maximumFractionDigits = 2
@@ -136,7 +136,7 @@ enum BudgetNotificationService {
 
     private static func formatDate(_ date: Date) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "fr_FR")
+        f.locale = AppLocalization.locale
         f.dateFormat = "d MMM"
         return f.string(from: date)
     }

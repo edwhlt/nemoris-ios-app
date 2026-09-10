@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - AlertEngine
 //
@@ -52,10 +53,18 @@ enum AlertRoute {
 struct Alert: Identifiable, Hashable {
     let id: String          // unique stable (= kind + ref) pour SwiftUI diff
     let severity: AlertSeverity
-    let title: String
-    let message: String
+    let title: LocalizedStringResource
+    let message: LocalizedStringResource
     let systemIcon: String  // surcharge possible de severity.systemIcon
     let route: AlertRoute
+    
+    static func == (lhs: Alert, rhs: Alert) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
 }
 
 /// Contexte d'entrée du moteur. Toutes les données sont fournies par l'appelant —
@@ -136,13 +145,15 @@ enum AlertEngine {
             // (`.warning`) pourrait devenir une `.info` plus tard ; on reste simple.
             guard progress.healthState == .exceeded else { return nil }
             let overshoot = progress.spent - progress.allocated
+            // AlertEngine est pur (doctrine du projet), pas d'accès à l'environnement
+            // SwiftUI — AppLocalization relit la préférence de langue directement
+            // depuis UserDefaults, cf. commentaire équivalent dans InsightEngine.
+            let overshootStr = overshoot.formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
             return Alert(
                 id: "env_overspent_\(progress.envelope.id)",
                 severity: .critical,
                 title: "Budget dépassé : \(progress.envelope.name)",
-                // Locale forcée fr_FR : AlertEngine est pur (doctrine du projet), pas d'accès
-                // à l'environnement SwiftUI — cf. commentaire équivalent dans InsightEngine.
-                message: "Dépassement de \(overshoot.formatted(.currency(code: "EUR").presentation(.narrow).locale(Locale(identifier: "fr_FR")))) ce mois",
+                message: "Dépassement de \(overshootStr) ce mois",
                 systemIcon: "chart.bar.fill",
                 route: .budget
             )
@@ -167,10 +178,13 @@ enum AlertEngine {
         }
 
         guard !broken.isEmpty else { return [] }
+        let title = broken.count == 1
+            ? LocalizedStringResource("1 lien Patrimoine rompu")
+            : LocalizedStringResource("\(broken.count) liens Patrimoine rompus")
         return [Alert(
             id: "patrimoine_broken_links_\(broken.count)",
             severity: .info,
-            title: broken.count == 1 ? "1 lien Patrimoine rompu" : "\(broken.count) liens Patrimoine rompus",
+            title: title,
             message: "Le compte source d'un actif a été supprimé. Relinkez ou repassez en saisie manuelle.",
             systemIcon: "link.badge.plus",
             route: .patrimoine

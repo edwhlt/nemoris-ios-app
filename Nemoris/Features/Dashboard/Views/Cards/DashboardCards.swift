@@ -12,22 +12,71 @@ import TipKit
 
 // MARK: - Coach financier
 
+/// Les 3 recommandations les plus importantes, TOUS COACHS CONFONDUS.
+///
+/// ⚠️ L'arbitrage entre « dépenses » et « investissement » ne se fait PAS ici :
+/// il vit dans `CoachRanker` (moteur pur), pour que le Dashboard et l'écran
+/// d'un coach classent exactement de la même façon.
+///
+/// Repli : tant qu'aucune analyse IA n'a tourné (pas de backend configuré,
+/// première utilisation), la carte affiche les insights déterministes de
+/// `InsightEngine`. C'est la doctrine offline-first de l'app — chaque
+/// fonctionnalité IA garde un chemin sans IA.
 struct InsightsCoachCard: View {
     let insights: [Insight]?
     let size: DashboardCardSize
+    @Environment(CoachStore.self) private var coach
+    @State private var selected: CoachRecommendation?
+
+    private var top: [CoachRecommendation] { coach.topRecommendations(limit: 3) }
+    private var isAnalyzing: Bool { CoachDomain.allCases.contains { coach.isRunning($0) } }
 
     var body: some View {
         DashboardTile(
             card: .insightsCoach,
             size: size,
-            isLoading: insights == nil,
-            isEmpty: insights?.isEmpty ?? false,
+            isLoading: insights == nil && top.isEmpty && !isAnalyzing,
+            isEmpty: top.isEmpty && (insights?.isEmpty ?? false) && !isAnalyzing,
             emptyMessage: "Rien à optimiser pour l'instant — revenez après quelques semaines de transactions.",
-            subtitle: "Vos meilleures pistes d'optimisation"
+            subtitle: top.isEmpty ? "Vos meilleures pistes d'optimisation" : "Ce qui compte le plus, tous domaines confondus"
         ) {
-            // `showsHeader: false` — c'est la tuile qui porte le titre désormais,
-            // sinon on aurait deux en-têtes empilés.
-            InsightsCoachSection(insights: insights ?? [], showsHeader: false)
+            VStack(spacing: AppTheme.Spacing.sm) {
+                if isAnalyzing && top.isEmpty {
+                    HStack(spacing: AppTheme.Spacing.sm) {
+                        ProgressView().controlSize(.small).tint(AppTheme.Colors.accent)
+                        Text("Le coach analyse tes données…")
+                            .font(AppTheme.Typography.bodySmall)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                        Spacer()
+                    }
+                }
+                if top.isEmpty {
+                    // `showsHeader: false` — c'est la tuile qui porte le titre,
+                    // sinon on aurait deux en-têtes empilés.
+                    InsightsCoachSection(insights: insights ?? [], showsHeader: false)
+                } else {
+                    ForEach(top) { reco in
+                        CoachRecommendationRow(reco: reco)
+                            .padding(AppTheme.Spacing.md)
+                            .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md))
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selected = reco
+                                HapticService.shared.tap()
+                            }
+                    }
+                }
+            }
+        }
+        .adaptivePane(item: $selected) { reco in
+            CoachRecommendationPane(reco: reco)
+        }
+        .task {
+            await coach.load()
+            // Relance automatique, non bloquante, uniquement si l'analyse est
+            // périmée ET qu'une IA est disponible. Le Dashboard ne DÉCLENCHE
+            // donc jamais de coût imprévu au simple affichage.
+            for domain in CoachDomain.allCases { coach.refreshIfStale(domain) }
         }
     }
 }
@@ -133,7 +182,7 @@ struct NetWorthCard: View {
     }
 
     @ViewBuilder
-    private func breakdownRow(_ label: String, amount: Double, color: Color) -> some View {
+    private func breakdownRow(_ label: LocalizedStringKey, amount: Double, color: Color) -> some View {
         HStack(spacing: AppTheme.Spacing.sm) {
             Text(label)
                 .font(.system(size: 11, weight: .medium))

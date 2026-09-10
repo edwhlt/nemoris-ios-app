@@ -3,39 +3,71 @@ import Foundation
 // MARK: - Enums
 
 enum RecurrenceFrequency: String, CaseIterable, Identifiable {
-    case daily   = "DAILY"
-    case weekly  = "WEEKLY"
-    case monthly = "MONTHLY"
-    case yearly  = "YEARLY"
+    case daily      = "DAILY"
+    case weekly     = "WEEKLY"
+    case biweekly   = "BIWEEKLY"    // bimensuel : toutes les ~2 semaines
+    case monthly    = "MONTHLY"
+    case quarterly  = "QUARTERLY"   // trimestriel : tous les 3 mois
+    case semiannual = "SEMIANNUAL"  // semestriel : tous les 6 mois
+    case yearly     = "YEARLY"
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .daily:   return "Quotidien"
-        case .weekly:  return "Hebdomadaire"
-        case .monthly: return "Mensuel"
-        case .yearly:  return "Annuel"
+        case .daily:      return "Quotidien"
+        case .weekly:     return "Hebdomadaire"
+        case .biweekly:   return "Bimensuel"
+        case .monthly:    return "Mensuel"
+        case .quarterly:  return "Trimestriel"
+        case .semiannual: return "Semestriel"
+        case .yearly:     return "Annuel"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .daily:   return "sun.min"
-        case .weekly:  return "calendar.badge.clock"
-        case .monthly: return "calendar"
-        case .yearly:  return "calendar.badge.checkmark"
+        case .daily:      return "sun.min"
+        case .weekly:     return "calendar.badge.clock"
+        case .biweekly:   return "calendar.badge.clock"
+        case .monthly:    return "calendar"
+        case .quarterly:  return "calendar"
+        case .semiannual: return "calendar"
+        case .yearly:     return "calendar.badge.checkmark"
         }
     }
 
     /// Nombre de jours approximatif entre deux occurrences
     var approximateDays: Int {
         switch self {
-        case .daily:   return 1
-        case .weekly:  return 7
-        case .monthly: return 30
-        case .yearly:  return 365
+        case .daily:      return 1
+        case .weekly:     return 7
+        case .biweekly:   return 14
+        case .monthly:    return 30
+        case .quarterly:  return 91
+        case .semiannual: return 182
+        case .yearly:     return 365
         }
+    }
+
+    /// Nombre de mois entre deux occurrences pour les frequences basees sur
+    /// un jour du mois fixe (MONTHLY/QUARTERLY/SEMIANNUAL partagent la meme
+    /// logique de projection, seul le pas change).
+    var monthStep: Int? {
+        switch self {
+        case .monthly:    return 1
+        case .quarterly:  return 3
+        case .semiannual: return 6
+        default:          return nil
+        }
+    }
+
+    /// true si l'ancrage pertinent est un jour du mois (1-31)
+    var usesDayOfMonthAnchor: Bool { monthStep != nil }
+
+    /// true si l'ancrage pertinent est un jour ISO de semaine (1=lundi)
+    var usesWeekdayAnchor: Bool {
+        self == .weekly || self == .biweekly
     }
 }
 

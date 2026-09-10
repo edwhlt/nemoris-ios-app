@@ -46,8 +46,31 @@ struct TransactionPickerSheet: View {
                         }
                     }
                 }
+                // Sans ça, macOS applique le chrome de bouton par défaut
+                // (teinté par l'accent de l'app) par-dessus la carte déjà
+                // verte de `macGroupedRow` (retour d'usage 2026-08-21).
+                .buttonStyle(.plain)
+                .macGroupedRow(first: tx.id == filtered.first?.id, last: tx.id == filtered.last?.id)
             }
-            .searchable(text: $search, prompt: "Rechercher une transaction…")
+            #if os(macOS)
+            // Même politique que les autres pickers : base neutre pour les
+            // cartes dessinées par macGroupedRow.
+            .listStyle(.plain)
+            // Décolle la 1ère carte du Divider() de `paneChrome` juste
+            // au-dessus (retour d'usage : la carte touchait le séparateur).
+            .macGroupedListTopGap()
+            #endif
+            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS tout
+            // `.background()` posé sur le conteneur — sans ce modificateur,
+            // le fond ci-dessous est invisible. Cf. `TagSummaryView` (retour
+            // d'usage 2026-08-19).
+            .scrollContentBackground(.hidden)
+            // Sans ce fond explicite, un `.sheet` macOS niveau 2+ (ouvert
+            // depuis une pane déjà hébergée au niveau racine, ex. Tricount)
+            // laisse transparaître le matériau translucide par défaut de la
+            // fenêtre.
+            .background(AppTheme.Colors.background)
+            .paneSearchable(text: $search, prompt: "Rechercher une transaction…")
             .onAppear { transactions = txRepo.fetchAllTransactions() }
             .paneChrome("Choisir une transaction", cancelLabel: "Annuler", onCancel: { dismiss() })
     }

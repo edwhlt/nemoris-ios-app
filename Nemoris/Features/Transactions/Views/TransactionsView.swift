@@ -6,11 +6,33 @@ import TipKit
 
 // MARK: - Tag color helpers
 extension Tag {
-    /// Couleur SwiftUI du tag (cuivre Nemoris par défaut si nil).
+    /// Couleur SwiftUI du tag. Si l'utilisateur n'en a choisi aucune, une
+    /// teinte est dérivée DÉTERMINISTIQUEMENT de l'id sur une petite palette
+    /// — pas un unique cuivre partagé par tous les tags non colorés. Sinon
+    /// plusieurs tags sans rapport (ex. deux voyages différents) affichent
+    /// EXACTEMENT la même couleur, ce qui défait l'intérêt d'un code couleur
+    /// (retour d'usage 2026-08-19 : « Ha Giang Loop », « Sa Pa » et d'autres
+    /// tags jamais colorés à la main se confondaient visuellement).
     var displayColor: Color {
-        guard let hex = color, !hex.isEmpty else { return AppTheme.Colors.accentSecondary }
+        guard let hex = color, !hex.isEmpty else {
+            return Tag.fallbackPalette[abs(id) % Tag.fallbackPalette.count]
+        }
         return Color(tagHex: hex)
     }
+
+    /// Palette fixe (comme les couleurs de tag choisies à la main : un hex
+    /// brut, sans variante dark/light) — juste assez de teintes distinctes
+    /// pour qu'un id proche ne retombe pas visuellement sur le même voisin.
+    private static let fallbackPalette: [Color] = [
+        AppTheme.Colors.accentSecondary,
+        Color(hex: "5B8DB8"),
+        Color(hex: "6FA86F"),
+        Color(hex: "8A7CB8"),
+        Color(hex: "4FA8A0"),
+        Color(hex: "B85B7A"),
+        Color(hex: "9AA85B"),
+        Color(hex: "C2914A"),
+    ]
 }
 
 extension Color {
@@ -62,9 +84,11 @@ struct TransactionsView: View {
     @State private var hasMore = true
     private let pageSize = 100
 
-    // Sélection
+    // Sélection — l'ancre permet le maj+clic (plage), cf. `RangeSelection`
+    // (DesignSystem/MultiSelect.swift).
     @State private var isSelecting = false
     @State private var selectedIds: Set<Int> = []
+    @State private var selectionAnchor: Int? = nil
     @State private var showDeleteConfirmation = false
     @State private var showBulkRemboursementPicker = false
     @State private var showBulkTagPicker = false
@@ -107,14 +131,27 @@ struct TransactionsView: View {
     // Soldes (#6)
     @State private var accountBalance: Double = 0
     @State private var uncategorizedCount: Int = 0
+    /// Fermeture manuelle de l'avertissement "N transactions sans catégorie"
+    /// — remis à `false` dès que le compte change (nouvel import, etc.),
+    /// pour ne pas cacher indéfiniment un vrai nouveau lot à catégoriser.
+    @State private var uncategorizedBannerDismissed = false
 
     // Filtres & affichage
+    //
+    // ⚠️ Catégorie / tags / groupement PERSISTÉS (`UserDefaults`, clés
+    // `tx.filter.*`) — retour d'usage : ces filtres repartaient à zéro à
+    // chaque lancement de l'app. La recherche texte (tiers/libellé), elle,
+    // NE l'est PAS délibérément : un terme de recherche laissé actif d'une
+    // session à l'autre serait plus surprenant qu'utile (contrairement à
+    // "je filtre toujours sur telle catégorie", une vraie préférence).
     @State private var showFilters = false
-    @State private var tiersSearchText = ""
-    @State private var selectedCategoryId = -1
-    @State private var filterTagIds: Set<Int> = []
+    @State private var payeeSearchText = ""
+    @State private var labelSearchText = ""
+    @State private var selectedCategoryId = UserDefaults.standard.object(forKey: "tx.filter.categoryId") as? Int ?? -1
+    @State private var filterTagIds: Set<Int> = Set((UserDefaults.standard.array(forKey: "tx.filter.tagIds") as? [Int]) ?? [])
     @State private var tagFilteredTxIds: Set<Int>? = nil  // nil = pas de filtre tag actif
-    @State private var grouping: TransactionGrouping = .day
+    @State private var grouping: TransactionGrouping =
+        TransactionGrouping(rawValue: UserDefaults.standard.string(forKey: "tx.filter.grouping") ?? "") ?? .day
 
     // MARK: Computed
 
@@ -132,20 +169,22 @@ struct TransactionsView: View {
     }
 
     private var activeFiltersCount: Int {
-        (tiersSearchText.isEmpty ? 0 : 1)
+        (payeeSearchText.isEmpty ? 0 : 1)
+        + (labelSearchText.isEmpty ? 0 : 1)
         + (selectedCategoryId == -1 ? 0 : 1)
         + (filterTagIds.isEmpty ? 0 : 1)
     }
 
     private var filteredTransactions: [FinanceTransaction] {
         transactions.filter { tx in
-            let tiersMatch = tiersSearchText.isEmpty
-                || tx.tiersName.localizedCaseInsensitiveContains(tiersSearchText)
-                || tx.information.localizedCaseInsensitiveContains(tiersSearchText)
+            let payeeMatch = payeeSearchText.isEmpty
+                || tx.tiersName.localizedCaseInsensitiveContains(payeeSearchText)
+            let labelMatch = labelSearchText.isEmpty
+                || tx.information.localizedCaseInsensitiveContains(labelSearchText)
             let catMatch = selectedCategoryId == -1
                 || (selectedCategoryId == -2 ? tx.categoryId == nil : tx.categoryId == selectedCategoryId)
             let tagMatch = tagFilteredTxIds.map { $0.contains(tx.id) } ?? true
-            return tiersMatch && catMatch && tagMatch
+            return payeeMatch && labelMatch && catMatch && tagMatch
         }
     }
 
@@ -206,264 +245,184 @@ struct TransactionsView: View {
         if isEmbedded { navBody } else { NavigationStack { navBody } }
     }
 
-    @ViewBuilder private var navBody: some View {
-        Group {
-                if isLoading {
-                    transactionsSkeleton
-                } else if transactions.isEmpty {
-                    EmptyStateView(
-                        icon: "tray",
-                        title: "Aucune transaction",
-                        message: "Vérifiez que le compte selectionné et la plage de temps correspondent. Sinon commencez par ajouter vos transactions ou les importer depuis un fichier sqlite existant ou un fichier csv."
-                    )
-                } else if filteredTransactions.isEmpty {
-                    EmptyStateView(
-                        icon: "magnifyingglass",
-                        title: "Aucun résultat",
-                        message: "Aucune transaction ne correspond aux filtres actifs."
-                    )
-                } else {
-                    List {
-                        // ── Soldes (#6) ─────────────────────────────────
-                        // En mode "Tous les comptes" on n'affiche QUE la somme période (flux net).
-                        // Le "Solde réel" agrège tous les comptes (CB + cash + épargne…) → lecture
-                        // trompeuse, on le masque + on libère la largeur pour le flux net + count.
-                        let periodBalance = filteredTransactions.reduce(0) { $0 + $1.amount }
-                        Section {
-                            if isAllAccountsMode {
-                                HStack(spacing: 0) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Flux net période · tous comptes")
-                                            .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
-                                        Text(periodBalance, format: .currency(code: "EUR"))
-                                            .font(.subheadline).fontWeight(.semibold)
-                                            .foregroundStyle(periodBalance >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "info.circle")
-                                        .font(.caption)
-                                        .foregroundStyle(AppTheme.Colors.textSecondary)
-                                }
-                                .padding(.vertical, 4)
-                            } else {
-                                HStack(spacing: 0) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Solde période")
-                                            .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
-                                        Text(periodBalance, format: .currency(code: "EUR"))
-                                            .font(.subheadline).fontWeight(.semibold)
-                                            .foregroundStyle(periodBalance >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
-                                    }
-                                    Spacer()
-                                    Divider().frame(height: 32)
-                                    Spacer()
-                                    VStack(alignment: .trailing, spacing: 2) {
-                                        Text("Solde réel")
-                                            .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
-                                        Text(accountBalance, format: .currency(code: "EUR"))
-                                            .font(.subheadline).fontWeight(.semibold)
-                                            .foregroundStyle(accountBalance >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
-                                    }
-                                }
-                                .padding(.vertical, 4)
-                            }
-                        }
-                        .macGroupedRow()
+    // ⚠️ Corps découpé en CHAÎNE de propriétés calculées (`listContent` →
+    // `bodyWithChrome` → … → `navBody`) plutôt qu'en une seule expression
+    // `Group { … }.modifier().modifier()…`. Avec ~30 modificateurs enchaînés
+    // (dont une douzaine de `.adaptivePane` à closure), Xcode 26 échouait sur
+    // « The compiler is unable to type-check this expression in reasonable
+    // time » : le vérificateur de types traite toute la chaîne comme UNE
+    // expression et explose combinatoirement. Chaque maillon est désormais une
+    // expression à part, résolue isolément. Ne pas re-fusionner — ajouter un
+    // nouveau pane dans le maillon thématique correspondant.
+    private var navBody: some View {
+        bodyWithLifecycle
+    }
 
-                        // ── Avertissement non catégorisé ────────────────
-                        if uncategorizedCount > 0 && selectedCategoryId != -2 {
-                            Section {
-                                Button {
-                                    selectedCategoryId = -2
-                                    resetAndLoad()
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: "exclamationmark.triangle.fill")
-                                            .foregroundStyle(AppTheme.Colors.warning)
-                                            .font(.title3)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text("\(uncategorizedCount) transaction(s) sans catégorie")
-                                                .font(.subheadline).fontWeight(.medium)
-                                                .foregroundStyle(AppTheme.Colors.textPrimary)
-                                            Text("Toucher pour les afficher et catégoriser")
-                                                .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
-                                        }
-                                        Spacer()
-                                        Image(systemName: "chevron.right")
-                                            .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
-                                    }
-                                    .padding(.vertical, 2)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .macGroupedRow()
-                        }
+    @ViewBuilder private var listContent: some View {
+        if isLoading {
+            transactionsSkeleton
+        } else if transactions.isEmpty {
+            EmptyStateView(
+                icon: "tray",
+                title: "Aucune transaction",
+                message: "Vérifiez que le compte selectionné et la plage de temps correspondent. Sinon commencez par ajouter vos transactions ou les importer depuis un fichier sqlite existant ou un fichier csv."
+            )
+        } else if filteredTransactions.isEmpty {
+            EmptyStateView(
+                icon: "magnifyingglass",
+                title: "Aucun résultat",
+                message: "Aucune transaction ne correspond aux filtres actifs."
+            )
+        } else {
+            transactionsList
+        }
+    }
 
-                        ForEach(groupedTransactions, id: \.date) { group in
-                            Section {
-                                ForEach(group.transactions) { item in
-                                    transactionRow(item)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            if isSelecting { toggleSelection(item.id) }
-                                            else { selectedTransaction = item }
-                                        }
-                                        .rowActions(
-                                            leading: isSelecting ? [] : [
-                                                RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) {
-                                                    selectedTransaction = item
-                                                }
-                                            ],
-                                            trailing: isSelecting ? [] : [
-                                                RowAction("Supprimer", systemImage: "trash", role: .destructive) {
-                                                    txToDelete = item
-                                                },
-                                                RowAction("Tags", systemImage: "tag", tint: AppTheme.Colors.accentSecondary) {
-                                                    tagQuickTx = item
-                                                }
-                                            ],
-                                            leadingFullSwipe: false,
-                                            trailingFullSwipe: false
-                                        )
-                                        .macGroupedRow(
-                                            first: item.id == group.transactions.first?.id,
-                                            last: item.id == group.transactions.last?.id
-                                        ) {
-                                            ZStack(alignment: .leading) {
-                                                AppTheme.Colors.surface
-                                                if linkedTricountTxIds.contains(item.id) {
-                                                    AppTheme.Colors.accentSecondary.opacity(0.08)
-                                                    Rectangle()
-                                                        .fill(AppTheme.Colors.accentSecondary)
-                                                        .frame(width: 3)
-                                                }
-                                            }
-                                        }
-                                }
-                            } header: {
-                                group.label
-                                    .macGroupedSectionHeader()
-                            }
-                        }
+    private var transactionsList: some View {
+        List {
+            balancesSection
+            uncategorizedWarningSection
+            transactionGroupsSections
+            paginationFooter
+        }
+        #if os(macOS)
+        // macOS : .plain = base neutre pour les cartes custom
+        // dessinées par macGroupedRow (coins arrondis first/last,
+        // inset, séparateurs internes). iOS garde son insetGrouped
+        // natif — macGroupedRow n'y pose que le listRowBackground.
+        .listStyle(.plain)
+        // Décolle la 1ʳᵉ carte de la toolbar (iOS insetGrouped ajoute
+        // cet espace automatiquement, pas `.plain`).
+        .macGroupedListTopGap()
+        #endif
+        .scrollContentBackground(.hidden)
+        .background(AppTheme.Colors.background)
+        // ⌘A : sélectionne tout ce qui est déjà chargé (cf. `selectAllLoaded`).
+        .background(SelectAllShortcut(isSelecting: $isSelecting, selected: $selectedIds, allIds: transactions.map(\.id)))
+    }
 
-                        // Sentinel pagination
-                        if hasMore {
-                            HStack { Spacer(); ProgressView(); Spacer() }
-                                .listRowSeparator(.hidden)
-                                .onAppear { loadMore() }
-                        } else {
-                            Text("\(transactions.count) transaction(s) sur la période")
-                                .font(.caption)
-                                .foregroundStyle(AppTheme.Colors.textSecondary)
-                                .frame(maxWidth: .infinity)
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
-                        }
-                    }
-                    #if os(macOS)
-                    // macOS : .plain = base neutre pour les cartes custom
-                    // dessinées par macGroupedRow (coins arrondis first/last,
-                    // inset, séparateurs internes). iOS garde son insetGrouped
-                    // natif — macGroupedRow n'y pose que le listRowBackground.
-                    .listStyle(.plain)
-                    // Décolle la 1ʳᵉ carte de la toolbar (iOS insetGrouped ajoute
-                    // cet espace automatiquement, pas `.plain`).
-                    .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
-                    #endif
-                    .scrollContentBackground(.hidden)
-                    .background(AppTheme.Colors.background)
+    private var bodyWithChrome: some View {
+        listContent
+            .localizedNavigationTitle("Transactions")
+            .toolbar { transactionsToolbar }
+    }
+
+    @ToolbarContentBuilder private var transactionsToolbar: some ToolbarContent {
+        // #9 macOS : ne pas émettre d'item .navigation (mapping de
+        // navigationBarLeading) — même vide il entre en collision avec le
+        // back système + toggle sidebar du NavigationSplitView, d'où la
+        // flèche de retour qui "voyage". Sur Mac, "Annuler" rejoint le
+        // groupe trailing.
+        #if !os(macOS)
+        ToolbarItem(placement: .navigationBarLeading) {
+            if isSelecting {
+                Button("Annuler") { cancelSelection() }
+            }
+        }
+        #endif
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            if isSelecting {
+                selectionToolbarButtons
+            } else {
+                browsingToolbarButtons
+            }
+        }
+    }
+
+    @ViewBuilder private var selectionToolbarButtons: some View {
+        #if os(macOS)
+        Button { cancelSelection() } label: {
+            Image(systemName: "xmark.circle")
+        }
+        .localizedHelp("Annuler la sélection")
+        .localizedAccessibilityLabel("Annuler la sélection")
+        
+        Spacer()
+        #endif
+        Button {
+            selectAllLoaded()
+        } label: {
+            Image(systemName: "checklist")
+        }
+        .localizedHelp("Tout sélectionner")
+        .localizedAccessibilityLabel("Tout sélectionner")
+        if !selectedIds.isEmpty {
+            PaneToggleButton(label: "Catégorie", systemImage: "folder", isOn: $showBulkCategoryPicker)
+            // Binding custom : le calcul des états initiaux doit
+            // rester déclenché à l'OUVERTURE (comme avant), pas à
+            // chaque bascule.
+            PaneToggleButton(label: "Tags", systemImage: "tag", isOn: Binding(
+                get: { showBulkTagPicker },
+                set: { newValue in
+                    if newValue { bulkTagInitialStates = computeBulkTagStates() }
+                    showBulkTagPicker = newValue
+                }
+            ))
+            if reimbursementsEnabled {
+                PaneToggleButton(label: "Remboursement", systemImage: "arrow.uturn.left.circle", isOn: $showBulkRemboursementPicker)
+            }
+            Button {
+                showDeleteConfirmation = true
+            } label: {
+                Label("Supprimer (\(selectedIds.count))", systemImage: "trash")
+                    .foregroundStyle(AppTheme.Colors.danger)
+            }
+        }
+    }
+
+    @ViewBuilder private var browsingToolbarButtons: some View {
+        // Ajout manuel
+        PaneToggleButton(label: "Ajouter une transaction", systemImage: "plus", isOn: $showAddTransaction)
+        // Bouton filtre (badge si actif)
+        PaneToggleButton(
+            label: "Filtrer",
+            systemImage: activeFiltersCount > 0
+                ? "line.3.horizontal.decrease.circle.fill"
+                : "line.3.horizontal.decrease.circle",
+            isOn: $showFilters
+        )
+        #if os(macOS)
+        // macOS : la fenêtre a la place — actions secondaires
+        // étalées en boutons icône seule + tooltip natif (.help),
+        // au lieu du menu "⋯" iOS.
+        PaneToggleButton(label: "Analyse filtrée", systemImage: "chart.bar.xaxis.ascending", isOn: $showFilteredDashboard)
+        Spacer()
+        PaneToggleButton(label: "Dépenses par tag", systemImage: "tag.circle", isOn: $showTagSummary)
+        if reimbursementsEnabled {
+            PaneToggleButton(label: "Remboursements", systemImage: "arrow.uturn.left.circle", isOn: $showReimbursements)
+        }
+        Spacer()
+        Button { isSelecting = true } label: {
+            Image(systemName: "checkmark.circle")
+        }
+        .localizedHelp("Sélectionner")
+        #else
+        // Menu actions secondaires
+        Menu {
+            Button { showFilteredDashboard = true } label: {
+                Label("Analyse filtrée", systemImage: "chart.bar.xaxis.ascending")
+            }
+            Divider()
+            Button { showTagSummary = true } label: {
+                Label("Dépenses par tag", systemImage: "tag.circle")
+            }
+            if reimbursementsEnabled {
+                Button { showReimbursements = true } label: {
+                    Label("Remboursements", systemImage: "arrow.uturn.left.circle")
                 }
             }
-            .navigationTitle("Transactions")
-            .toolbar {
-                // #9 macOS : ne pas émettre d'item .navigation (mapping de
-                // navigationBarLeading) — même vide il entre en collision avec le
-                // back système + toggle sidebar du NavigationSplitView, d'où la
-                // flèche de retour qui "voyage". Sur Mac, "Annuler" rejoint le
-                // groupe trailing.
-                #if !os(macOS)
-                ToolbarItem(placement: .navigationBarLeading) {
-                    if isSelecting {
-                        Button("Annuler") { cancelSelection() }
-                    }
-                }
-                #endif
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    if isSelecting {
-                        #if os(macOS)
-                        Button("Annuler") { cancelSelection() }
-                        #endif
-                        if !selectedIds.isEmpty {
-                            PaneToggleButton(label: "Catégorie", systemImage: "folder", isOn: $showBulkCategoryPicker)
-                            // Binding custom : le calcul des états initiaux doit
-                            // rester déclenché à l'OUVERTURE (comme avant), pas à
-                            // chaque bascule.
-                            PaneToggleButton(label: "Tags", systemImage: "tag", isOn: Binding(
-                                get: { showBulkTagPicker },
-                                set: { newValue in
-                                    if newValue { bulkTagInitialStates = computeBulkTagStates() }
-                                    showBulkTagPicker = newValue
-                                }
-                            ))
-                            if reimbursementsEnabled {
-                                PaneToggleButton(label: "Remboursement", systemImage: "arrow.uturn.left.circle", isOn: $showBulkRemboursementPicker)
-                            }
-                            Button {
-                                showDeleteConfirmation = true
-                            } label: {
-                                Label("Supprimer (\(selectedIds.count))", systemImage: "trash")
-                                    .foregroundStyle(AppTheme.Colors.danger)
-                            }
-                        }
-                    } else {
-                        // Ajout manuel
-                        PaneToggleButton(label: "Ajouter une transaction", systemImage: "plus", isOn: $showAddTransaction)
-                        // Bouton filtre (badge si actif)
-                        PaneToggleButton(
-                            label: "Filtrer",
-                            systemImage: activeFiltersCount > 0
-                                ? "line.3.horizontal.decrease.circle.fill"
-                                : "line.3.horizontal.decrease.circle",
-                            isOn: $showFilters
-                        )
-                        #if os(macOS)
-                        // macOS : la fenêtre a la place — actions secondaires
-                        // étalées en boutons icône seule + tooltip natif (.help),
-                        // au lieu du menu "⋯" iOS.
-                        PaneToggleButton(label: "Analyse filtrée", systemImage: "chart.bar.xaxis.ascending", isOn: $showFilteredDashboard)
-                        PaneToggleButton(label: "Dépenses par tag", systemImage: "tag.circle", isOn: $showTagSummary)
-                        if reimbursementsEnabled {
-                            PaneToggleButton(label: "Remboursements", systemImage: "arrow.uturn.left.circle", isOn: $showReimbursements)
-                        }
-                        Button { isSelecting = true } label: {
-                            Image(systemName: "checkmark.circle")
-                        }
-                        .help("Sélectionner")
-                        #else
-                        // Menu actions secondaires
-                        Menu {
-                            Button { showFilteredDashboard = true } label: {
-                                Label("Analyse filtrée", systemImage: "chart.bar.xaxis.ascending")
-                            }
-                            Button { showTagSummary = true } label: {
-                                Label("Dépenses par tag", systemImage: "tag.circle")
-                            }
-                            if reimbursementsEnabled {
-                                Button { showReimbursements = true } label: {
-                                    Label("Remboursements", systemImage: "arrow.uturn.left.circle")
-                                }
-                            }
-                            Divider()
-                            Button { isSelecting = true } label: {
-                                Label("Sélectionner", systemImage: "checkmark.circle")
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                        }
-                        #endif
-                    }
-                }
+            Divider()
+            Button { isSelecting = true } label: {
+                Label("Sélectionner", systemImage: "checkmark.circle")
             }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        #endif
+    }
+
+    private var bodyWithDialogs: some View {
+        bodyWithChrome
             .confirmationDialog(
                 "Supprimer \(selectedIds.count) transaction(s) ?",
                 isPresented: $showDeleteConfirmation,
@@ -486,12 +445,18 @@ struct TransactionsView: View {
                     Text("\(tx.tiersName.isEmpty ? tx.information : tx.tiersName) · ") + Text(tx.amount, format: .currency(code: "EUR"))
                 }
             }
+    }
+
+    private var bodyWithFilters: some View {
+        bodyWithDialogs
             .adaptivePane(isPresented: $showFilters) {
                 TransactionFiltersSheet(
                     accounts: accounts,
                     allCategories: allCategories,
                     allTags: allTags,
-                    tiersSearchText: $tiersSearchText,
+                    allTiers: allTiers,
+                    payeeSearchText: $payeeSearchText,
+                    labelSearchText: $labelSearchText,
                     selectedCategoryId: $selectedCategoryId,
                     filterTagIds: $filterTagIds,
                     grouping: $grouping,
@@ -504,6 +469,21 @@ struct TransactionsView: View {
                 )
                 .environment(appState)
             }
+            // Persistance des préférences de filtre (catégorie/tags/groupement,
+            // pas la recherche texte — cf. commentaire de leurs déclarations).
+            .onChange(of: selectedCategoryId) { _, new in
+                UserDefaults.standard.set(new, forKey: "tx.filter.categoryId")
+            }
+            .onChange(of: filterTagIds) { _, new in
+                UserDefaults.standard.set(Array(new), forKey: "tx.filter.tagIds")
+            }
+            .onChange(of: grouping) { _, new in
+                UserDefaults.standard.set(new.rawValue, forKey: "tx.filter.grouping")
+            }
+    }
+
+    private var bodyWithEntityPanes: some View {
+        bodyWithFilters
             .adaptivePane(item: $quickCategoryTx) { tx in
                 CategoryQuickPickSheet(
                     currentCategoryId: tx.categoryId,
@@ -550,6 +530,10 @@ struct TransactionsView: View {
                     }
                 }
             }
+    }
+
+    private var bodyWithActionPanes: some View {
+        bodyWithEntityPanes
             .adaptivePane(isPresented: $showAddTransaction) {
                 // Si l'utilisateur est en mode "Tous" (selectedAccountId == 0), on retombe
                 // sur le premier compte disponible pour l'ajout manuel (impossible
@@ -584,6 +568,10 @@ struct TransactionsView: View {
             .adaptivePane(item: $tricountDetailGroup, onDismiss: { tricountDetailEntryId = nil }) { group in
                 TricountDetailView(group: group, initialEntryId: tricountDetailEntryId)
             }
+    }
+
+    private var bodyWithBulkPanes: some View {
+        bodyWithActionPanes
             .adaptivePane(isPresented: $showBulkRemboursementPicker) {
                 RemboursementQuickPickSheet(allTiers: allTiers) { tiersId, tiersName in
                     let reimbursementRepo = ReimbursementRepository()
@@ -620,6 +608,10 @@ struct TransactionsView: View {
                     }
                 )
             }
+    }
+
+    private var bodyWithLifecycle: some View {
+        bodyWithBulkPanes
             .task(id: appState.dataRefreshToken) {
                 // 1-frame guard : laisse le skeleton se peindre avant la requête SQLite.
                 await Task.yield()
@@ -628,6 +620,9 @@ struct TransactionsView: View {
             .refreshable {
                 // Pas de skeleton sur pull-to-refresh : l'indicateur système suffit.
                 loadInitialData()
+            }
+            .onChange(of: uncategorizedCount) { old, new in
+                if new != old { uncategorizedBannerDismissed = false }
             }
     }
 
@@ -668,13 +663,239 @@ struct TransactionsView: View {
         #if os(macOS)
         // Même base .plain que la liste chargée (cartes macGroupedRow).
         .listStyle(.plain)
-        .contentMargins(.top, AppTheme.Spacing.md, for: .scrollContent)
+        .macGroupedListTopGap()
         #endif
         .scrollContentBackground(.hidden)
         .background(AppTheme.Colors.background)
     }
 
+    // MARK: List sections
+    //
+    // Chacune de ces sections vivait auparavant en ligne dans le `List` du
+    // `navBody` — un seul énorme bloc ViewBuilder (soldes + avertissement +
+    // groupes + pagination, avec conditions et ternaires imbriqués). Xcode 26
+    // (release) échoue à type-checker ce bloc en temps raisonnable
+    // (`the compiler is unable to type-check this expression`) alors qu'Xcode 27
+    // beta, avec un solveur de types plus rapide, n'a pas ce problème — la
+    // découpe en propriétés séparées donne des bornes claires au type-checker,
+    // indépendamment de la version du compilateur.
+
+    /// Soldes période/compte (#6). En mode "Tous les comptes" on n'affiche QUE
+    /// la somme période (flux net) — le "Solde réel" agrégerait tous les
+    /// comptes (CB + cash + épargne…), lecture trompeuse.
+    @ViewBuilder
+    private var balancesSection: some View {
+        let periodBalance = filteredTransactions.reduce(0) { $0 + $1.amount }
+        Section {
+            if isAllAccountsMode {
+                HStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Flux net période · tous comptes")
+                            .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
+                        Text(periodBalance, format: .currency(code: "EUR"))
+                            .font(.subheadline).fontWeight(.semibold)
+                            .foregroundStyle(periodBalance >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
+                    }
+                    Spacer()
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                }
+                .padding(.vertical, 4)
+            } else {
+                HStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Solde période")
+                            .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
+                        Text(periodBalance, format: .currency(code: "EUR"))
+                            .font(.subheadline).fontWeight(.semibold)
+                            .foregroundStyle(periodBalance >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
+                    }
+                    Spacer()
+                    Divider().frame(height: 32)
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("Solde réel")
+                            .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary)
+                        Text(accountBalance, format: .currency(code: "EUR"))
+                            .font(.subheadline).fontWeight(.semibold)
+                            .foregroundStyle(accountBalance >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .macGroupedRow()
+    }
+
+    /// Bandeau "N transactions sans catégorie", masquable par session
+    /// (`uncategorizedBannerDismissed`).
+    @ViewBuilder
+    private var uncategorizedWarningSection: some View {
+        if uncategorizedCount > 0 && selectedCategoryId != -2 && !uncategorizedBannerDismissed {
+            Section {
+                HStack(spacing: 12) {
+                    Button {
+                        selectedCategoryId = -2
+                        resetAndLoad()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(AppTheme.Colors.warning)
+                                .font(.title3)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(uncategorizedCount) transaction(s) sans catégorie")
+                                    .font(.subheadline).fontWeight(.medium)
+                                    .foregroundStyle(AppTheme.Colors.textPrimary)
+                                Text("Toucher pour les afficher et catégoriser")
+                                    .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    // Fermer sans catégoriser : reste tant que le compte de non
+                    // catégorisées ne change pas (nouvel import, etc. le refait
+                    // réapparaître — cf. `.onChange(of: uncategorizedCount)`).
+                    Button {
+                        uncategorizedBannerDismissed = true
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                            .frame(width: 22, height: 22)
+                            .background(AppTheme.Colors.surfaceSecondary, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .localizedAccessibilityLabel("Fermer cet avertissement")
+                }
+                .padding(.vertical, 2)
+            }
+            .macGroupedRow()
+        }
+    }
+
+    /// Groupes de transactions par date, chacun en `Section`.
+    ///
+    /// `flatIds`/`flatIndex` : index GLOBAL (toutes sections confondues) de
+    /// chaque transaction visible — nécessaire au maj+clic, dont la plage
+    /// peut franchir une frontière de groupe (jour/semaine/mois). Calculé
+    /// UNE fois par rendu de la liste (pas par row), sinon O(n²) sur un
+    /// historique de plusieurs centaines de lignes.
+    @ViewBuilder
+    private var transactionGroupsSections: some View {
+        let flatIds = groupedTransactions.flatMap { $0.transactions.map(\.id) }
+        let flatIndex = Dictionary(uniqueKeysWithValues: flatIds.enumerated().map { ($1, $0) })
+        ForEach(groupedTransactions, id: \.date) { group in
+            Section {
+                ForEach(group.transactions) { item in
+                    transactionListRow(item, index: flatIndex[item.id] ?? 0, allIds: flatIds, in: group.transactions)
+                }
+            } header: {
+                group.label
+                    .macGroupedSectionHeader()
+            }
+        }
+    }
+
+    /// Sentinelle de pagination (déclenche `loadMore()`) ou compteur final.
+    @ViewBuilder
+    private var paginationFooter: some View {
+        if hasMore {
+            HStack { Spacer(); ProgressView(); Spacer() }
+                .listRowSeparator(.hidden)
+                .onAppear { loadMore() }
+        } else {
+            Text("\(transactions.count) transaction(s) sur la période")
+                .font(.caption)
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+                .frame(maxWidth: .infinity)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        }
+    }
+
     // MARK: Row
+
+    // Extraits en fonctions séparées (au lieu d'une seule chaîne de modifiers
+    // dans le ForEach) : le compilateur Swift 6 met un temps déraisonnable à
+    // type-checker un enchaînement `.contentShape().onTapGesture().rowActions().macGroupedRow { … }`
+    // quand il est imbriqué tel quel dans un ForEach/Section — la découpe en
+    // sous-expressions ré-annotées donne au type-checker des bornes claires.
+    private func leadingRowActions(for item: FinanceTransaction) -> [RowAction] {
+        guard !isSelecting else { return [] }
+        return [
+            RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) {
+                selectedTransaction = item
+            }
+        ]
+    }
+
+    private func trailingRowActions(for item: FinanceTransaction) -> [RowAction] {
+        guard !isSelecting else { return [] }
+        return [
+            RowAction("Supprimer", systemImage: "trash", role: .destructive) {
+                txToDelete = item
+            },
+            RowAction("Tags", systemImage: "tag", tint: AppTheme.Colors.accentSecondary) {
+                tagQuickTx = item
+            }
+        ]
+    }
+
+    /// Entrées de sélection du menu contextuel (clic droit macOS / appui
+    /// long iOS) — "Sélectionner" hors sélection, actions de groupe si
+    /// plusieurs transactions sont déjà sélectionnées. Cf. `selectionRowActions`.
+    private func selectionActions(for item: FinanceTransaction, index: Int, allIds: [Int]) -> [RowAction] {
+        selectionRowActions(
+            isSelecting: isSelecting,
+            isSelected: selectedIds.contains(item.id),
+            selectionCount: selectedIds.count,
+            toggle: { RangeSelection.toggle(item.id, index: index, selected: &selectedIds, anchor: &selectionAnchor) },
+            selectAll: selectAllLoaded,
+            clearSelection: { selectedIds = [] },
+            deleteSelection: { showDeleteConfirmation = true }
+        )
+    }
+
+    @ViewBuilder
+    private func transactionRowBackground(for item: FinanceTransaction) -> some View {
+        ZStack(alignment: .leading) {
+            AppTheme.Colors.surface
+            if linkedTricountTxIds.contains(item.id) {
+                AppTheme.Colors.accentSecondary.opacity(0.08)
+                Rectangle()
+                    .fill(AppTheme.Colors.accentSecondary)
+                    .frame(width: 3)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func transactionListRow(_ item: FinanceTransaction, index: Int, allIds: [Int], in groupTransactions: [FinanceTransaction]) -> some View {
+        let isFirst = item.id == groupTransactions.first?.id
+        let isLast = item.id == groupTransactions.last?.id
+        transactionRow(item)
+            .selectableRow(
+                id: item.id, index: index, allIds: allIds,
+                isSelecting: $isSelecting, selected: $selectedIds, anchor: $selectionAnchor
+            ) {
+                selectedTransaction = item
+            }
+            .rowActions(
+                selection: selectionActions(for: item, index: index, allIds: allIds),
+                leading: leadingRowActions(for: item),
+                trailing: trailingRowActions(for: item),
+                leadingFullSwipe: false,
+                trailingFullSwipe: false
+            )
+            .macGroupedRow(first: isFirst, last: isLast) {
+                transactionRowBackground(for: item)
+            }
+    }
 
     @ViewBuilder
     private func transactionRow(_ item: FinanceTransaction) -> some View {
@@ -825,6 +1046,32 @@ struct TransactionsView: View {
     // MARK: Chargement
 
     private func loadInitialData() {
+        // Navigation depuis la fiche d'un tiers ("Voir les transactions") :
+        // même doctrine de reset que le bouton "Réinitialiser les filtres"
+        // de `TransactionFiltersSheet` — sans elle, un filtre catégorie/tag
+        // laissé actif masquerait une partie des transactions du tiers visé,
+        // à l'encontre de ce que le bouton promet. "Tous les comptes" : un
+        // tiers n'est pas rattaché à un compte particulier.
+        //
+        // ⚠️ La plage de dates ACTIVE (mois précédent par défaut) fait
+        // exactement la même chose, en silence : sans l'élargir, les
+        // transactions plus anciennes du tiers restent masquées sans aucun
+        // indice que c'est CE filtre-là qui limite l'affichage (retour
+        // d'usage). Élargie plutôt que retirée — la borne reste visible et
+        // modifiable dans `TransactionFiltersSheet` (DatePicker "Du"/"Au").
+        if let pendingPayeeName = appState.pendingPayeeFilterName {
+            payeeSearchText    = pendingPayeeName
+            labelSearchText    = ""
+            selectedCategoryId = -1
+            filterTagIds       = []
+            tagFilteredTxIds   = nil
+            appState.selectedAccountId   = 0
+            appState.selectedAccountName = ""
+            appState.filterFromDate = Calendar.current.date(byAdding: .year, value: -50, to: Date()) ?? .distantPast
+            appState.filterToDate   = Date()
+            appState.pendingPayeeFilterName = nil
+        }
+
         accounts      = repository.fetchAccounts()
         allTiers      = repository.fetchTiers()
         allCategories = repository.fetchCategories()
@@ -845,6 +1092,13 @@ struct TransactionsView: View {
         } else if let accountId = appState.selectedAccountId, appState.selectedAccountName.isEmpty {
             appState.selectedAccountName = accounts.first(where: { $0.id == accountId })?.name ?? ""
         }
+        // `filterTagIds` peut arriver pré-rempli (persisté, cf. sa déclaration)
+        // avant même que l'utilisateur n'ouvre la feuille de filtres — sans ce
+        // recalcul initial, `tagFilteredTxIds` resterait nil et le filtre tag
+        // persisté n'aurait aucun effet tant que "Appliquer" n'est pas retapé.
+        if !filterTagIds.isEmpty {
+            tagFilteredTxIds = repository.fetchTransactionIds(havingAnyTagIds: filterTagIds)
+        }
         resetAndLoad()
     }
 
@@ -856,7 +1110,7 @@ struct TransactionsView: View {
         transactions = []
         hasMore      = true
 
-        let hasActiveFilters = !tiersSearchText.isEmpty || selectedCategoryId != -1 || tagFilteredTxIds != nil
+        let hasActiveFilters = !payeeSearchText.isEmpty || !labelSearchText.isEmpty || selectedCategoryId != -1 || tagFilteredTxIds != nil
 
         if hasActiveFilters {
             // Filtres actifs : on charge TOUTES les transactions correspondantes en SQL
@@ -903,14 +1157,19 @@ struct TransactionsView: View {
 
     // MARK: Sélection
 
-    private func toggleSelection(_ id: Int) {
-        if selectedIds.contains(id) { selectedIds.remove(id) }
-        else { selectedIds.insert(id) }
-    }
-
     private func cancelSelection() {
         isSelecting = false
         selectedIds.removeAll()
+        selectionAnchor = nil
+    }
+
+    /// ⌘A / "Tout sélectionner" : ne porte que sur ce qui est déjà CHARGÉ en
+    /// mémoire (`transactions`), jamais un fetch de tout l'historique — sur
+    /// une liste paginée, on ne veut pas qu'un raccourci ramène silencieusement
+    /// des années de données non affichées.
+    private func selectAllLoaded() {
+        isSelecting = true
+        selectedIds = Set(transactions.map(\.id))
     }
 
     // MARK: Catégorie rapide
@@ -968,7 +1227,8 @@ struct TransactionsView: View {
             accountName: appState.selectedAccountName,
             from: appState.filterFromDate,
             to: appState.filterToDate,
-            tiersSearchText: tiersSearchText,
+            payeeSearchText: payeeSearchText,
+            labelSearchText: labelSearchText,
             categoryId: selectedCategoryId,
             categoryName: categoryName,
             tagNames: tagNames,

@@ -27,7 +27,6 @@ struct NewTiersFormSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             Form {
                 Section {
                     TextField("Nom", text: $name).autocorrectionDisabled()
@@ -50,22 +49,21 @@ struct NewTiersFormSheet: View {
                 }
             }
             .nemorisFormStyle()
-            .navigationTitle("Nouveau tiers")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { dismiss() }
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
+            // barre d'outils native laisse le bureau de l'utilisateur
+            // transparaître (retour d'usage 2026-08-21). Cf. le commentaire
+            // de `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome(
+                "Nouveau tiers",
+                cancelLabel: "Annuler", onCancel: { dismiss() },
+                confirmLabel: "Confirmer",
+                confirmDisabled: name.trimmingCharacters(in: .whitespaces).isEmpty,
+                onConfirm: {
+                    let n = name.trimmingCharacters(in: .whitespaces)
+                    guard !n.isEmpty else { return }
+                    onCreate(n, regex.trimmingCharacters(in: .whitespaces), categoryId)
+                    dismiss()
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Confirmer") {
-                        let n = name.trimmingCharacters(in: .whitespaces)
-                        guard !n.isEmpty else { return }
-                        onCreate(n, regex.trimmingCharacters(in: .whitespaces), categoryId)
-                        dismiss()
-                    }
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-        }
+            )
     }
 }

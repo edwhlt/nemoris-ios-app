@@ -137,7 +137,7 @@ struct OnboardingFlowView: View {
         }
     }
 
-    private func promiseRow(icon: String, title: String, subtitle: String) -> some View {
+    private func promiseRow(icon: String, title: LocalizedStringKey, subtitle: LocalizedStringKey) -> some View {
         HStack(spacing: AppTheme.Spacing.md) {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .semibold))
@@ -240,7 +240,7 @@ struct OnboardingFlowView: View {
                         .autocorrectionDisabled()
                     Picker("Type", selection: $accountType) {
                         ForEach(AccountType.allCases, id: \.rawValue) { type in
-                            Text(type.label).tag(type.rawValue)
+                            Text(LocalizedStringKey(type.label)).tag(type.rawValue)
                         }
                     }
                 } header: {
@@ -263,7 +263,7 @@ struct OnboardingFlowView: View {
             .padding(.horizontal, AppTheme.Spacing.xxxl)
             .padding(.bottom, AppTheme.Spacing.xxxl)
         }
-        .navigationTitle("Créer un compte")
+        .localizedNavigationTitle("Créer un compte")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -337,7 +337,7 @@ struct OnboardingFlowView: View {
     }
 
     @ViewBuilder
-    private func moduleCard(icon: String, title: String, subtitle: String, isPro: Bool, isOn: Binding<Bool>) -> some View {
+    private func moduleCard(icon: String, title: LocalizedStringKey, subtitle: LocalizedStringKey, isPro: Bool, isOn: Binding<Bool>) -> some View {
         HStack(spacing: AppTheme.Spacing.md) {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .semibold))
@@ -416,7 +416,7 @@ struct OnboardingFlowView: View {
         }
     }
 
-    private func tipRow(icon: String, text: String) -> some View {
+    private func tipRow(icon: String, text: LocalizedStringKey) -> some View {
         HStack(spacing: AppTheme.Spacing.md) {
             Image(systemName: icon)
                 .font(.system(size: 13, weight: .semibold))
@@ -538,6 +538,7 @@ struct OnboardingFlowView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, AppTheme.Spacing.md)
             }
+            .buttonStyle(.plain)
             .foregroundStyle(.white)
             .background(AppTheme.Colors.accent)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md))
@@ -554,25 +555,27 @@ struct OnboardingFlowView: View {
 
     // MARK: - Reusable buttons
 
-    private func primaryButton(_ title: String, action: @escaping () -> Void) -> some View {
+    private func primaryButton(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(AppTheme.Typography.titleSmall)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, AppTheme.Spacing.md)
         }
+        .buttonStyle(.plain)
         .foregroundStyle(.white)
         .background(AppTheme.Colors.accent)
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md))
     }
 
-    private func secondaryButton(_ title: String, action: @escaping () -> Void) -> some View {
+    private func secondaryButton(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(AppTheme.Typography.titleSmall)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, AppTheme.Spacing.md)
         }
+        .buttonStyle(.plain)
         .foregroundStyle(AppTheme.Colors.accent)
         .background(AppTheme.Colors.accent.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.Radius.md))

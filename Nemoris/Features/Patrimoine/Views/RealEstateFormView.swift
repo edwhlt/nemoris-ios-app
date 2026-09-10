@@ -93,7 +93,9 @@ struct RealEstateFormView: View {
                         Text("Prix d'achat")
                             .font(AppTheme.Typography.bodyMedium)
                         Spacer()
-                        TextField("0,00", text: $purchasePriceText)
+                        // Titre vide : la row a déjà son label — cf.
+                        // TransactionEditSheet pour la raison macOS.
+                        TextField("", text: $purchasePriceText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(maxWidth: 160)
@@ -108,7 +110,7 @@ struct RealEstateFormView: View {
                         Text("Valeur estimée")
                             .font(AppTheme.Typography.bodyMedium)
                         Spacer()
-                        TextField("0,00", text: $currentValueText)
+                        TextField("", text: $currentValueText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(maxWidth: 160)

@@ -124,6 +124,12 @@ struct BudgetApercuSheet: View {
                     }
                 }
             }
+            #if os(macOS)
+            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
+            // celui du panneau hôte — sans ce modificateur, le bureau de
+            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            .scrollContentBackground(.hidden)
+            #endif
             .paneChrome(selectedCategoryName ?? "Transactions",
                         cancelLabel: "Fermer", onCancel: { showCategoryTxSheet = false })
         }
@@ -163,7 +169,7 @@ struct BudgetApercuSheet: View {
         }
     }
 
-    private func statBox(title: String, value: Double, color: Color) -> some View {
+    private func statBox(title: LocalizedStringKey, value: Double, color: Color) -> some View {
         VStack(spacing: 2) {
             Text(value, format: .currency(code: "EUR"))
                 .font(AppTheme.Typography.moneySmall).foregroundStyle(color)

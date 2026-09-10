@@ -35,6 +35,26 @@ struct LocalLLMService: Sendable {
 
     static var hasConfiguration: Bool { !baseURL.isEmpty }
 
+    private static let disableThinkingKey = "ai.localServer.disableThinking"
+
+    /// Demander au serveur de couper le mode « raisonnement » du modèle.
+    ///
+    /// ⚠️ **Désactivé par défaut, et c'est délibéré.** Un modèle raisonnement
+    /// bien alimenté produit ici les meilleurs résultats de tous les backends
+    /// testés (qwen3.5-9b via LM Studio). Le couper d'office ferait perdre
+    /// cette qualité pour se prémunir d'un cas — le modèle qui dépense tout
+    /// son budget en réflexion sans jamais conclure — que le découpage en
+    /// passes (`CoachPassPlanner`) traite désormais à la source, en réduisant
+    /// ce qu'on lui demande d'un coup.
+    ///
+    /// Le réglage reste exposé comme SOUPAPE : si un serveur continue de
+    /// rendre des réponses vides avec un `reasoning_content` rempli, le
+    /// basculer coupe la réflexion sans changer de modèle.
+    static var disableThinking: Bool {
+        get { UserDefaults.standard.bool(forKey: disableThinkingKey) }
+        set { UserDefaults.standard.set(newValue, forKey: disableThinkingKey) }
+    }
+
     /// Identifie un marchand. `nil` si non configuré ou en cas d'échec réseau/parsing —
     /// même contrat de silence que `EnrichmentLLMService.identify` : l'orchestrateur et
     /// les sheets manuelles continuent simplement sans ce candidat.
@@ -84,9 +104,19 @@ struct LocalLLMService: Sendable {
     /// `imageDataURL` : capture encodée en data-URL base64, pour un modèle
     /// multimodal. Le serveur reçoit alors un message à parties typées
     /// (protocole OpenAI) au lieu d'une simple chaîne.
+    /// - Parameter maxTokens: budget de SORTIE. ⚠️ Longtemps omis, ce qui
+    ///   laissait le serveur appliquer sa propre limite par défaut — souvent
+    ///   quelques centaines de tokens, d'où des réponses coupées net sans
+    ///   aucun rapport avec la taille du contexte (retour d'usage 2026-08-28).
+    /// - Parameter forceDirectAnswer: coupe le mode raisonnement pour CET
+    ///   appel, quel que soit le réglage de l'utilisateur. Réservé au repli
+    ///   automatique déclenché après un `reasoningOnly` avéré — on ne bride
+    ///   jamais le premier essai, c'est lui qui donne les meilleures analyses.
     func complete(systemPrompt: String,
                   userPrompt: String,
-                  imageDataURL: String? = nil) async throws -> String {
+                  imageDataURL: String? = nil,
+                  maxTokens: Int = 1_024,
+                  forceDirectAnswer: Bool = false) async throws -> String {
         guard let url = URL(string: Self.baseURL + "/v1/chat/completions") else {
             throw LocalLLMError.invalidURL
         }
@@ -106,7 +136,9 @@ struct LocalLLMService: Sendable {
                 .init(role: "user", text: userPrompt, imageDataURL: imageDataURL)
             ],
             temperature: 0.2,
-            stream: false
+            stream: false,
+            max_tokens: maxTokens,
+            chat_template_kwargs: (Self.disableThinking || forceDirectAnswer) ? ["enable_thinking": false] : nil
         )
         request.httpBody = try JSONEncoder().encode(body)
 
@@ -132,10 +164,29 @@ struct LocalLLMService: Sendable {
 
         do {
             let decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
-            guard let content = decoded.choices.first?.message.content, !content.isEmpty else {
+            guard let message = decoded.choices.first?.message else {
                 throw LocalLLMError.emptyResponse
             }
-            return content
+            if !message.content.isEmpty { return message.content }
+            // ⚠️ Signature MESURÉE sur trois retours d'usage (2026-08-29,
+            // 09-01, 09-06, qwen3.5-9b via LM Studio) : `content` vide,
+            // `reasoning_content` rempli de milliers de tokens et coupé EN
+            // PLEIN MOT, `finish_reason` pourtant à "stop". Le modèle a
+            // dépensé tout le budget disponible à re-dérouler les consignes
+            // sans jamais écrire sa réponse.
+            //
+            // Une ERREUR TYPÉE, pas le texte du raisonnement rendu tel quel :
+            // l'appelant doit pouvoir distinguer « ce serveur a montré sa
+            // vraie limite » d'une réponse hors format, pour relancer en mode
+            // dégradé au lieu d'afficher un échec (cf. `CoachService`).
+            //
+            // Le raisonnement voyage AVEC l'erreur : il ne contient aucun JSON
+            // exploitable, mais c'est lui qui alimente le dépliant diagnostic
+            // (« Voir la réponse du modèle ») si le repli échoue à son tour.
+            if let reasoning = message.reasoning_content, !reasoning.isEmpty {
+                throw LocalLLMError.reasoningOnly(reasoning)
+            }
+            throw LocalLLMError.emptyResponse
         } catch let error as LocalLLMError {
             throw error
         } catch {
@@ -185,11 +236,32 @@ private struct ChatCompletionRequest: Encodable {
     let messages: [Message]
     let temperature: Double
     let stream: Bool
+    /// Nom volontairement en snake_case : c'est la clé du protocole OpenAI,
+    /// que les serveurs locaux implémentent tel quel.
+    let max_tokens: Int
+    /// Demande au serveur de couper le mode « raisonnement » du modèle, quand
+    /// il honore ce champ (extension vLLM / llama.cpp récents, transmise telle
+    /// quelle au template de chat Jinja).
+    ///
+    /// ⚠️ `nil` par DÉFAUT — donc absent du JSON, donc réflexion CONSERVÉE.
+    /// Une version antérieure l'envoyait systématiquement à `false` : c'était
+    /// se priver du backend qui donne les meilleurs résultats (un modèle
+    /// raisonnement bien alimenté) pour parer un cas que le découpage en
+    /// passes règle mieux. N'est renseigné que si l'utilisateur bascule la
+    /// soupape (`LocalLLMService.disableThinking`).
+    let chat_template_kwargs: [String: Bool]?
 }
 
 private struct ChatCompletionResponse: Decodable {
     struct Choice: Decodable {
-        struct Msg: Decodable { let content: String }
+        struct Msg: Decodable {
+            let content: String
+            /// Certains modèles "thinking" (Qwen3, DeepSeek-R1…) exposent leur
+            /// raisonnement dans ce champ séparé plutôt que dans `content` —
+            /// extension du protocole OpenAI portée par LM Studio/vLLM/Ollama.
+            /// `nil` chez tout modèle non-reasoning, donc absent sans risque.
+            let reasoning_content: String?
+        }
         let message: Msg
     }
     let choices: [Choice]
@@ -204,6 +276,9 @@ enum LocalLLMError: Error, LocalizedError {
     case timedOut
     case badStatus(Int)
     case emptyResponse
+    /// Le modèle a produit du RAISONNEMENT mais aucune réponse finale — le
+    /// texte associé est ce raisonnement, conservé pour le diagnostic.
+    case reasoningOnly(String)
     case decodingFailed(String)
 
     var errorDescription: String? {
@@ -220,6 +295,8 @@ enum LocalLLMError: Error, LocalizedError {
             return "Le serveur a répondu avec une erreur (HTTP \(code))."
         case .emptyResponse:
             return "Réponse vide — le modèle n'a rien renvoyé."
+        case .reasoningOnly:
+            return "Le modèle a réfléchi sans jamais écrire sa réponse : il a dépensé tout son budget en réflexion interne. Réduis la taille du contexte demandé, ou coupe le mode raisonnement de ce modèle."
         case .decodingFailed(let detail):
             return "Réponse illisible — le serveur ne renvoie pas un format compatible OpenAI. (\(detail))"
         }

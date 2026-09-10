@@ -44,7 +44,7 @@ struct MonthOverviewCard: View {
     }
 
     @ViewBuilder
-    private func statBox(title: String, value: Double, color: Color) -> some View {
+    private func statBox(title: LocalizedStringKey, value: Double, color: Color) -> some View {
         VStack(spacing: 2) {
             Text(value, format: .currency(code: "EUR"))
                 .font(AppTheme.Typography.moneySmall).foregroundStyle(color)

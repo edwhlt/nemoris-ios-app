@@ -23,7 +23,7 @@ struct DashboardTile<Content: View>: View {
     /// Vrai quand l'agrégat est arrivé mais ne contient rien à montrer.
     var isEmpty: Bool = false
     var emptyMessage: String = "Aucune donnée"
-    var subtitle: String? = nil
+    var subtitle: LocalizedStringResource? = nil
     var onOpenModule: (() -> Void)? = nil
     @ViewBuilder var content: () -> Content
 
@@ -78,7 +78,8 @@ struct DashboardTile<Content: View>: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(AppTheme.Colors.textSecondary)
             VStack(alignment: .leading, spacing: 2) {
-                Text(card.title.uppercased())
+                Text(LocalizedStringKey(card.title))
+                    .textCase(.uppercase)
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(0.8)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -118,7 +119,7 @@ struct DashboardTile<Content: View>: View {
     }
 
     @ViewBuilder private var emptyContent: some View {
-        Text(emptyMessage)
+        Text(LocalizedStringKey(emptyMessage))
             .font(AppTheme.Typography.bodySmall)
             .foregroundStyle(AppTheme.Colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)

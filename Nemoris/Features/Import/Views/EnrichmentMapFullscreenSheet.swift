@@ -36,7 +36,6 @@ struct EnrichmentMapFullscreenSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
             ZStack(alignment: .bottom) {
                 Map(position: $cameraPosition, selection: Binding(
                     get: { selectedCandidate?.id },
@@ -72,16 +71,11 @@ struct EnrichmentMapFullscreenSheet: View {
                     }
                 }
             }
-            .navigationTitle("Carte des résultats")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: {
-                        Label("Fermer", systemImage: "xmark")
-                    }
-                }
-            }
-        }
+            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
+            // barre d'outils native laisse le bureau de l'utilisateur
+            // transparaître (retour d'usage 2026-08-21). Cf. le commentaire
+            // de `macSheetChrome` dans AdaptivePane.swift.
+            .paneChrome("Carte des résultats", cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 
     private var geoCandidates: [SearchCandidate] {
@@ -167,7 +161,7 @@ struct EnrichmentMapFullscreenSheet: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: selectedCandidate?.id)
     }
 
-    private func detailBadge(_ label: String, color: Color) -> some View {
+    private func detailBadge(_ label: LocalizedStringKey, color: Color) -> some View {
         Text(label)
             .font(.caption2.weight(.bold))
             .padding(.horizontal, 6).padding(.vertical, 1)

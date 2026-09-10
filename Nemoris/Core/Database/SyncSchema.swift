@@ -54,7 +54,9 @@ enum SyncSchema {
     /// Deliberately NEVER synced: `investment_live_sync` + Keychain
     /// credentials (by design), `currency_rates` (re-fetchable cache),
     /// `csv_mappings` / `import_sessions` (local device workflow state),
-    /// disk caches (out of the DB entirely).
+    /// `pending_apple_pay_entries` (per-device Shortcuts staging buffer — each
+    /// device gets its own Apple Pay notifications, nothing to reconcile
+    /// across devices), disk caches (out of the DB entirely).
     static let syncedTables: [String] = [
         // — Core ledger
         "accounts",
@@ -88,6 +90,11 @@ enum SyncSchema {
         // ⚠️ Keys BEFORE values: the latter reference the former.
         "transaction_metadata_keys",
         "transaction_metadata_values",
+        // — AI coach: ONLY the objectives the user authored. The analyses and
+        // the recommendations they produce are DERIVED (regenerable from the
+        // ledger at any time), so they stay local — same reasoning as
+        // `import_sessions` / `csv_mappings`.
+        "coach_profile",
     ]
 
     /// Tables added by migration v42 — NEVER MODIFY after ship (migration

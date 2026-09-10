@@ -1,0 +1,774 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# =============================================================================
+# distribute
+#
+# Prévu pour:
+#
+#   MonProjet/
+#   ├── MonProjet.xcodeproj / MonProjet.xcworkspace
+#   └── scripts/
+#       └── distribute
+#
+# Exemples:
+#
+#   iOS:
+#     ./scripts/distribute
+#
+#   iOS + macOS:
+#     PLATFORM=both ./scripts/distribute
+#
+#   macOS:
+#     PLATFORM=macos ./scripts/distribute
+#
+#   Par défaut, le script archive + upload vers App Store Connect.
+#
+#   Export local uniquement (pas d'upload):
+#     EXPORT_ONLY=1 PLATFORM=both ./scripts/distribute
+#
+#   Xcode particulier:
+#     XCODE_APP="/Applications/Xcode-26.4.app" PLATFORM=both ./scripts/distribute
+#
+#   Version marketing:
+#     VERSION=1.2.0 PLATFORM=both ./scripts/distribute
+#
+#   Forcer ponctuellement:
+#     IOS_BUILD=5 ./scripts/distribute
+#     MAC_BUILD=12 PLATFORM=macos ./scripts/distribute
+#
+# App Store Connect API (recommandé):
+#
+#   export ASC_KEY_ID="ABC123DEFG"
+#   export ASC_ISSUER_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+#   export ASC_KEY_PATH="$HOME/.appstoreconnect/AuthKey_ABC123DEFG.p8"
+#
+# Avec l'API configurée:
+#
+#   iOS   1.1.0: max des builds IOS de 1.1.0 + 1
+#   macOS 1.1.0: max des builds MAC_OS de 1.1.0 + 1
+#
+# Les numéros iOS et macOS sont donc indépendants.
+#
+# IMPORTANT:
+#   Lorsque App Store Connect est configuré, le numéro distant est la source
+#   de vérité. Le CURRENT_PROJECT_VERSION local n'est PAS utilisé pour choisir
+#   le prochain numéro. Cela évite qu'un ancien compteur local incorrect
+#   (par exemple 10) force iOS à continuer à 11 alors qu'Apple n'est qu'à 4.
+# =============================================================================
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+cd "$PROJECT_ROOT"
+
+XCODE_APP="${XCODE_APP:-/Applications/Xcode.app}"
+CONFIGURATION="${CONFIGURATION:-Release}"
+
+PLATFORM="${PLATFORM:-ios}"             # ios | macos | both
+MAC_VARIANT="${MAC_VARIANT:-native}"    # native | catalyst
+EXPORT_ONLY="${EXPORT_ONLY:-0}"
+
+DIST_DIR="${DIST_DIR:-$PROJECT_ROOT/dist}"
+METHOD="${METHOD:-app-store-connect}"
+
+ASC_KEY_ID="${ASC_KEY_ID:-}"
+ASC_ISSUER_ID="${ASC_ISSUER_ID:-}"
+ASC_KEY_PATH="${ASC_KEY_PATH:-}"
+
+# Optionnel: éviter la recherche par Bundle ID.
+ASC_IOS_APP_ID="${ASC_IOS_APP_ID:-}"
+ASC_MAC_APP_ID="${ASC_MAC_APP_ID:-}"
+
+die() {
+  echo "❌ $*" >&2
+  exit 1
+}
+
+case "$PLATFORM" in
+  ios|macos|both) ;;
+  *) die "PLATFORM doit être ios, macos ou both." ;;
+esac
+
+case "$MAC_VARIANT" in
+  native|catalyst) ;;
+  *) die "MAC_VARIANT doit être native ou catalyst." ;;
+esac
+
+case "$EXPORT_ONLY" in
+  0|1) ;;
+  *) die "EXPORT_ONLY doit valoir 0 ou 1." ;;
+esac
+
+if [[ ! -d "$XCODE_APP/Contents/Developer" ]]; then
+  die "Xcode introuvable: $XCODE_APP
+
+Xcode disponibles:
+$(ls -d /Applications/Xcode*.app 2>/dev/null || true)"
+fi
+
+export DEVELOPER_DIR="$XCODE_APP/Contents/Developer"
+
+echo
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🛠  $(xcodebuild -version | tr '\n' ' ')"
+echo "📁 Projet: $PROJECT_ROOT"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+
+# -----------------------------------------------------------------------------
+# Projet / workspace
+# -----------------------------------------------------------------------------
+
+if [[ -n "${WORKSPACE:-}" ]]; then
+  CONTAINER_FLAG="-workspace"
+  CONTAINER_PATH="$WORKSPACE"
+
+elif [[ -n "${PROJECT:-}" ]]; then
+  CONTAINER_FLAG="-project"
+  CONTAINER_PATH="$PROJECT"
+
+else
+  shopt -s nullglob
+  workspaces=( *.xcworkspace )
+  projects=( *.xcodeproj )
+  shopt -u nullglob
+
+  if (( ${#workspaces[@]} == 1 )); then
+    CONTAINER_FLAG="-workspace"
+    CONTAINER_PATH="${workspaces[0]}"
+
+  elif (( ${#workspaces[@]} > 1 )); then
+    die "Plusieurs .xcworkspace trouvés.
+Utilise WORKSPACE=\"...\"."
+
+  elif (( ${#projects[@]} == 1 )); then
+    CONTAINER_FLAG="-project"
+    CONTAINER_PATH="${projects[0]}"
+
+  elif (( ${#projects[@]} > 1 )); then
+    die "Plusieurs .xcodeproj trouvés.
+Utilise PROJECT=\"...\"."
+
+  else
+    die "Aucun .xcworkspace ou .xcodeproj trouvé."
+  fi
+fi
+
+[[ -e "$CONTAINER_PATH" ]] || die "Projet introuvable: $CONTAINER_PATH"
+
+echo "📦 Container: $CONTAINER_PATH"
+
+
+# -----------------------------------------------------------------------------
+# Scheme
+# -----------------------------------------------------------------------------
+
+TMP_FILES=()
+
+cleanup() {
+  if (( ${#TMP_FILES[@]} )); then
+    rm -f "${TMP_FILES[@]}" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+if [[ -z "${SCHEME:-}" ]]; then
+  LIST_JSON="$(mktemp -t xcode-schemes.XXXXXX)"
+  TMP_FILES+=( "$LIST_JSON" )
+
+  xcodebuild \
+    "$CONTAINER_FLAG" "$CONTAINER_PATH" \
+    -list -json > "$LIST_JSON"
+
+  PREFERRED="$(basename "$CONTAINER_PATH")"
+  PREFERRED="${PREFERRED%.xcworkspace}"
+  PREFERRED="${PREFERRED%.xcodeproj}"
+
+  SCHEME="$(
+    python3 - "$LIST_JSON" "$PREFERRED" <<'PY'
+import json, sys
+
+data = json.load(open(sys.argv[1]))
+preferred = sys.argv[2]
+root = data.get("workspace") or data.get("project") or {}
+schemes = root.get("schemes") or []
+
+if preferred in schemes:
+    print(preferred)
+elif len(schemes) == 1:
+    print(schemes[0])
+else:
+    print("")
+PY
+  )"
+
+  if [[ -z "$SCHEME" ]]; then
+    echo "❌ Plusieurs schemes possibles:" >&2
+    python3 - "$LIST_JSON" <<'PY' >&2
+import json, sys
+data = json.load(open(sys.argv[1]))
+root = data.get("workspace") or data.get("project") or {}
+for s in root.get("schemes") or []:
+    print("  -", s)
+PY
+    echo "Utilise SCHEME=\"...\" ./scripts/distribute" >&2
+    exit 1
+  fi
+fi
+
+echo "🎯 Scheme: $SCHEME"
+
+
+# -----------------------------------------------------------------------------
+# Helpers Build Settings
+# -----------------------------------------------------------------------------
+
+show_settings() {
+  local destination="$1"
+
+  xcodebuild \
+    "$CONTAINER_FLAG" "$CONTAINER_PATH" \
+    -scheme "$SCHEME" \
+    -configuration "$CONFIGURATION" \
+    -destination "$destination" \
+    -showBuildSettings 2>/dev/null
+}
+
+setting_value() {
+  local settings="$1"
+  local key="$2"
+
+  printf '%s\n' "$settings" \
+    | awk -F ' = ' -v k="$key" \
+      '$0 ~ "^[[:space:]]*" k " = " {print $2; exit}'
+}
+
+
+IOS_DESTINATION="generic/platform=iOS"
+
+if [[ "$MAC_VARIANT" == "catalyst" ]]; then
+  MAC_DESTINATION="generic/platform=macOS,variant=Mac Catalyst"
+  MAC_LABEL="Mac-Catalyst"
+else
+  MAC_DESTINATION="generic/platform=macOS"
+  MAC_LABEL="macOS"
+fi
+
+
+# -----------------------------------------------------------------------------
+# Version marketing + Bundle IDs par plateforme
+# -----------------------------------------------------------------------------
+
+if [[ -n "${VERSION:-}" ]]; then
+  if xcrun agvtool what-marketing-version >/dev/null 2>&1; then
+    echo "🏷  Nouvelle version marketing: $VERSION"
+    xcrun agvtool new-marketing-version "$VERSION" >/dev/null
+  else
+    die "VERSION=$VERSION demandé, mais agvtool n'est pas configuré."
+  fi
+fi
+
+
+IOS_VERSION=""
+IOS_BUNDLE_ID=""
+MAC_VERSION=""
+MAC_BUNDLE_ID=""
+
+if [[ "$PLATFORM" == "ios" || "$PLATFORM" == "both" ]]; then
+  IOS_SETTINGS="$(show_settings "$IOS_DESTINATION")"
+
+  IOS_VERSION="$(setting_value "$IOS_SETTINGS" "MARKETING_VERSION")"
+  IOS_BUNDLE_ID="$(setting_value "$IOS_SETTINGS" "PRODUCT_BUNDLE_IDENTIFIER")"
+
+  [[ -n "$IOS_VERSION" ]] || die "MARKETING_VERSION iOS introuvable."
+  [[ -n "$IOS_BUNDLE_ID" ]] || die "Bundle ID iOS introuvable."
+
+  echo "📱 iOS   : $IOS_BUNDLE_ID — version $IOS_VERSION"
+fi
+
+if [[ "$PLATFORM" == "macos" || "$PLATFORM" == "both" ]]; then
+  MAC_SETTINGS="$(show_settings "$MAC_DESTINATION")"
+
+  MAC_VERSION="$(setting_value "$MAC_SETTINGS" "MARKETING_VERSION")"
+  MAC_BUNDLE_ID="$(setting_value "$MAC_SETTINGS" "PRODUCT_BUNDLE_IDENTIFIER")"
+
+  [[ -n "$MAC_VERSION" ]] || die "MARKETING_VERSION macOS introuvable."
+  [[ -n "$MAC_BUNDLE_ID" ]] || die "Bundle ID macOS introuvable."
+
+  echo "🖥  macOS : $MAC_BUNDLE_ID — version $MAC_VERSION"
+fi
+
+
+# -----------------------------------------------------------------------------
+# App Store Connect
+# -----------------------------------------------------------------------------
+
+ASC_CONFIGURED=0
+
+if [[ -n "$ASC_KEY_ID" || -n "$ASC_ISSUER_ID" || -n "$ASC_KEY_PATH" ]]; then
+  if [[ -z "$ASC_KEY_ID" || -z "$ASC_ISSUER_ID" || -z "$ASC_KEY_PATH" ]]; then
+    die "Configuration App Store Connect incomplète.
+Il faut ASC_KEY_ID + ASC_ISSUER_ID + ASC_KEY_PATH."
+  fi
+
+  [[ -f "$ASC_KEY_PATH" ]] || die "Clé .p8 introuvable:
+$ASC_KEY_PATH"
+
+  ASC_CONFIGURED=1
+fi
+
+
+# Retourne le plus grand build pour:
+#   - UNE app
+#   - UNE plateforme
+#   - UNE version marketing
+#
+# C'est la correction essentielle par rapport à l'ancien script.
+asc_latest_build() {
+  local bundle_id="$1"
+  local platform="$2"
+  local marketing_version="$3"
+  local explicit_app_id="$4"
+
+  python3 - \
+    "$ASC_KEY_ID" \
+    "$ASC_ISSUER_ID" \
+    "$ASC_KEY_PATH" \
+    "$bundle_id" \
+    "$platform" \
+    "$marketing_version" \
+    "$explicit_app_id" <<'PY'
+import base64
+import json
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+(
+    key_id,
+    issuer_id,
+    key_path,
+    bundle_id,
+    platform,
+    marketing_version,
+    explicit_app_id,
+) = sys.argv[1:8]
+
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def der_to_raw(sig: bytes, size=32) -> bytes:
+    i = 0
+
+    if not sig or sig[i] != 0x30:
+        raise RuntimeError("Signature ECDSA invalide")
+    i += 1
+
+    length = sig[i]
+    i += 1
+
+    if length & 0x80:
+        n = length & 0x7F
+        i += n
+
+    if sig[i] != 0x02:
+        raise RuntimeError("INTEGER r absent")
+    i += 1
+
+    rlen = sig[i]
+    i += 1
+    r = sig[i:i+rlen]
+    i += rlen
+
+    if sig[i] != 0x02:
+        raise RuntimeError("INTEGER s absent")
+    i += 1
+
+    slen = sig[i]
+    i += 1
+    s = sig[i:i+slen]
+
+    r = r.lstrip(b"\x00").rjust(size, b"\x00")
+    s = s.lstrip(b"\x00").rjust(size, b"\x00")
+
+    return r + s
+
+
+now = int(time.time())
+
+header = {
+    "alg": "ES256",
+    "kid": key_id,
+    "typ": "JWT",
+}
+
+payload = {
+    "iss": issuer_id,
+    "iat": now,
+    "exp": now + 10 * 60,
+    "aud": "appstoreconnect-v1",
+}
+
+h = b64url(json.dumps(header, separators=(",", ":")).encode())
+p = b64url(json.dumps(payload, separators=(",", ":")).encode())
+signing_input = f"{h}.{p}".encode()
+
+proc = subprocess.run(
+    ["/usr/bin/openssl", "dgst", "-sha256", "-sign", key_path],
+    input=signing_input,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+)
+
+if proc.returncode != 0:
+    raise SystemExit(
+        "Impossible de signer le JWT:\n"
+        + proc.stderr.decode(errors="replace")
+    )
+
+jwt = f"{h}.{p}.{b64url(der_to_raw(proc.stdout))}"
+
+
+def api_get(url):
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {jwt}",
+            "Accept": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return json.load(response)
+
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        raise SystemExit(
+            f"App Store Connect API HTTP {e.code}:\n{body}"
+        )
+
+
+# App ID
+if explicit_app_id:
+    app_id = explicit_app_id
+else:
+    params = urllib.parse.urlencode({
+        "filter[bundleId]": bundle_id,
+        "limit": 1,
+    })
+
+    result = api_get(
+        "https://api.appstoreconnect.apple.com/v1/apps?" + params
+    )
+
+    apps = result.get("data") or []
+
+    if not apps:
+        raise SystemExit(
+            f"Aucune app App Store Connect pour {bundle_id}"
+        )
+
+    app_id = apps[0]["id"]
+
+
+# IMPORTANT:
+# On filtre maintenant simultanément:
+#   app
+#   preReleaseVersion.platform
+#   preReleaseVersion.version
+#
+# Ex:
+#   IOS + 1.1.0
+# ne verra donc plus les builds macOS ou ceux de 1.0.0.
+params = urllib.parse.urlencode({
+    "filter[app]": app_id,
+    "filter[preReleaseVersion.platform]": platform,
+    "filter[preReleaseVersion.version]": marketing_version,
+    "limit": 200,
+})
+
+url = "https://api.appstoreconnect.apple.com/v1/builds?" + params
+
+highest = 0
+
+while url:
+    result = api_get(url)
+
+    for item in result.get("data") or []:
+        version = str(
+            (item.get("attributes") or {}).get("version") or ""
+        ).strip()
+
+        if version.isdigit():
+            highest = max(highest, int(version))
+
+    url = (result.get("links") or {}).get("next")
+
+print(highest)
+PY
+}
+
+
+# -----------------------------------------------------------------------------
+# Choix des builds PAR PLATEFORME
+# -----------------------------------------------------------------------------
+
+LOCAL_BUILD=""
+
+if xcrun agvtool what-version >/dev/null 2>&1; then
+  LOCAL_BUILD="$(
+    xcrun agvtool what-version -terse 2>/dev/null \
+      | head -n 1 \
+      | tr -d '[:space:]'
+  )"
+fi
+
+if ! [[ "${LOCAL_BUILD:-}" =~ ^[0-9]+$ ]]; then
+  LOCAL_BUILD=0
+fi
+
+
+IOS_REMOTE_BUILD=""
+MAC_REMOTE_BUILD=""
+IOS_NEXT_BUILD=""
+MAC_NEXT_BUILD=""
+
+
+if [[ "$PLATFORM" == "ios" || "$PLATFORM" == "both" ]]; then
+
+  if [[ -n "${IOS_BUILD:-}" ]]; then
+    [[ "$IOS_BUILD" =~ ^[0-9]+$ ]] || die "IOS_BUILD doit être un entier."
+    IOS_NEXT_BUILD="$IOS_BUILD"
+
+  elif [[ "$ASC_CONFIGURED" == "1" ]]; then
+    echo
+    echo "☁️  iOS $IOS_VERSION — lecture App Store Connect…"
+
+    IOS_REMOTE_BUILD="$(
+      asc_latest_build \
+        "$IOS_BUNDLE_ID" \
+        "IOS" \
+        "$IOS_VERSION" \
+        "$ASC_IOS_APP_ID"
+    )"
+
+    [[ "$IOS_REMOTE_BUILD" =~ ^[0-9]+$ ]] \
+      || die "Build iOS App Store Connect invalide."
+
+    IOS_NEXT_BUILD=$((IOS_REMOTE_BUILD + 1))
+
+    echo "   dernier iOS Apple : $IOS_REMOTE_BUILD"
+    echo "   prochain iOS      : $IOS_NEXT_BUILD"
+
+  else
+    IOS_NEXT_BUILD=$((LOCAL_BUILD + 1))
+    echo
+    echo "⚠️  API App Store Connect non configurée."
+    echo "   iOS utilise le compteur local: $LOCAL_BUILD → $IOS_NEXT_BUILD"
+  fi
+fi
+
+
+if [[ "$PLATFORM" == "macos" || "$PLATFORM" == "both" ]]; then
+
+  if [[ -n "${MAC_BUILD:-}" ]]; then
+    [[ "$MAC_BUILD" =~ ^[0-9]+$ ]] || die "MAC_BUILD doit être un entier."
+    MAC_NEXT_BUILD="$MAC_BUILD"
+
+  elif [[ "$ASC_CONFIGURED" == "1" ]]; then
+    echo
+    echo "☁️  macOS $MAC_VERSION — lecture App Store Connect…"
+
+    MAC_REMOTE_BUILD="$(
+      asc_latest_build \
+        "$MAC_BUNDLE_ID" \
+        "MAC_OS" \
+        "$MAC_VERSION" \
+        "$ASC_MAC_APP_ID"
+    )"
+
+    [[ "$MAC_REMOTE_BUILD" =~ ^[0-9]+$ ]] \
+      || die "Build macOS App Store Connect invalide."
+
+    MAC_NEXT_BUILD=$((MAC_REMOTE_BUILD + 1))
+
+    echo "   dernier macOS Apple : $MAC_REMOTE_BUILD"
+    echo "   prochain macOS      : $MAC_NEXT_BUILD"
+
+  else
+    MAC_NEXT_BUILD=$((LOCAL_BUILD + 1))
+    echo
+    echo "⚠️  API App Store Connect non configurée."
+    echo "   macOS utilise le compteur local: $LOCAL_BUILD → $MAC_NEXT_BUILD"
+  fi
+fi
+
+
+# -----------------------------------------------------------------------------
+# ExportOptions
+# -----------------------------------------------------------------------------
+
+if [[ -n "${EXPORT_OPTIONS_PLIST:-}" ]]; then
+  OPTIONS_PLIST="$EXPORT_OPTIONS_PLIST"
+  [[ -f "$OPTIONS_PLIST" ]] \
+    || die "ExportOptions.plist introuvable: $OPTIONS_PLIST"
+
+else
+  OPTIONS_PLIST="$(mktemp -t ExportOptions.XXXXXX).plist"
+  TMP_FILES+=( "$OPTIONS_PLIST" )
+
+  EXPORT_DESTINATION="upload"
+  [[ "$EXPORT_ONLY" == "1" ]] && EXPORT_DESTINATION="export"
+
+  {
+    cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>${METHOD}</string>
+    <key>destination</key>
+    <string>${EXPORT_DESTINATION}</string>
+    <key>signingStyle</key>
+    <string>automatic</string>
+EOF
+
+    if [[ -n "${TEAM_ID:-}" ]]; then
+      cat <<EOF
+    <key>teamID</key>
+    <string>${TEAM_ID}</string>
+EOF
+    fi
+
+    cat <<'EOF'
+</dict>
+</plist>
+EOF
+  } > "$OPTIONS_PLIST"
+fi
+
+
+# -----------------------------------------------------------------------------
+# Archive / export
+# -----------------------------------------------------------------------------
+
+SAFE_SCHEME="${SCHEME// /-}"
+
+
+archive_and_distribute() {
+  local label="$1"
+  local destination="$2"
+  local marketing_version="$3"
+  local build_number="$4"
+
+  local run_dir="$DIST_DIR/$marketing_version/$label-$build_number"
+  local archive_dir="$run_dir/archive"
+  local export_dir="$run_dir/export"
+
+  local archive_path="$archive_dir/${SAFE_SCHEME}-${label}.xcarchive"
+
+  mkdir -p "$archive_dir" "$export_dir"
+
+  echo
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "📦 $label"
+  echo "   Version : $marketing_version"
+  echo "   Build   : $build_number"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  # CURRENT_PROJECT_VERSION est surchargé uniquement pour CETTE archive.
+  # Ainsi iOS et macOS peuvent utiliser des numéros différents.
+  xcodebuild \
+    "$CONTAINER_FLAG" "$CONTAINER_PATH" \
+    -scheme "$SCHEME" \
+    -configuration "$CONFIGURATION" \
+    -destination "$destination" \
+    -archivePath "$archive_path" \
+    -allowProvisioningUpdates \
+    CURRENT_PROJECT_VERSION="$build_number" \
+    MARKETING_VERSION="$marketing_version" \
+    archive
+
+  echo "✅ Archive: $archive_path"
+
+  if [[ "$EXPORT_ONLY" == "1" ]]; then
+    echo "📤 Export local $label…"
+  else
+    echo "☁️  Upload $label vers App Store Connect…"
+  fi
+
+  xcodebuild \
+    -exportArchive \
+    -archivePath "$archive_path" \
+    -exportPath "$export_dir" \
+    -exportOptionsPlist "$OPTIONS_PLIST" \
+    -allowProvisioningUpdates
+
+  if [[ "$EXPORT_ONLY" == "1" ]]; then
+    echo "✅ $label exporté localement: $export_dir"
+
+    EXPORTED_FILE="$(
+      find "$export_dir" \
+        -maxdepth 1 \
+        -type f \
+        \( -name '*.ipa' -o -name '*.pkg' \) \
+        -print \
+        | head -n 1
+    )"
+
+    [[ -n "$EXPORTED_FILE" ]] && echo "   → $EXPORTED_FILE"
+  else
+    echo "✅ $label envoyé à App Store Connect."
+  fi
+}
+
+
+if [[ "$PLATFORM" == "ios" || "$PLATFORM" == "both" ]]; then
+  archive_and_distribute \
+    "iOS" \
+    "$IOS_DESTINATION" \
+    "$IOS_VERSION" \
+    "$IOS_NEXT_BUILD"
+fi
+
+
+if [[ "$PLATFORM" == "macos" || "$PLATFORM" == "both" ]]; then
+  archive_and_distribute \
+    "$MAC_LABEL" \
+    "$MAC_DESTINATION" \
+    "$MAC_VERSION" \
+    "$MAC_NEXT_BUILD"
+fi
+
+
+# -----------------------------------------------------------------------------
+# Résumé
+# -----------------------------------------------------------------------------
+
+echo
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "✅ DISTRIBUTION TERMINÉE"
+
+if [[ "$PLATFORM" == "ios" || "$PLATFORM" == "both" ]]; then
+  echo "📱 iOS   : $IOS_VERSION ($IOS_NEXT_BUILD)"
+fi
+
+if [[ "$PLATFORM" == "macos" || "$PLATFORM" == "both" ]]; then
+  echo "🖥  macOS : $MAC_VERSION ($MAC_NEXT_BUILD)"
+fi
+
+if [[ "$EXPORT_ONLY" == "1" ]]; then
+  echo "📤 Mode   : export local uniquement"
+else
+  echo "☁️  Mode   : upload App Store Connect"
+fi
+
+echo "📁 $DIST_DIR"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
