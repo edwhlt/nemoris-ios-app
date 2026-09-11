@@ -421,13 +421,13 @@ struct ImportSessionRepository {
         return f
     }()
 
-    nonisolated(unsafe) static let jsonEncoder: JSONEncoder = {
+    static let jsonEncoder: JSONEncoder = {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .iso8601
         return e
     }()
 
-    nonisolated(unsafe) static let jsonDecoder: JSONDecoder = {
+    static let jsonDecoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
         return d

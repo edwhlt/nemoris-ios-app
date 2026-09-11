@@ -411,7 +411,7 @@ final class ImportSessionViewModel {
         var processed = 0
         for idx in indices {
             let row = session.rows[idx]
-            let canonical = (try? EngineBootstrap.shared.engine?.normalizer.parse(row.rawLabel).merchantCandidate) ?? row.rawLabel
+            let canonical = EngineBootstrap.shared.engine?.normalizer.parse(row.rawLabel).merchantCandidate ?? row.rawLabel
             let context = MerchantEnrichmentContext(
                 rawLabel: row.rawLabel,
                 canonicalName: canonical,

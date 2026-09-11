@@ -860,7 +860,7 @@ enum SettingsSection: String, Identifiable, CaseIterable {
         }
     }
 
-    @ViewBuilder var destination: some View {
+    @MainActor @ViewBuilder var destination: some View {
         switch self {
         case .modules:         ModulesSettingsView()
         case .importCSV:       ImportEntryView(isEmbedded: true)

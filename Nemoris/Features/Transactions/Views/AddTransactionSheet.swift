@@ -162,7 +162,7 @@ struct AddTransactionSheet: View {
                         regex: newTiers.regex ?? "",
                         categoryId: newTiers.categoryId
                     ) else { return }
-                    var fullTiers = Tiers(
+                    let fullTiers = Tiers(
                         id: id, name: newTiers.name, regex: newTiers.regex,
                         categoryId: newTiers.categoryId, linkedCompteId: newTiers.linkedCompteId,
                         engineMerchantId: newTiers.engineMerchantId, domain: newTiers.domain,

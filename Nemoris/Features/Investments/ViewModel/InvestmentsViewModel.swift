@@ -252,8 +252,6 @@ final class InvestmentsViewModel {
                 csvErrors.append("Ligne \(lineNo): quantité/prix d'achat invalides")
                 continue
             }
-            let currentValue = qty * avg
-
             let parsedDate = dateIdx.flatMap { formatter.date(from: row[$0].trimmingCharacters(in: .whitespaces)) }
             let date: Date
             if let parsedDate {

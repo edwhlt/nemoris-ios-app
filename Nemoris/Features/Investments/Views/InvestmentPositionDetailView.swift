@@ -12,6 +12,159 @@ import Charts
 //
 // Each order is marked on the chart at its date, with its execution price.
 
+extension InvestmentPricePoint: DatedPoint {}
+
+// MARK: - Position Chart Plot
+
+/// The chart's actual drawn content — price line/area + average-cost threshold
+/// + order markers, nothing scrub-related. Pulled out of `positionChart` into
+/// its OWN `Equatable` view for the same reason as `EvolutionChartPlot`
+/// (`InvestmentChartComponents.swift`): paired with `.equatable()` at the call
+/// site, SwiftUI compares the new value against the previous one field by
+/// field and skips re-rendering when nothing here changed — always true while
+/// scrubbing, since none of these properties depend on the selection. Leaving
+/// this inline was the real remaining source of stutter: every scrub touch
+/// update re-ran this ~300-mark construction from scratch for no reason.
+///
+/// No closure property here (e.g. an `annotationColor` callback): closures
+/// aren't `Equatable`, which would make the whole struct's synthesized `==`
+/// impossible — the order-type→color mapping is duplicated as a tiny private
+/// static func instead.
+private struct PositionChartPlot: View, Equatable {
+    let chartPoints: [InvestmentPricePoint]
+    let trendColor: Color
+    let baseline: Double
+    let chartYDomain: ClosedRange<Double>
+    let pru: Double
+    let currencyCode: String
+    let visibleOrders: [InvestmentOrder]
+    let priceHistory: [InvestmentPricePoint]
+    let xAxisLabelFormat: Date.FormatStyle
+
+    private static func annotationColor(_ type: InvestmentOrderType) -> Color {
+        switch type {
+        case .buy:      return AppTheme.Colors.success
+        case .sell:     return AppTheme.Colors.danger
+        case .dividend: return AppTheme.Colors.accentSecondary
+        }
+    }
+
+    var body: some View {
+        Chart {
+            // Area + line in A SINGLE ForEach (same pattern as EvolutionChart). Two
+            // separate ForEach, or an `if` inside, break the series' continuity and
+            // render each point as an isolated vertical bar ("barcode"). The held
+            // position (gain/loss vs average cost) reads through the curve being above /
+            // below the average cost RuleMark.
+            ForEach(chartPoints) { point in
+                AreaMark(
+                    x: .value("Date", point.date),
+                    yStart: .value("Min", baseline),
+                    yEnd: .value("Cours", point.close)
+                )
+                .foregroundStyle(trendColor.opacity(0.14))
+                .interpolationMethod(.monotone)
+
+                LineMark(
+                    x: .value("Date", point.date),
+                    y: .value("Cours", point.close)
+                )
+                .foregroundStyle(trendColor)
+                .interpolationMethod(.monotone)
+                .lineStyle(StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
+            }
+
+            // Horizontal line at the average cost = visual break-even threshold.
+            // Above = profit zone, below = loss zone.
+            // Hidden when it leaves the domain: the average cost is a marker, it doesn't
+            // justify flattening the curve to stay visible. It stays readable in the
+            // KPIs and the Details card.
+            if pru > 0, chartYDomain.contains(pru) {
+                RuleMark(y: .value("PRU", pru))
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.55))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    .annotation(position: .top, alignment: .leading) {
+                        Text("PRU \(pru, format: .currency(code: currencyCode))")
+                            .font(.system(size: 9))
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(AppTheme.Colors.surface.opacity(0.85))
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
+            }
+
+            // BUY/SELL markers at the order's unit price.
+            // DIVs are placed on the PRICE line at their date — a dividend's amount
+            // (€1.70) has nothing to do with the price (€60), so plotting them at €1.70
+            // would squash the Y axis towards 0 and hide the price's real range. The
+            // temporal position (vertical date) is kept: that's the useful info for a DIV.
+            ForEach(visibleOrders) { order in
+                let markerY: Double = {
+                    switch order.orderType {
+                    case .dividend:
+                        // Positioned on the price at the dividend's date.
+                        // Falls back to the average cost if there's no price at that date.
+                        let closeAtDate = priceHistory
+                            .filter { $0.date <= order.executedAt }
+                            .max(by: { $0.date < $1.date })?
+                            .close
+                        return closeAtDate ?? pru
+                    case .buy, .sell:
+                        return order.unitPrice
+                    }
+                }()
+                RuleMark(x: .value("Ordre", order.executedAt))
+                    .foregroundStyle(Self.annotationColor(order.orderType).opacity(0.5))
+                    .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
+
+                // The dot is placed only if its price fits within the domain; otherwise the
+                // vertical rule alone carries the useful info (the order's DATE) rather than
+                // forcing the scale open up to a price that is now far away.
+                if chartYDomain.contains(markerY) {
+                    PointMark(
+                        x: .value("Ordre", order.executedAt),
+                        y: .value("Cours", markerY)
+                    )
+                    .foregroundStyle(Self.annotationColor(order.orderType))
+                    .symbol {
+                        ZStack {
+                            Circle()
+                                .fill(AppTheme.Colors.surface)
+                                .frame(width: 10, height: 10)
+                            Circle()
+                                .strokeBorder(Self.annotationColor(order.orderType), lineWidth: 2)
+                                .frame(width: 10, height: 10)
+                        }
+                    }
+                    .symbolSize(70)
+                }
+            }
+        }
+        .chartYScale(domain: chartYDomain)
+        .chartXAxis {
+            // Ticks adapted to the time range (5Y/10Y/Max → yearly ticks formatted
+            // yyyy, 1D → hours, etc.).
+            AxisMarks(position: .bottom, values: .automatic(desiredCount: 5)) { _ in
+                AxisValueLabel(format: xAxisLabelFormat)
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
+                    .font(.system(size: 10))
+            }
+        }
+        .chartYAxis {
+            // Bounded desiredCount (like EvolutionChart): an unbounded Y axis could
+            // generate too many ticks/gridlines and weigh down the layout.
+            AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { _ in
+                AxisValueLabel()
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
+                    .font(.system(size: 10))
+                AxisGridLine()
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.08))
+            }
+        }
+    }
+}
+
 struct InvestmentPositionDetailView: View {
     @Bindable var viewModel: InvestmentsViewModel
     let account: InvestmentAccount
@@ -228,15 +381,6 @@ struct InvestmentPositionDetailView: View {
     private var visibleOrders: [InvestmentOrder] {
         guard let cutoff = localTimeRange.startDate else { return orders }
         return orders.filter { $0.executedAt >= cutoff }
-    }
-
-    /// Chart annotation color for each order type.
-    private func annotationColor(_ type: InvestmentOrderType) -> Color {
-        switch type {
-        case .buy:      return AppTheme.Colors.success         // purchase = long-term entry = green
-        case .sell:     return AppTheme.Colors.danger          // vente = sortie = rouge
-        case .dividend: return AppTheme.Colors.accentSecondary // dividende = brun secondaire
-        }
     }
 
     /// True if the market value is unknown (not synced yet) but at least a cost
@@ -691,6 +835,16 @@ struct InvestmentPositionDetailView: View {
         readoutCandle.map { ChartReadoutPoint(date: $0.date, value: $0.close) }
     }
 
+    /// The point currently pinned by scrubbing — nil at rest. Unlike
+    /// `readoutCandle` (which falls back to the last point so the band always
+    /// shows something), this stays nil when nothing is selected, so it only
+    /// serves the before/after color split below: the whole curve stays in the
+    /// full trend color until the user actually scrubs.
+    private var scrubPivot: InvestmentPricePoint? {
+        guard let selected = chartSelectedDate else { return nil }
+        return closestPoint(to: selected)
+    }
+
     /// Date of the oldest stored price point for this position. Used to show
     /// "Data available since ..." and explain why a 10Y chart can be truncated
     /// (Yahoo only returns data since inception).
@@ -758,172 +912,70 @@ struct InvestmentPositionDetailView: View {
                 ? AppTheme.Colors.success
                 : AppTheme.Colors.danger
             let baseline = chartYDomain.lowerBound
+            let span: TimeInterval = {
+                guard let first = positionPricePoints.first?.date,
+                      let last = positionPricePoints.last?.date else { return 0 }
+                return max(0, last.timeIntervalSince(first))
+            }()
+            let xAxisConfig = InvestmentChartXAxisConfig.config(for: localTimeRange, span: span)
 
-            Chart {
-                // Area + line in A SINGLE ForEach (same pattern as EvolutionChart). Two
-                // separate ForEach, or an `if` inside, break the series' continuity and
-                // render each point as an isolated vertical bar ("barcode"). The held
-                // position (gain/loss vs average cost) reads through the curve being above /
-                // below the average cost RuleMark.
-                ForEach(chartPoints) { point in
-                    AreaMark(
-                        x: .value("Date", point.date),
-                        yStart: .value("Min", baseline),
-                        yEnd: .value("Cours", point.close)
-                    )
-                    .foregroundStyle(trendColor.opacity(0.14))
-                    .interpolationMethod(.monotone)
-
-                    LineMark(
-                        x: .value("Date", point.date),
-                        y: .value("Cours", point.close)
-                    )
-                    .foregroundStyle(trendColor)
-                    .interpolationMethod(.monotone)
-                    .lineStyle(StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
-                }
-
-                // Horizontal line at the average cost = visual break-even threshold.
-                // Above = profit zone, below = loss zone.
-                // Hidden when it leaves the domain: the average cost is a marker, it doesn't
-                // justify flattening the curve to stay visible. It stays readable in the
-                // KPIs and the Details card.
-                if pru > 0, chartYDomain.contains(pru) {
-                    RuleMark(y: .value("PRU", pru))
-                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.55))
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                        .annotation(position: .top, alignment: .leading) {
-                            Text("PRU \(pru, format: .currency(code: account.currency))")
-                                .font(.system(size: 9))
-                                .foregroundStyle(AppTheme.Colors.textSecondary)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(AppTheme.Colors.surface.opacity(0.85))
-                                .clipShape(RoundedRectangle(cornerRadius: 3))
-                        }
-                }
-
-                // BUY/SELL markers at the order's unit price.
-                // DIVs are placed on the PRICE line at their date — a dividend's amount
-                // (€1.70) has nothing to do with the price (€60), so plotting them at €1.70
-                // would squash the Y axis towards 0 and hide the price's real range. The
-                // temporal position (vertical date) is kept: that's the useful info for a DIV.
-                ForEach(visibleOrders) { order in
-                    let markerY: Double = {
-                        switch order.orderType {
-                        case .dividend:
-                            // Positioned on the price at the dividend's date.
-                            // Falls back to the average cost if there's no price at that date.
-                            let closeAtDate = priceHistory
-                                .filter { $0.date <= order.executedAt }
-                                .max(by: { $0.date < $1.date })?
-                                .close
-                            return closeAtDate ?? pru
-                        case .buy, .sell:
-                            return order.unitPrice
-                        }
-                    }()
-                    RuleMark(x: .value("Ordre", order.executedAt))
-                        .foregroundStyle(annotationColor(order.orderType).opacity(0.5))
-                        .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
-
-                    // The dot is placed only if its price fits within the domain; otherwise the
-                    // vertical rule alone carries the useful info (the order's DATE) rather than
-                    // forcing the scale open up to a price that is now far away.
-                    if chartYDomain.contains(markerY) {
-                        PointMark(
-                            x: .value("Ordre", order.executedAt),
-                            y: .value("Cours", markerY)
-                        )
-                        .foregroundStyle(annotationColor(order.orderType))
-                        .symbol {
-                            ZStack {
-                                Circle()
-                                    .fill(AppTheme.Colors.surface)
-                                    .frame(width: 10, height: 10)
-                                Circle()
-                                    .strokeBorder(annotationColor(order.orderType), lineWidth: 2)
-                                    .frame(width: 10, height: 10)
-                            }
-                        }
-                        .symbolSize(70)
-                    }
-                }
-
-                // Visual indicator while the user scrubs the chart (vertical line + dot on
-                // the curve). Only appears when chartSelectedDate is set.
-                if let selected = chartSelectedDate,
-                   let snapped = closestPoint(to: selected) {
-                    RuleMark(x: .value("Scrub", snapped.date))
-                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.4))
-                        .lineStyle(StrokeStyle(lineWidth: 1))
-                    PointMark(x: .value("Scrub", snapped.date),
-                              y: .value("Cours", snapped.close))
-                        .foregroundStyle(trendColor)
-                        .symbolSize(120)
-                }
-            }
-            .chartYScale(domain: chartYDomain)
-            .chartXAxis {
-                // Ticks adapted to the time range (5Y/10Y/Max → yearly ticks formatted
-                // yyyy, 1D → hours, etc.).
-                let span: TimeInterval = {
-                    guard let first = positionPricePoints.first?.date,
-                          let last = positionPricePoints.last?.date else { return 0 }
-                    return max(0, last.timeIntervalSince(first))
-                }()
-                let config = InvestmentChartXAxisConfig.config(for: localTimeRange, span: span)
-                // `.stride(by:count:)` can produce DOZENS of ticks on long ranges (5Y/Max):
-                // labels overlap AND inflate the chart's intrinsic width, making the whole
-                // view horizontally scrollable. Capped at ~5 ticks.
-                AxisMarks(position: .bottom, values: .automatic(desiredCount: 5)) { _ in
-                    AxisValueLabel(format: config.labelFormat)
-                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
-                        .font(.system(size: 10))
-                }
-            }
-            .chartYAxis {
-                // Bounded desiredCount (like EvolutionChart): an unbounded Y axis could
-                // generate too many ticks/gridlines and weigh down the layout.
-                AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { _ in
-                    AxisValueLabel()
-                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
-                        .font(.system(size: 10))
-                    AxisGridLine()
-                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.08))
-                }
-            }
+            PositionChartPlot(
+                chartPoints: chartPoints,
+                trendColor: trendColor,
+                baseline: baseline,
+                chartYDomain: chartYDomain,
+                pru: pru,
+                currencyCode: account.currency,
+                visibleOrders: visibleOrders,
+                priceHistory: priceHistory,
+                xAxisLabelFormat: xAxisConfig.labelFormat
+            )
+            // See `EvolutionChartPlot`'s doc for why this matters: without it, SwiftUI has
+            // no guaranteed way to know this ~300-mark construction didn't actually change
+            // while scrubbing, and may re-render it on every touch update for nothing.
+            .equatable()
             // Interactive scrub (consumes horizontal drags so the chart feels "pinned"
             // under the finger, lets vertical drags through to the parent ScrollView for
             // page scrolling).
             .chartOverlay { proxy in
                 GeometryReader { geo in
-                    Rectangle()
-                        .fill(.clear)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 8)
-                                .onChanged { value in
-                                    let dx = abs(value.translation.width)
-                                    let dy = abs(value.translation.height)
-                                    guard dx > dy else {
-                                        if chartSelectedDate != nil { chartSelectedDate = nil }
-                                        return
-                                    }
-                                    guard let plotFrame = proxy.plotFrame else { return }
-                                    let origin = geo[plotFrame].origin
-                                    let locationX = value.location.x - origin.x
-                                    if let date: Date = proxy.value(atX: locationX) {
-                                        let previous = chartSelectedDate.flatMap { closestPoint(to: $0)?.date }
-                                        chartSelectedDate = date
-                                        // Discreet tick on each point change (not on every pixel traveled).
-                                        if closestPoint(to: date)?.date != previous {
-                                            HapticService.shared.selection()
-                                        }
-                                    }
-                                }
-                                .onEnded { _ in chartSelectedDate = nil }
+                    ZStack {
+                        ChartScrubOverlay(
+                            proxy: proxy,
+                            geo: geo,
+                            selection: scrubPivot.map { ($0.date, $0.close) },
+                            accentColor: trendColor
                         )
+
+                        // `minimumDistance: 0` fires immediately on touch-down: the reading band
+                        // shows where you are the instant you touch, before any slide. Tradeoff
+                        // accepted: a touch starting directly on the chart scrubs instead of
+                        // scrolling the page — same as Stocks/Robinhood/Trade Republic.
+                        Rectangle()
+                            .fill(.clear)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        guard let plotFrame = proxy.plotFrame else { return }
+                                        let origin = geo[plotFrame].origin
+                                        let locationX = value.location.x - origin.x
+                                        guard let date: Date = proxy.value(atX: locationX) else { return }
+                                        guard let nearest = closestPoint(to: date) else { return }
+                                        // Same fix as EvolutionChart: touch state — and re-render the
+                                        // whole chart — only when the SNAPPED point actually changes, not
+                                        // on every raw pixel crossed.
+                                        guard nearest.date != scrubPivot?.date else { return }
+                                        var transaction = Transaction()
+                                        transaction.disablesAnimations = true
+                                        withTransaction(transaction) {
+                                            chartSelectedDate = nearest.date
+                                        }
+                                        HapticService.shared.selection()
+                                    }
+                                    .onEnded { _ in chartSelectedDate = nil }
+                            )
+                    }
                 }
             }
             // NO `.frame(maxWidth: .infinity)` here. Combined with the
@@ -939,10 +991,11 @@ struct InvestmentPositionDetailView: View {
 
     /// Finds the history point closest in time to `date`.
     /// Used to snap the scrub to a real data point (not an interpolation).
+    /// Binary search via `nearestByDate` (`InvestmentChartComponents.swift`) —
+    /// this runs on every raw touch sample during a scrub, not just when the
+    /// selection changes, so it's the one lookup gating alone couldn't speed up.
     private func closestPoint(to date: Date) -> InvestmentPricePoint? {
-        chartPoints.min(by: { a, b in
-            abs(a.date.timeIntervalSince(date)) < abs(b.date.timeIntervalSince(date))
-        })
+        chartPoints.nearestByDate(to: date)
     }
 
     /// Total dividends received over the position's lifetime. Used for the

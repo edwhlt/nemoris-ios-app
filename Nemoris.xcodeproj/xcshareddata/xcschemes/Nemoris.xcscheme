@@ -76,7 +76,7 @@
          </BuildableReference>
       </BuildableProductRunnable>
       <StoreKitConfigurationFileReference
-         identifier = "../../Nemoris.storekit">
+         identifier = "../../Nemoris/App/Nemoris.storekit">
       </StoreKitConfigurationFileReference>
    </LaunchAction>
    <ProfileAction

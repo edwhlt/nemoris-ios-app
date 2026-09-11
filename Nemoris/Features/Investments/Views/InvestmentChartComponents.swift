@@ -234,6 +234,54 @@ extension Array where Element == PortfolioEvolutionPoint {
     }
 }
 
+// MARK: - Nearest-by-date lookup (shared by every scrubbable chart)
+
+/// A chart data point with a date. Lets `nearestByDate(to:)` below be written
+/// ONCE and shared by every point type that needs "which point is the finger
+/// closest to" (`PortfolioEvolutionPoint`, `InvestmentPricePoint`) instead of
+/// each chart writing (and maybe diverging on) its own version.
+protocol DatedPoint {
+    var date: Date { get }
+}
+
+extension PortfolioEvolutionPoint: DatedPoint {}
+
+extension Array where Element: DatedPoint {
+    /// Finds the point closest in time to `date` via BINARY SEARCH — O(log n)
+    /// instead of the O(n) linear scan a plain `.min(by:)` would do.
+    ///
+    /// This matters specifically because a chart's scrub gesture calls this on
+    /// EVERY raw touch sample (up to ~120/s on ProMotion), not just when the
+    /// selected point changes — unlike most of this file's other per-touch
+    /// costs, this one couldn't be fixed by gating (the gate itself needs to
+    /// know the nearest point BEFORE it can decide whether anything changed).
+    /// For a few hundred points this was already cheap in absolute terms, but
+    /// it's the one piece of work still done at full touch-sampling rate.
+    ///
+    /// Requires `self` sorted ascending by date — true for every series that
+    /// reaches a chart in this file (`sanitizedForChart()`, `positionPricePoints`,
+    /// both explicitly sorted before use).
+    func nearestByDate(to date: Date) -> Element? {
+        guard !isEmpty else { return nil }
+        var lo = 0
+        var hi = count - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if self[mid].date < date {
+                lo = mid + 1
+            } else {
+                hi = mid
+            }
+        }
+        // `lo` is the first index with date >= target; the nearest point is
+        // either that one or its immediate predecessor.
+        guard lo > 0 else { return self[0] }
+        let after = self[lo]
+        let before = self[lo - 1]
+        return abs(after.date.timeIntervalSince(date)) < abs(before.date.timeIntervalSince(date)) ? after : before
+    }
+}
+
 // MARK: - Chart Scrub Readout
 
 /// A marker (value + optional date) shown in a chart's reading band. The date
@@ -390,6 +438,93 @@ struct ChartScrubReadout: View {
     }
 }
 
+// MARK: - Chart Scrub Overlay
+
+/// Everything drawn while scrubbing — the dimming veil AND the pinned point's
+/// vertical rule + dot — as a PLAIN overlay positioned via `ChartProxy`, never
+/// as marks inside the `Chart` builder.
+///
+/// This is the actual fix for the stutter, not just another tweak: as long as
+/// the RuleMark/PointMark selection indicator lived INSIDE `Chart { }` (gated
+/// by an `if`), every point change added/removed marks from the Chart's own
+/// content — forcing Swift Charts to re-lay out the WHOLE plot (the line, the
+/// area gradient, the axes), not just those two extra marks. With the
+/// indicator moved out here, `Chart { }`'s content never changes at all while
+/// scrubbing (it doesn't reference the selection anymore) — only this cheap,
+/// separately-drawn overlay redraws, which is what actually lets Charts skip
+/// re-rendering the expensive part on every touch update.
+///
+/// `selection` is nil at rest: nothing is drawn, the curve stays fully colored.
+///
+/// The "after" segment is the SAME green line/area, just visually faded — not a
+/// second gray line drawn on top of it. Compositing a translucent layer of the
+/// EXACT page background color over an opaque foreground is mathematically
+/// identical to lowering that foreground's own alpha (`background×α +
+/// foreground×(1-α)` is precisely the blend formula for "foreground at alpha
+/// (1-α) over that same background"). So a background-colored veil at opacity
+/// `fadeOpacity` really is "the green, less opaque" — not a trick, not a
+/// different color standing in for it. It's the correct way to dim a mark that
+/// must stay OUTSIDE the `Chart` for fluidity (see `EvolutionChartPlot`'s doc:
+/// the marks can't depend on the selection without reintroducing the
+/// per-touch relayout stutter).
+///
+/// A PLAIN RECTANGLE spanning the plot's full height, not a shape retracing the
+/// curve/area: a retraced shape was tried first, built from straight segments
+/// between points, while the real `LineMark` is `.monotone`-smoothed — a
+/// mismatch that let slivers of unfaded green peek through at curve bends.
+/// Because the veil's color is IDENTICAL to the page background, a plain
+/// rectangle has no such problem: wherever there's no line/area (empty chart
+/// space), the veil is literally invisible (covering the background with
+/// itself changes nothing) — only actual colored content gets visibly dimmed,
+/// with no shape-matching required at all.
+struct ChartScrubOverlay: View {
+    let proxy: ChartProxy
+    let geo: GeometryProxy
+    let selection: (date: Date, value: Double)?
+    var accentColor: Color = AppTheme.Colors.accent
+    /// How much to fade the line + area toward the page background after the pin.
+    var fadeOpacity: Double = 0.8
+
+    var body: some View {
+        if let selection,
+           let plotFrame = proxy.plotFrame,
+           let posX = proxy.position(forX: selection.date) {
+            let frame = geo[plotFrame]
+            let x = frame.minX + posX
+            // A hair of margin on the far/top/bottom edges: the line's rounded
+            // caps/joins (and the very last data point) can render a touch outside
+            // `plotFrame`'s reported bounds, which otherwise left an uncovered sliver
+            // of full-opacity color right at the end of the curve. Kept tiny (barely
+            // more than half the 2pt line width) — anything bigger starts reaching
+            // into the Y-axis label gutter (trailing) and tints the numbers.
+            let margin: CGFloat = 1.5
+            let dimWidth = max(0, frame.maxX - x) + margin
+
+            Rectangle()
+                .fill(AppTheme.Colors.background.opacity(fadeOpacity))
+                .frame(width: dimWidth, height: frame.height + margin * 2)
+                .position(x: x + dimWidth / 2, y: frame.midY)
+                .allowsHitTesting(false)
+
+            Path { path in
+                path.move(to: CGPoint(x: x, y: frame.minY))
+                path.addLine(to: CGPoint(x: x, y: frame.maxY))
+            }
+            .stroke(AppTheme.Colors.textSecondary.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            .allowsHitTesting(false)
+
+            if let posY = proxy.position(forY: selection.value) {
+                Circle()
+                    .fill(AppTheme.Colors.surface)
+                    .overlay(Circle().strokeBorder(accentColor, lineWidth: 2))
+                    .frame(width: 10, height: 10)
+                    .position(x: x, y: frame.minY + posY)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+}
+
 // MARK: - Investment Hero Card
 
 /// "Hero" card at the top of an investments screen (Global or Account level).
@@ -478,6 +613,81 @@ struct InvestmentHeroCard: View {
     }
 }
 
+// MARK: - Evolution Chart Plot
+
+/// The chart's actual drawn content — line + area gradient, nothing else.
+/// Pulled out of `EvolutionChart` into its OWN `Equatable` view so that
+/// scrubbing (which only changes `selectedDate` in the enclosing view) never
+/// re-runs this body at all: paired with `.equatable()` at the call site,
+/// SwiftUI compares the new value against the previous one field by field and
+/// skips re-rendering when nothing here actually changed — which is always the
+/// case while scrubbing. Leaving this inline in `EvolutionChart.body` was the
+/// real remaining source of stutter: every scrub touch update re-ran this
+/// ~300-mark construction from scratch even though the result never changed,
+/// because a plain (non-`Equatable`) inline view has no way to be skipped.
+private struct EvolutionChartPlot: View, Equatable {
+    let cleanPoints: [PortfolioEvolutionPoint]
+    let trendColor: Color
+    let minValue: Double
+    let yDomain: ClosedRange<Double>
+    let xAxisLabelFormat: Date.FormatStyle
+
+    var body: some View {
+        Chart {
+            ForEach(cleanPoints) { point in
+                LineMark(
+                    x: .value("Date", point.date),
+                    y: .value("Valeur", point.value)
+                )
+                .foregroundStyle(trendColor)
+                .interpolationMethod(.monotone)
+                .lineStyle(StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
+
+                // yStart set to the real lowest point (not yDomain.lowerBound, which includes
+                // the bottom visual padding) → the fill stops at the curve's minimum instead
+                // of touching the x-axis.
+                AreaMark(
+                    x: .value("Date", point.date),
+                    yStart: .value("Min", minValue),
+                    yEnd: .value("Valeur", point.value)
+                )
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [trendColor.opacity(0.25), trendColor.opacity(0.0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .interpolationMethod(.monotone)
+            }
+        }
+        .chartYScale(domain: yDomain)
+        .chartXAxis {
+            // Adaptive ticks + label format depending on the time range (1D → hours,
+            // 10Y → years) via `InvestmentChartXAxisConfig`. Without it, Swift Charts
+            // picks an automatic format without the year, which makes a multi-year "Max"
+            // unreadable.
+            // Capped at ~5 ticks: `.stride` produces dozens on long ranges (overlapping
+            // labels + the chart's intrinsic width blowing up → a horizontally
+            // scrollable view).
+            AxisMarks(position: .bottom, values: .automatic(desiredCount: 5)) { _ in
+                AxisValueLabel(format: xAxisLabelFormat)
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
+                    .font(.system(size: 10))
+            }
+        }
+        // Apple Stocks style: no Y grid, just 2-3 discreet value markers on the right.
+        // The chart breathes, the line is the star.
+        .chartYAxis {
+            AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { _ in
+                AxisValueLabel()
+                    .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.55))
+                    .font(.system(size: 10))
+            }
+        }
+    }
+}
+
 // MARK: - Evolution Chart
 
 /// Value evolution chart (portfolio / account / position).
@@ -524,7 +734,7 @@ struct EvolutionChart: View {
 
     private var selectedPoint: PortfolioEvolutionPoint? {
         guard let selectedDate else { return nil }
-        return cleanPoints.min { abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate)) }
+        return cleanPoints.nearestByDate(to: selectedDate)
     }
 
     /// Y domain with visual padding so the curve doesn't touch the edges.
@@ -587,116 +797,70 @@ struct EvolutionChart: View {
             }
             .frame(maxWidth: .infinity, minHeight: height)
         } else {
-            Chart {
-                ForEach(cleanPoints) { point in
-                    LineMark(
-                        x: .value("Date", point.date),
-                        y: .value("Valeur", point.value)
-                    )
-                    .foregroundStyle(trendColor)
-                    .interpolationMethod(.monotone)
-                    .lineStyle(StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
-
-                    // yStart set to the real lowest point (not yDomain.lowerBound, which includes
-                    // the bottom visual padding) → the fill stops at the curve's minimum instead
-                    // of touching the x-axis.
-                    AreaMark(
-                        x: .value("Date", point.date),
-                        yStart: .value("Min", minValue),
-                        yEnd: .value("Valeur", point.value)
-                    )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [trendColor.opacity(0.25), trendColor.opacity(0.0)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .interpolationMethod(.monotone)
-                }
-
-                // Selection marker: vertical rule + point on the curve.
-                // No floating annotation here: stuck to the point, it gets truncated as soon
-                // as the point nears the top or an edge of the plot. The figures are read in
-                // `ChartScrubReadout`, above the chart.
-                if let selectedPoint {
-                    RuleMark(x: .value("Sélection", selectedPoint.date))
-                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-
-                    PointMark(
-                        x: .value("Date", selectedPoint.date),
-                        y: .value("Valeur", selectedPoint.value)
-                    )
-                    .foregroundStyle(trendColor)
-                    .symbolSize(90)
-                }
-            }
-            .chartYScale(domain: yDomain)
-            .chartXAxis {
-                // Adaptive ticks + label format depending on the time range (1D → hours,
-                // 10Y → years) via `InvestmentChartXAxisConfig`. Without it, Swift Charts
-                // picks an automatic format without the year, which makes a multi-year "Max"
-                // unreadable.
-                // Capped at ~5 ticks: `.stride` produces dozens on long ranges (overlapping
-                // labels + the chart's intrinsic width blowing up → a horizontally
-                // scrollable view).
-                AxisMarks(position: .bottom, values: .automatic(desiredCount: 5)) { _ in
-                    AxisValueLabel(format: xAxisConfig.labelFormat)
-                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
-                        .font(.system(size: 10))
-                }
-            }
-            // Apple Stocks style: no Y grid, just 2-3 discreet value markers on the
-            // right. The chart breathes, the line is the star.
-            .chartYAxis {
-                AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { _ in
-                    AxisValueLabel()
-                        .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.55))
-                        .font(.system(size: 10))
-                }
-            }
+            EvolutionChartPlot(
+                cleanPoints: cleanPoints,
+                trendColor: trendColor,
+                minValue: minValue,
+                yDomain: yDomain,
+                xAxisLabelFormat: xAxisConfig.labelFormat
+            )
+            // `.equatable()` is what makes the fix below actually bite: it tells SwiftUI
+            // to compare the new `EvolutionChartPlot` value against the previous one and
+            // SKIP calling its `body` again when every field is equal — which is always
+            // the case while scrubbing, since none of them depend on the selection.
+            // Without this, SwiftUI has no guaranteed way to know that, and may still
+            // re-run the ~300-mark construction on every touch update for nothing.
+            .equatable()
             .chartOverlay { proxy in
                 GeometryReader { geo in
-                    Rectangle()
-                        .fill(.clear)
-                        .contentShape(Rectangle())
-                        // .gesture with minimumDistance > 0 + direction detection → lets the parent
-                        // ScrollView handle vertical drags (scrolling) without intercepting them. A
-                        // minimumDistance of 0 would capture every touch and move the page while
-                        // scrubbing.
-                        .gesture(
-                            DragGesture(minimumDistance: 8)
-                                .onChanged { value in
-                                    let dx = abs(value.translation.width)
-                                    let dy = abs(value.translation.height)
-                                    // Vertically dominant drag → it's a scroll, not intercepted
-                                    guard dx > dy else {
-                                        if selectedDate != nil {
-                                            selectedDate = nil
-                                            onSelectPoint?(nil)
-                                        }
-                                        return
-                                    }
-                                    guard let plotFrame = proxy.plotFrame else { return }
-                                    let origin = geo[plotFrame].origin
-                                    let locationX = value.location.x - origin.x
-                                    if let date: Date = proxy.value(atX: locationX) {
-                                        let previous = selectedPoint?.date
-                                        selectedDate = date
-                                        // Discreet tick on each point change (not on each pixel) — a tactile cue
-                                        // while reading the figures above.
-                                        if selectedPoint?.date != previous {
-                                            HapticService.shared.selection()
-                                        }
-                                        onSelectPoint?(selectedPoint)
-                                    }
-                                }
-                                .onEnded { _ in
-                                    selectedDate = nil
-                                    onSelectPoint?(nil)
-                                }
+                    ZStack {
+                        ChartScrubOverlay(
+                            proxy: proxy,
+                            geo: geo,
+                            selection: selectedPoint.map { ($0.date, $0.value) },
+                            accentColor: trendColor
                         )
+
+                        // `minimumDistance: 0` fires immediately on touch-down (not after N
+                        // points of travel): the reading band shows where you are the instant
+                        // you touch, before any slide — press-and-slide-to-inspect, not
+                        // press-8pt-then-maybe-inspect. Tradeoff accepted: a touch that starts
+                        // directly on the chart won't scroll the enclosing page (it scrubs
+                        // instead) — same as Stocks/Robinhood/Trade Republic.
+                        Rectangle()
+                            .fill(.clear)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        guard let plotFrame = proxy.plotFrame else { return }
+                                        let origin = geo[plotFrame].origin
+                                        let locationX = value.location.x - origin.x
+                                        guard let date: Date = proxy.value(atX: locationX) else { return }
+                                        guard let nearest = cleanPoints.nearestByDate(to: date) else { return }
+                                        // Touch state — and re-render the whole chart — only when the
+                                        // SNAPPED point actually changes, not on every raw pixel the finger
+                                        // crosses. The marker/veil/readout only ever depend on the snapped
+                                        // point, so redoing the whole body at the touch's full sampling
+                                        // rate for no visual difference was the main drag on fluidity.
+                                        guard nearest.date != selectedDate else { return }
+                                        // Also stops Swift Charts from smoothly (and slowly) tweening the
+                                        // marker between points, which otherwise visibly trails a fast
+                                        // finger instead of tracking it.
+                                        var transaction = Transaction()
+                                        transaction.disablesAnimations = true
+                                        withTransaction(transaction) {
+                                            selectedDate = nearest.date
+                                        }
+                                        HapticService.shared.selection()
+                                        onSelectPoint?(nearest)
+                                    }
+                                    .onEnded { _ in
+                                        selectedDate = nil
+                                        onSelectPoint?(nil)
+                                    }
+                            )
+                    }
                 }
             }
             .frame(height: height)

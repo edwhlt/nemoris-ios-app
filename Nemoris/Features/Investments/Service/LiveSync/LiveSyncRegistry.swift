@@ -214,7 +214,7 @@ final class LiveSyncRegistry {
                     purchaseDate: Date()
                 ) {
                     // Also updates the brand-new row's current_value.
-                    var fresh = InvestmentPosition(
+                    let fresh = InvestmentPosition(
                         id: newPosId, accountId: accountId,
                         assetType: pos.assetType.uppercased(),
                         assetName: pos.assetName, ticker: pos.ticker,

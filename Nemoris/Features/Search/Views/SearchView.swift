@@ -361,7 +361,6 @@ struct SearchView: View {
         }
     }
 
-    @ViewBuilder
     private func trailing(for result: SearchResult) -> AnyView? {
         switch result {
         case .transaction(let t):

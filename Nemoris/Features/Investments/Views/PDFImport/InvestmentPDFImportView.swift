@@ -236,16 +236,21 @@ struct InvestmentPDFImportView: View {
                 .buttonStyle(.plain)
 
                 // Capture from the photo library (screenshot of a PEA/brokerage app).
+                // Les valeurs sont capturées AVANT le closure `label:` : sous Swift 6
+                // strict concurrency, ce paramètre de PhotosPicker n'hérite pas
+                // toujours l'isolation MainActor du contexte appelant.
+                let imageLabel = imageSelectionLabel
+                let hasPickedImages = !pickedImages.isEmpty
                 PhotosPicker(selection: $photoItems, maxSelectionCount: 10, matching: .images) {
                     HStack {
                         Image(systemName: "photo.on.rectangle.angled")
                             .font(.title2)
                             .foregroundStyle(AppTheme.Colors.accent)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(imageSelectionLabel)
+                            Text(imageLabel)
                                 .font(.subheadline)
                                 .foregroundStyle(AppTheme.Colors.textPrimary)
-                            Text(pickedImages.isEmpty ? "Depuis la photothèque" : "Toucher pour changer")
+                            Text(hasPickedImages ? "Toucher pour changer" : "Depuis la photothèque")
                                 .font(.caption)
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
                         }

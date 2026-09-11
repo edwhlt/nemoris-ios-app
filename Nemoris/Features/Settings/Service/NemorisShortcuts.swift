@@ -31,7 +31,7 @@ struct ImportFileIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         let payload: [(data: Data, fileExtension: String)] = files.compactMap { file in
-            guard let data = try? file.data else { return nil }
+            let data = file.data
             return (data, Self.fileExtension(of: file, fallback: "csv"))
         }
         guard !payload.isEmpty else {
@@ -84,7 +84,7 @@ struct ImportInvestmentDocumentIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         let payload: [(data: Data, fileExtension: String)] = files.compactMap { file in
-            guard let data = try? file.data else { return nil }
+            let data = file.data
             return (data, ImportFileIntent.fileExtension(of: file, fallback: "dat"))
         }
         guard !payload.isEmpty else {
