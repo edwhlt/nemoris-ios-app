@@ -3,14 +3,14 @@ import SQLite3
 
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-/// CRUD pour les sessions d'import et les mappings CSV.
-/// Le contenu d'une session est sérialisé en JSON dans `import_sessions.rows_json`.
+/// CRUD for import sessions and CSV mappings.
+/// A session's content is serialized as JSON in `import_sessions.rows_json`.
 struct ImportSessionRepository {
 
     private let store: SQLiteStore
 
-    /// La valeur par défaut vise la base de l'application : les sites d'appel
-    /// existants n'ont pas à changer.
+    /// The default value targets the app's own database: existing call sites
+    /// need no change.
     init(store: SQLiteStore = SQLiteStore()) {
         self.store = store
     }
@@ -18,7 +18,7 @@ struct ImportSessionRepository {
 
     // MARK: - Sessions
 
-    /// Renvoie le résumé léger des sessions, plus récente d'abord.
+    /// Returns the lightweight summary of the sessions, most recent first.
     func fetchSummaries(status: ImportSessionStatus? = nil) -> [ImportSessionSummary] {
         guard store.databaseExists else { return [] }
         var db: OpaquePointer?
@@ -58,14 +58,14 @@ struct ImportSessionRepository {
                 ? nil : Int(sqlite3_column_int(stmt, 5))
             let total = Int(sqlite3_column_int(stmt, 6))
 
-            // Pour calculer pendingRows, on doit décoder rows_json. C'est dommage pour la "lite"
-            // mais c'est le seul moyen sans table séparée. Le coût reste raisonnable car on a
-            // 1 seule session active en pratique.
+            // Computing pendingRows requires decoding rows_json. A pity for the "lite"
+            // summary, but it's the only way without a separate table. The cost stays
+            // reasonable since there is only 1 active session in practice.
             let jsonRaw = String(cString: sqlite3_column_text(stmt, 7))
             let destination = ImportDestination(
                 rawValue: String(cString: sqlite3_column_text(stmt, 8))) ?? .transactions
-            // Une session d'investissements n'a pas d'état par ligne : tout ce
-            // qu'elle contient reste à relire, donc tout est « en attente ».
+            // An investment session has no per-row state: everything it contains is
+            // still to be reviewed, so everything is "pending".
             let pending = destination == .transactions
                 ? Self.countPending(jsonRaw: jsonRaw)
                 : total
@@ -79,12 +79,12 @@ struct ImportSessionRepository {
         return out
     }
 
-    /// Récupère LA session active (il ne devrait y en avoir qu'une), sinon nil.
+    /// Fetches THE active session (there should only be one), otherwise nil.
     func fetchActiveSummary() -> ImportSessionSummary? {
         fetchSummaries(status: .active).first
     }
 
-    /// Charge intégralement une session (incluant toutes les rows) par id.
+    /// Loads a session fully (including every row) by id.
     func fetchSession(id: UUID) -> ImportSession? {
         guard store.databaseExists else { return nil }
         var db: OpaquePointer?
@@ -115,10 +115,9 @@ struct ImportSessionRepository {
         let destination = ImportDestination(
             rawValue: String(cString: sqlite3_column_text(stmt, 7))) ?? .transactions
 
-        // ⚠️ Le contenu de `rows_json` dépend de la destination (migration v45).
-        // Les sessions écrites avant cette migration n'ont pas de colonne
-        // `destination` renseignée : le DEFAULT 'transactions' les fait tomber
-        // dans la première branche, donc elles se relisent inchangées.
+        // The content of `rows_json` depends on the destination. Sessions without a
+        // `destination` value fall back to the DEFAULT 'transactions', so they land
+        // in the first branch and read back unchanged.
         switch destination {
         case .transactions:
             let rows = (try? Self.jsonDecoder.decode([ImportSessionRow].self,
@@ -137,19 +136,19 @@ struct ImportSessionRepository {
         }
     }
 
-    /// Insère une nouvelle session (INSERT). Renvoie true si OK.
+    /// Inserts a new session (INSERT). Returns true on success.
     @discardableResult
     func insertSession(_ session: ImportSession) -> Bool {
         upsertSession(session, isInsert: true)
     }
 
-    /// SEUL fabricant de session d'import : insère, programme le rappel 12 h et
-    /// renvoie le résumé prêt pour `AppState`. `nil` si l'insert a échoué.
+    /// The ONLY import session factory: inserts, schedules the 12 h reminder and
+    /// returns the summary ready for `AppState`. `nil` if the insert failed.
     ///
-    /// Centralisé parce que le parcours a maintenant DEUX producteurs de lignes
-    /// (mapping de colonnes CSV et extraction de documents PDF/captures) : leur
-    /// laisser dupliquer cette fin de course ferait diverger la notification de
-    /// rappel ou le statut initial dès la première évolution de l'un des deux.
+    /// Centralized because the flow has TWO row producers (CSV column mapping
+    /// and PDF/capture document extraction): letting them duplicate this final
+    /// stretch would make the reminder notification or the initial status
+    /// diverge as soon as one of them evolves.
     func createSession(rows: [ImportSessionRow],
                        accountId: Int,
                        sourceFile: String?) -> ImportSessionSummary? {
@@ -179,13 +178,12 @@ struct ImportSessionRepository {
         )
     }
 
-    /// Fabrique de session pour les INVESTISSEMENTS.
+    /// Session factory for INVESTMENTS.
     ///
-    /// Même fin de course que la version transactions (insert + rappel 12 h +
-    /// résumé), avec un contenu différent. Elle existe parce que le résultat
-    /// d'une analyse d'investissements ne vivait qu'en mémoire : relancer l'app
-    /// le perdait, alors qu'une analyse de relevé se compte en dizaines de
-    /// secondes — l'asymétrie était documentée et assumée, elle ne l'est plus.
+    /// Same final stretch as the transaction version (insert + 12 h reminder +
+    /// summary), with different content. It persists an investment analysis so
+    /// relaunching the app doesn't lose it — a statement analysis takes tens of
+    /// seconds.
     func createSession(batch: ImportBatchResult,
                        accountId: Int,
                        sourceFile: String?) -> ImportSessionSummary? {
@@ -217,14 +215,14 @@ struct ImportSessionRepository {
         )
     }
 
-    /// Met à jour le payload complet d'une session existante (UPDATE).
-    /// Atomique : un seul UPDATE. Met aussi à jour `updated_at`.
+    /// Updates the full payload of an existing session (UPDATE).
+    /// Atomic: a single UPDATE. Also updates `updated_at`.
     @discardableResult
     func saveSession(_ session: ImportSession) -> Bool {
         upsertSession(session, isInsert: false)
     }
 
-    /// Supprime une session (ex : cancel).
+    /// Deletes a session (e.g. on cancel).
     @discardableResult
     func deleteSession(id: UUID) -> Bool {
         guard store.databaseExists else { return false }
@@ -252,7 +250,7 @@ struct ImportSessionRepository {
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
 
-        // Le contenu sérialisé dépend de la destination (cf. migration v45).
+        // The serialized content depends on the destination.
         let payloadData: Data
         switch session.destination {
         case .transactions:
@@ -398,9 +396,9 @@ struct ImportSessionRepository {
         if let value { sqlite3_bind_int(stmt, idx, Int32(value)) } else { sqlite3_bind_null(stmt, idx) }
     }
 
-    /// Comptage par scan de string (évite un JSON.decode coûteux sur les grandes sessions).
-    /// La sérialisation Codable utilise `"userAction":"pending"` comme représentation —
-    /// si on change le format de l'enum, mettre à jour ce needle.
+    /// Counting by scanning the string (avoids a costly JSON decode on large
+    /// sessions). Codable serialization represents it as `"userAction":"pending"`
+    /// — if the enum's format changes, update this needle.
     private static func countPending(jsonRaw: String) -> Int {
         let needle = "\"userAction\":\"pending\""
         var count = 0
@@ -412,9 +410,10 @@ struct ImportSessionRepository {
         return count
     }
 
-    // `nonisolated(unsafe)` justifié : ISO8601DateFormatter, JSONEncoder et JSONDecoder
-    // sont thread-safe pour parser/encoder une fois configurés (Apple docs), mais ne sont
-    // pas Sendable. On les configure une fois au démarrage, jamais mutés ensuite.
+    // `nonisolated(unsafe)` justified: ISO8601DateFormatter, JSONEncoder and
+    // JSONDecoder are thread-safe for parsing/encoding once configured (Apple
+    // docs), but aren't Sendable. They're configured once at startup and never
+    // mutated afterwards.
     nonisolated(unsafe) static let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

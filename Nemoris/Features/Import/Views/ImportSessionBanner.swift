@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Bandeau flottant "Import en cours" affiché au-dessus de la tab bar dans MainTabView
-/// quand une session est `active`.
+/// Floating "Import in progress" banner shown above the tab bar in MainTabView
+/// when a session is `active`.
 struct ImportSessionBanner: View {
     let summary: ImportSessionSummary
     let onTap: () -> Void
@@ -53,8 +53,9 @@ struct ImportSessionBanner: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        // Le bandeau est en haut de l'écran (sous le status bar) — divider en BAS pour
-        // séparer du contenu du TabView, padding top pour respirer sous la status bar.
+        // The banner is at the top of the screen (under the status bar) — divider at
+        // the BOTTOM to separate it from the TabView content, top padding to breathe
+        // under the status bar.
         .padding(.top, 4)
         .background(AppTheme.Colors.surface)
         .overlay(
@@ -73,12 +74,12 @@ struct ImportSessionBanner: View {
     }
 }
 
-/// Bandeau d'ANALYSE en arrière-plan : l'utilisateur a lancé un import de
-/// document et continue à se servir de l'app pendant que ça travaille.
+/// Background ANALYSIS banner: the user started a document import and keeps
+/// using the app while it works.
 ///
-/// Même gabarit que le bandeau de session pour rester lisible au même endroit,
-/// avec une barre de progression tant que l'analyse tourne et un bouton
-/// « Continuer » dès que le résultat est relisible.
+/// Same template as the session banner so it stays readable in the same
+/// place, with a progress bar while the analysis runs and a "Continue" button
+/// as soon as the result can be reviewed.
 struct ImportAnalysisBanner: View {
     let coordinator: DocumentImportCoordinator
     let onOpen: () -> Void
@@ -103,9 +104,8 @@ struct ImportAnalysisBanner: View {
                     .foregroundStyle(AppTheme.Colors.textSecondary)
                     .lineLimit(1)
                 if coordinator.isRunning {
-                    // Déterminée seulement quand elle a quelque chose à
-                    // raconter (cf. `progressFraction`) ; sinon barre
-                    // indéterminée, qui au moins montre que ça travaille.
+                    // Determinate only when it has something to tell (see `progressFraction`);
+                    // otherwise an indeterminate bar, which at least shows work is happening.
                     if let fraction = coordinator.progressFraction {
                         ProgressView(value: fraction)
                             .tint(AppTheme.Colors.accent)

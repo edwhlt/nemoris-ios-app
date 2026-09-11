@@ -236,9 +236,9 @@ struct InvestmentPDFImportView: View {
                 .buttonStyle(.plain)
 
                 // Capture from the photo library (screenshot of a PEA/brokerage app).
-                // Les valeurs sont capturées AVANT le closure `label:` : sous Swift 6
-                // strict concurrency, ce paramètre de PhotosPicker n'hérite pas
-                // toujours l'isolation MainActor du contexte appelant.
+                // Values are captured BEFORE the `label:` closure: under Swift 6
+                // strict concurrency, this PhotosPicker parameter does not always
+                // inherit the calling context's MainActor isolation.
                 let imageLabel = imageSelectionLabel
                 let hasPickedImages = !pickedImages.isEmpty
                 PhotosPicker(selection: $photoItems, maxSelectionCount: 10, matching: .images) {

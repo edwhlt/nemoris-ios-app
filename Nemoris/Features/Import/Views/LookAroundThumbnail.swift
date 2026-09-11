@@ -1,15 +1,16 @@
 import SwiftUI
 import MapKit
 
-/// Petit thumbnail Apple Look Around (vue street-view) pour un POI géolocalisé.
+/// Small Apple Look Around (street-view) thumbnail for a geolocated POI.
 ///
-/// Fetch lazy via `MKLookAroundSceneRequest` au `.task` :
-///   - Si Look Around est dispo pour la zone (centres urbains majeurs ↗ couverture
-///     mondiale en expansion), on affiche un mini preview interactif (`LookAroundPreview`).
-///   - Sinon, on n'affiche rien du tout → la cellule reste compacte.
+/// Lazy fetch via `MKLookAroundSceneRequest` in `.task`:
+///   - If Look Around is available for the area (major city centers, with
+///     worldwide coverage growing), a small interactive preview is shown
+///     (`LookAroundPreview`).
+///   - Otherwise nothing is shown at all → the cell stays compact.
 ///
-/// Utile dans `PayeeCreationFormSheet` / `EnrichmentSheetView` pour aider l'utilisateur
-/// à **reconnaître visuellement** un commerçant (la devanture du restaurant, etc.).
+/// Used in `PayeeCreationFormSheet` / `EnrichmentSheetView` to help the user
+/// **visually recognize** a merchant (the restaurant's storefront, etc.).
 struct LookAroundThumbnail: View {
     let coordinate: CLLocationCoordinate2D
     var size: CGFloat = 60
@@ -28,7 +29,7 @@ struct LookAroundThumbnail: View {
                             .strokeBorder(AppTheme.Colors.surfaceSecondary, lineWidth: 0.5)
                     )
             } else if !didLoad {
-                // Placeholder pendant le chargement (court)
+                // Placeholder while loading (short)
                 ZStack {
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Color(.tertiarySystemFill))
@@ -43,7 +44,7 @@ struct LookAroundThumbnail: View {
         }
     }
 
-    /// Cle stable pour redéclencher le fetch si la coord change.
+    /// Stable key to re-trigger the fetch when the coordinate changes.
     private var coordinateKey: String {
         "\(coordinate.latitude)|\(coordinate.longitude)"
     }

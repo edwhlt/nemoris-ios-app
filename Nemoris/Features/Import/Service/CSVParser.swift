@@ -1,13 +1,13 @@
 import Foundation
 
-/// Parseur CSV minimal pour le nouveau parcours d'import.
-/// Autodétection séparateur + lecture des cellules en respectant les guillemets.
+/// Minimal CSV parser for the import flow.
+/// Separator auto-detection + reading cells while honoring quotes.
 enum CSVParser {
 
-    /// Le CSV n'a plus son propre modèle de sortie : il produit la table
-    /// COMMUNE aux sources tabulaires (`ImportGrid`), la même que le lecteur de
-    /// classeurs XLSX. C'est ce qui permet aux deux formats de partager
-    /// l'écran de mapping des colonnes au lieu d'en avoir chacun un.
+    /// CSV has no output model of its own: it produces the table COMMON to
+    /// tabular sources (`ImportGrid`), the same as the XLSX workbook reader.
+    /// That's what lets both formats share the column mapping screen instead of
+    /// each having one.
     typealias Parsed = ImportGrid
 
     static let separatorCandidates: [Character] = [";", "\t", ","]
@@ -19,11 +19,10 @@ enum CSVParser {
 
     // MARK: - High level
 
-    /// `forcedSeparator` : imposé par l'utilisateur depuis l'écran de mapping.
-    /// L'autodétection se trompe sur les fichiers où un autre séparateur est
-    /// plus fréquent dans l'en-tête (libellés contenant des virgules, colonne
-    /// unique…), et le mapping devient alors inexploitable — il faut donc
-    /// pouvoir la corriger à la main.
+    /// `forcedSeparator`: imposed by the user from the mapping screen.
+    /// Auto-detection gets it wrong on files where another separator is more
+    /// frequent in the header (labels containing commas, a single column…), and
+    /// the mapping then becomes unusable — so it must be correctable by hand.
     static func parse(content: String, forcedSeparator: String? = nil) -> Parsed? {
         let lines = content
             .split(whereSeparator: { $0.isNewline })
@@ -116,7 +115,7 @@ enum CSVParser {
         return nil
     }
 
-    /// Détecte le format de date le plus probable à partir d'un échantillon.
+    /// Detects the most likely date format from a sample.
     static func detectDateFormat(samples: [String]) -> String? {
         for fmt in dateFormatCandidates {
             let formatter = DateFormatter()
@@ -129,11 +128,11 @@ enum CSVParser {
         return nil
     }
 
-    /// Parse un montant en respectant le décimal (`,` ou `.`).
-    /// Gère les espaces (séparateurs de milliers) et les parenthèses (négatifs comptables).
+    /// Parses an amount honoring the decimal separator (`,` or `.`).
+    /// Handles spaces (thousands separators) and parentheses (accounting negatives).
     static func parseAmount(_ raw: String, decimal: String = ",") -> Double? {
         var s = raw
-            .replacingOccurrences(of: "\u{00A0}", with: "")     // espace insécable
+            .replacingOccurrences(of: "\u{00A0}", with: "")     // non-breaking space
             .replacingOccurrences(of: " ", with: "")
             .trimmingCharacters(in: .whitespaces)
         guard !s.isEmpty else { return nil }
@@ -153,18 +152,16 @@ enum CSVParser {
         return negative ? -value : value
     }
 
-    // MARK: - Construction des lignes de session
+    // MARK: - Building session rows
 
-    /// Applique un mapping de colonnes et produit les lignes de session.
+    /// Applies a column mapping and produces the session rows.
     ///
-    /// Extrait de `ColumnMappingView` parce qu'un import multi-fichiers réutilise
-    /// AUTOMATIQUEMENT le mapping mémorisé d'un format déjà connu, sans jamais
-    /// afficher l'écran de mapping : le même code doit servir les deux chemins.
+    /// Separate from `ColumnMappingView` so the same code can serve every path
+    /// that builds rows from a mapping.
     ///
-    /// `startingAt` continue une numérotation GLOBALE : deux fichiers repartant
-    /// chacun à 1 produiraient des `sourceRowNumber` en collision dans une
-    /// session agrégée, et les rapports d'échec au commit désigneraient une
-    /// ligne ambiguë.
+    /// `startingAt` continues a GLOBAL numbering: two files each restarting at 1
+    /// would produce colliding `sourceRowNumber`s in an aggregated session, and
+    /// the commit's failure reports would point at an ambiguous row.
     static func buildRows(parsed: Parsed,
                           mapping: ColumnMapping,
                           startingAt startNumber: Int = 1,

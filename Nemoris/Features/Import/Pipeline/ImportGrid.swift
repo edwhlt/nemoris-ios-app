@@ -1,30 +1,27 @@
 import Foundation
 
-/// Une table de valeurs brutes : en-têtes + lignes de cellules.
+/// A table of raw values: headers + rows of cells.
 ///
-/// Moteur PUR. C'est le format de sortie COMMUN des sources tabulaires — CSV,
-/// TSV et classeur XLSX — précisément parce qu'elles posent toutes la même
-/// question à l'utilisateur : « quelle colonne est la date, laquelle le
-/// montant, laquelle le libellé ? ».
+/// PURE engine. It's the COMMON output format of tabular sources — CSV, TSV
+/// and XLSX workbooks — precisely because they all ask the user the same
+/// question: "which column is the date, which one the amount, which one the
+/// label?".
 ///
-/// ⚠️ Faire converger XLSX ici plutôt que lui écrire son propre écran de
-/// mapping est ce qui évite de recréer la situation qu'on est en train de
-/// démonter : l'app avait DÉJÀ trois imports CSV indépendants (transactions,
-/// investissements, et le mapping mémorisé), avec trois détections de
-/// séparateur et trois conventions décimales.
+/// Converging XLSX here, rather than writing it its own mapping screen, keeps
+/// a single mapping path instead of one per format, each with its own
+/// separator detection and decimal convention.
 struct ImportGrid: Equatable, Codable, Hashable, Sendable {
-    /// Noms de colonnes. Synthétiques (« Colonne 1 ») quand la source n'a pas
-    /// de ligne d'en-tête reconnaissable.
+    /// Column names. Synthetic ("Column 1") when the source has no recognizable
+    /// header row.
     var headers: [String]
-    /// Vrai quand la première ligne a été reconnue comme un en-tête et n'est
-    /// donc PAS une donnée.
+    /// True when the first row was recognized as a header and is therefore NOT data.
     var hasExplicitHeader: Bool
-    /// Les lignes de données, sans l'en-tête.
+    /// The data rows, without the header.
     var rows: [[String]]
-    /// Séparateur retenu pour une source texte. Chaîne vide pour un classeur,
-    /// dont les cellules sont déjà délimitées par le format.
+    /// Separator kept for a text source. Empty for a workbook, whose cells are
+    /// already delimited by the format.
     var separator: String
-    /// Nom de la feuille, pour un classeur multi-feuilles.
+    /// Sheet name, for a multi-sheet workbook.
     var sheetName: String?
 
     init(headers: [String], hasExplicitHeader: Bool, rows: [[String]],
@@ -36,12 +33,11 @@ struct ImportGrid: Equatable, Codable, Hashable, Sendable {
         self.sheetName = sheetName
     }
 
-    /// Vrai quand la table a assez de structure pour qu'un mapping de colonnes
-    /// ait un sens.
+    /// True when the table has enough structure for a column mapping to make
+    /// sense.
     ///
-    /// ⚠️ Une source à UNE seule colonne n'est pas un tableau : c'est un relevé
-    /// en prose. L'envoyer à l'écran de mapping demanderait à l'utilisateur de
-    /// désigner des colonnes qui n'existent pas — elle part au parseur de
-    /// documents à la place.
+    /// A source with ONE single column isn't a table: it's a prose statement.
+    /// Sending it to the mapping screen would ask the user to designate columns
+    /// that don't exist — it goes to the document parser instead.
     var isTabular: Bool { !rows.isEmpty && headers.count >= 2 }
 }

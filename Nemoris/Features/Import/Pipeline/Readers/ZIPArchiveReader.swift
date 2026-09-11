@@ -1,27 +1,26 @@
 import Foundation
 import Compression
 
-// MARK: - Lecteur ZIP minimal, en LECTURE SEULE
+// MARK: - Minimal, READ-ONLY ZIP reader
 //
-// Moteur PUR (Foundation + Compression, tous deux sans état ni I/O implicite) —
-// testable via `run_import_pipeline_tests.sh`.
+// PURE engine (Foundation + Compression, both stateless with no implicit I/O)
+// — covered by `ImportPipelineTests`.
 //
-// ─── Pourquoi écrire un lecteur ZIP plutôt qu'ajouter une dépendance ───────
+// ─── Why write a ZIP reader rather than add a dependency ──────────────────
 //
-// Un XLSX EST une archive ZIP contenant du XML. Ouvrir un classeur demande donc
-// exactement deux choses : lister les entrées et décompresser celles qu'on veut.
-// C'est ~200 lignes bien balisées par la spécification APPNOTE.
+// An XLSX IS a ZIP archive containing XML. Opening a workbook therefore takes
+// exactly two things: listing the entries and decompressing the wanted ones.
+// That's ~200 lines, well charted by the APPNOTE specification.
 //
-// Le projet a une doctrine explicite de réduction des dépendances ( a
-// retiré 7 paquets SPM pour ~100 Mo d'embed). Ajouter ZIPFoundation pour lire
-// deux fichiers XML par classeur irait contre cette ligne, et ferait entrer
-// dans le binaire tout un moteur d'écriture, de chiffrement et de streaming
-// dont on n'utiliserait rien.
+// The project keeps its dependencies to a minimum. Adding ZIPFoundation to
+// read two XML files per workbook would go against that, and would bring
+// into the binary a whole writing, encryption and streaming engine of which
+// nothing would be used.
 //
-// ⚠️ Périmètre volontairement étroit : lecture seule, méthodes STORE (0) et
-// DEFLATE (8), pas de chiffrement, pas de ZIP64. Un classeur produit par Excel,
-// Numbers, LibreOffice ou un export bancaire entre dans ce cadre. Le reste est
-// refusé proprement, jamais deviné.
+// Deliberately narrow scope: read-only, STORE (0) and DEFLATE (8) methods, no
+// encryption, no ZIP64. A workbook produced by Excel, Numbers, LibreOffice or
+// a bank export fits within it. Anything else is rejected cleanly, never
+// guessed.
 
 struct ZIPArchiveError: Error, Equatable {
     let reason: String
@@ -29,13 +28,13 @@ struct ZIPArchiveError: Error, Equatable {
 
 enum ZIPArchiveReader {
 
-    /// Une entrée de l'archive, telle que décrite par le répertoire central.
+    /// An archive entry, as described by the central directory.
     struct Entry: Equatable {
         let name: String
         let compressionMethod: UInt16
         let compressedSize: Int
         let uncompressedSize: Int
-        /// Offset de l'en-tête LOCAL de l'entrée, depuis le début de l'archive.
+        /// Offset of the entry's LOCAL header, from the start of the archive.
         let localHeaderOffset: Int
     }
 
@@ -47,12 +46,11 @@ enum ZIPArchiveReader {
 
     // MARK: - Listing
 
-    /// Liste les entrées via le RÉPERTOIRE CENTRAL, en fin d'archive.
+    /// Lists the entries through the CENTRAL DIRECTORY, at the end of the archive.
     ///
-    /// ⚠️ Pas en balayant les en-têtes locaux depuis le début : ceux-ci peuvent
-    /// annoncer des tailles à zéro et renvoyer à un descripteur placé APRÈS les
-    /// données (bit 3 des drapeaux), ce que font les outils qui écrivent en
-    /// flux. Le répertoire central, lui, porte toujours les tailles réelles.
+    /// Not by scanning the local headers from the start: they can announce zero
+    /// sizes and point to a descriptor placed AFTER the data (flag bit 3), which
+    /// streaming writers do. The central directory always carries the real sizes.
     static func entries(in data: Data) -> Result<[Entry], ZIPArchiveError> {
         guard let eocd = locateEndOfCentralDirectory(data) else {
             return .failure(ZIPArchiveError(reason: "archive illisible (fin de répertoire introuvable)"))
@@ -99,17 +97,17 @@ enum ZIPArchiveReader {
 
     // MARK: - Extraction
 
-    /// Contenu décompressé d'une entrée.
+    /// Decompressed content of an entry.
     static func extract(_ entry: Entry, from data: Data) -> Result<Data, ZIPArchiveError> {
         let header = entry.localHeaderOffset
         guard header + 30 <= data.count,
               read32(data, header) == localFileHeader else {
             return .failure(ZIPArchiveError(reason: "en-tête local invalide pour \(entry.name)"))
         }
-        // ⚠️ Les longueurs de nom et de champ « extra » de l'en-tête LOCAL
-        // peuvent différer de celles du répertoire central (l'extra local porte
-        // souvent des horodatages absents du central). Il faut donc lire
-        // celles-ci, pas celles déjà connues, pour trouver le début des données.
+        // The name and "extra" field lengths of the LOCAL header can differ from
+        // those of the central directory (the local extra often carries timestamps
+        // absent from the central one). These must be read to find where the data
+        // starts, not the already-known ones.
         let nameLen  = Int(read16(data, header + 26))
         let extraLen = Int(read16(data, header + 28))
         let start = header + 30 + nameLen + extraLen
@@ -133,7 +131,7 @@ enum ZIPArchiveReader {
         }
     }
 
-    /// Contenu d'une entrée désignée par son nom.
+    /// Content of an entry designated by its name.
     static func extract(named name: String, from data: Data) -> Result<Data, ZIPArchiveError> {
         switch entries(in: data) {
         case .failure(let error): return .failure(error)
@@ -147,14 +145,13 @@ enum ZIPArchiveReader {
 
     // MARK: - DEFLATE
 
-    /// ⚠️ `COMPRESSION_ZLIB` d'Apple attend un flux DEFLATE **BRUT**, sans
-    /// l'en-tête zlib de 2 octets ni le contrôle Adler-32 — c'est exactement ce
-    /// que ZIP stocke. Le nom prête à confusion : passer un vrai flux zlib ici
-    /// échoue.
+    /// Apple's `COMPRESSION_ZLIB` expects a **RAW** DEFLATE stream, without the
+    /// 2-byte zlib header or the Adler-32 check — exactly what ZIP stores. The
+    /// name is misleading: passing a real zlib stream here fails.
     private static func inflate(_ data: Data, expectedSize: Int) -> Data? {
         guard !data.isEmpty else { return Data() }
-        // Une taille annoncée à zéro par un writer en flux ne doit pas produire
-        // un tampon vide : on prend une marge raisonnable.
+        // A size announced as zero by a streaming writer must not produce an empty
+        // buffer: a reasonable margin is taken.
         var capacity = expectedSize > 0 ? expectedSize : max(data.count * 8, 64 * 1024)
 
         for _ in 0..<4 {
@@ -171,9 +168,9 @@ enum ZIPArchiveReader {
             if written > 0 && written < capacity {
                 return output.prefix(written)
             }
-            // `written == capacity` : le tampon était peut-être trop juste, on
-            // ne peut pas distinguer « pile poil » de « tronqué » — on retente
-            // plus grand, et si la taille était connue on la croit.
+            // `written == capacity`: the buffer may have been too tight, and "exact fit"
+            // can't be told from "truncated" — retry larger, and trust the size when it
+            // was known.
             if written == capacity {
                 if expectedSize > 0 && written == expectedSize { return output }
                 capacity *= 4
@@ -184,7 +181,7 @@ enum ZIPArchiveReader {
         return nil
     }
 
-    // MARK: - Lecture d'entiers petit-boutistes
+    // MARK: - Reading little-endian integers
 
     private static func read16(_ data: Data, _ offset: Int) -> UInt16 {
         guard offset + 2 <= data.count else { return 0 }
@@ -201,9 +198,9 @@ enum ZIPArchiveReader {
             | (UInt32(data[base + 3]) << 24)
     }
 
-    /// Le répertoire central se trouve par sa signature, en remontant depuis la
-    /// fin : sa position n'est pas fixe, un commentaire d'archive de longueur
-    /// libre peut le suivre (limité à 64 Ko par le format, d'où la fenêtre).
+    /// The central directory is found by its signature, searching back from the
+    /// end: its position isn't fixed, since a free-length archive comment may
+    /// follow it (capped at 64 KB by the format, hence the window).
     private static func locateEndOfCentralDirectory(_ data: Data) -> Int? {
         let minimumSize = 22
         guard data.count >= minimumSize else { return nil }

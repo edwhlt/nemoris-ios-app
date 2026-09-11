@@ -1,20 +1,20 @@
 import Foundation
 import UserNotifications
 
-/// planifie/annule les rappels "Import Nemoris en attente".
+/// Schedules/cancels the "Nemoris import pending" reminders.
 ///
-/// Permission demandée *lazy* (uniquement au moment où l'utilisateur lance son premier
-/// import — pas au launch), conformément à la convention CLAUDE.md §6.7.
+/// Permission is requested *lazily* (only when the user starts their first
+/// import — not at launch).
 ///
-/// Un rappel par session, identifié par `import_session_<UUID>`, déclenché toutes les
-/// 12 heures via un `UNTimeIntervalNotificationTrigger` répété.
+/// One reminder per session, identified by `import_session_<UUID>`, fired
+/// every 12 hours through a repeating `UNTimeIntervalNotificationTrigger`.
 enum ImportNotificationService {
 
     static let intervalSeconds: TimeInterval = 12 * 3600
 
-    /// Demande la permission notifications puis planifie le rappel. À appeler au démarrage
-    /// d'un nouvel import. Si la permission est refusée, on ne fait rien (silencieux,
-    /// pas d'erreur — le bandeau dans l'app suffit).
+    /// Requests the notification permission, then schedules the reminder. Call it
+    /// when a new import starts. If permission is denied, nothing happens
+    /// (silent, no error — the in-app banner is enough).
     static func scheduleReminder(forSessionId id: UUID, pendingRows: Int) async {
         let center = UNUserNotificationCenter.current()
         do {
@@ -46,9 +46,9 @@ enum ImportNotificationService {
         }
     }
 
-    /// Met à jour le body de la notification (compteur de lignes restantes) en
-    /// réutilisant la même `identifier` (le système remplace silencieusement).
-    /// Ne re-demande pas la permission — si elle n'a pas été accordée, on no-op.
+    /// Updates the notification body (remaining row count) by reusing the same
+    /// `identifier` (the system silently replaces it).
+    /// Doesn't ask for permission again — if it wasn't granted, this is a no-op.
     static func updateReminder(forSessionId id: UUID, pendingRows: Int) async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
@@ -56,7 +56,7 @@ enum ImportNotificationService {
         await scheduleReminder(forSessionId: id, pendingRows: pendingRows)
     }
 
-    /// Annule le rappel d'une session (à appeler à la complétion ou cancel).
+    /// Cancels a session's reminder (call it on completion or cancel).
     static func cancelReminder(forSessionId id: UUID) {
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(withIdentifiers: [identifier(for: id)])

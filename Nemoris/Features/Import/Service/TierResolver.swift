@@ -3,7 +3,7 @@ import SQLite3
 
 struct PayeeSuggestion: Hashable {
     let displayName: String          // "Carrefour Market — Oullins"
-    let canonicalName: String        // "carrefour market" (technique côté engine)
+    let canonicalName: String        // "carrefour market" (technical, engine side)
     let engineMerchantId: String     // "carrefour_market"
     let city: String?
     let country: String?
@@ -17,14 +17,14 @@ struct ResolvedPayeeGroup: Hashable {
     let engineMerchantId: String?
 }
 
-/// Écriture des payees dans `finance.sqlite` une fois qu'une suggestion a été
-/// validée par l'utilisateur (via `ImportSessionViewModel.commit()`).
+/// Writes payees into `finance.sqlite` once a suggestion has been validated by
+/// the user (via `ImportSessionViewModel.commit()`).
 ///
-/// La RÉSOLUTION (libellé brut → décision) ne vit plus ici : elle est faite
-/// directement par `engine.resolve()` + `ImportSessionViewModel.snapshot(from:allTiers:)`,
-/// qui reste la seule source de vérité pour le routage `.matched`/`.suggestCreate`/etc.
-/// (cf. `TierResolutionSnapshot`). Cette classe ne fait plus que le dernier kilomètre :
-/// transformer une `PayeeSuggestion` déjà décidée en INSERT SQL.
+/// RESOLUTION (raw label → decision) doesn't live here: it's done directly by
+/// `engine.resolve()` + `ImportSessionViewModel.snapshot(from:allTiers:)`,
+/// the single source of truth for the `.matched`/`.suggestCreate`/etc. routing
+/// (see `TierResolutionSnapshot`). This class only does the last mile:
+/// turning an already-decided `PayeeSuggestion` into a SQL INSERT.
 @MainActor
 final class TierResolver {
 
@@ -34,10 +34,10 @@ final class TierResolver {
         self.dbPath = dbPath
     }
 
-    // MARK: - Création (appelée depuis l'UI après confirmation user)
+    // MARK: - Creation (called from the UI after user confirmation)
 
-    /// Crée un payee (et son groupe si demandé) et retourne son id. À appeler depuis l'UI
-    /// après que l'utilisateur a validé la suggestion.
+    /// Creates a payee (and its group if requested) and returns its id. Call it
+    /// from the UI once the user has validated the suggestion.
     @discardableResult
     func commitNewPayee(_ suggestion: PayeeSuggestion, useGroup: Bool) -> Int? {
         var db: OpaquePointer?
@@ -55,7 +55,7 @@ final class TierResolver {
         return insertPayee(db: db, suggestion: suggestion, groupId: groupId)
     }
 
-    /// Crée un payee "personne" (contact P2P) sans lien engine.
+    /// Creates a "person" payee (P2P contact) without an engine link.
     @discardableResult
     func commitContactPayee(name: String) -> Int? {
         var db: OpaquePointer?
@@ -116,5 +116,5 @@ final class TierResolver {
     }
 }
 
-/// SQLITE_TRANSIENT pour bind_text : oblige SQLite à copier la string Swift en interne.
+/// SQLITE_TRANSIENT for bind_text: forces SQLite to copy the Swift string internally.
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)

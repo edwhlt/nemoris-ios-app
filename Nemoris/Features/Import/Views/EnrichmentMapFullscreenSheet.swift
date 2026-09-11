@@ -2,16 +2,16 @@ import SwiftUI
 import MapKit
 import NemorisEngine
 
-/// Carte plein écran pour explorer les candidats d'enrichissement géolocalisés.
+/// Full-screen map to explore geolocated enrichment candidates.
 ///
-/// L'utilisateur peut :
-///   - Pan/zoom à volonté
-///   - Modifier la requête en haut et **relancer la recherche** (région courante prise
-///     en compte si dispo, sinon globale)
-///   - Tap sur un pin → bottom sheet avec détails + "Choisir ce candidat"
+/// The user can:
+///   - Pan/zoom freely
+///   - Edit the query at the top and **rerun the search** (the current region
+///     is taken into account when available, otherwise global)
+///   - Tap a pin → bottom sheet with details + "Choose this candidate"
 ///
-/// Tap "Choisir" → ferme la sheet et appelle `onPick(candidate)` (qui pré-remplit le
-/// formulaire parent — typiquement `PayeeCreationFormSheet`).
+/// Tapping "Choose" → closes the sheet and calls `onPick(candidate)` (which
+/// pre-fills the parent form — typically `PayeeCreationFormSheet`).
 struct EnrichmentMapFullscreenSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -71,10 +71,9 @@ struct EnrichmentMapFullscreenSheet: View {
                     }
                 }
             }
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
-            // barre d'outils native laisse le bureau de l'utilisateur
-            // transparaître (retour d'usage 2026-08-21). Cf. le commentaire
-            // de `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on a macOS sheet — the native toolbar
+            // would let the user's desktop show through. See the `macSheetChrome`
+            // comment in AdaptivePane.swift.
             .paneChrome("Carte des résultats", cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 
@@ -189,17 +188,16 @@ struct EnrichmentMapFullscreenSheet: View {
         defer { isSearching = false }
         selectedCandidate = nil
 
-        // Pour le plein écran on relance Sirene + MapKit + LLM (toggles non exposés
-        // ici — l'utilisateur veut juste explorer la carte, on garde toutes les sources).
+        // Full screen reruns Sirene + MapKit + LLM (toggles aren't exposed here — the
+        // user just wants to explore the map, so every source is kept).
         var collected: [SearchCandidate] = []
 
-        // même chemin que les deux autres écrans : planificateur + cascade.
-        // Laisser ici l'ancienne construction de `q=` aurait recréé deux chemins de code
-        // divergents pour la même question, ce que la doctrine du projet proscrit.
+        // Same path as the two other screens: planner + cascade. Building `q=` here
+        // would create two diverging code paths for the same question.
         //
-        // Un pin par ÉTABLISSEMENT géolocalisé (`establishmentPins`, chemin partagé) —
-        // l'ancien aplatissement 1 entreprise = 1 pin masquait toutes les branches
-        // alors que c'est précisément l'adresse qui distingue la bonne boutique.
+        // One pin per geolocated ESTABLISHMENT (`establishmentPins`, shared path) —
+        // flattening 1 company = 1 pin would hide every branch, while it's precisely
+        // the address that identifies the right shop.
         let result = await MerchantQueryExecutor.shared.search(
             input: MerchantQueryPlanner.Input(
                 rawLabel: trimmed,

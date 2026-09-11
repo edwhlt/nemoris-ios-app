@@ -1,14 +1,13 @@
 import SwiftUI
 import NemorisEngine
 
-/// Sheet présentée APRÈS le `PayeePickerSheet` quand l'utilisateur choisit de lier
-/// une row d'import à un tier existant.
+/// Sheet presented AFTER `PayeePickerSheet` when the user chooses to link an
+/// import row to an existing payee.
 ///
-/// **Mode édition complète** (V2-style) : tous les champs du tier sont éditables
-/// directement. Pour chaque champ où la résolution moteur / l'enrichissement propose
-/// une valeur différente, une chip "Ajouter / Remplacer" permet de l'appliquer d'un tap.
-/// Pour le regex, l'append (avec séparateur `|`) est privilégié pour ne pas perdre
-/// les patterns déjà appris.
+/// **Full edit mode**: every field of the payee is directly editable. For each
+/// field where the engine resolution / enrichment proposes a different value,
+/// an "Add / Replace" chip applies it with a tap. For the regex, appending
+/// (with a `|` separator) is preferred so already-learned patterns aren't lost.
 struct TierUpdateSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -16,7 +15,7 @@ struct TierUpdateSheet: View {
     let existingPayee: Tiers
     let onApply: (Tiers) -> Void
 
-    // Champs édités
+    // Edited fields
     @State private var name: String
     @State private var regex: String
     @State private var domain: String
@@ -27,12 +26,12 @@ struct TierUpdateSheet: View {
     @State private var categoryId: Int?
     @State private var groupId: Int?
 
-    // Référentiels chargés à la volée
+    // Reference data loaded on the fly
     @State private var allCategories: [Category] = []
     @State private var payeeGroups: [PayeeGroup] = []
     @State private var showGroupPicker = false
 
-    // Candidats issus de l'import (computed once à l'init)
+    // Candidates coming from the import (computed once at init)
     private let candidate: UpdateCandidate
 
     private let repository = TransactionRepository()
@@ -64,12 +63,11 @@ struct TierUpdateSheet: View {
         }
         .nemorisFormStyle()
         .sheet(isPresented: $showGroupPicker) {
-            // Cf. CLAUDE.md §5 : ré-injection \.locale obligatoire pour toute
-            // `.sheet()` niveau 2+ atteignable sur macOS. `\.paneHostContext`
-            // itou (cf. commentaire équivalent dans PayeeCreationFormSheet) :
-            // cette sheet hérite `.inspector` de son ancêtre `ImportSessionView`,
-            // et son `.paneChrome` interne a besoin de `.modal` pour dessiner
-            // ses boutons dans CETTE fenêtre au lieu de la barre système.
+            // Re-injecting \.locale is mandatory for any level-2+ `.sheet()` reachable
+            // on macOS. Same for `\.paneHostContext` (see the matching comment in
+            // PayeeCreationFormSheet): this sheet inherits `.inspector` from its
+            // `ImportSessionView` ancestor, and its inner `.paneChrome` needs `.modal` to
+            // draw its buttons in THIS window rather than in the system bar.
             PayeeGroupPickerView(currentGroupId: groupId) { group in
                 groupId = group?.id
             }
@@ -82,12 +80,11 @@ struct TierUpdateSheet: View {
         }
 
         #if os(macOS)
-        // Ni `.paneChrome` ni `.toolbar` natif ici : les DEUX boutons
-        // appliquent la ligne (aucun n'est un vrai "annuler"), donc ni
-        // l'icône xmark forcée du slot `cancel` de `.paneChrome`, ni la
-        // barre d'outils native (dont le matériau translucide laisse le
-        // bureau transparaître, retour d'usage 2026-08-21) ne conviennent.
-        // Barres dessinées à la main, dédiées à ce seul écran.
+        // Neither `.paneChrome` nor a native `.toolbar` here: BOTH buttons apply the
+        // row (neither is a real "cancel"), so neither the xmark icon forced into
+        // `.paneChrome`'s `cancel` slot, nor the native toolbar (whose translucent
+        // material lets the desktop show through) fits. Bars drawn by hand, for this
+        // screen only.
         VStack(spacing: 0) {
             HStack {
                 Spacer()
@@ -128,11 +125,10 @@ struct TierUpdateSheet: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        // ⚠️ Volontairement en texte, PAS d'icône : contrairement à un
-                        // vrai "Annuler", ce bouton APPLIQUE quand même la ligne
-                        // (`onApply(existingPayee)`) — juste sans les modifications
-                        // proposées. Un xmark serait lu comme "ne rien faire", alors
-                        // qu'un clic ici valide bel et bien l'import de la ligne.
+                        // Deliberately text, NO icon: unlike a real "Cancel", this button still
+                        // APPLIES the row (`onApply(existingPayee)`) — just without the proposed
+                        // changes. An xmark would read as "do nothing", while a click here does
+                        // validate the row's import.
                         Button("Sans modif") {
                             onApply(existingPayee)
                             dismiss()
@@ -271,7 +267,7 @@ struct TierUpdateSheet: View {
 
     // MARK: - Helpers
 
-    /// Champ texte éditable + chip de suggestion (si différente de la valeur actuelle).
+    /// Editable text field + suggestion chip (when different from the current value).
     @ViewBuilder
     private func editableField(title: LocalizedStringKey,
                                value: Binding<String>,
@@ -373,7 +369,7 @@ private struct UpdateCandidate {
     let engineMerchantId: String?
 
     init(row: ImportSessionRow) {
-        // Regex : pattern simple insensible casse à partir du libellé brut
+        // Regex: simple case-insensitive pattern from the raw label
         let escaped = NSRegularExpression.escapedPattern(for: row.rawLabel)
             .trimmingCharacters(in: .whitespaces)
         self.regex = escaped.isEmpty ? nil : "(?i)\(escaped)"

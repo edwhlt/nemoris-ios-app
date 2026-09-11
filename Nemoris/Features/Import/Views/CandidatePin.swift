@@ -1,13 +1,14 @@
 import SwiftUI
 
-/// Pin custom pour les cartes (`PayeeCreationFormSheet` et `EnrichmentMapFullscreenSheet`).
+/// Custom pin for the maps (`PayeeCreationFormSheet` and `EnrichmentMapFullscreenSheet`).
 ///
-/// Affiche dans cet ordre de priorité :
-///   1. Favicon du `domain` (via `MerchantLogo`) — pour les chaînes connues
-///   2. SF Symbol thématique déduit du `displayName` (restaurant, café, hôtel, aéroport…)
-///   3. Fallback SF Symbol selon la source (sirene/mapkit/llm)
+/// Shows, in this order of priority:
+///   1. The `domain`'s favicon (via `MerchantLogo`) — for known chains
+///   2. A thematic SF Symbol inferred from `displayName` (restaurant, café,
+///      hotel, airport…)
+///   3. A fallback SF Symbol by source (sirene/mapkit/llm)
 ///
-/// La bordure et le pointer sont colorés selon la source. Plus grand quand sélectionné.
+/// The border and the pointer are colored by source. Larger when selected.
 struct CandidatePin: View {
     let source: MerchantEnrichmentSource
     let displayName: String?
@@ -27,7 +28,7 @@ struct CandidatePin: View {
                     .frame(width: pinSize, height: pinSize)
 
                 if let domain, !domain.isEmpty {
-                    // MerchantLogo gère le favicon Google + fallback
+                    // MerchantLogo handles the Google favicon + fallback
                     MerchantLogo(
                         domain: domain,
                         engineMerchantId: nil,
@@ -62,8 +63,8 @@ struct CandidatePin: View {
         }
     }
 
-    /// SF Symbol thématique déduit du `displayName` quand le domain manque.
-    /// Couvre les patterns FR + abréviations vietnamiennes.
+    /// Thematic SF Symbol inferred from `displayName` when the domain is missing.
+    /// Covers French patterns + Vietnamese abbreviations.
     private var thematicIcon: String {
         let name = (displayName ?? "")
             .folding(options: .diacriticInsensitive, locale: .current)
@@ -86,7 +87,7 @@ struct CandidatePin: View {
             return "birthday.cake.fill"
         }
 
-        // Hôtels
+        // Hotels
         if name.contains("hotel") || name.contains("khach san") || name.contains("ibis") ||
            name.contains("novotel") || name.contains("airbnb") || name.contains("auberge") {
             return "bed.double.fill"
@@ -126,7 +127,7 @@ struct CandidatePin: View {
             return "bag.fill"
         }
 
-        // Aéroports/voyage
+        // Airports/travel
         if name.contains("acv") {
             return "airplane.circle.fill"
         }

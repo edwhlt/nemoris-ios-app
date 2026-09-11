@@ -1,16 +1,15 @@
 import SwiftUI
 
-/// Relecture du résultat d'une analyse de document (relevé PDF, capture) avant
-/// création de la session d'import.
+/// Review of a document analysis result (PDF statement, capture) before the
+/// import session is created.
 ///
-/// Elle n'analyse RIEN elle-même : le travail a été fait par
-/// `DocumentImportCoordinator`, en arrière-plan, pendant que l'utilisateur
-/// continuait à se servir de l'app. Cet écran ne fait que présenter le résultat
-/// — c'est ce qui permet de le fermer et de le rouvrir depuis le bandeau sans
-/// rien perdre.
+/// It analyzes NOTHING itself: the work was done by
+/// `DocumentImportCoordinator`, in the background, while the user kept using
+/// the app. This screen only presents the result — which is what allows
+/// closing it and reopening it from the banner without losing anything.
 ///
-/// La revue détaillée (tiers, catégories, doublons) reste `ImportSessionView`,
-/// inchangée : ici on valide seulement que la lecture est correcte.
+/// The detailed review (payees, categories, duplicates) remains
+/// `ImportSessionView`: here only the reading itself is validated.
 struct TransactionDocumentReviewView: View {
 
     let coordinator: DocumentImportCoordinator
@@ -23,18 +22,17 @@ struct TransactionDocumentReviewView: View {
     private var units: [AnalysisUnit] { coordinator.batch.analysisUnits() }
     private var rows: [ImportSessionRow] { coordinator.transactionRows }
 
-    /// Vocabulaire adapté au format réel : parler de « pages » pour une capture
-    /// d'écran n'a aucun sens depuis que l'import est multi-format.
+    /// Wording matched to the real format: "pages" means nothing for a screenshot.
     private var unitLabel: String {
         (units.first?.kind ?? .unknown).unitLabel(count: units.count)
     }
 
-    /// Ce que CHAQUE source a produit, tables mappées comprises.
+    /// What EACH source produced, mapped tables included.
     ///
-    /// ⚠️ Construit depuis le pipeline et non depuis les lignes retenues : une
-    /// source qui n'a RIEN donné est justement celle qu'il faut voir, et elle
-    /// n'apparaît par définition dans aucune ligne. C'est ce qui manquait pour
-    /// repérer qu'un fichier ne remontait pas dans un import multi-format.
+    /// Built from the pipeline, not from the kept rows: a source that yielded
+    /// NOTHING is exactly the one to see, and by definition it appears in no row.
+    /// That's what makes a file that didn't come through visible in a
+    /// multi-format import.
     private var sourceBreakdown: [ImportSourceSummary] {
         let summaries = coordinator.sourceBreakdown
         guard summaries.count > 1 else { return [] }
@@ -72,7 +70,7 @@ struct TransactionDocumentReviewView: View {
             }
         }
         .nemorisFormStyle()
-        // Tint posé par vue (cf. convention notée dans `ImportEntryView`).
+        // Tint set per view (see the convention noted in `ImportEntryView`).
         .tint(AppTheme.Colors.accent)
         .paneChrome("Résultat de l'analyse", cancelLabel: "Annuler", onCancel: onCancel)
     }
@@ -98,9 +96,8 @@ struct TransactionDocumentReviewView: View {
                     Text("\(units.count) \(unitLabel)")
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
-                // Le détail par fichier vit dans sa propre section
-                // (`ImportSourceBreakdownSection`), partagée avec les autres
-                // écrans de revue.
+                // The per-file detail lives in its own section (`ImportSourceBreakdownSection`),
+                // shared with the other review screens.
                 if units.contains(where: \.usedDeterministicFallback) {
                     Label("Extraction automatique utilisée (sans IA) sur une partie du document.",
                           systemImage: "gearshape.2")
@@ -118,8 +115,7 @@ struct TransactionDocumentReviewView: View {
 
         if !rows.isEmpty {
             Section("Aperçu") {
-                // Aperçu borné : la revue complète, ligne par ligne, c'est
-                // l'écran de session qui la fait.
+                // Bounded preview: the full row-by-row review is the session screen's job.
                 ForEach(rows.prefix(20)) { row in
                     previewRow(row)
                 }
@@ -159,7 +155,7 @@ struct TransactionDocumentReviewView: View {
         .padding(.vertical, 2)
     }
 
-    // MARK: - Création de la session
+    // MARK: - Session creation
 
     private func createSession() {
         guard let summary = sessionRepo.createSession(rows: rows,

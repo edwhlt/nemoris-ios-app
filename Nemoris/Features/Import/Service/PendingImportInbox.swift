@@ -1,30 +1,30 @@
 import Foundation
 
-/// boîte de réception des documents déposés par un App
-/// Intent / raccourci Siri (`ImportInvestmentDocumentIntent`, `ImportFileIntent`)
-/// ou par les share extensions (`NemorisShareInvest`, `NemorisShareTransactions`).
+/// Inbox for documents dropped off by an App Intent / Siri shortcut
+/// (`ImportInvestmentDocumentIntent`, `ImportFileIntent`) or by the share
+/// extensions (`NemorisShareInvest`, `NemorisShareTransactions`).
 ///
-/// Le déposant n'importe RIEN silencieusement : il copie le fichier reçu dans le
-/// conteneur partagé App Group (`PendingImports/<uuid>.<ext>`) et pose une clé
-/// pointant dessus (une clé PAR type d'import). L'app, à son prochain passage au
-/// premier plan, consomme la clé, ouvre l'écran d'import pré-rempli et laisse
-/// l'utilisateur relire puis valider (aucun commit automatique).
+/// The depositor imports NOTHING silently: it copies the received file into
+/// the shared App Group container (`PendingImports/<uuid>.<ext>`) and sets a
+/// key pointing to it (one key PER import type). The next time the app comes
+/// to the foreground, it consumes the key, opens the pre-filled import screen
+/// and lets the user review, then validate (no automatic commit).
 ///
-/// Le conteneur App Group est partagé entre l'app, l'extension d'intent et les
-/// share extensions (même suite name que `WidgetDataStore.appGroupID`).
-/// ⚠️ Les share extensions embarquent un MIROIR de la logique d'écriture
-/// (`ShareInboxWriter` dans NemorisShareTransactions/ et NemorisShareInvest/,
-/// même convention que les modèles mirrorés du widget) — garder les clés,
-/// le nom de dossier et le format de fichier synchronisés.
+/// The App Group container is shared between the app, the intent extension
+/// and the share extensions (same suite name as `WidgetDataStore.appGroupID`).
+/// The share extensions embed a MIRROR of the writing logic
+/// (`ShareInboxWriter` in NemorisShareTransactions/ and NemorisShareInvest/,
+/// same convention as the widget's mirrored models) — keep the keys, folder
+/// name and file format in sync.
 @MainActor
 enum PendingImportInbox {
 
-    /// Type d'import en attente. Chaque kind a sa propre clé → un dépôt
-    /// investissement n'écrase jamais un dépôt transactions (et inversement).
+    /// Pending import type. Each kind has its own key → an investment drop never
+    /// overwrites a transaction drop (and vice versa).
     enum Kind {
-        /// Relevé/capture de portefeuille → `InvestmentPDFImportView` pré-rempli.
+        /// Portfolio statement/capture → pre-filled `InvestmentPDFImportView`.
         case investment
-        /// Relevé bancaire CSV → `ImportEntryView` pré-rempli.
+        /// CSV bank statement → pre-filled `ImportEntryView`.
         case transactions
 
         var pendingPathKey: String {
@@ -37,10 +37,10 @@ enum PendingImportInbox {
 
     static let appGroupID = "group.fr.hedwin.nemoris"
     private static let folderName = "PendingImports"
-    /// Durée de vie max d'un fichier en attente avant purge (fichier jamais consommé).
+    /// Maximum lifetime of a pending file before it's purged (never consumed).
     private static let maxAge: TimeInterval = 24 * 3600
 
-    /// Répertoire `PendingImports/` dans le conteneur App Group, créé si absent.
+    /// The `PendingImports/` directory in the App Group container, created if missing.
     private static func inboxDirectory() -> URL? {
         guard let container = FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
@@ -55,19 +55,18 @@ enum PendingImportInbox {
         return dir
     }
 
-    /// Dépose UN document en attente.
+    /// Drops off ONE pending document.
     @discardableResult
     static func stash(data: Data, fileExtension: String, kind: Kind) -> Bool {
         stash(files: [(data: data, fileExtension: fileExtension)], kind: kind)
     }
 
-    /// Dépose N documents en attente. Appelée par les App Intents et les share
-    /// extensions (via leur miroir `ShareInboxWriter`).
+    /// Drops off N pending documents. Called by the App Intents and the share
+    /// extensions (through their `ShareInboxWriter` mirror).
     ///
-    /// Sémantique d'AJOUT : les chemins déjà en attente sont conservés. Deux
-    /// partages successifs avant le retour dans l'app s'accumulent au lieu que
-    /// le second efface le premier — le fichier écrasé restait sur disque sans
-    /// que rien ne pointe plus dessus.
+    /// APPEND semantics: paths already pending are kept. Two successive shares
+    /// before returning to the app accumulate, instead of the second erasing the
+    /// first (whose file would stay on disk with nothing pointing to it).
     @discardableResult
     static func stash(files: [(data: Data, fileExtension: String)], kind: Kind) -> Bool {
         guard !files.isEmpty else { return false }
@@ -77,11 +76,10 @@ enum PendingImportInbox {
 
         var paths = storedPaths(defaults: defaults, kind: kind)
         for file in files {
-            // Les octets font foi (même règle que les share extensions) : un
-            // `IntentFile` fourni par Raccourcis porte souvent un type abstrait
-            // sans extension exploitable, et un fichier `.dat` était ensuite
-            // traité comme du texte brut par l'import — le binaire passait pour
-            // un relevé.
+            // The bytes are authoritative (same rule as the share extensions): an
+            // `IntentFile` supplied by Shortcuts often carries an abstract type without
+            // a usable extension, and a `.dat` file would then be treated as plain text
+            // by the import — binary passing for a statement.
             let declared = file.fileExtension.lowercased()
             let ext = InvestmentPDFParser.sniffFileExtension(data: file.data)
                 ?? (declared.isEmpty || declared == "dat" ? "txt" : declared)
@@ -99,26 +97,26 @@ enum PendingImportInbox {
         return true
     }
 
-    /// Consomme les documents d'investissement en attente. Appelée par l'app au
-    /// passage au premier plan.
+    /// Consumes the pending investment documents. Called by the app when it comes
+    /// to the foreground.
     static func consumePendingInvestmentImports() -> [URL] {
         consume(kind: .investment)
     }
 
-    /// Consomme les relevés de transactions en attente.
+    /// Consumes the pending transaction statements.
     static func consumePendingTransactionImports() -> [URL] {
         consume(kind: .transactions)
     }
 
-    /// Consomme les documents en attente du kind donné (ceux qui existent
-    /// encore sur disque). Efface la clé (one-shot).
+    /// Consumes the pending documents of the given kind (those still on disk).
+    /// Clears the key (one-shot).
     private static func consume(kind: Kind) -> [URL] {
         guard let defaults = UserDefaults(suiteName: appGroupID) else { return [] }
         let paths = storedPaths(defaults: defaults, kind: kind)
         guard !paths.isEmpty else { return [] }
 
-        // Clé effacée dans tous les cas : one-shot, on ne re-propose pas un
-        // fichier disparu au prochain foreground.
+        // The key is cleared in every case: one-shot, a vanished file isn't offered
+        // again on the next foreground.
         defaults.removeObject(forKey: kind.pendingPathKey)
 
         return paths.compactMap { path in
@@ -130,9 +128,9 @@ enum PendingImportInbox {
         }
     }
 
-    /// Lecture tolérante de la clé : tableau JSON de chemins (format courant),
-    /// ou chemin brut — une version antérieure de l'app, ou une share extension
-    /// pas encore mise à jour, écrit encore la forme scalaire.
+    /// Tolerant key read: a JSON array of paths (current format), or a raw path
+    /// — an earlier app version, or a share extension not yet updated, still
+    /// writes the scalar form.
     private static func storedPaths(defaults: UserDefaults, kind: Kind) -> [String] {
         guard let raw = defaults.string(forKey: kind.pendingPathKey), !raw.isEmpty else { return [] }
         if let data = raw.data(using: .utf8),
@@ -148,7 +146,7 @@ enum PendingImportInbox {
         defaults.set(json, forKey: kind.pendingPathKey)
     }
 
-    /// Supprime les fichiers en attente plus vieux que `maxAge` (jamais consommés).
+    /// Deletes pending files older than `maxAge` (never consumed).
     static func purgeStale() {
         guard let dir = inboxDirectory() else { return }
         let cutoff = Date().addingTimeInterval(-maxAge)

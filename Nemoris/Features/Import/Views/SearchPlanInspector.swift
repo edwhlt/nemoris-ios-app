@@ -1,30 +1,30 @@
 import SwiftUI
 
-/// Rend VISIBLE ce que le planificateur a décidé.
+/// Makes VISIBLE what the planner decided.
 ///
-/// C'est la réponse à « comment apprendre au système que FLANCHES est un lieu ? ». Plutôt
-/// qu'une étape IA opaque, on montre ce qui a été retiré du nom et on laisse l'utilisateur
-/// le réinjecter d'un tap. Le découpage devient inspectable et corrigeable, et chaque
-/// correction est une entrée de corpus candidate.
+/// It answers "how can the system learn that FLANCHES is a place?". Rather
+/// than an opaque AI step, it shows what was removed from the name and lets
+/// the user put it back with a tap. The splitting becomes inspectable and
+/// correctable, and each correction is a candidate corpus entry.
 
-// MARK: - Puces « Retiré du nom »
+// MARK: - "Removed from the name" chips
 
 struct DroppedTokenChips: View {
 
     let extraction: MerchantLabelExtraction
-    /// Réinjecte le jeton dans la requête et relance la planification.
+    /// Puts the token back into the query and reruns the planning.
     let onRestore: (String) -> Void
 
-    /// Un même jeton peut être retiré plusieurs fois (ville répétée dans l'enseigne) :
-    /// on dédoublonne pour ne pas afficher deux puces identiques.
+    /// The same token can be removed several times (a city repeated in the brand):
+    /// deduplicated so two identical chips aren't shown.
     private var chips: [DroppedToken] {
         var seen = Set<String>()
         return extraction.droppedTokens.filter { token in
             let key = "\(token.value)|\(token.reason.rawValue)"
             guard !seen.contains(key), !token.value.isEmpty else { return false }
             seen.insert(key)
-            // Le bruit purement structurel n'apprend rien à l'utilisateur : on ne montre
-            // que ce qui pourrait légitimement faire partie du nom du commerce.
+            // Purely structural noise teaches the user nothing: only what could
+            // legitimately be part of the shop's name is shown.
             return token.reason != .noise
         }
     }
@@ -81,7 +81,7 @@ struct DroppedTokenChips: View {
     }
 }
 
-// MARK: - « Détails de la recherche »
+// MARK: - "Search details"
 
 struct SearchDetailsDisclosure: View {
 
@@ -183,8 +183,8 @@ struct SearchDetailsDisclosure: View {
         }
     }
 
-    /// Paramètres réels de la requête. Jamais l'URL complète : on ne veut aucune clé ni
-    /// aucun identifiant dans une surface affichable ou copiable.
+    /// The query's real parameters. Never the full URL: no key or identifier may
+    /// appear in a displayable or copyable surface.
     private func subtitle(for attempt: SearchAttempt, outcome: SearchAttemptOutcome?) -> String {
         var parts: [String] = []
         switch attempt.kind {
@@ -235,8 +235,8 @@ struct SearchDetailsDisclosure: View {
 
 // MARK: - Disposition en flot
 
-/// Enchaîne les puces et passe à la ligne quand la largeur est atteinte.
-/// `Layout` existe depuis iOS 16 / macOS 13 : la cible du projet (18 / 14) est couverte.
+/// Lays the chips out in sequence and wraps when the width is reached.
+/// `Layout` exists since iOS 16 / macOS 13: the project's target (18 / 14) is covered.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 6
 

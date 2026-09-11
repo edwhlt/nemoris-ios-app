@@ -35,10 +35,9 @@ struct ApplePayAlertSettingsView: View {
 
     @State private var purgeOlderThanDays = 30
     @State private var showPurgeConfirmation = false
-    // `LocalizedStringResource`, not `String`: built once in `performPurge`
-    // and re-read later by `body` — a plain `String` would freeze whatever
-    // language was active at construction time (cf. CLAUDE.md §5, "texte
-    // persisté = LocalizedStringResource").
+    // `LocalizedStringResource`, not `String`: built once in `performPurge` and
+    // re-read later by `body` — a plain `String` would freeze whatever language
+    // was active at construction time.
     @State private var purgeResultMessage: LocalizedStringResource?
 
     var body: some View {

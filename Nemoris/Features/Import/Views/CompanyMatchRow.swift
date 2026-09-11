@@ -1,15 +1,16 @@
 import SwiftUI
 
-/// Affichage à DEUX NIVEAUX d'un résultat de registre d'entreprises.
+/// TWO-LEVEL display of a company registry result.
 ///
-/// Pourquoi deux niveaux : une enseigne est une personne morale (« OULLIDIS », « CSF »,
-/// « SAS SISENS ») qui exploite N établissements. Le siège social est souvent à l'autre
-/// bout du pays, alors que le commerce facturé est une BRANCHE qu'on reconnaît à son
-/// adresse. Écraser tout ça en une ligne plate — ce que faisait l'ancienne liste — perdait
-/// justement l'information qui permet d'identifier le bon commerce.
+/// Why two levels: a brand is a legal entity ("OULLIDIS", "CSF", "SAS
+/// SISENS") operating N establishments. The head office is often at the other
+/// end of the country, while the billed shop is a BRANCH recognized by its
+/// address. Flattening all that into one row would lose exactly the
+/// information that identifies the right shop.
 ///
-/// Taper l'ENTREPRISE remplit le nom et le SIREN.
-/// Taper un ÉTABLISSEMENT remplit en plus l'adresse, le SIRET et les coordonnées.
+/// Tapping the COMPANY fills in the name and the SIREN.
+/// Tapping an ESTABLISHMENT also fills in the address, the SIRET and the
+/// coordinates.
 struct CompanyMatchRow: View {
 
     let ranked: RankedCompany
@@ -18,10 +19,10 @@ struct CompanyMatchRow: View {
 
     @State private var isExpanded: Bool
 
-    /// `initiallyExpanded: true` déplie le meilleur résultat d'entrée — les
-    /// établissements (et leurs adresses, LE critère d'identification) étaient
-    /// invisibles derrière un disclosure replié : l'utilisateur ne voyait que
-    /// « N établissements » sans savoir qu'un tap les révélait.
+    /// `initiallyExpanded: true` unfolds the best result from the start —
+    /// otherwise the establishments (and their addresses, THE identification
+    /// criterion) sit behind a collapsed disclosure, and the user only sees
+    /// "N establishments" without knowing a tap reveals them.
     init(ranked: RankedCompany,
          initiallyExpanded: Bool = false,
          onPickCompany: @escaping (CompanyMatch) -> Void,
@@ -33,7 +34,7 @@ struct CompanyMatchRow: View {
     }
 
     private var establishments: [Establishment] {
-        // Ordonnés par le classement : le plus plausible d'abord, les fermés en dernier.
+        // Ordered by the ranking: the most plausible first, closed ones last.
         ranked.rankedEstablishments.compactMap { candidate in
             ranked.match.allEstablishments.first { $0.id == candidate.candidate.id }
         }
@@ -93,7 +94,7 @@ struct CompanyMatchRow: View {
         }
     }
 
-    // MARK: Niveau 2 — les établissements
+    // MARK: Level 2 — the establishments
 
     @ViewBuilder
     private var establishmentList: some View {
@@ -115,13 +116,12 @@ struct CompanyMatchRow: View {
                     }
                 }
 
-                // Honnêteté d'affichage : `matching_etablissements` ne renvoie QUE les
-                // branches dont le nom matche la requête, pas toutes celles de l'entreprise.
-                // Laisser croire à une liste exhaustive serait mensonger. Pas de bouton
-                // « voir tout » : l'API recherche-entreprises ne sait PAS lister tous les
-                // établissements d'un SIREN (q=<siren> renvoie l'entité avec
-                // matching_etablissements VIDE — vérifié) ; il faudrait l'API Sirene INSEE
-                // avec token, hors scope.
+                // Honest display: `matching_etablissements` returns ONLY the branches whose
+                // name matches the query, not all of the company's. Implying an exhaustive
+                // list would be misleading. No "see all" button: the recherche-entreprises
+                // API can't list every establishment of a SIREN (q=<siren> returns the
+                // entity with an EMPTY matching_etablissements); that would need the INSEE
+                // Sirene API with a token.
                 if let total = ranked.match.openEstablishmentCount, total > establishments.count {
                     Divider().padding(.leading, 4)
                     Text("\(total - establishments.count) autre(s) établissement(s) non affiché(s).")
@@ -148,8 +148,8 @@ struct CompanyMatchRow: View {
                         .foregroundStyle(AppTheme.Colors.textPrimary)
                         .lineLimit(1)
                 }
-                // L'adresse EST le critère d'identification : c'est elle qui distingue
-                // deux boutiques de la même enseigne.
+                // The address IS the identification criterion: it's what tells two shops of
+                // the same brand apart.
                 if let address = e.addressLine {
                     Text(address)
                         .font(.caption2)

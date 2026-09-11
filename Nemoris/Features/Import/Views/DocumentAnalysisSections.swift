@@ -1,51 +1,47 @@
 import SwiftUI
 
-// `ImportDocumentSource` et `ImportDocumentReader` vivaient ici. Ils sont
-// remontés dans `Features/Import/Pipeline/Readers/` : ce sont des moteurs de
-// lecture, pas des vues, et la refonte leur ajoute deux formats (classeur,
-// relevé structuré) qui n'ont rien à faire dans un fichier d'UI.
+// `ImportDocumentSource` and `ImportDocumentReader` live in
+// `Features/Import/Pipeline/Readers/`: they are reading engines, not views.
 
-/// Blocs d'UI PARTAGÉS par les deux imports de documents (transactions et
-/// investissements) : la barre de progression de l'analyse et le détail par
-/// unité en cas d'échec.
+/// UI blocks SHARED by both document imports (transactions and investments):
+/// the analysis progress bar and the per-unit detail on failure.
 ///
-/// **Pourquoi les mutualiser :** les deux imports lisent les mêmes formats
-/// (PDF, capture, texte), avec le même découpage en unités et les mêmes modes
-/// d'échec (`ImportUnitDiagnostic`). Laisser chaque module réinventer son écran de
-/// traitement, c'est garantir qu'ils divergent — l'un a fini par afficher une
-/// progression exacte avec le texte lu en cas d'échec, l'autre un simple
-/// « Page X / Y » sans diagnostic.
+/// **Why share them:** both imports read the same formats (PDF, capture,
+/// text), with the same splitting into units and the same failure modes
+/// (`ImportUnitDiagnostic`). Letting each module reinvent its processing
+/// screen guarantees they diverge.
 
-/// Vue neutre d'une unité analysée, alimentée par l'un ou l'autre parseur.
+/// Neutral view of an analyzed unit, fed by either parser.
 struct AnalysisUnit: Identifiable {
     let id: UUID
     let unitNumber: Int
-    /// Fichier d'origine (une session peut agréger plusieurs documents).
+    /// Source file (a session can aggregate several documents).
     let sourceName: String
-    /// Texte réellement extrait — c'est LUI qui permet de distinguer un OCR
-    /// muet d'une interprétation ratée.
+    /// Text actually extracted — IT is what tells a silent OCR from a failed
+    /// interpretation.
     let rawText: String
-    /// Nombre d'éléments reconnus dans cette unité (opérations, ordres…).
+    /// Number of items recognized in this unit (operations, orders…).
     let recognizedCount: Int
     let diagnostic: ImportUnitDiagnostic
     let kind: ImportSourceKind
-    /// Vrai si le résultat vient de l'extraction déterministe, sans IA.
+    /// True if the result comes from the deterministic extraction, without AI.
     let usedDeterministicFallback: Bool
 }
 
-/// Progression de l'analyse.
+/// Analysis progress.
 ///
-/// ⚠️ La barre n'est DÉTERMINÉE que si elle a quelque chose à raconter, c'est-à-dire
-/// s'il y a plus d'une unité à traiter :
-///   • total inconnu (0) → on lit encore le document, la durée est imprévisible ;
-///   • une seule unité → la barre sauterait de 0 % à 100 % sans jamais bouger,
-///     alors que l'attente réelle (OCR + génération IA) se passe DANS cette
-///     unique unité.
-/// Dans les deux cas une barre indéterminée est plus honnête.
+/// The bar is DETERMINATE only when it has something to tell, i.e. when there
+/// is more than one unit to process:
+///   • unknown total (0) → the document is still being read, the duration is
+///     unpredictable;
+///   • a single unit → the bar would jump from 0% to 100% without ever
+///     moving, while the real wait (OCR + AI generation) happens INSIDE that
+///     single unit.
+/// In both cases an indeterminate bar is more honest.
 struct DocumentAnalysisProgressSection: View {
     let done: Int
     let total: Int
-    /// Phrase d'attente adaptée au type d'import.
+    /// Waiting sentence adapted to the import type.
     var subtitle: LocalizedStringKey
 
     private var showsDeterminate: Bool { total > 1 }
@@ -77,23 +73,22 @@ struct DocumentAnalysisProgressSection: View {
     }
 }
 
-/// Détail PAR SOURCE de ce que l'import a produit, avec inspection du JSON
-/// normalisé.
+/// PER-SOURCE detail of what the import produced, with inspection of the
+/// normalized JSON.
 ///
-/// **Pourquoi par source et pas un total :** sur un import multi-fichiers
-/// mêlant plusieurs formats, un total agrégé ne dit pas si TOUTES les sources
-/// ont contribué. Une source muette n'apparaît dans aucune ligne importée — par
-/// définition — donc seul un décompte par fichier permet de la repérer.
+/// **Why per source rather than a total:** on a multi-file import mixing
+/// several formats, an aggregated total doesn't say whether ALL sources
+/// contributed. A silent source appears in no imported row — by definition —
+/// so only a per-file count can reveal it.
 ///
-/// **Pourquoi le JSON `ImportElement` et pas le texte OCR :** c'est la seule
-/// forme qui existe pour TOUS les formats. Un CSV, un classeur ou un relevé
-/// CAMT n'ont aucun « texte lu » à montrer, alors qu'ils produisent bien des
-/// éléments — les inspecter était impossible avant.
+/// **Why the `ImportElement` JSON rather than the OCR text:** it's the only
+/// form that exists for EVERY format. A CSV, a workbook or a CAMT statement
+/// has no "text read" to show, yet they do produce elements.
 struct ImportSourceBreakdownSection: View {
     let summaries: [ImportSourceSummary]
-    /// Nom de ce qui est compté (« opération », « ligne »).
+    /// Name of what is counted ("operation", "row").
     var noun: String = "opération"
-    /// JSON normalisé d'une source, à la demande.
+    /// Normalized JSON of a source, on demand.
     let debugJSON: (ImportSourceSummary) -> String
 
     @State private var inspected: ImportSourceSummary?
@@ -112,8 +107,8 @@ struct ImportSourceBreakdownSection: View {
                                 .lineLimit(1)
                             Text(summary.summaryLabel(noun: noun))
                                 .font(.caption.monospacedDigit())
-                                // Une source qui n'a rien donné est mise en
-                                // évidence : c'est l'information utile.
+                                // A source that yielded nothing is highlighted: that's the useful
+                                // information.
                                 .foregroundStyle(summary.isEmptyResult
                                                  ? AppTheme.Colors.warning
                                                  : AppTheme.Colors.textSecondary)
@@ -136,12 +131,11 @@ struct ImportSourceBreakdownSection: View {
                 Text("Vérifie qu'aucun fichier n'a été laissé de côté. L'icône { } montre les données brutes lues pour ce fichier.")
             }
             .sheet(item: $inspected) { summary in
-                // Ré-injection \.locale obligatoire (CLAUDE.md §5) et
-                // `\.paneHostContext` itou : cette section vit dans une vue
-                // elle-même hébergée dans l'inspecteur macOS (`.inspector`) —
-                // sans reset à `.modal`, le `.paneChrome` d'`ImportDebugJSONView`
-                // publierait ses boutons dans la barre système au lieu de les
-                // dessiner dans CETTE fenêtre séparée (aucun bouton visible).
+                // Re-injecting \.locale is mandatory, and so is `\.paneHostContext`: this
+                // section lives in a view itself hosted in the macOS inspector
+                // (`.inspector`) — without a reset to `.modal`, `ImportDebugJSONView`'s
+                // `.paneChrome` would publish its buttons into the system bar instead of
+                // drawing them in THIS separate window (no visible button).
                 ImportDebugJSONView(title: summary.sourceName, json: debugJSON(summary))
                     .environment(\.locale, AppLocalization.locale)
                     .environment(\.paneHostContext, .modal)
@@ -161,7 +155,7 @@ struct ImportSourceBreakdownSection: View {
     }
 }
 
-/// Affichage brut du JSON normalisé d'une source.
+/// Raw display of a source's normalized JSON.
 struct ImportDebugJSONView: View {
     let title: String
     let json: String
@@ -177,18 +171,17 @@ struct ImportDebugJSONView: View {
             }
             .background(AppTheme.Colors.background.ignoresSafeArea())
             .tint(AppTheme.Colors.accent)
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
-            // barre d'outils native laisse le bureau de l'utilisateur
-            // transparaître (retour d'usage 2026-08-21). Cf. le commentaire
-            // de `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on a macOS sheet — the native toolbar
+            // would let the user's desktop show through. See the `macSheetChrome`
+            // comment in AdaptivePane.swift.
             .paneChrome(title, cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 }
 
-/// Détail par unité : pourquoi ça n'a rien donné, et ce que l'app a lu.
+/// Per-unit detail: why it yielded nothing, and what the app read.
 ///
-/// Sans ce bloc, un OCR muet, une IA indisponible et un document réellement
-/// vide donnent le même écran — impossible de savoir quoi corriger.
+/// Without this block, a silent OCR, an unavailable AI and a genuinely empty
+/// document all give the same screen — no way to know what to fix.
 struct DocumentAnalysisDiagnosticsSection: View {
     let units: [AnalysisUnit]
     @State private var expandedText: UUID?
@@ -238,7 +231,7 @@ struct DocumentAnalysisDiagnosticsSection: View {
     }
 }
 
-// MARK: - Adaptateurs depuis les deux parseurs
+// MARK: - Adapters from the two parsers
 
 extension TransactionDocumentParser.UnitResult {
     var analysisUnit: AnalysisUnit {
