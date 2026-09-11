@@ -1,22 +1,21 @@
 import Foundation
 import Observation
 
-// MARK: - Chantier A — Auto-sync des portefeuilles d'investissement
+// MARK: - Investment portfolio auto-sync
 //
-// Orchestrateur central de la synchronisation Investissements :
+// Central orchestrator of the Investments sync:
 //   1. LiveSync (Binance / EVM / BTC / Solana) via LiveSyncRegistry.syncAll()
-//   2. Historique des cours pour toutes les positions "stale" (dernier point
-//      du cache ≠ aujourd'hui), séquentiel avec pacing géré par ProviderRateLimiter.
+//   2. Price history for every "stale" position (last cached point ≠ today),
+//      sequential, with pacing handled by ProviderRateLimiter.
 //
-// Déclencheurs : passage de l'app en premier plan (`.appActive`), ouverture du
-// module (`.investmentsOpened`) — gates 4 h + toggle user — et pull-to-refresh
-// (`.pullToRefresh`, bypass de l'intervalle).
+// Triggers: the app coming to the foreground (`.appActive`), opening the
+// module (`.investmentsOpened`) — gated by 4 h + a user toggle — and
+// pull-to-refresh (`.pullToRefresh`, bypasses the interval).
 //
-// C'est aussi ici que vit `syncHistory(identifier:)` — le corps déplacé de
-// `InvestmentsViewModel.syncMarketHistory` / `syncCryptoHistory` — SANS AUCUN
-// `load()` : le fix du O(N²) (avant : full reload SQLite main-thread PAR position).
-// Le refresh UI passe par UNE notification `.nemorisInvestmentsDidSync` postée
-// en fin de passe (→ bump de AppState.dataRefreshToken dans NemorisApp).
+// `syncHistory(identifier:)` lives here too, WITHOUT any `load()`: reloading
+// every view model per position would make a pass O(N²) on the main thread.
+// The UI refresh goes through ONE `.nemorisInvestmentsDidSync` notification
+// posted at the end of the pass (→ bumps AppState.dataRefreshToken in NemorisApp).
 
 @Observable
 @MainActor
@@ -24,34 +23,33 @@ final class InvestmentAutoSyncService {
 
     static let shared = InvestmentAutoSyncService()
 
-    // MARK: - État observable (hooks UI)
+    // MARK: - Observable state (UI hooks)
 
     private(set) var isSyncing = false
     private(set) var lastSyncAt: Date?
-    /// Résumé de la dernière passe (ex. "12 cours à jour · 2 sans données · Yahoo limité").
-    /// ⚠️ `LocalizedStringResource`, pas `String` — sinon figé dans la langue
-    /// active AU MOMENT DU SYNC (cf. `InvestmentSyncTraceStore.Entry.message`).
+    /// Summary of the last pass (e.g. "12 prices up to date · 2 without data · Yahoo limited").
+    /// `LocalizedStringResource`, not `String` — otherwise frozen in the language
+    /// active AT SYNC TIME (see `InvestmentSyncTraceStore.Entry.message`).
     private(set) var lastSummary: LocalizedStringResource?
-    /// Vrai si la dernière passe a rencontré au moins un problème (calculé une
-    /// fois dans `buildSummary`, cf. `SyncSummary.hasIssues`) — pas un test de
-    /// sous-chaîne sur `lastSummary`, qui casserait dès que l'app n'est plus
-    /// en français.
+    /// True if the last pass hit at least one problem (computed once in
+    /// `buildSummary`, see `SyncSummary.hasIssues`) — not a substring test on
+    /// `lastSummary`, which would break as soon as the app isn't in French.
     private(set) var lastSyncHadIssues = false
-    /// Outcome typé par identifier (clé uppercased) — consommé par les vues
-    /// pour afficher un statut par position sans parser de messages.
+    /// Typed outcome per identifier (uppercased key) — consumed by the views to
+    /// show a per-position status without parsing messages.
     private(set) var outcomesByIdentifier: [String: PositionSyncOutcome] = [:]
 
-    /// Enregistre manuellement un outcome pour `identifier`. `syncNow()` (passe
-    /// complète) écrit directement dans `outcomesByIdentifier` ; les sync ciblées
-    /// (compte, position — `syncHistory(identifier:)` appelé hors passe complète)
-    /// passent par ici pour que le "?" reste une vue à jour quel que soit le
-    /// déclencheur, plutôt qu'un 2ᵉ suivi divergent par écran.
+    /// Records an outcome for `identifier` by hand. `syncNow()` (full pass) writes
+    /// directly into `outcomesByIdentifier`; targeted syncs (account, position —
+    /// `syncHistory(identifier:)` called outside a full pass) go through here, so
+    /// the "?" stays an up-to-date view whatever the trigger, rather than a second,
+    /// diverging tracking per screen.
     func recordOutcome(identifier: String, outcome: PositionSyncOutcome) {
         let key = identifier.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !key.isEmpty else { return }
         outcomesByIdentifier[key] = outcome
     }
-    /// Progression de la passe courante (nil hors sync).
+    /// Progress of the current pass (nil outside a sync).
     private(set) var progress: SyncProgress?
 
     struct SyncProgress: Equatable, Sendable {
@@ -65,35 +63,35 @@ final class InvestmentAutoSyncService {
         case pullToRefresh
     }
 
-    // MARK: - Dépendances & clés
+    // MARK: - Dependencies & keys
 
     private let repository = InvestmentRepository()
     private let marketDataService = InvestmentMarketDataService()
 
     private static let lastSyncKey = "investments.lastAutoSyncAt"
     private static let autoSyncEnabledKey = "investments.autoSyncEnabled"
-    /// Intervalle minimal entre 2 passes automatiques.
+    /// Minimum interval between 2 automatic passes.
     private static let minAutoSyncInterval: TimeInterval = 4 * 3600
 
     private init() {
         lastSyncAt = UserDefaults.standard.object(forKey: Self.lastSyncKey) as? Date
     }
 
-    /// Toggle user "Synchronisation automatique des cours" — défaut TRUE
-    /// (la clé absente vaut activé, cf. AppState.investmentsAutoSyncEnabled).
+    /// User toggle "Automatic price sync" — defaults to TRUE (a missing key means
+    /// enabled, see AppState.investmentsAutoSyncEnabled).
     static var autoSyncEnabled: Bool {
         UserDefaults.standard.object(forKey: autoSyncEnabledKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: autoSyncEnabledKey)
     }
 
-    // MARK: - Déclencheur gated
+    // MARK: - Gated trigger
 
-    /// Lance une passe complète si toutes les gates passent :
-    ///   - module Investissements activé (feature flag)
-    ///   - toggle auto-sync activé
-    ///   - pas de passe déjà en cours
-    ///   - ≥ 4 h depuis la dernière passe (bypassé par `.pullToRefresh`)
+    /// Runs a full pass if every gate passes:
+    ///   - Investments module enabled (feature flag)
+    ///   - auto-sync toggle enabled
+    ///   - no pass already running
+    ///   - ≥ 4 h since the last pass (bypassed by `.pullToRefresh`)
     func autoSyncIfNeeded(trigger: Trigger) async {
         guard UserDefaults.standard.bool(forKey: "featureInvestments") else { return }
         guard Self.autoSyncEnabled else { return }
@@ -106,7 +104,7 @@ final class InvestmentAutoSyncService {
         await syncNow()
     }
 
-    // MARK: - Passe complète
+    // MARK: - Full pass
 
     func syncNow() async {
         guard !isSyncing else { return }
@@ -114,26 +112,26 @@ final class InvestmentAutoSyncService {
         defer {
             isSyncing = false
             progress = nil
-            // TOUJOURS posté, même en cas d'échec partiel — c'est ce qui
-            // déclenche le rechargement de l'UI (bump dataRefreshToken).
+            // ALWAYS posted, even on partial failure — it's what triggers the UI
+            // reload (bumps dataRefreshToken).
             NotificationCenter.default.post(name: .nemorisInvestmentsDidSync, object: nil)
         }
         print("[InvestmentAutoSyncService] Passe de sync démarrée")
 
-        // 1. LiveSync exchanges/wallets (séquentiel, rate limits gérés côté providers)
-        // Feature Pro (`.investmentsLiveSync`) : un lien créé pendant une période Pro
-        // ne doit pas continuer à se synchroniser gratuitement après résiliation —
-        // seul l'écran de gestion (LiveSyncSettingsView) est verrouillé par son
-        // propre `paywallOverlay`, ce déclencheur en arrière-plan doit l'être aussi.
-        // Le reste de la passe (historique de cours des positions saisies à la
-        // main) n'a rien à voir avec Live Sync et continue pour tout le monde.
+        // 1. LiveSync exchanges/wallets (sequential, rate limits handled by the providers)
+        // Pro feature (`.investmentsLiveSync`): a link created during a Pro period
+        // must not keep syncing for free after cancellation — the management screen
+        // (LiveSyncSettingsView) is locked by its own `paywallOverlay`, and this
+        // background trigger must be too. The rest of the pass (price history of
+        // manually entered positions) has nothing to do with Live Sync and carries
+        // on for everyone.
         let liveSyncResults = PurchaseManager.shared.isUnlocked(.investmentsLiveSync)
             ? await LiveSyncRegistry.shared.syncAll()
             : []
         let liveSyncErrors = liveSyncResults.filter { $0.error != nil }
 
-        // 2. Historique marché : cibles = positions dédupliquées par identifier
-        //    de sync (2 positions même ticker → 1 seul fetch).
+        // 2. Market history: targets = positions deduplicated by sync identifier
+        //    (2 positions with the same ticker → a single fetch).
         let accounts = repository.fetchAccounts()
         let allPositions = accounts.flatMap { repository.fetchPositions(accountId: $0.id) }
 
@@ -149,19 +147,19 @@ final class InvestmentAutoSyncService {
         outcomesByIdentifier = [:]
         progress = SyncProgress(done: 0, total: targets.count)
 
-        // Familles de providers déjà rate-limitées pendant CETTE passe :
-        // crypto → coinGecko ; titres traditionnels → yahoo/stooq (regroupés
-        // sous .yahoo). Les positions restantes de la même famille sont
-        // marquées .rateLimited SANS être tentées — mais l'autre famille continue.
+        // Provider families already rate-limited during THIS pass: crypto →
+        // coinGecko; traditional securities → yahoo/stooq (grouped under .yahoo).
+        // Remaining positions of the same family are marked .rateLimited WITHOUT
+        // being tried — but the other family carries on.
         var rateLimitedFamilies = Set<MarketDataProvider>()
         var done = 0
 
         for target in targets {
             let key = target.identifier.uppercased()
 
-            // Raffinement week-end : marchés traditionnels fermés samedi/dimanche,
-            // un dernier point daté de vendredi est le maximum atteignable →
-            // .upToDate sans appel réseau. Ne s'applique PAS aux cryptos (24/7).
+            // Weekend refinement: traditional markets are closed Saturday/Sunday, so a
+            // last point dated Friday is the most that can be reached → .upToDate
+            // without a network call. Does NOT apply to cryptos (24/7).
             if !target.isCrypto,
                let latest = PriceHistoryCache.shared.latestDate(identifier: target.identifier),
                Self.isWeekendFresh(latest: latest) {
@@ -189,11 +187,11 @@ final class InvestmentAutoSyncService {
 
             done += 1
             progress = SyncProgress(done: done, total: targets.count)
-            // Laisse respirer le main actor entre 2 positions (UI fluide).
+            // Let the main actor breathe between 2 positions (smooth UI).
             await Task.yield()
         }
 
-        // 3. Résumé + persistance de la date
+        // 3. Summary + persisting the date
         let summary = Self.buildSummary(
             outcomes: Array(outcomesByIdentifier.values),
             liveSyncTotal: liveSyncResults.count,
@@ -206,13 +204,12 @@ final class InvestmentAutoSyncService {
         print("[InvestmentAutoSyncService] Passe terminée — \(String(localized: summary.text))")
     }
 
-    // MARK: - Sync d'un identifier (corps déplacé depuis InvestmentsViewModel)
+    // MARK: - Syncing one identifier
 
-    /// Synchronise l'historique de cours d'UN identifier (ticker/ISIN) :
-    /// route crypto → CoinGecko, sinon Yahoo/Stooq. Skip si le cache a déjà
-    /// un point aujourd'hui. Persiste (cache disque + current_value SQLite +
-    /// trace) mais NE recharge AUCUN ViewModel — c'est le cœur du fix O(N²) :
-    /// l'appelant fait UN SEUL reload en fin de passe.
+    /// Syncs ONE identifier's (ticker/ISIN) price history: crypto → CoinGecko,
+    /// otherwise Yahoo/Stooq. Skipped if the cache already has a point for today.
+    /// Persists (disk cache + SQLite current_value + trace) but reloads NO view
+    /// model: the caller does a SINGLE reload at the end of the pass.
     func syncHistory(identifier: String) async -> PositionSyncOutcome {
         let clean = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else {
@@ -224,15 +221,15 @@ final class InvestmentAutoSyncService {
             return .invalidIdentifier
         }
 
-        // Route critique : ticker crypto connu → CoinGecko (sinon Yahoo cote
-        // des actions homonymes — l'action "FET" cotée €53 corromprait le
-        // cours Fetch.AI qui vaut €1.50).
+        // Critical routing: a known crypto ticker → CoinGecko (otherwise Yahoo
+        // quotes same-named stocks — the "FET" stock trading at €53 would corrupt
+        // the Fetch.AI price, worth €1.50).
         if let coinId = PriceResolver.coinId(forTicker: clean) {
             return await syncCryptoHistory(identifier: clean, coinId: coinId)
         }
 
-        // Skip optimization (Yahoo) : le passé est immuable. Si on a déjà un
-        // point pour aujourd'hui en cache, l'API ne nous apprendra rien.
+        // Skip optimization (Yahoo): the past is immutable. With a point for today
+        // already cached, the API has nothing new to say.
         if let latest = PriceHistoryCache.shared.latestDate(identifier: clean),
            Calendar.current.isDateInToday(latest) {
             InvestmentSyncTraceStore.record(.init(
@@ -247,24 +244,24 @@ final class InvestmentAutoSyncService {
             let result = try await marketDataService.fetchHistory(identifier: clean)
             _ = repository.savePriceHistory(identifier: clean, points: result.points, source: result.source)
 
-            // Update current_value des positions matchant l'identifier ET le
-            // résultat fetché (qui peut différer après résolution OpenFIGI).
+            // Update current_value of the positions matching the identifier AND the
+            // fetched result (which may differ after OpenFIGI resolution).
             let touchedA = repository.updatePositionsCurrentValueFromLatestPrice(identifier: result.identifier)
             let touchedB = result.identifier.uppercased() == clean.uppercased()
                 ? 0
                 : repository.updatePositionsCurrentValueFromLatestPrice(identifier: clean)
             let totalTouched = touchedA + touchedB
 
-            // `LocalizedStringResource` s'imbrique dans un autre via
-            // interpolation (vérifié) — c'est ce qui permet de composer une
-            // phrase en deux morceaux sans jamais figer de texte résolu.
+            // A `LocalizedStringResource` nests inside another through interpolation —
+            // that's what allows composing a sentence in two parts without ever
+            // freezing resolved text.
             let baseMsg = LocalizedStringResource("Historique synchronisé via \(result.source) (\(result.points.count) points).")
             let msg: LocalizedStringResource = totalTouched > 0
                 ? LocalizedStringResource("\(baseMsg) \(totalTouched) position(s) mise(s) à jour.")
                 : baseMsg
 
-            // Trace persistante : TOUS les symboles essayés (pas seulement le
-            // winner) pour montrer le chemin de résolution complet.
+            // Persistent trace: ALL symbols tried (not just the winner), to show the
+            // full resolution path.
             InvestmentSyncTraceStore.record(.init(
                 identifier: clean, attemptedAt: Date(), status: .success,
                 message: msg, symbolsTried: result.attemptedSymbols,
@@ -304,7 +301,7 @@ final class InvestmentAutoSyncService {
                 return .rateLimited(provider: provider, retryAfter: retryAfter)
             }
         } catch let error as MarketDataFetchError {
-            // Peut remonter si le service laisse fuiter une erreur transport brute.
+            // Can surface if the service lets a raw transport error leak.
             switch error {
             case .rateLimited(let provider, let retryAfter):
                 InvestmentSyncTraceStore.record(.init(
@@ -345,10 +342,9 @@ final class InvestmentAutoSyncService {
         }
     }
 
-    /// Sync historique d'une crypto via CoinGecko (corps déplacé depuis
-    /// `InvestmentsViewModel.syncCryptoHistory`, sans `load()`).
+    /// Syncs a crypto's history via CoinGecko (without `load()`).
     private func syncCryptoHistory(identifier: String, coinId: String) async -> PositionSyncOutcome {
-        // Skip optimization : déjà un point aujourd'hui → pas de quota brûlé.
+        // Skip optimization: already a point for today → no quota burned.
         if let latest = PriceHistoryCache.shared.latestDate(identifier: identifier),
            Calendar.current.isDateInToday(latest) {
             InvestmentSyncTraceStore.record(.init(
@@ -397,13 +393,13 @@ final class InvestmentAutoSyncService {
         return .success(points: result.points.count, source: "coingecko")
     }
 
-    // MARK: - Intraday (plage 1J — points 30 min sur 24-48 h glissantes)
+    // MARK: - Intraday (1D range — 30-min points over a rolling 24-48 h)
 
-    /// Sync de l'historique INTRADAY d'un identifier, déclenchée quand l'utilisateur
-    /// sélectionne la plage 1J. Adapte la fréquence à la plage : points 30 min,
-    /// rétention 48 h (purge auto côté cache) — le quotidien 10 ans reste la
-    /// série de référence pour toutes les autres plages.
-    /// Skip si le dernier point intraday a moins de 25 min (fraîcheur ≈ pas).
+    /// Syncs an identifier's INTRADAY history, triggered when the user selects the
+    /// 1D range. Frequency matches the range: 30-min points, short retention
+    /// (auto-purged by the cache) — the 10-year daily series stays the reference
+    /// for every other range.
+    /// Skipped if the last intraday point is less than 25 min old (freshness ≈ step).
     func syncIntradayHistory(identifier: String) async -> PositionSyncOutcome {
         let clean = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return .invalidIdentifier }
@@ -413,7 +409,7 @@ final class InvestmentAutoSyncService {
             return .upToDate
         }
 
-        // Crypto → CoinGecko days=1 (sous-échantillonné 30 min).
+        // Crypto → CoinGecko days=1 (downsampled to 30 min).
         if let coinId = PriceResolver.coinId(forTicker: clean) {
             let result = await PriceResolver.shared.fetchIntradayDetailed(coinId: coinId, identifier: clean)
             guard !result.points.isEmpty else {
@@ -428,16 +424,16 @@ final class InvestmentAutoSyncService {
             return .success(points: result.points.count, source: "coingecko")
         }
 
-        // Titres traditionnels → Yahoo interval=30m, avec le symbole DÉJÀ RÉSOLU
-        // par la sync quotidienne : les points quotidiens portent le symbole
-        // gagnant dans leur champ `identifier` (ex. ISIN → "EWLD.PA"). Pas de
-        // re-résolution OpenFIGI ici.
+        // Traditional securities → Yahoo interval=30m, with the symbol ALREADY
+        // RESOLVED by the daily sync: daily points carry the winning symbol in
+        // their `identifier` field (e.g. ISIN → "EWLD.PA"). No OpenFIGI
+        // re-resolution here.
         //
-        // ⚠️ PLUSIEURS candidats, plus un seul. Le symbole porté par les points
-        // quotidiens peut ne pas être interrogeable en intraday (série venue de
-        // Stooq, ou cache quotidien vide → on retombait sur l'ISIN, que Yahoo
-        // ne connaît pas et renvoie en 404). Un seul essai raté = pas de vue 1J,
-        // silencieusement.
+        // SEVERAL candidates, not just one. The symbol carried by the daily points
+        // may not be queryable intraday (a series that came from Stooq, or an empty
+        // daily cache → falling back to the ISIN, which Yahoo doesn't know and
+        // answers with a 404). A single failed attempt would mean no 1D view,
+        // silently.
         var candidates: [String] = []
         func addCandidate(_ value: String?) {
             guard let value, !value.isEmpty,
@@ -464,8 +460,8 @@ final class InvestmentAutoSyncService {
                 ))
                 return .success(points: points.count, source: "yahoo")
             } catch MarketDataFetchError.rateLimited(let provider, let retryAfter) {
-                // Inutile d'essayer les autres symboles : le breaker est ouvert
-                // pour tout le provider.
+                // No point trying the other symbols: the breaker is open for the whole
+                // provider.
                 lastOutcome = .rateLimited(provider: provider, retryAfter: retryAfter)
                 break
             } catch {
@@ -474,8 +470,8 @@ final class InvestmentAutoSyncService {
             }
         }
 
-        // Trace persistante, comme la passe quotidienne : sans elle, la carte
-        // « Dernière synchro du cours » ne pouvait rien dire d'un échec 1J.
+        // Persistent trace, like the daily pass: without it, the "Last price sync"
+        // card couldn't say anything about a 1D failure.
         InvestmentSyncTraceStore.record(.init(
             identifier: clean, attemptedAt: Date(),
             status: {
@@ -483,10 +479,9 @@ final class InvestmentAutoSyncService {
                 if case .networkError = lastOutcome { return .error }
                 return .noData
             }(),
-            // Pas de `+` : `LocalizedStringResource` ne concatène pas comme
-            // `String`/`Text` — chaque branche compose sa propre ressource
-            // complète (imbrication testée et supportée), en partant du
-            // même préfixe.
+            // No `+`: `LocalizedStringResource` doesn't concatenate like `String`/`Text`
+            // — each branch composes its own complete resource (nesting is supported),
+            // starting from the same prefix.
             message: {
                 let prefix = LocalizedStringResource("Cours intrajournaliers (1J) indisponibles.")
                 switch lastOutcome {
@@ -503,9 +498,9 @@ final class InvestmentAutoSyncService {
         return lastOutcome
     }
 
-    /// Sync intraday séquentielle d'un lot d'identifiers (tap sur la chip 1J
-    /// du dashboard ou d'un compte). Même politique que la passe quotidienne :
-    /// skip de toute la famille de provider dès qu'elle est rate-limitée.
+    /// Sequential intraday sync of a batch of identifiers (tap on the 1D chip of
+    /// the dashboard or of an account). Same policy as the daily pass: the whole
+    /// provider family is skipped as soon as it's rate-limited.
     func syncIntradayIfNeeded(identifiers: [String]) async {
         var seen = Set<String>()
         var rateLimitedFamilies = Set<MarketDataProvider>()
@@ -524,13 +519,13 @@ final class InvestmentAutoSyncService {
 
     // MARK: - Helpers
 
-    /// True si `latest` est le dernier point de cotation atteignable un
-    /// week-end : dernier point = vendredi DE CE week-end, aujourd'hui =
-    /// samedi ou dimanche. Marchés traditionnels fermés → rien à fetcher.
+    /// True if `latest` is the last quote reachable over a weekend: last point =
+    /// Friday OF THIS weekend, today = Saturday or Sunday. Traditional markets are
+    /// closed → nothing to fetch.
     private static func isWeekendFresh(latest: Date) -> Bool {
         let calendar = Calendar.current
         let todayWeekday = calendar.component(.weekday, from: Date())
-        // Grégorien : 1 = dimanche, 6 = vendredi, 7 = samedi.
+        // Gregorian: 1 = Sunday, 6 = Friday, 7 = Saturday.
         guard todayWeekday == 1 || todayWeekday == 7 else { return false }
         guard calendar.component(.weekday, from: latest) == 6 else { return false }
         let days = calendar.dateComponents(
@@ -541,11 +536,10 @@ final class InvestmentAutoSyncService {
         return days <= 2
     }
 
-    /// `hasIssues` remplace un ancien test `summary.contains("erreur")` côté
-    /// vue (`InvestmentsView`) — fragile car il matchait des MOTS FRANÇAIS
-    /// dans un texte désormais résolu dans la langue de l'app : cassé dès que
-    /// l'app tourne en anglais. Calculé ici, une seule fois, à partir des
-    /// mêmes compteurs que le texte — pas une 2ᵉ lecture divergente.
+    /// `hasIssues` lets the view (`InvestmentsView`) avoid testing the summary
+    /// text for words — a text now resolved in the app's language, so matching
+    /// French words breaks as soon as the app runs in English. Computed here,
+    /// once, from the same counters as the text — not a second, diverging reading.
     struct SyncSummary {
         let text: LocalizedStringResource
         let hasIssues: Bool
@@ -571,9 +565,9 @@ final class InvestmentAutoSyncService {
         let hasIssues = noData > 0 || invalid > 0 || netErrors > 0
             || !limitedProviders.isEmpty || liveSyncErrors > 0
 
-        // `LocalizedStringResource` ne conforme pas à `Sequence.joined()` —
-        // repli manuel par imbrication (testé, supporté), qui préserve la
-        // clé + les arguments de chaque fragment au lieu de figer du texte.
+        // `LocalizedStringResource` doesn't conform to `Sequence.joined()` — manual
+        // fold by nesting (supported), which keeps each fragment's key + arguments
+        // instead of freezing text.
         var parts: [LocalizedStringResource] = []
         if synced > 0    { parts.append(LocalizedStringResource("\(synced) cours synchronisé\(synced > 1 ? "s" : "")")) }
         if upToDate > 0  { parts.append(LocalizedStringResource("\(upToDate) à jour")) }

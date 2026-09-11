@@ -1,14 +1,14 @@
 import SwiftUI
 
-// MARK: - Formulaire d'ajout/édition d'un ordre
+// MARK: - Order add/edit form
 //
-// Ouvert depuis InvestmentPositionDetailView en sheet. Permet de saisir/éditer
-// un BUY / SELL / DIV avec date, qty, prix unitaire, frais, notes.
+// Opened as a sheet from InvestmentPositionDetailView. Enters/edits a
+// BUY / SELL / DIV with date, quantity, unit price, fees, notes.
 //
-// Après save : appelle onSave qui se charge de
-//   1. `addOrder` ou `updateOrder` dans le repo
-//   2. `recomputePositionFromOrders(positionId:)` pour rafraîchir qty + PRU
-//   3. refresh de la vue parente
+// After save: calls onSave, which takes care of
+//   1. `addOrder` or `updateOrder` in the repository
+//   2. `recomputePositionFromOrders(positionId:)` to refresh quantity + average cost
+//   3. refreshing the parent view
 
 struct InvestmentOrderFormView: View {
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
@@ -16,7 +16,7 @@ struct InvestmentOrderFormView: View {
 
     let positionId: Int
     let currency: String
-    /// nil = ajout d'un nouvel ordre ; non-nil = édition d'un existant
+    /// nil = adding a new order; non-nil = editing an existing one
     let order: InvestmentOrder?
     let onSave: (InvestmentOrder, Bool) -> Void
 
@@ -29,9 +29,9 @@ struct InvestmentOrderFormView: View {
 
     private var isEditing: Bool { order != nil }
 
-    /// init() set @State au build time depuis l'order passé. Évite
-    /// le bug de stale state où une édition d'order pouvait écraser les nouvelles
-    /// valeurs avec celles d'un ordre précédemment édité.
+    /// init() sets the @State at build time from the given order. Avoids stale
+    /// state, where editing an order could overwrite the new values with those
+    /// of a previously edited order.
     init(positionId: Int, currency: String, order: InvestmentOrder?, onSave: @escaping (InvestmentOrder, Bool) -> Void) {
         self.positionId = positionId
         self.currency = currency
@@ -64,8 +64,8 @@ struct InvestmentOrderFormView: View {
                     HStack {
                         Text("Quantité")
                         Spacer()
-                        // Titre vide : la row a déjà son label — cf.
-                        // TransactionEditSheet pour la raison macOS.
+                        // Empty title: the row already has its label — see TransactionEditSheet
+                        // for the macOS reason.
                         TextField("", text: $quantity)
                             .multilineTextAlignment(.trailing)
                             .keyboardType(.decimalPad)
@@ -99,7 +99,7 @@ struct InvestmentOrderFormView: View {
                         .lineLimit(2...5)
                 }
 
-                // Récap calcul total — utile pour vérifier avant save
+                // Total recap — useful to double-check before saving
                 Section {
                     HStack {
                         Text("Total brut")
@@ -114,7 +114,7 @@ struct InvestmentOrderFormView: View {
                 }
             }
             .nemorisFormStyle()
-            // Pas de .onAppear — init() set tout au build time.
+            // No .onAppear — init() sets everything at build time.
             .paneChrome(isEditing ? "Modifier l'ordre" : "Nouvel ordre",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
                         confirmLabel: isEditing ? "Mettre à jour" : "Ajouter",
@@ -135,7 +135,7 @@ struct InvestmentOrderFormView: View {
     private var totalColor: Color {
         switch orderType {
         case .buy:      return AppTheme.Colors.danger   // sortie de cash
-        case .sell:     return AppTheme.Colors.success  // entrée de cash
+        case .sell:     return AppTheme.Colors.success  // cash inflow
         case .dividend: return AppTheme.Colors.success
         }
     }
@@ -152,8 +152,8 @@ struct InvestmentOrderFormView: View {
         }
     }
 
-    // populateFields() retiré — l'init() ci-dessus le fait au build time
-    // (élimine le bug de stale state quand SwiftUI réutilise l'instance).
+    // init() above sets the fields at build time (avoids stale state when
+    // SwiftUI reuses the instance).
 
     private func save() {
         let q = Double(quantity.replacingOccurrences(of: ",", with: ".")) ?? 0

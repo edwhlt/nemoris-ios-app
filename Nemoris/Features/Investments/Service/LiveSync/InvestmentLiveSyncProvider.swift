@@ -1,30 +1,30 @@
 import Foundation
 
-// MARK: - Protocol + types communs pour les providers de live sync
+// MARK: - Protocol + shared types for live sync providers
 //
-// Tous les providers (Binance CEX, wallets EVM/BTC/SOL) implémentent ce protocol.
-// Ils sont read-only : on lit l'état d'un compte externe sans jamais y écrire.
+// Every provider (Binance CEX, EVM/BTC/SOL wallets) implements this protocol.
+// They are read-only: an external account's state is read, never written.
 //
-// Stratégie credentials :
-//   - les valeurs sont saisies par l'utilisateur dans un form généré dynamiquement depuis
+// Credentials strategy:
+//   - values are entered by the user in a form generated dynamically from
 //     `credentialFields`
-//   - stockées chiffrées en Keychain iOS via `InvestmentCredentialStore`
-//   - JAMAIS transmises à un serveur Nemoris (pas de serveur Nemoris du tout)
+//   - stored encrypted in the iOS Keychain via `InvestmentCredentialStore`
+//   - NEVER sent to a Nemoris server (there is no Nemoris server at all)
 //
-// Stratégie config (par provider) :
-//   - certains providers ont besoin de metadata non-sensibles (ex: chaîne EVM choisie,
-//     adresse publique d'un wallet). Stockées en SQLite (`config_json`).
+// Config strategy (per provider):
+//   - some providers need non-sensitive metadata (e.g. the chosen EVM chain,
+//     a wallet's public address). Stored in SQLite (`config_json`).
 
 // MARK: - Champ de credential (form dynamique)
 
-/// Décrit un champ à remplir dans le formulaire de credentials du provider.
-/// Le form Settings génère automatiquement les TextField correspondants.
+/// Describes a field to fill in the provider's credentials form.
+/// The settings form generates the matching TextFields automatically.
 struct LiveSyncCredentialField: Identifiable, Hashable, Sendable {
     let key: String              // ID interne stable (ex: "apiKey", "apiSecret", "address")
-    let label: String            // Libellé affiché ("Clé API", "Adresse publique")
+    let label: String            // Displayed label ("API key", "Public address")
     let isSecret: Bool           // true → SecureField, false → TextField
     let placeholder: String?
-    let helpText: String?        // Aide affichée sous le field
+    let helpText: String?        // Help shown under the field
     let validation: ValidationRule
 
     var id: String { key }
@@ -35,11 +35,11 @@ struct LiveSyncCredentialField: Identifiable, Hashable, Sendable {
         case hexAddress           // 0x... 40 hex chars (EVM)
         case bitcoinAddress       // bc1... | 1... | 3...
         case solanaAddress        // base58, 32-44 chars
-        case anyString            // accepte tout (utilisé pour les champs optionnels)
+        case anyString            // accepts anything (used for optional fields)
     }
 
-    /// True si la valeur passée respecte la règle. Pas d'erreur message custom
-    /// — l'UI affiche juste "Valeur invalide" en cas d'échec.
+    /// True if the value passes the rule. No custom error message — the UI just
+    /// shows "Invalid value" on failure.
     func isValid(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         switch validation {
@@ -66,24 +66,24 @@ struct LiveSyncCredentialField: Identifiable, Hashable, Sendable {
     }
 }
 
-// MARK: - Résultat de sync : positions + transactions
+// MARK: - Sync result: positions + transactions
 
-/// Représente une position retournée par un provider après sync.
-/// Mappée vers `investment_positions` par `LiveSyncRegistry.applySync`.
+/// A position returned by a provider after a sync.
+/// Mapped to `investment_positions` by `LiveSyncRegistry.applySync`.
 struct LiveSyncPosition: Hashable {
-    let assetType: String           // "crypto" (peut s'étendre plus tard)
+    let assetType: String           // "crypto" (may be extended later)
     let assetName: String           // "Ethereum", "USD Coin"
     let ticker: String              // "ETH", "USDC"
-    let quantity: Double            // Quantité actuelle dans le wallet/exchange
-    let currentValueEUR: Double?    // nil = prix non trouvé via CoinGecko
+    let quantity: Double            // Current quantity in the wallet/exchange
+    let currentValueEUR: Double?    // nil = price not found via CoinGecko
     let metadata: [String: String]  // Ex: ["contractAddress": "0x...", "chain": "polygon"]
 }
 
-/// Représente une transaction historique retournée par un provider.
-/// Mappée vers `investment_orders` (achat/vente/dividende crypto) ou ignorée si pas pertinent.
+/// A historical transaction returned by a provider.
+/// Mapped to `investment_orders` (crypto buy/sell/dividend) or ignored if irrelevant.
 struct LiveSyncTransaction: Hashable {
-    /// ID externe stable (ex: txHash blockchain ou tradeId Binance) — permet de
-    /// déduplique au prochain sync sans re-créer la même opération.
+    /// Stable external ID (e.g. a blockchain txHash or a Binance tradeId) — lets
+    /// the next sync deduplicate without recreating the same operation.
     let externalId: String
     let orderType: InvestmentOrderType
     let assetTicker: String
@@ -104,14 +104,12 @@ enum LiveSyncError: LocalizedError, Sendable {
     case parseError(String)
     case providerNotImplemented
 
-    /// ⚠️ Chaque branche passe par `AppLocalization.string(...)` — cette enum
-    /// était ENTIÈREMENT en littéraux français bruts, jamais traduite quelle
-    /// que soit la langue de l'app (bug distinct de celui des `.sheet()` macOS :
-    /// ici il n'y avait même pas de tentative de résolution). `msg` (le seul
-    /// paramètre déjà localisé par l'appelant, cf. `LiveSyncRegistry`) doit
-    /// rester un fragment SÉPARÉ dans l'interpolation — jamais concaténé AVANT
-    /// l'appel à `AppLocalization.string`, sinon la clé de lookup change à
-    /// chaque valeur de `msg` et ne matche plus jamais la table.
+    /// Each branch goes through `AppLocalization.string(...)`, so the message
+    /// follows the app's language. `msg` (the only parameter already localized
+    /// by the caller, see `LiveSyncRegistry`) must remain a SEPARATE fragment in
+    /// the interpolation — never concatenated BEFORE the call to
+    /// `AppLocalization.string`, otherwise the lookup key changes with every
+    /// value of `msg` and never matches the table.
     var errorDescription: String? {
         switch self {
         case .missingCredentials:
@@ -133,62 +131,62 @@ enum LiveSyncError: LocalizedError, Sendable {
 
 // MARK: - Protocol provider
 
-/// Tous les providers de live sync conforment à ce protocol. `Sendable` pour pouvoir
-/// les utiliser depuis n'importe quel acteur sans warning concurrency Swift 6.
+/// Every live sync provider conforms to this protocol. `Sendable` so they can
+/// be used from any actor without Swift 6 concurrency warnings.
 protocol InvestmentLiveSyncProvider: Sendable {
 
-    /// Init sans argument requis pour pouvoir instancier depuis un `metatype`
-    /// (ex: `providerType.init()` dans le Registry).
+    /// Argument-less init, required to instantiate from a metatype
+    /// (e.g. `providerType.init()` in the Registry).
     init()
 
-    /// ID interne stable du provider (ex: "binance", "evm_wallet").
-    /// Utilisé comme clé dans `investment_live_sync.provider_id` et Keychain.
+    /// The provider's stable internal ID (e.g. "binance", "evm_wallet").
+    /// Used as the key in `investment_live_sync.provider_id` and in the Keychain.
     static var id: String { get }
 
-    /// Libellé affiché à l'utilisateur (ex: "Binance", "Wallet EVM").
+    /// Label shown to the user (e.g. "Binance", "EVM wallet").
     static var displayName: String { get }
 
-    /// SF Symbol représentant le provider (ex: "bitcoinsign.circle", "link").
+    /// SF Symbol representing the provider (e.g. "bitcoinsign.circle", "link").
     static var iconName: String { get }
 
-    /// Description courte affichée dans le picker d'ajout.
+    /// Short description shown in the add picker.
     static var description: String { get }
 
-    /// Champs de credentials à demander à l'utilisateur (apiKey, address, etc.).
-    /// Le form Settings génère les TextField dynamiquement.
+    /// Credential fields to ask the user for (apiKey, address, etc.).
+    /// The settings form generates the TextFields dynamically.
     static var credentialFields: [LiveSyncCredentialField] { get }
 
-    /// Si true, on demande aussi à l'utilisateur de choisir une chaîne (ex: EVM).
-    /// Le form affiche un Picker des chaînes supportées dans ce cas.
+    /// If true, the user is also asked to pick a chain (e.g. EVM).
+    /// The form then shows a Picker of the supported chains.
     static var supportsChainSelection: Bool { get }
 
-    /// Liste des chaînes supportées (si `supportsChainSelection == true`).
-    /// Le tag est stocké dans `config_json` sous la clé "chain".
+    /// Supported chains (when `supportsChainSelection == true`).
+    /// The tag is stored in `config_json` under the "chain" key.
     static var supportedChains: [LiveSyncChainOption] { get }
 
-    /// Teste les credentials sans modifier d'état (endpoint minimal de validation).
-    /// Throw `LiveSyncError` si problème.
+    /// Tests the credentials without changing any state (minimal validation
+    /// endpoint). Throws `LiveSyncError` on a problem.
     func validate(credentials: [String: String], config: [String: String]) async throws
 
-    /// Récupère les positions actuelles. Doit appliquer la conversion EUR via
-    /// `PriceResolver` si le provider ne renvoie pas déjà des prix EUR.
+    /// Fetches current positions. Must apply the EUR conversion via
+    /// `PriceResolver` if the provider doesn't already return EUR prices.
     func fetchPositions(credentials: [String: String], config: [String: String]) async throws -> [LiveSyncPosition]
 
-    /// Récupère les transactions historiques. `since` permet de limiter (sync incrémentale).
-    /// Si nil → toute l'année courante par défaut.
+    /// Fetches historical transactions. `since` limits the range (incremental
+    /// sync). If nil → the whole current year by default.
     func fetchTransactions(credentials: [String: String], config: [String: String], since: Date?) async throws -> [LiveSyncTransaction]
 }
 
-/// Une chaîne supportée par un provider EVM/multi-chain.
+/// A chain supported by an EVM/multi-chain provider.
 struct LiveSyncChainOption: Identifiable, Hashable, Sendable {
     let id: String           // ID interne ("eth", "polygon", "bsc", "arbitrum"...)
     let displayName: String  // "Ethereum", "Polygon"
     let icon: String         // SF Symbol
     let nativeCurrency: String // "ETH", "MATIC", "BNB"
-    let chainIdHex: String?  // Pour EVM : 0x1, 0x89, etc. nil pour non-EVM
+    let chainIdHex: String?  // For EVM: 0x1, 0x89, etc. nil for non-EVM
 }
 
-// MARK: - Helpers Character pour validation hex
+// MARK: - Character helpers for hex validation
 
 private extension Character {
     var isHexDigit: Bool {

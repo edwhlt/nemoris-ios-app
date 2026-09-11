@@ -7,8 +7,8 @@ struct InvestmentRepository {
 
     private let store: SQLiteStore
 
-    /// La valeur par défaut vise la base de l'application : les sites d'appel
-    /// existants n'ont pas à changer.
+    /// The default value targets the app's own database: existing call sites
+    /// need no change.
     init(store: SQLiteStore = SQLiteStore()) {
         self.store = store
     }
@@ -20,22 +20,21 @@ struct InvestmentRepository {
         return formatter
     }()
 
-    // MARK: - Fetch (avec colonnes dérivées calculées à la volée)
+    // MARK: - Fetch (with derived columns computed on the fly)
     //
-    // Depuis la migration v30, `quantity`, `average_buy_price` et `purchase_date`
-    // n'existent plus comme colonnes sur `investment_positions` ; pareil pour
-    // `current_value` et `invested_amount` sur `investment_accounts`. Tout est
-    // calculé via SQL au moment du fetch, à partir des `investment_orders` et
-    // des positions courantes — impossible de drift.
+    // `quantity`, `average_buy_price` and `purchase_date` are not columns of
+    // `investment_positions`; neither are `current_value` and `invested_amount`
+    // on `investment_accounts`. Everything is computed in SQL at fetch time, from
+    // the `investment_orders` and the current positions — drift is impossible.
 
     func fetchAccounts() -> [InvestmentAccount] {
         query { db in
-            // CTE position_summary : pour chaque position, on calcule qty nette
-            //   (Σ BUY − Σ SELL) et PRU pondéré (Σ BUY_cost / Σ BUY_qty). On
-            //   réutilise ensuite ces valeurs pour sommer par compte.
+            // position_summary CTE: for each position, compute the net quantity
+            //   (Σ BUY − Σ SELL) and the weighted average cost (Σ BUY_cost / Σ BUY_qty).
+            //   These values are then reused to sum per account.
             //
-            // invested_amount au niveau compte = Σ (qty × PRU) des positions du
-            //   compte = exposure résiduelle. Cohérent avec la définition de
+            // Account-level invested_amount = Σ (qty × average cost) of the account's
+            //   positions = residual exposure. Consistent with the definition of
             //   InvestmentPosition.investedAmount.
             let sql = """
             WITH position_summary AS (
@@ -90,13 +89,12 @@ struct InvestmentRepository {
 
     func fetchPositions(accountId: Int) -> [InvestmentPosition] {
         query { db in
-            // qty nette = Σ BUY − Σ SELL
-            // pru pondéré = Σ (BUY.qty × BUY.unit_price + BUY.fees) / Σ BUY.qty
-            // first_buy_date = MIN(BUY.executed_at), fallback today si aucun BUY
+            // net qty = Σ BUY − Σ SELL
+            // weighted average cost = Σ (BUY.qty × BUY.unit_price + BUY.fees) / Σ BUY.qty
+            // first_buy_date = MIN(BUY.executed_at), falling back to today if no BUY
             //
-            // ORDER BY first_buy_date DESC : on conserve l'ordre antérieur
-            // (anciennement ORDER BY purchase_date DESC). Pour positions sans
-            // ordre, on tombe sur "today" → elles se retrouvent en tête.
+            // ORDER BY first_buy_date DESC: most recent positions first. Positions
+            // without orders fall back to "today" → they come first.
             let sql = """
             SELECT
                 p.id, p.account_id, p.asset_type, p.asset_name, p.ticker,
@@ -144,9 +142,8 @@ struct InvestmentRepository {
     }
 
     @discardableResult
-    /// Variante d'`addAccount` qui retourne le `Int` ID du compte créé (utile pour
-    /// le live sync qui doit lier le link à l'account fraîchement créé).
-    /// Couche 4.
+    /// Variant of `addAccount` that returns the created account's `Int` ID (live
+    /// sync needs it to attach the link to the freshly created account).
     func addAccountAndGetId(name: String, broker: String, currency: String, accountType: String,
                             openedAt: Date) -> Int? {
         guard store.databaseExists else { return nil }
@@ -175,10 +172,10 @@ struct InvestmentRepository {
         return Int(sqlite3_last_insert_rowid(db))
     }
 
-    /// Crée un compte. Les paramètres `currentValue` et `investedAmount` sont
-    /// conservés pour rétro-compat des call sites (LiveSync, formulaires) mais
-    /// SILENCIEUSEMENT IGNORÉS depuis la migration v30 — ces valeurs sont
-    /// désormais dérivées des positions/ordres et calculées au fetch.
+    /// Creates an account. The `currentValue` and `investedAmount` parameters are
+    /// accepted for call-site compatibility (LiveSync, forms) but SILENTLY
+    /// IGNORED — these values are derived from positions/orders and computed at
+    /// fetch time.
     func addAccount(name: String, broker: String, currency: String, accountType: String,
                     currentValue: Double, investedAmount: Double, openedAt: Date) -> Bool {
         writeSingle(sql: """
@@ -193,10 +190,9 @@ struct InvestmentRepository {
         }
     }
 
-    /// Met à jour les champs ÉDITABLES d'un compte. `currentValue` et
-    /// `investedAmount` sur le struct sont conservés pour rétro-compat mais
-    /// IGNORÉS — ils sont dérivés des positions/ordres et calculés au fetch.
-    /// `cashBalance` (v34) est persisté pour la trésorerie disponible.
+    /// Updates an account's EDITABLE fields. `currentValue` and `investedAmount`
+    /// on the struct are IGNORED — they are derived from positions/orders and
+    /// computed at fetch time. `cashBalance` is persisted, for available cash.
     @discardableResult
     func updateAccount(_ account: InvestmentAccount) -> Bool {
         writeSingle(sql: """
@@ -214,23 +210,23 @@ struct InvestmentRepository {
         }
     }
 
-    /// Supprime un compte et son arborescence en CASCADE manuelle.
+    /// Deletes an account and its tree with a manual CASCADE.
     ///
-    /// Le schéma déclare bien `ON DELETE CASCADE` sur investment_positions
-    /// (et investment_orders → positions, investment_live_sync → accounts)
-    /// mais SQLite a `foreign_keys = OFF` par défaut → les déclarations FK
-    /// sont ignorées. On fait donc le cascade manuellement pour ne pas
-    /// activer `foreign_keys = ON` global qui pourrait casser d'autres tables.
+    /// The schema does declare `ON DELETE CASCADE` on investment_positions (and
+    /// investment_orders → positions, investment_live_sync → accounts), but
+    /// SQLite has `foreign_keys = OFF` by default → the FK declarations are
+    /// ignored. The cascade is therefore done by hand, rather than enabling
+    /// `foreign_keys = ON` globally, which could break other tables.
     ///
-    /// Ordre (enfants d'abord pour respecter la "logique FK") :
-    ///   1. Sync traces des positions (UserDefaults)
-    ///   2. investment_orders rattachés aux positions du compte
-    ///   3. investment_positions du compte
-    ///   4. investment_live_sync liens vers ce compte (sinon ils restent orphelins)
-    ///   5. investment_accounts row finale
+    /// Order (children first, following the FK logic):
+    ///   1. The positions' sync traces (UserDefaults)
+    ///   2. investment_orders attached to the account's positions
+    ///   3. The account's investment_positions
+    ///   4. investment_live_sync links to this account (otherwise orphaned)
+    ///   5. The final investment_accounts row
     @discardableResult
     func deleteAccount(id: Int) -> Bool {
-        // Étape 1 + 2 + 3 : positions et leurs ordres / traces.
+        // Steps 1 + 2 + 3: positions and their orders / traces.
         let positions = fetchPositions(accountId: id)
         for position in positions {
             _ = deletePosition(id: position.id)  // cascade orders + trace + position
@@ -246,14 +242,14 @@ struct InvestmentRepository {
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
 
-        // Étape 4 : retirer les LiveSync links rattachés au compte.
-        // (Le credential Keychain est nettoyé par LiveSyncRepository.deleteLink
-        // mais on n'a pas accès à l'API ici sans dépendance circulaire → SQL direct.)
+        // Step 4: remove the LiveSync links attached to the account.
+        // (The Keychain credential is cleaned by LiveSyncRepository.deleteLink, but
+        // that API isn't reachable from here without a circular dependency → direct SQL.)
         sqlite3_exec(db,
             "DELETE FROM investment_live_sync WHERE account_id = \(id);",
             nil, nil, nil)
 
-        // Étape 5 : DELETE compte
+        // Step 5: DELETE the account
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db,
             "DELETE FROM investment_accounts WHERE id = ?",
@@ -263,16 +259,15 @@ struct InvestmentRepository {
         return sqlite3_step(stmt) == SQLITE_DONE
     }
 
-    /// Crée une position. Les paramètres `quantity`, `averageBuyPrice` et
-    /// `purchaseDate` sont conservés pour rétro-compat des call sites (CSV
-    /// import legacy, LiveSync) mais SILENCIEUSEMENT IGNORÉS depuis la
-    /// migration v30 — ces valeurs sont dérivées des `investment_orders` et
-    /// calculées au fetch. Pour matérialiser une qty/PRU à la création, le
-    /// caller doit insérer un ordre BUY après cette méthode (cf. PDF import,
-    /// `insertPositionsDetailed`).
+    /// Creates a position. The `quantity`, `averageBuyPrice` and `purchaseDate`
+    /// parameters are accepted for call-site compatibility (CSV import, LiveSync)
+    /// but SILENTLY IGNORED — these values are derived from `investment_orders`
+    /// and computed at fetch time. To materialize a quantity/average cost at
+    /// creation, the caller must insert a BUY order after this method (see the
+    /// PDF import, `insertPositionsDetailed`).
     ///
-    /// `currentValue` est persisté : c'est la valeur de marché instantanée,
-    /// pas dérivée des ordres.
+    /// `currentValue` is persisted: it's the instantaneous market value, not
+    /// derived from the orders.
     @discardableResult
     func addPosition(accountId: Int, assetType: String, assetName: String, ticker: String,
                      quantity: Double, averageBuyPrice: Double, currentValue: Double, purchaseDate: Date) -> Bool {
@@ -289,11 +284,10 @@ struct InvestmentRepository {
     }
 
 
-    /// Variante d'`addPosition` qui renvoie l'ID de la position créée. Utilisée
-    /// par l'import PDF qui doit ensuite y rattacher des ordres. Le paramètre
-    /// `purchaseDate` est conservé pour rétro-compat mais IGNORÉ depuis v30 —
-    /// la date dérivée sera le `MIN(executedAt)` des ordres BUY rattachés.
-    /// `isin` (v31) est persisté pour permettre la sync via OpenFIGI.
+    /// Variant of `addPosition` that returns the created position's ID. Used by
+    /// the PDF import, which then attaches orders to it. `purchaseDate` is
+    /// IGNORED — the derived date will be the `MIN(executedAt)` of the attached
+    /// BUY orders. `isin` is persisted to allow syncing via OpenFIGI.
     func addPositionAndGetId(accountId: Int, assetType: String, assetName: String,
                              ticker: String, isin: String = "", purchaseDate: Date) -> Int? {
         guard store.databaseExists else { return nil }
@@ -327,11 +321,11 @@ struct InvestmentRepository {
         return Int(sqlite3_last_insert_rowid(db))
     }
 
-    /// Met à jour les champs ÉDITABLES d'une position (identité + valeur marché).
-    /// Les champs DÉRIVÉS (`quantity`, `averageBuyPrice`, `purchaseDate`) ont été
-    /// supprimés du schéma à la migration v30 — ils sont calculés au fetch via
-    /// agrégation des `investment_orders`. Si tu passes des valeurs dans ces
-    /// champs sur le struct, elles sont silencieusement ignorées.
+    /// Updates a position's EDITABLE fields (identity + market value). The
+    /// DERIVED fields (`quantity`, `averageBuyPrice`, `purchaseDate`) are not in
+    /// the schema — they are computed at fetch time by aggregating
+    /// `investment_orders`. Values passed in these fields on the struct are
+    /// silently ignored.
     @discardableResult
     func updatePosition(_ position: InvestmentPosition) -> Bool {
         writeSingle(sql: """
@@ -353,15 +347,15 @@ struct InvestmentRepository {
         }
     }
 
-    /// Supprime une position en CASCADE manuelle :
-    /// 1. Capture les identifiers (ticker + isin) pour effacer leur sync trace
-    /// 2. DELETE des investment_orders rattachés (foreign keys SQLite OFF par défaut)
-    /// 3. DELETE de la position
-    /// 4. Efface la trace UserDefaults — sinon recréer une position avec le
-    ///    même ticker ferait remonter l'ancien trace de sync.
+    /// Deletes a position with a manual CASCADE:
+    /// 1. Captures the identifiers (ticker + isin) to clear their sync trace
+    /// 2. DELETEs the attached investment_orders (SQLite foreign keys are OFF by default)
+    /// 3. DELETEs the position
+    /// 4. Clears the UserDefaults trace — otherwise recreating a position with
+    ///    the same ticker would bring back the old sync trace.
     @discardableResult
     func deletePosition(id: Int) -> Bool {
-        // Étape 1 : capturer les identifiers AVANT le delete
+        // Step 1: capture the identifiers BEFORE the delete
         var traceIdentifiers: [String] = []
         if let position = query({ db -> InvestmentPosition? in
             var stmt: OpaquePointer?
@@ -386,17 +380,17 @@ struct InvestmentRepository {
             traceIdentifiers = [position.isin, position.ticker].filter { !$0.isEmpty }
         }
 
-        // Étape 2 : DELETE ordres rattachés
+        // Step 2: DELETE the attached orders
         _ = writeSingle(sql: "DELETE FROM investment_orders WHERE position_id = ?") { stmt in
             sqlite3_bind_int(stmt, 1, Int32(id))
         }
 
-        // Étape 3 : DELETE position
+        // Step 3: DELETE the position
         let deleted = writeSingle(sql: "DELETE FROM investment_positions WHERE id = ?") { stmt in
             sqlite3_bind_int(stmt, 1, Int32(id))
         }
 
-        // Étape 4 : nettoyer les traces UserDefaults
+        // Step 4: clean the UserDefaults traces
         if !traceIdentifiers.isEmpty {
             InvestmentSyncTraceStore.clear(identifiers: traceIdentifiers)
         }
@@ -406,7 +400,7 @@ struct InvestmentRepository {
 
     // MARK: - Orders CRUD + recompute position
 
-    /// Récupère les ordres d'une position, triés chronologiquement (plus ancien d'abord).
+    /// Fetches a position's orders, sorted chronologically (oldest first).
     func fetchOrders(positionId: Int) -> [InvestmentOrder] {
         query { db in
             let sql = """
@@ -448,9 +442,9 @@ struct InvestmentRepository {
 
     @discardableResult
     func addOrder(_ order: InvestmentOrder) -> Bool {
-        // INSERT OR IGNORE permet la dédup atomique sur external_id (UNIQUE INDEX v33).
-        // Pour les ordres manuels (externalId == nil), l'INDEX partiel "WHERE external_id IS NOT NULL"
-        // ne les contraint pas → insertion normale possible.
+        // INSERT OR IGNORE allows atomic deduplication on external_id (UNIQUE INDEX).
+        // Manual orders (externalId == nil) aren't constrained by the partial
+        // "WHERE external_id IS NOT NULL" index → normal insertion.
         writeSingle(sql: """
             INSERT OR IGNORE INTO investment_orders
                 (position_id, order_type, quantity, unit_price, fees, executed_at, notes, external_id)
@@ -475,9 +469,9 @@ struct InvestmentRepository {
         }
     }
 
-    /// vérifie si un ordre avec cet `external_id` existe déjà.
-    /// Permet au sync d'éviter le re-INSERT inutile (l'UNIQUE INDEX bloquerait
-    /// de toute façon mais ça évite la requête).
+    /// Checks whether an order with this `external_id` already exists.
+    /// Lets the sync skip a pointless re-INSERT (the UNIQUE INDEX would block it
+    /// anyway, but this avoids the query).
     func orderExistsWithExternalId(_ externalId: String) -> Bool {
         query { db in
             var stmt: OpaquePointer?
@@ -517,19 +511,18 @@ struct InvestmentRepository {
         }
     }
 
-    /// Supprime les ordres SYNTHÉTIQUES d'une position — ceux créés par
-    /// `LiveSyncRegistry.persistPositions` à la 1ère sync pour matérialiser
-    /// la quantité snapshot quand l'historique des trades n'est pas dispo.
+    /// Deletes a position's SYNTHETIC orders — those created by
+    /// `LiveSyncRegistry.persistPositions` on the 1st sync to materialize the
+    /// snapshot quantity when trade history isn't available.
     ///
-    /// Détection : `external_id IS NULL` (ce sont nos seeds locaux, pas des
-    /// trades Binance qui ont tous un `external_id`) ET `notes LIKE 'Sync %'`
-    /// (= marqueur posé par persistPositions). On préserve donc les ordres
-    /// saisis manuellement par l'utilisateur (qui ont external_id nul mais des notes
-    /// différentes).
+    /// Detection: `external_id IS NULL` (these are local seeds, unlike Binance
+    /// trades, which all have an `external_id`) AND `notes LIKE 'Sync %'` (= the
+    /// marker set by persistPositions). Orders entered manually by the user
+    /// (null external_id but different notes) are therefore preserved.
     ///
-    /// À appeler depuis `persistTransactions` après qu'on ait inséré des
-    /// trades réels — sinon on doublerait la qty (synthetic + somme des trades).
-    /// Retourne le nombre d'ordres supprimés.
+    /// Call it from `persistTransactions` after inserting real trades —
+    /// otherwise the quantity would be doubled (synthetic + sum of trades).
+    /// Returns the number of deleted orders.
     @discardableResult
     func deleteSyntheticOrders(positionId: Int) -> Int {
         guard store.databaseExists else { return 0 }
@@ -555,18 +548,15 @@ struct InvestmentRepository {
         return Int(sqlite3_changes(db))
     }
 
-    /// **NO-OP depuis migration v30.** Conservé pour rétro-compat des call sites
-    /// (PDF import, edit d'ordres, etc.) qui l'appelaient après mutation des
-    /// ordres pour maintenir la cohérence du cache.
+    /// **NO-OP.** Kept for call sites that invoke it after mutating orders.
     ///
-    /// Désormais, `quantity` / `averageBuyPrice` / `purchaseDate` sont calculés
-    /// à la volée dans `fetchPositions` via JOIN+GROUP BY — pas de cache à
-    /// maintenir, donc pas de recompute à déclencher. La méthode reste callable
-    /// (retourne toujours `true`) pour ne pas casser le code existant qui
-    /// la chaîne après `addOrder` / `updateOrder` / `deleteOrder`.
+    /// `quantity` / `averageBuyPrice` / `purchaseDate` are computed on the fly in
+    /// `fetchPositions` via JOIN + GROUP BY — there is no cache to maintain, so
+    /// nothing to recompute. The method stays callable (always returns `true`)
+    /// for code chaining it after `addOrder` / `updateOrder` / `deleteOrder`.
     @discardableResult
     func recomputePositionFromOrders(positionId: Int) -> Bool {
-        // Volontairement vide : tout est dérivé au fetch.
+        // Deliberately empty: everything is derived at fetch time.
         return true
     }
 
@@ -580,11 +570,11 @@ struct InvestmentRepository {
         var inserted = 0
         var failures: [InvestmentImportFailure] = []
 
-        // Chantier C — fix bug qty=0 : depuis v30, `addPosition` ignore
-        // quantity/averageBuyPrice (dérivés des ordres). Une position importée
-        // en CSV se retrouvait donc avec une quantité DÉRIVÉE de 0. On crée
-        // désormais la position PUIS un ordre BUY synthétique (qty @ PRU) pour
-        // matérialiser la quantité et le PRU, + on écrit current_value.
+        // `addPosition` ignores quantity/averageBuyPrice (derived from orders), so a
+        // CSV-imported position would end up with a DERIVED quantity of 0. The
+        // position is therefore created FIRST, then a synthetic BUY order (qty @
+        // average cost) materializes the quantity and the average cost, + current_value
+        // is written.
         let extIdFormatter = DateFormatter()
         extIdFormatter.locale = Locale(identifier: "en_US_POSIX")
         extIdFormatter.dateFormat = "yyyyMMdd"
@@ -608,8 +598,8 @@ struct InvestmentRepository {
                 continue
             }
 
-            // Ordre BUY synthétique (dédup via external_id "csv_…" en cas de
-            // ré-import du même fichier). Ignoré si quantité nulle.
+            // Synthetic BUY order (deduplicated via the "csv_…" external_id if the same
+            // file is imported again). Skipped when the quantity is zero.
             if row.quantity > 0 {
                 let key = row.ticker.isEmpty ? row.assetName : row.ticker
                 let synthetic = InvestmentOrder(
@@ -626,7 +616,7 @@ struct InvestmentRepository {
                 _ = addOrder(synthetic)
             }
 
-            // current_value : valeur de marché de la ligne CSV, fallback coût.
+            // current_value: the CSV row's market value, falling back to cost.
             let marketValue = row.currentValue > 0 ? row.currentValue : row.quantity * row.averageBuyPrice
             let created = InvestmentPosition(
                 id: newId, accountId: accountId,
@@ -641,23 +631,23 @@ struct InvestmentRepository {
         return InvestmentImportResult(insertedCount: inserted, failures: failures)
     }
 
-    /// Après écriture d'un historique de cours, met à jour la `current_value`
-    /// de toutes les positions qui matchent ce ticker — sinon le hero affiche
-    /// €0 même après une sync réussie.
+    /// After writing a price history, updates the `current_value` of every
+    /// position matching this ticker — otherwise the hero shows €0 even after a
+    /// successful sync.
     ///
-    /// Logique : `current_value = qty_dérivée × dernier_close_price`. La qty
-    /// est calculée à la volée via la même agrégation que `fetchPositions`
+    /// Logic: `current_value = derived_qty × last_close_price`. The quantity is
+    /// computed on the fly through the same aggregation as `fetchPositions`
     /// (Σ BUY − Σ SELL).
     ///
-    /// Cross-account : si plusieurs positions utilisent le même ticker (peu
-    /// fréquent mais possible), toutes sont mises à jour.
+    /// Cross-account: if several positions use the same ticker (uncommon but
+    /// possible), all of them are updated.
     @MainActor
     @discardableResult
     func updatePositionsCurrentValueFromLatestPrice(identifier: String) -> Int {
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, store.databaseExists else { return 0 }
 
-        // Depuis v33 : le dernier close vient du cache disque (plus de subquery SQL).
+        // The last close comes from the disk cache.
         guard let latestClose = PriceHistoryCache.shared.latestClose(identifier: trimmed) else {
             return 0
         }
@@ -671,9 +661,9 @@ struct InvestmentRepository {
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
 
-        // UPDATE direct : qty recalculée inline depuis investment_orders, prix
-        // passé en bind depuis le cache. 1 seule passe SQL pour toutes les
-        // positions matchant ticker OU ISIN.
+        // Direct UPDATE: quantity recomputed inline from investment_orders, price
+        // bound from the cache. A single SQL pass for every position matching the
+        // ticker OR the ISIN.
         let sql = """
         UPDATE investment_positions AS pos
         SET current_value = (
@@ -695,13 +685,13 @@ struct InvestmentRepository {
         return Int(sqlite3_changes(db))
     }
 
-    /// Réparation crypto : reset à 0 le `current_value` de TOUTES les positions
-    /// CRYPTO + purge les `investment_price_history` stockés sous leurs tickers
-    /// (BTC, ETH, FET, etc.) qui correspondent en fait à des données d'actions
-    /// homonymes scrappées sur Yahoo. Après ça, l'utilisateur relance LiveSync Binance/
-    /// wallet pour récupérer les vraies valeurs depuis CoinGecko.
+    /// Crypto repair: resets `current_value` to 0 for ALL CRYPTO positions + purges
+    /// the price history stored under their tickers (BTC, ETH, FET, etc.), which
+    /// actually belongs to same-named stocks scraped from Yahoo. Afterwards, the
+    /// user reruns the Binance/wallet LiveSync to get the real values from
+    /// CoinGecko.
     ///
-    /// Sûr à appeler plusieurs fois (idempotent).
+    /// Safe to call several times (idempotent).
     @MainActor
     @discardableResult
     func purgeCorruptedCryptoData() -> (positionsReset: Int, historyRowsDeleted: Int) {
@@ -715,7 +705,7 @@ struct InvestmentRepository {
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
 
-        // 1. Liste les tickers des positions CRYPTO (typique : BTC, ETH, FET, SOL...)
+        // 1. List the tickers of the CRYPTO positions (typically: BTC, ETH, FET, SOL...)
         var cryptoTickers: [String] = []
         let listSQL = "SELECT DISTINCT UPPER(ticker) FROM investment_positions WHERE UPPER(asset_type) = 'CRYPTO' AND ticker IS NOT NULL AND ticker != ''"
         var listStmt: OpaquePointer?
@@ -728,8 +718,8 @@ struct InvestmentRepository {
         }
         sqlite3_finalize(listStmt)
 
-        // 2. Purge des prix sous ces tickers depuis le cache disque (depuis v33,
-        // les price_history ne sont plus en SQL — voir PriceHistoryCache).
+        // 2. Purge the prices under these tickers from the disk cache (price history
+        // lives in PriceHistoryCache, not in SQL).
         var deletedCount = 0
         for ticker in cryptoTickers {
             let existing = PriceHistoryCache.shared.fetch(identifier: ticker, limit: Int.max)
@@ -739,7 +729,7 @@ struct InvestmentRepository {
             }
         }
 
-        // 3. Reset current_value = 0 sur toutes les positions CRYPTO
+        // 3. Reset current_value = 0 on every CRYPTO position
         var resetCount = 0
         let resetSQL = "UPDATE investment_positions SET current_value = 0 WHERE UPPER(asset_type) = 'CRYPTO'"
         var resetStmt: OpaquePointer?
@@ -752,19 +742,19 @@ struct InvestmentRepository {
         return (resetCount, deletedCount)
     }
 
-    /// Stocke l'historique de prix d'un actif. Depuis la migration v33 cette
-    /// data est en cache disque (`Library/Caches/`), plus dans la base SQLite —
-    /// les prix ne sont pas data utilisateur, juste un cache des APIs Yahoo/
-    /// Stooq/CoinGecko, donc inutile de polluer la DB.
+    /// Stores an asset's price history. This data lives in a disk cache
+    /// (`Library/Caches/`), not in the SQLite database — prices aren't user data,
+    /// just a cache of the Yahoo/Stooq/CoinGecko APIs, so there's no reason to
+    /// put them in the database.
     @MainActor
     @discardableResult
     func savePriceHistory(identifier: String, points: [InvestmentPricePoint], source: String = "unknown") -> Int {
-        // `source` ne sert plus à rien (avant on l'écrivait en SQL) — on l'ignore.
+        // `source` is unused — ignored.
         _ = source
         return PriceHistoryCache.shared.save(identifier: identifier, points: points)
     }
 
-    /// Lit l'historique depuis le cache disque (RAM-hydraté au 1er accès).
+    /// Reads the history from the disk cache (hydrated into RAM on first access).
     @MainActor
     func fetchPriceHistory(identifier: String, limit: Int = 365) -> [InvestmentPricePoint] {
         PriceHistoryCache.shared.fetch(identifier: identifier, limit: limit)

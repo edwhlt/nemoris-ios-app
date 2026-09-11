@@ -3,19 +3,19 @@ import SQLite3
 
 private let SQLITE_TRANSIENT_LIVESYNC = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-// MARK: - Repository CRUD pour investment_live_sync
+// MARK: - CRUD repository for investment_live_sync
 //
-// Stocke uniquement les métadonnées non-sensibles des liens (provider_id, display_name,
-// account_id, config_json, status). Les credentials sont gérés séparément par
+// Stores only the links' non-sensitive metadata (provider_id, display_name,
+// account_id, config_json, status). Credentials are handled separately by
 // `InvestmentCredentialStore` (Keychain).
 
-/// Modèle Swift d'un lien live sync (1 ligne de la table investment_live_sync).
+/// Swift model of a live sync link (one row of the investment_live_sync table).
 struct InvestmentLiveSyncLink: Identifiable {
     let id: Int
     var providerId: String
     var displayName: String
     var accountId: Int?
-    /// Config JSON brute (sera décodée par chaque provider selon ses besoins).
+    /// Raw JSON config (decoded by each provider as it needs).
     var configJSON: String?
     var enabled: Bool
     var lastSyncAt: Date?
@@ -30,7 +30,7 @@ struct InvestmentLiveSyncLink: Identifiable {
         case pending // En cours de sync
     }
 
-    /// Décode `configJSON` en dictionnaire pratique pour les providers.
+    /// Decodes `configJSON` into a convenient dictionary for the providers.
     var config: [String: String] {
         guard let json = configJSON,
               let data = json.data(using: .utf8),
@@ -40,16 +40,16 @@ struct InvestmentLiveSyncLink: Identifiable {
     }
 }
 
-/// `@unchecked Sendable` : la classe est stateless (chaque méthode ouvre/ferme
-/// sa propre connexion SQLite). Pas d'état mutable partagé.
+/// `@unchecked Sendable`: the class is stateless (each method opens/closes its
+/// own SQLite connection). No shared mutable state.
 final class LiveSyncRepository: @unchecked Sendable {
 
     static let shared = LiveSyncRepository()
 
     private let store: SQLiteStore
 
-    /// `shared` reste le point d'accès de l'application ; l'init injectable
-    /// permet aux tests d'instancier le repository sur une base temporaire.
+    /// `shared` remains the app's access point; the injectable init lets tests
+    /// instantiate the repository on a temporary database.
     init(store: SQLiteStore = SQLiteStore()) {
         self.store = store
     }
@@ -102,8 +102,8 @@ final class LiveSyncRepository: @unchecked Sendable {
 
     // MARK: - Mutations
 
-    /// Crée un nouveau lien et renvoie son ID. Les credentials doivent être stockés
-    /// séparément par `InvestmentCredentialStore.store(linkId:..., providerId:..., credentials:...)`.
+    /// Creates a new link and returns its ID. Credentials must be stored
+    /// separately via `InvestmentCredentialStore.store(linkId:..., providerId:..., credentials:...)`.
     @discardableResult
     func addLink(providerId: String,
                  displayName: String,
@@ -170,7 +170,7 @@ final class LiveSyncRepository: @unchecked Sendable {
         } != nil
     }
 
-    /// Met à jour uniquement les colonnes de status (utile après une sync).
+    /// Updates only the status columns (useful after a sync).
     func updateSyncStatus(linkId: Int,
                           status: InvestmentLiveSyncLink.SyncStatus,
                           message: LocalizedStringResource?,
@@ -191,12 +191,11 @@ final class LiveSyncRepository: @unchecked Sendable {
         }
     }
 
-    /// `last_sync_message` reste une colonne `TEXT` — le `LocalizedStringResource`
-    /// y est encodé en JSON (il est `Codable`) plutôt que via une migration de
-    /// colonne. `decodeMessage` retombe sur le texte BRUT (`stringLiteral:`,
-    /// verbatim, non réactif) si le contenu n'est pas du JSON valide — couvre
-    /// les lignes écrites par l'ancienne version (`String` en clair), sans
-    /// jamais faire planter la lecture.
+    /// `last_sync_message` remains a `TEXT` column — the `LocalizedStringResource`
+    /// is encoded there as JSON (it's `Codable`) rather than through a column
+    /// migration. `decodeMessage` falls back to the RAW text (`stringLiteral:`,
+    /// verbatim, non-reactive) if the content isn't valid JSON — which covers
+    /// rows holding a plain `String`, without ever making the read fail.
     private static func encodeMessage(_ resource: LocalizedStringResource) -> String? {
         guard let data = try? JSONEncoder().encode(resource) else { return nil }
         return String(data: data, encoding: .utf8)
@@ -210,8 +209,8 @@ final class LiveSyncRepository: @unchecked Sendable {
         return LocalizedStringResource(stringLiteral: raw)
     }
 
-    /// Supprime un lien. Le caller doit ALSO supprimer les credentials du Keychain
-    /// via `InvestmentCredentialStore.delete(linkId:..., providerId:...)`.
+    /// Deletes a link. The caller must ALSO delete the Keychain credentials via
+    /// `InvestmentCredentialStore.delete(linkId:..., providerId:...)`.
     @discardableResult
     func deleteLink(id: Int) -> Bool {
         executeWrite("DELETE FROM investment_live_sync WHERE id = ?") { stmt, _ in
@@ -266,7 +265,8 @@ final class LiveSyncRepository: @unchecked Sendable {
         bind(stmt)
     }
 
-    /// Renvoie nil si l'exécution a échoué, sinon un Void marker (utilisé par updateLink/deleteLink pour Bool).
+    /// Returns nil if execution failed, otherwise a Void marker (used by
+    /// updateLink/deleteLink to produce a Bool).
     @discardableResult
     private func executeWrite(_ sql: String,
                               _ bind: (OpaquePointer?, OpaquePointer?) -> Void) -> Void? {

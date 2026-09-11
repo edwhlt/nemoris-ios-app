@@ -1,15 +1,15 @@
 import SwiftUI
 
-/// Pendant `InvestmentAccount` d'`AccountSearchSheet` — mêmes conventions
-/// (recherche + `.macGroupedRow`), mais liste plate : `InvestmentAccount`
-/// n'a pas d'équivalent de `AccountType`/`groupedByType`, et un utilisateur a
-/// en pratique bien moins de comptes-titres que de comptes différés.
+/// `InvestmentAccount` counterpart of `AccountSearchSheet` — same conventions
+/// (search + `.macGroupedRow`), but a flat list: `InvestmentAccount` has no
+/// equivalent of `AccountType`/`groupedByType`, and in practice a user has
+/// far fewer brokerage accounts than deferred-debit accounts.
 struct InvestmentAccountSearchSheet: View {
-    // `\.paneDismiss`, PAS `\.dismiss` — cf. le commentaire équivalent dans
-    // `AccountSearchSheet.swift` : ouverte depuis des contextes racine
-    // (entonnoir d'import), cette sheet peut atterrir en niveau 1 de
-    // `.adaptivePane` (inspecteur macOS, pas une vraie `.sheet`), où
-    // `\.dismiss` remonte fermer la fenêtre.
+    // `\.paneDismiss`, NOT `\.dismiss` — see the matching comment in
+    // `AccountSearchSheet.swift`: opened from root contexts (the import
+    // funnel), this sheet can land at level 1 of `.adaptivePane` (the macOS
+    // inspector, not a real `.sheet`), where `\.dismiss` walks up and closes
+    // the window.
     @Environment(\.paneDismiss) private var dismiss
 
     let accounts: [InvestmentAccount]

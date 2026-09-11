@@ -1,11 +1,11 @@
 import Foundation
 
-// MARK: - Provider Bitcoin Wallet (impl réelle)
+// MARK: - Bitcoin wallet provider
 //
-// Sync simple — 1 seule requête vers Blockstream Esplora pour la balance.
-// Bitcoin n'a pas de tokens (au sens ERC-20), donc 1 position unique = BTC native.
-// Les Ordinals/Runes/BRC-20 sont hors scope MVP (écosystème fragmenté, valorisation
-// EUR difficile, et la majorité des wallets perso n'en détiennent pas).
+// Simple sync — a single request to Blockstream Esplora for the balance.
+// Bitcoin has no tokens (in the ERC-20 sense), so one single position = native
+// BTC. Ordinals/Runes/BRC-20 are out of scope (fragmented ecosystem, hard EUR
+// valuation, and most personal wallets hold none).
 
 extension BitcoinWalletLiveSyncProvider {
 
@@ -14,7 +14,7 @@ extension BitcoinWalletLiveSyncProvider {
             throw LiveSyncError.missingCredentials
         }
         let client = BitcoinAPIClient()
-        // Simple balance fetch valide à la fois la connectivité ET le format de l'adresse
+        // A simple balance fetch validates both connectivity AND the address format
         _ = try await client.fetchBalance(address: address)
     }
 
@@ -47,11 +47,11 @@ extension BitcoinWalletLiveSyncProvider {
     }
 
     func fetchTransactions(credentials: [String: String], config: [String: String], since: Date?) async throws -> [LiveSyncTransaction] {
-        // Stub Couche 3a. À venir :
-        //   - GET /address/{addr}/txs → array de transactions Bitcoin
-        //   - Parsing vin/vout pour identifier les entrées (BUY) et sorties (SELL)
-        //   - Pour un wallet perso, chaque entrée externe = "achat" (qu'on a reçu)
-        //   - Conversion EUR au moment de la tx → besoin d'historique de prix BTC/EUR
+        // Not implemented yet. To do:
+        //   - GET /address/{addr}/txs → array of Bitcoin transactions
+        //   - Parse vin/vout to identify inflows (BUY) and outflows (SELL)
+        //   - For a personal wallet, each external inflow = a "purchase" (received)
+        //   - EUR conversion at transaction time → needs BTC/EUR price history
         return []
     }
 }

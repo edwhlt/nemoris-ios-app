@@ -1,42 +1,43 @@
 import Foundation
 
-/// Domaine vertical d'un graphique de cours ou de valorisation.
+/// Vertical domain of a price or valuation chart.
 ///
-/// Règle unique : **l'échelle vient de la série effectivement tracée sur la
-/// plage sélectionnée**, jamais d'une valeur qui vit en dehors. Sans ça,
-/// changer de plage ne fait varier que l'abscisse — l'ordonnée reste étirée
-/// par un repère hors champ, la courbe se tasse sur quelques pixels et se lit
-/// comme une droite alors qu'elle bouge.
+/// Single rule: **the scale comes from the series actually drawn over the
+/// selected range**, never from a value that lives outside it. Without it,
+/// changing the range only moves the x-axis — the y-axis stays stretched by
+/// an out-of-view marker, and the curve squashes into a few pixels and reads
+/// as a straight line even though it moves.
 ///
-/// Deux pièges concrets, tous deux rencontrés sur la fiche position :
+/// Two concrete traps:
 ///
-/// 1. **Un repère hors plage impose l'échelle.** Le PRU d'un titre acheté
-///    250 € qui cote 40 € force un domaine 0–270 sur TOUTES les plages ; le
-///    mouvement réel du mois (39 → 41 €) devient invisible. D'où
-///    `references` : ces valeurs n'ont le droit d'élargir le domaine que si
-///    elles tombent à portée de la série (`referenceTolerance`), sinon elles
-///    sont ignorées — au dessinateur de masquer le repère devenu hors champ
-///    (`domaine.contains(repère)`).
+/// 1. **An out-of-range marker dictates the scale.** The average cost of a
+///    security bought at €250 that trades at €40 forces a 0–270 domain on
+///    EVERY range; the month's real movement (39 → 41 €) becomes invisible.
+///    Hence `references`: these values may widen the domain only if they fall
+///    within reach of the series (`referenceTolerance`); otherwise they are
+///    ignored — it's up to the drawing code to hide the now out-of-view
+///    marker (`domain.contains(marker)`).
 ///
-/// 2. **Un padding proportionnel à la VALEUR au lieu de l'AMPLITUDE.** Un
-///    `lo * 0.92 ... hi * 1.08` sur une série 39–41 € donne 35,9–44,3 : le
-///    padding vaut quatre fois l'amplitude réelle et écrase la courbe à lui
-///    seul, PRU ou pas. Ici le padding est une fraction de l'amplitude.
+/// 2. **Padding proportional to the VALUE instead of the RANGE.** A
+///    `lo * 0.92 ... hi * 1.08` on a 39–41 € series gives 35.9–44.3: the
+///    padding is four times the real range and flattens the curve on its own,
+///    average cost or not. Here the padding is a fraction of the range.
 enum ChartYDomain {
 
-    /// Domaine de repli quand il n'y a strictement rien à représenter.
+    /// Fallback domain when there is strictly nothing to plot.
     static let fallback: ClosedRange<Double> = 0...1
 
     /// - Parameters:
-    ///   - values: la série TRACÉE sur la plage affichée. Elle seule fixe l'échelle.
-    ///   - references: repères secondaires (PRU, cours d'un ordre) qui ne doivent
-    ///     pas imposer l'échelle. Ils n'élargissent le domaine que s'ils tombent
-    ///     à portée de la série.
-    ///   - padding: respiration haute et basse, en fraction de l'amplitude.
-    ///   - referenceTolerance: distance maximale, en fraction de l'amplitude, à
-    ///     laquelle un repère peut encore élargir le domaine.
-    ///   - clampToZero: borne basse à 0 — pour un cours ou une valorisation,
-    ///     qui ne descendent pas sous zéro.
+    ///   - values: the series DRAWN over the displayed range. It alone sets the
+    ///     scale.
+    ///   - references: secondary markers (average cost, an order's price) that
+    ///     must not dictate the scale. They widen the domain only if they fall
+    ///     within reach of the series.
+    ///   - padding: top and bottom breathing room, as a fraction of the range.
+    ///   - referenceTolerance: maximum distance, as a fraction of the range, at
+    ///     which a marker may still widen the domain.
+    ///   - clampToZero: lower bound at 0 — for a price or a valuation, which
+    ///     never go below zero.
     static func compute(values: [Double],
                         references: [Double] = [],
                         padding: Double = 0.12,
@@ -46,17 +47,16 @@ enum ChartYDomain {
         let repères = references.filter(\.isFinite)
 
         guard let bas = série.min(), let haut = série.max() else {
-            // Pas de série : les repères redeviennent la seule information
-            // disponible, et à ce titre reprennent le droit de fixer l'échelle.
+            // No series: the markers become the only information available, and as
+            // such regain the right to set the scale.
             guard let basRepère = repères.min(), let hautRepère = repères.max() else {
                 return fallback
             }
             return padded(basRepère, hautRepère, padding: padding, clampToZero: clampToZero)
         }
 
-        // Amplitude plancher : une série plate ne doit donner ni un domaine
-        // dégénéré, ni une tolérance nulle qui exclurait jusqu'au repère collé
-        // à la courbe.
+        // Minimum range: a flat series must yield neither a degenerate domain nor a
+        // zero tolerance that would exclude even a marker sitting on the curve.
         let amplitude = floorSpan(bas, haut)
         let marge = amplitude * max(0, referenceTolerance)
 
@@ -73,9 +73,9 @@ enum ChartYDomain {
         return padded(bornBas, bornHaut, padding: padding, clampToZero: clampToZero)
     }
 
-    /// Amplitude retenue pour le calcul : jamais nulle, et au moins 2 % de la
-    /// valeur affichée pour qu'une série parfaitement plate garde une bande
-    /// lisible plutôt qu'un trait au milieu d'un domaine microscopique.
+    /// Range used for the computation: never zero, and at least 2% of the
+    /// displayed value, so a perfectly flat series keeps a readable band rather
+    /// than a line in the middle of a microscopic domain.
     private static func floorSpan(_ bas: Double, _ haut: Double) -> Double {
         max(haut - bas, abs(haut) * 0.02, 0.0001)
     }
@@ -85,8 +85,8 @@ enum ChartYDomain {
         let marge = floorSpan(bas, haut) * max(0, padding)
         let bornBas = clampToZero ? max(0, bas - marge) : bas - marge
         let bornHaut = haut + marge
-        // `ClosedRange` exige lower <= upper : un clamp à zéro sur une série
-        // elle-même à zéro pourrait sinon produire une plage inversée.
+        // `ClosedRange` requires lower <= upper: clamping to zero on a series that
+        // is itself at zero could otherwise produce an inverted range.
         return bornBas...max(bornHaut, bornBas + 0.0001)
     }
 }

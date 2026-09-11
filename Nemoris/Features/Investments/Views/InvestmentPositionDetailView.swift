@@ -1,18 +1,16 @@
 import SwiftUI
 import Charts
 
-// MARK: - Phase 2 — Niveau Valeur (Position Detail)
+// MARK: - Security level (position detail)
 //
-// Écran de détail d'une position individuelle, accessible via NavigationLink depuis
-// AccountDetailView. Affiche :
-//   - Hero card position (current value + variation sur la plage)
-//   - KPIs : Quantité · PRU · Valeur actuelle · P&L abs+%
-//   - Chart évolution avec point d'entrée (purchase_date) highlighté
+// Detail screen of an individual position, reached from AccountDetailView.
+// Shows:
+//   - Position hero card (current value + variation over the range)
+//   - KPIs: Quantity · Average cost · Current value · P&L abs+%
+//   - Evolution chart with the orders highlighted
 //   - Time range chips
-//   - Bouton sync historique en toolbar
 //
-// Le "point d'entrée" est marqué par un PointMark distinct sur le chart à la
-// date d'achat (`position.purchaseDate`) avec une annotation "Entrée @ PRU".
+// Each order is marked on the chart at its date, with its execution price.
 
 struct InvestmentPositionDetailView: View {
     @Bindable var viewModel: InvestmentsViewModel
@@ -21,12 +19,12 @@ struct InvestmentPositionDetailView: View {
 
     @State private var localTimeRange: InvestmentTimeRange = .all
     @State private var priceHistory: [InvestmentPricePoint] = []
-    /// Série INTRADAY 30 min (plage 1J uniquement) — chargée on-demand quand
-    /// l'utilisateur sélectionne 1J, cache 48 h avec skip fraîcheur < 25 min.
+    /// 30-min INTRADAY series (1D range only) — loaded on demand when the user
+    /// selects 1D, cached with a freshness skip under 25 min.
     @State private var intradayHistory: [InvestmentPricePoint] = []
-    /// État du chargement de la série intraday (plage 1J). Rend visible ce qui
-    /// était muet : tant que le fetch tourne on l'annonce, et s'il échoue on
-    /// dit pourquoi au lieu de retomber sans le dire sur le quotidien.
+    /// Loading state of the intraday series (1D range). While the fetch runs it's
+    /// announced, and if it fails the reason is shown, rather than silently
+    /// falling back to the daily series.
     @State private var intradayState: IntradayState = .idle
 
     enum IntradayState: Equatable {
@@ -38,35 +36,33 @@ struct InvestmentPositionDetailView: View {
     @State private var isSyncing = false
     @State private var statusMessage: LocalizedStringResource?
     @State private var showEditForm = false
-    /// Détail de la dernière synchro (ouvert par le bouton "?" sous le chart) —
-    /// a remplacé la carte "Dernière synchro du cours" en pleine largeur.
+    /// Detail of the last sync (opened by the "?" button under the chart).
     @State private var showSyncDetail = false
 
-    // ordres
-    // Pour éviter le bug "tap pour modifier crée un nouveau ordre", on utilise
-    // 2 sheets distinctes (pattern recommandé Apple) :
-    //   - showOrderAddForm  : nouvelle saisie (order = nil)
-    //   - editingOrder (Identifiable) : édition d'un ordre existant
-    // Une seule `sheet(isPresented:)` partagée avec un `@State` optionnel
-    // souffrait d'une race de capture de closure — la sheet se présentait
-    // parfois avec `editingOrder = nil` même si on venait de l'assigner.
+    // orders
+    // 2 distinct sheets, so tapping to edit can never create a new order:
+    //   - showOrderAddForm  : new entry (order = nil)
+    //   - editingOrder (Identifiable) : editing an existing order
+    // A single shared `sheet(isPresented:)` with an optional `@State` suffers a
+    // closure-capture race — the sheet can present with `editingOrder = nil`
+    // right after it was assigned.
     @State private var orders: [InvestmentOrder] = []
     @State private var showOrderAddForm = false
     @State private var editingOrder: InvestmentOrder?
 
-    // scrub interactif sur la position chart. Permet de "fixer" la chart
-    // sous le doigt (consomme les gestures horizontaux), tout en laissant le scroll
-    // vertical fonctionner (le gesture refuse les drags verticaux).
+    // Interactive scrub on the position chart. "Pins" the chart under the finger
+    // (consumes horizontal gestures), while letting vertical scrolling work (the
+    // gesture rejects vertical drags).
     @State private var chartSelectedDate: Date?
 
     // Suppression position
     @State private var showDeletePositionConfirm = false
-    /// Skeleton tant que `.task` n'a pas terminé loadCachedHistory + loadOrders.
+    /// Skeleton until `.task` has finished loadCachedHistory + loadOrders.
     @State private var hasLoaded = false
     @Environment(\.dismiss) private var dismissDetail
-    /// macOS : la fiche vit dans le panneau latéral (AdaptivePane) — `\.dismiss`
-    /// y est un no-op, la fermeture passe par `\.paneDismiss` (no-op partout
-    /// ailleurs : les deux appels coexistent sans garde de plateforme).
+    /// macOS: the sheet lives in the side pane (AdaptivePane) — `\.dismiss` is a
+    /// no-op there, closing goes through `\.paneDismiss` (a no-op everywhere
+    /// else: both calls coexist without a platform guard).
     @Environment(\.paneDismiss) private var paneDismiss
     @Environment(AppState.self) private var appState
 
@@ -74,12 +70,12 @@ struct InvestmentPositionDetailView: View {
 
     // MARK: - Derived
 
-    /// Valeur de la position dans le temps = qty_à_cette_date × close.
+    /// The position's value over time = qty_at_that_date × close.
     ///
-    /// On utilise la quantité HISTORIQUE à chaque point (calculée depuis les
-    /// ordres : Σ BUY − Σ SELL avant la date) au lieu de la qty actuelle.
-    /// Sans ça, une position vendue afficherait une ligne plate à 0 alors
-    /// qu'elle avait bien une valeur de marché tant qu'elle était détenue.
+    /// The HISTORICAL quantity at each point (computed from the orders: Σ BUY −
+    /// Σ SELL before the date) is used instead of the current quantity.
+    /// Otherwise a sold position would show a flat line at 0, even though it had
+    /// a market value while it was held.
     private var positionValuePoints: [PortfolioEvolutionPoint] {
         let cutoff = localTimeRange.startDate
         return priceHistory
@@ -96,9 +92,9 @@ struct InvestmentPositionDetailView: View {
             }
     }
 
-    /// Quantité détenue à une date donnée, reconstruite depuis les ordres.
-    /// Σ BUY − Σ SELL avant ou égal à `date`. Les DIV n'affectent pas la qty.
-    /// Clampée à 0 si plus de SELL que de BUY (edge case data corruption).
+    /// Quantity held at a given date, rebuilt from the orders.
+    /// Σ BUY − Σ SELL on or before `date`. DIVs don't affect the quantity.
+    /// Clamped to 0 if there are more SELLs than BUYs (corrupted data edge case).
     private func quantityAt(date: Date) -> Double {
         var qty: Double = 0
         for order in orders where order.executedAt <= date {
@@ -111,10 +107,11 @@ struct InvestmentPositionDetailView: View {
         return max(0, qty)
     }
 
-    /// PRU pondéré à une date donnée, calculé à partir des BUYs antérieurs.
-    /// Σ(qty × price + fees) des BUYs / Σ qty des BUYs.
-    /// Sert au shading "zone gain/perte" sur le chart : la zone entre la courbe
-    /// du cours et la ligne du PRU à cet instant montre le gain/perte latent.
+    /// Weighted average cost at a given date, computed from the earlier BUYs.
+    /// Σ(qty × price + fees) of the BUYs / Σ qty of the BUYs.
+    /// Used for the "gain/loss zone" shading on the chart: the area between the
+    /// price curve and the average cost line at that instant shows the unrealized
+    /// gain/loss.
     private func pruAt(date: Date) -> Double {
         var totalQty: Double = 0
         var totalCost: Double = 0
@@ -126,14 +123,14 @@ struct InvestmentPositionDetailView: View {
         return totalQty > 0 ? totalCost / totalQty : 0
     }
 
-    /// PRU pondéré "actuel" (toutes les BUYs cumulées). Utilisé pour la RuleMark
-    /// horizontale qui matérialise le seuil de break-even.
+    /// "Current" weighted average cost (all BUYs combined). Used for the
+    /// horizontal RuleMark that marks the break-even threshold.
     private var currentWeightedPRU: Double {
         pruAt(date: Date())
     }
 
-    /// Points de cours filtrés à la plage temporelle. Sert au chart principal
-    /// (close × 1, pas × qty — on visualise le titre, pas la poche).
+    /// Price points filtered to the time range. Feed the main chart (close × 1,
+    /// not × qty — the security is shown, not the holding).
     private var positionPricePoints: [InvestmentPricePoint] {
         let cutoff = localTimeRange.startDate
         return priceHistory
@@ -144,30 +141,27 @@ struct InvestmentPositionDetailView: View {
             }
     }
 
-    /// Points ASSAINIS pour le rendu du chart : triés par date, un seul point
-    /// par pas de temps, `close` fini et strictement positif, ET valeurs
-    /// aberrantes rejetées (`rejectOutliers`).
+    /// SANITIZED points for chart rendering: sorted by date, a single point per
+    /// time step, finite and strictly positive `close`, AND outliers rejected
+    /// (`rejectOutliers`).
     ///
-    /// Granularité adaptée à la plage : en 1J on trace la série INTRADAY 30 min
-    /// des dernières 24 h glissantes (la série quotidienne n'a qu'un point sur
-    /// cette fenêtre — rien à tracer) ; sinon la série quotidienne, dédupliquée
-    /// par jour calendaire (prévention "code-barres").
+    /// Granularity matched to the range: on 1D the 30-min INTRADAY series of the
+    /// last rolling 24 h is drawn (the daily series has a single point over that
+    /// window — nothing to draw); otherwise the daily series, deduplicated per
+    /// calendar day ("barcode" prevention).
     private var chartPoints: [InvestmentPricePoint] {
         if localTimeRange == .oneDay {
-            // ⚠️ PAS de repli sur la série quotidienne en 1J.
+            // NO fallback to the daily series on 1D.
             //
-            // C'est LA cause du « 1J n'affiche que 2 points » : sans cotations
-            // intrajournalières, on filtrait le QUOTIDIEN sur 24 h, ce qui
-            // laisse un ou deux points de clôture — tracés comme une courbe
-            // ordinaire. L'utilisateur voyait donc une droite entre deux points
-            // en croyant regarder la journée, sans rien pour lui dire que la
-            // série intraday manquait. Mieux vaut un état vide explicite
-            // (cf. `intradayState`) qu'une courbe fabriquée à partir d'une
-            // autre granularité.
+            // Without intraday quotes, filtering the DAILY series over 24 h leaves one or
+            // two closing points — drawn as an ordinary curve. The user would see a
+            // straight line between two points, believing it's the day, with nothing to
+            // tell them the intraday series was missing. An explicit empty state (see
+            // `intradayState`) beats a curve fabricated from another granularity.
             guard !intradayHistory.isEmpty else { return [] }
-            // Un point par HORODATAGE (pas par jour !), fenêtre des dernières
-            // 24 h COTÉES — ancrée sur le dernier point disponible et non sur
-            // `Date()`, sinon la vue est vide hors séance (cf. `lastQuotedWindow`).
+            // One point per TIMESTAMP (not per day!), window of the last 24 TRADED hours
+            // — anchored on the last available point, not on `Date()`, otherwise the
+            // view is empty outside trading hours (see `lastQuotedWindow`).
             var seen = Set<Date>()
             let deduped = intradayHistory
                 .filter { $0.close.isFinite && $0.close > 0 }
@@ -184,12 +178,12 @@ struct InvestmentPositionDetailView: View {
         return rejectOutliers(deduped)
     }
 
-    /// Prévention "code-barres" (2e ligne de défense) : une série de cours peut
-    /// être CONTAMINÉE par deux échelles de prix incompatibles fusionnées sous
-    /// le même identifiant — ex. un ticker qui résout vers le mauvais instrument
-    /// Yahoo. Le chart alternerait alors entre 35 € et 300 € d'un point à
-    /// l'autre → un peigne. On écarte tout point hors de l'intervalle
-    /// [médiane / 4, médiane × 4] : une seule échelle survit, le rendu reste lisse.
+    /// "Barcode" prevention (2nd line of defense): a price series can be
+    /// CONTAMINATED by two incompatible price scales merged under the same
+    /// identifier — e.g. a ticker resolving to the wrong Yahoo instrument. The
+    /// chart would then alternate between €35 and €300 from one point to the next
+    /// → a comb. Every point outside [median / 4, median × 4] is dropped: a single
+    /// scale survives, and the rendering stays smooth.
     private func rejectOutliers(_ points: [InvestmentPricePoint]) -> [InvestmentPricePoint] {
         guard points.count >= 4 else { return points }
         let sortedCloses = points.map(\.close).sorted()
@@ -197,21 +191,21 @@ struct InvestmentPositionDetailView: View {
         guard median > 0 else { return points }
         let lower = median / 4, upper = median * 4
         let cleaned = points.filter { $0.close >= lower && $0.close <= upper }
-        // Si le filtre écarte tout (médiane pathologique), on retombe sur la
-        // série dédupliquée plutôt que d'afficher un chart vide.
+        // If the filter drops everything (pathological median), fall back to the
+        // deduplicated series rather than showing an empty chart.
         return cleaned.isEmpty ? points : cleaned
     }
 
-    /// Repères secondaires du chart : PRU + cours des BUY/SELL visibles.
-    /// Les dividendes en sont EXCLUS (quelques centimes par titre : les inclure
-    /// écrasait l'axe Y vers 0).
+    /// Secondary chart markers: average cost + the visible BUY/SELL prices.
+    /// Dividends are EXCLUDED (a few cents per share: including them would
+    /// squash the Y axis towards 0).
     ///
-    /// ⚠️ Ce sont des repères, PAS la série : ils n'ont pas le droit de fixer
-    /// l'échelle. Un titre acheté 250 € qui cote 40 € imposerait sinon un
-    /// domaine 0–270 à toutes les plages, et le mouvement du mois (39 → 41 €)
-    /// se lirait comme une droite. `ChartYDomain` ne les retient que s'ils
-    /// tombent à portée de la courbe ; hors champ, c'est le repère qu'on masque
-    /// (cf. `chartYDomain.contains(...)` au rendu), pas la courbe qu'on écrase.
+    /// These are markers, NOT the series: they have no right to set the scale. A
+    /// security bought at €250 that trades at €40 would otherwise force a 0–270
+    /// domain on every range, and the month's movement (39 → 41 €) would read as
+    /// a straight line. `ChartYDomain` only keeps them when they fall within
+    /// reach of the curve; out of view, the marker is hidden (see
+    /// `chartYDomain.contains(...)` at render), the curve isn't squashed.
     private var chartYReferences: [Double] {
         var refs = visibleOrders
             .filter { $0.orderType != .dividend }
@@ -220,8 +214,8 @@ struct InvestmentPositionDetailView: View {
         return refs
     }
 
-    /// Domaine Y calculé sur la série TRACÉE (`chartPoints`, et pas
-    /// `positionPricePoints` : en 1J le domaine doit suivre la série intraday).
+    /// Y domain computed on the DRAWN series (`chartPoints`, not
+    /// `positionPricePoints`: on 1D the domain must follow the intraday series).
     private var chartYDomain: ClosedRange<Double> {
         ChartYDomain.compute(values: chartPoints.map(\.close),
                              references: chartYReferences,
@@ -229,67 +223,60 @@ struct InvestmentPositionDetailView: View {
                              clampToZero: true)
     }
 
-    /// Indique si la date d'achat est visible dans la plage actuelle.
-    /// (Conservé pour compat — utilisé nulle part depuis le refacto multi-ordres.)
-    private var entryPointInRange: Bool {
-        guard let cutoff = localTimeRange.startDate else { return true }
-        return position.purchaseDate >= cutoff
-    }
-
-    /// ordres à afficher sur le chart : ceux qui tombent dans la plage temporelle
-    /// sélectionnée. Pour "Max" (cutoff == nil) on prend tous les ordres.
+    /// Orders to show on the chart: those falling within the selected time range.
+    /// For "Max" (cutoff == nil) every order is taken.
     private var visibleOrders: [InvestmentOrder] {
         guard let cutoff = localTimeRange.startDate else { return orders }
         return orders.filter { $0.executedAt >= cutoff }
     }
 
-    /// Couleur d'annotation sur le chart pour chaque type d'ordre.
+    /// Chart annotation color for each order type.
     private func annotationColor(_ type: InvestmentOrderType) -> Color {
         switch type {
-        case .buy:      return AppTheme.Colors.success         // achat = entrée à long terme = vert
+        case .buy:      return AppTheme.Colors.success         // purchase = long-term entry = green
         case .sell:     return AppTheme.Colors.danger          // vente = sortie = rouge
         case .dividend: return AppTheme.Colors.accentSecondary // dividende = brun secondaire
         }
     }
 
-    /// True si la valeur de marché est inconnue (pas encore syncée) mais qu'on
-    /// connaît au moins un cost basis via les ordres BUY. Dans ce cas on affiche
-    /// le cost basis à la place et on cache le P&L (qui sinon serait -100%).
+    /// True if the market value is unknown (not synced yet) but at least a cost
+    /// basis is known from the BUY orders. In that case the cost basis is shown
+    /// instead and the P&L hidden (it would otherwise be -100%).
     private var valuationIsEstimated: Bool {
         position.currentValue <= 0 && position.investedAmount > 0
     }
-    /// True si la position a été ouverte (au moins 1 BUY) puis fermée (qty
-    /// nette actuelle = 0). On change le narratif du hero/KPIs : on ne parle
-    /// plus de "valeur" mais de "P&L réalisé" sur toute la durée de détention.
+    /// True if the position was opened (at least 1 BUY) then closed (current net
+    /// qty = 0). The hero/KPIs then talk about "realized P&L" over the whole
+    /// holding period rather than a "value".
     private var isClosedPosition: Bool {
         position.quantity <= 0 && orders.contains { $0.orderType == .buy }
     }
-    /// Valeur à afficher dans le hero : valeur de marché si syncée, sinon cost
-    /// basis pour ne pas montrer €0 alors qu'on a investi.
+    /// Value shown in the hero: market value if synced, otherwise the cost basis,
+    /// so as not to show €0 when money was invested.
     private var displayedValuation: Double {
         valuationIsEstimated ? position.investedAmount : position.currentValue
     }
 
-    /// Titre du hero adapté au cycle de vie de la position.
+    /// Hero title adapted to the position's life cycle.
     private var heroTitle: LocalizedStringResource {
         if isClosedPosition { return "P&L réalisé sur la position" }
         if valuationIsEstimated { return "Valeur estimée (PRU × qty)" }
         return "Valeur de la position"
     }
 
-    /// Valeur du hero adaptée :
-    /// - Position fermée → P&L réalisé total (peut être positif ou négatif)
-    /// - Pas sync → cost basis
-    /// - Sync OK → valeur de marché
+    /// Adapted hero value:
+    /// - Closed position → total realized P&L (positive or negative)
+    /// - Not synced → cost basis
+    /// - Synced → market value
     private var heroValue: Double {
         if isClosedPosition { return realizedPnL }
         return displayedValuation
     }
 
-    /// P&L réalisé = gains sur ventes passées + dividendes reçus.
-    /// Méthode : pour chaque SELL, on calcule (sell_price − PRU_moyen_à_ce_moment)
-    /// × qty_vendue − frais. Pour chaque DIV, on additionne qty × unit_price.
-    /// Le PRU moyen évolue au fil des BUY (chronologique).
+    /// Realized P&L = gains on past sales + dividends received.
+    /// Method: for each SELL, (sell_price − average cost at that moment) ×
+    /// qty_sold − fees. For each DIV, qty × unit_price is added.
+    /// The average cost evolves with the BUYs (chronologically).
     private var realizedPnL: Double {
         var pnl: Double = 0
         var cumulativeBuyQty: Double = 0
@@ -301,7 +288,7 @@ struct InvestmentPositionDetailView: View {
                 cumulativeBuyQty += order.quantity
                 cumulativeBuyCost += order.quantity * order.unitPrice + order.fees
             case .sell:
-                // PRU pondéré à cet instant
+                // Weighted average cost at that instant
                 let avgPRU = cumulativeBuyQty > 0 ? cumulativeBuyCost / cumulativeBuyQty : 0
                 let saleProceeds = order.quantity * order.unitPrice - order.fees
                 let costBasis = order.quantity * avgPRU
@@ -313,18 +300,18 @@ struct InvestmentPositionDetailView: View {
         return pnl
     }
 
-    /// P&L latent (non réalisé) = current_value − qty × PRU. C'est ce qui
-    /// disparaît à la prochaine vente totale.
+    /// Unrealized P&L = current_value − qty × average cost. It's what disappears
+    /// at the next full sale.
     private var unrealizedPnL: Double {
         position.currentValue - position.investedAmount
     }
 
-    /// P&L total = latent + réalisé. C'est ce qu'on veut montrer en priorité.
+    /// Total P&L = unrealized + realized. The figure shown first.
     private var totalPnL: Double { unrealizedPnL + realizedPnL }
 
-    /// Capital total investi cumulé (Σ BUY costs, sans déduction des SELL).
-    /// Sert de dénominateur pour la variation % — plus stable que `investedAmount`
-    /// (qui chute à 0 quand la position est fermée et fausserait la variation %).
+    /// Total cumulative capital invested (Σ BUY costs, without deducting SELLs).
+    /// The denominator of the variation % — more stable than `investedAmount`
+    /// (which drops to 0 when the position is closed and would skew the variation %).
     private var totalInvestedEver: Double {
         var cost: Double = 0
         for order in orders where order.orderType == .buy {
@@ -354,7 +341,7 @@ struct InvestmentPositionDetailView: View {
                     } else {
                         heroAndChartCard
                         kpisCard
-                        ordersCard       // — historique des ordres BUY/SELL/DIV
+                        ordersCard       // — BUY/SELL/DIV order history
                         detailsCard
                         if let statusMessage {
                             AppCard {
@@ -372,10 +359,10 @@ struct InvestmentPositionDetailView: View {
                 await syncHistory()
             }
         }
-        // Sync déclenchée par pull-to-refresh sur la ScrollView — pas de bouton dédié.
-        // macOS : hébergée dans le PANNEAU (depuis la fiche compte) → chrome
-        // déclaré via paneChrome (Fermer / Supprimer / Modifier dans la barre
-        // système, une seule pilule). iOS : poussée → NavigationStack + toolbar.
+        // Sync is triggered by pull-to-refresh on the ScrollView — no dedicated button.
+        // macOS: hosted in the PANE (from the account sheet) → chrome declared via
+        // paneChrome (Close / Delete / Edit in the system bar, a single pill).
+        // iOS: pushed → NavigationStack + toolbar.
         #if os(macOS)
         .paneChrome(position.assetName.isEmpty ? position.ticker : position.assetName,
                     cancelLabel: "Fermer", onCancel: { paneDismiss() },
@@ -450,7 +437,7 @@ struct InvestmentPositionDetailView: View {
             Button("Supprimer", role: .destructive) {
                 viewModel.deletePosition(id: position.id)
                 appState.dataRefreshToken = UUID()
-                dismissDetail()   // push iOS : pop de la stack
+                dismissDetail()   // iOS push: pop the stack
                 paneDismiss()     // panneau macOS : fermeture (no-op ailleurs)
             }
             Button("Annuler", role: .cancel) {}
@@ -462,29 +449,27 @@ struct InvestmentPositionDetailView: View {
             loadCachedHistory()
             loadOrders()
             hasLoaded = true
-            // Si la vue s'ouvre déjà sur 1J (état restauré), charge l'intraday.
+            // If the view already opens on 1D (restored state), load the intraday series.
             if localTimeRange == .oneDay {
                 await loadIntradayHistory()
             }
         }
         .onChange(of: localTimeRange) { _, newRange in
-            // Plage 1J → fetch on-demand de la série intraday 30 min (skip si
-            // fraîche < 25 min côté service). Les autres plages n'en ont pas besoin.
+            // 1D range → on-demand fetch of the 30-min intraday series (skipped if fresh
+            // < 25 min on the service side). The other ranges don't need it.
             if newRange == .oneDay {
                 Task { await loadIntradayHistory() }
             }
         }
     }
 
-    /// Chargement de la série intraday : sync réseau (avec skip fraîcheur) puis
-    /// lecture du cache sous les identifiants candidats (ISIN puis ticker —
-    /// le service stocke sous `bestSyncIdentifier`).
+    /// Loads the intraday series: network sync (with a freshness skip), then a
+    /// cache read under the candidate identifiers (ISIN then ticker — the service
+    /// stores under `bestSyncIdentifier`).
     ///
-    /// ⚠️ Le résultat de la synchro n'est PLUS jeté (`_ = await …`). Sans lui,
-    /// toute panne du 1J — cours limité par le provider, symbole introuvable,
-    /// réseau coupé — était strictement invisible : l'écran retombait sur la
-    /// série quotidienne et affichait une droite entre deux points comme si
-    /// c'était la courbe de la journée.
+    /// The sync result is kept: any 1D failure — price rate-limited by the
+    /// provider, symbol not found, network down — is surfaced instead of the
+    /// screen silently showing a two-point line as if it were the day's curve.
     private func loadIntradayHistory() async {
         let identifier = position.bestSyncIdentifier
         guard !identifier.isEmpty else {
@@ -507,13 +492,12 @@ struct InvestmentPositionDetailView: View {
         intradayState = .unavailable(Self.intradayFailureMessage(outcome))
     }
 
-    /// Traduction FR du résultat de synchro intraday.
+    /// Text of the intraday sync result.
     private static func intradayFailureMessage(_ outcome: PositionSyncOutcome) -> String {
         switch outcome {
         case .success, .upToDate:
-            // Synchro annoncée OK mais rien en cache : l'instrument n'a pas de
-            // cotation en continu (fonds à VL quotidienne, marché fermé depuis
-            // plus longtemps que la rétention).
+            // Sync reported OK but nothing cached: the instrument has no continuous
+            // quotes (fund with a daily NAV, market closed for longer than the retention).
             return "Ce titre n'a pas de cotation en continu disponible — seul un cours de clôture quotidien existe."
         case .rateLimited(let provider, let retryAfter):
             return "\(provider.displayName) limite les requêtes — nouvelle tentative possible dans \(Int(retryAfter)) s."
@@ -578,16 +562,14 @@ struct InvestmentPositionDetailView: View {
 
     // MARK: - Cards
 
-    // `syncIconButton` retiré — la sync est désormais déclenchée par le
-    // bouton refresh dans la toolbar (à gauche du menu ⋯), pas dans le hero.
-    /// Chantier B — hero + chart à plat (sans carte), chips SOUS le chart.
+    /// Hero + chart, flat (no card), chips BELOW the chart.
     private var heroAndChartCard: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             InvestmentHeroCard(
                 title: heroTitle,
                 currentValue: heroValue,
-                // Pas de variation visible quand on est sur l'estimation
-                // ou la position fermée — ce serait trompeur.
+                // No visible variation on the estimate or on a closed position — it would
+                // be misleading.
                 previousValue: (valuationIsEstimated || isClosedPosition)
                     ? heroValue
                     : positionValuePoints.first?.value,
@@ -615,12 +597,11 @@ struct InvestmentPositionDetailView: View {
                 }
             }
 
-            // Bandeau de lecture : prix d'entrée (ouverture) → prix de sortie
-            // (clôture) DU POINT POINTÉ, avec l'écart en valeur et en %. Ces
-            // deux prix viennent de la source (OHLC Yahoo/Stooq) et changent
-            // donc à chaque point parcouru. Toujours visible dès qu'il y a une
-            // courbe : une annotation collée au point serait tronquée près des
-            // bords du chart.
+            // Reading band: entry price (open) → exit price (close) OF THE POINTED
+            // CANDLE, with the difference in value and %. Both prices come from the
+            // source (Yahoo/Stooq OHLC) and so change with each point scrubbed. Always
+            // visible as soon as there is a curve: an annotation stuck to the point
+            // would be truncated near the chart's edges.
             if !chartPoints.isEmpty {
                 ChartScrubReadout(
                     reference: chartReadoutReference,
@@ -640,10 +621,9 @@ struct InvestmentPositionDetailView: View {
 
             TimeRangeChips(selection: $localTimeRange)
 
-            // Info sur la profondeur de données disponible. Permet à l'utilisateur
-            // de comprendre qu'un chart 10A tronqué n'est pas un bug mais
-            // simplement que l'ETF/action est récent (Yahoo ne fournit que
-            // l'historique depuis l'inception du titre).
+            // Info on the depth of available data. Lets the user understand that a
+            // truncated 10Y chart isn't a bug: the ETF/stock is simply recent (Yahoo
+            // only supplies history since the security's inception).
             if let earliest = priceHistoryEarliestDate {
                 Text("Données disponibles depuis \(earliest, format: .dateTime.day().month(.abbreviated).year())")
                     .font(AppTheme.Typography.labelMedium)
@@ -668,8 +648,8 @@ struct InvestmentPositionDetailView: View {
         .padding(.horizontal, AppTheme.Spacing.sm)
     }
 
-    /// Identifiers utilisés pour retrouver la trace de sync (ISIN prioritaire,
-    /// même logique que `bestSyncIdentifier`).
+    /// Identifiers used to find the sync trace (ISIN first, same logic as
+    /// `bestSyncIdentifier`).
     private var syncTraceIdentifiers: [String] {
         [position.isin, position.ticker].filter { !$0.isEmpty }
     }
@@ -678,8 +658,8 @@ struct InvestmentPositionDetailView: View {
         InvestmentSyncTraceStore.fetchBest(identifiers: syncTraceIdentifiers)
     }
 
-    /// Bougie lue par le bandeau : celle sous le doigt pendant le scrub, la
-    /// dernière de la plage au repos.
+    /// Candle read by the band: the one under the finger while scrubbing, the
+    /// range's last one at rest.
     private var readoutCandle: InvestmentPricePoint? {
         if let selected = chartSelectedDate, let snapped = closestPoint(to: selected) {
             return snapped
@@ -687,16 +667,15 @@ struct InvestmentPositionDetailView: View {
         return chartPoints.last
     }
 
-    /// Prix d'ENTRÉE du point pointé = ouverture de la bougie, telle que la
-    /// source la fournit (`open` de Yahoo / Stooq). C'est une donnée PROPRE À
-    /// CHAQUE POINT : elle change quand on parcourt la courbe, contrairement au
-    /// PRU qui est une constante de la position.
+    /// ENTRY price of the pointed point = the candle's open, as the source
+    /// supplies it (`open` from Yahoo / Stooq). It's data SPECIFIC TO EACH
+    /// POINT: it changes while scrubbing the curve, unlike the average cost,
+    /// which is a constant of the position.
     ///
-    /// Repli quand la source n'a pas d'OHLC (CoinGecko, ou série mise en cache
-    /// avant l'ajout du champ `open`) : la clôture du point précédent, qui est
-    /// le prix auquel le pas de temps a commencé. Même sémantique, autre nom —
-    /// d'où le label distinct côté UI, pour ne pas laisser croire à une vraie
-    /// ouverture de séance.
+    /// Fallback when the source has no OHLC (CoinGecko, or a series cached
+    /// without the `open` field): the previous point's close, which is the price
+    /// at which the time step started. Same semantics, different name — hence
+    /// the distinct UI label, so it doesn't pass for a real session open.
     private var readoutOpen: (value: Double, isRealOpen: Bool)? {
         guard let candle = readoutCandle else { return nil }
         if let open = candle.open, open > 0 { return (open, true) }
@@ -712,19 +691,19 @@ struct InvestmentPositionDetailView: View {
         readoutCandle.map { ChartReadoutPoint(date: $0.date, value: $0.close) }
     }
 
-    /// Date du plus ancien point de cours stocké pour cette position. Utilisé
-    /// pour afficher "Données disponibles depuis ..." et expliquer pourquoi
-    /// un chart 10A peut être tronqué (Yahoo ne renvoie que depuis l'inception).
+    /// Date of the oldest stored price point for this position. Used to show
+    /// "Data available since ..." and explain why a 10Y chart can be truncated
+    /// (Yahoo only returns data since inception).
     private var priceHistoryEarliestDate: Date? {
         priceHistory.map(\.date).min()
     }
 
-    /// Chart de COURS du titre (close × 1, pas multiplié par qty).
-    /// Affiche en plus :
-    ///   - PRU horizontal (RuleMark) = seuil de break-even pour toutes les BUYs
-    ///   - Zone gain/perte (AreaMark) entre le PRU et la courbe quand position
-    ///     est détenue : vert si cours > PRU, rouge sinon
-    ///   - Markers BUY/SELL/DIV à (executedAt, unitPrice) du cercle
+    /// PRICE chart of the security (close × 1, not multiplied by qty).
+    /// Also shows:
+    ///   - Horizontal average cost (RuleMark) = break-even threshold for all BUYs
+    ///   - Gain/loss zone (AreaMark) between the average cost and the curve while
+    ///     the position is held: green if price > average cost, red otherwise
+    ///   - BUY/SELL/DIV markers at (executedAt, unitPrice) of the circle
     @ViewBuilder
     private var positionChart: some View {
         if chartPoints.isEmpty {
@@ -739,10 +718,9 @@ struct InvestmentPositionDetailView: View {
                     Image(systemName: "chart.xyaxis.line")
                         .font(.system(size: 28, weight: .light))
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.4))
-                    // En 1J, l'absence de courbe a une cause PROPRE (pas de
-                    // cotation en continu, provider limité…) : la dire, au lieu
-                    // du message générique « aucun historique » qui laissait
-                    // croire à un défaut de synchro globale.
+                    // On 1D, the missing curve has a SPECIFIC cause (no continuous quote,
+                    // provider limited…): state it, rather than the generic "no history"
+                    // message, which would suggest a global sync failure.
                     if localTimeRange == .oneDay, case .unavailable(let reason) = intradayState {
                         Text("Pas de cours intrajournalier")
                             .font(.system(size: 12, weight: .semibold))
@@ -782,12 +760,11 @@ struct InvestmentPositionDetailView: View {
             let baseline = chartYDomain.lowerBound
 
             Chart {
-                // Aire + courbe dans UN SEUL ForEach (pattern identique à
-                // EvolutionChart, qui rend correctement). Deux ForEach séparés
-                // ou un `if` à l'intérieur cassent la continuité de la série et
-                // font rendre chaque point comme une barre verticale isolée
-                // (bug "code-barres"). La position détenue (gain/perte vs PRU)
-                // se lit via la courbe au-dessus/en-dessous de la RuleMark PRU.
+                // Area + line in A SINGLE ForEach (same pattern as EvolutionChart). Two
+                // separate ForEach, or an `if` inside, break the series' continuity and
+                // render each point as an isolated vertical bar ("barcode"). The held
+                // position (gain/loss vs average cost) reads through the curve being above /
+                // below the average cost RuleMark.
                 ForEach(chartPoints) { point in
                     AreaMark(
                         x: .value("Date", point.date),
@@ -806,11 +783,11 @@ struct InvestmentPositionDetailView: View {
                     .lineStyle(StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
                 }
 
-                // Ligne horizontale au PRU = seuil de break-even visuel.
-                // Au-dessus = profit zone, en-dessous = loss zone.
-                // Masqué quand il sort du domaine : le PRU est un repère, il
-                // ne justifie pas d'aplatir la courbe pour rester visible. Il
-                // reste lisible dans les KPIs et la carte Détails.
+                // Horizontal line at the average cost = visual break-even threshold.
+                // Above = profit zone, below = loss zone.
+                // Hidden when it leaves the domain: the average cost is a marker, it doesn't
+                // justify flattening the curve to stay visible. It stays readable in the
+                // KPIs and the Details card.
                 if pru > 0, chartYDomain.contains(pru) {
                     RuleMark(y: .value("PRU", pru))
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.55))
@@ -826,18 +803,17 @@ struct InvestmentPositionDetailView: View {
                         }
                 }
 
-                // Markers BUY/SELL au cours unitaire de l'ordre.
-                // DIV placés sur la ligne du COURS à leur date — le montant du
-                // dividende (€1.70) n'a aucun rapport avec le cours (€60), donc
-                // les plotter à €1.70 écrasait l'axe Y vers 0 et masquait toute
-                // l'amplitude réelle du cours. On garde la position temporelle
-                // (date verticale) qui est l'info utile pour un DIV.
+                // BUY/SELL markers at the order's unit price.
+                // DIVs are placed on the PRICE line at their date — a dividend's amount
+                // (€1.70) has nothing to do with the price (€60), so plotting them at €1.70
+                // would squash the Y axis towards 0 and hide the price's real range. The
+                // temporal position (vertical date) is kept: that's the useful info for a DIV.
                 ForEach(visibleOrders) { order in
                     let markerY: Double = {
                         switch order.orderType {
                         case .dividend:
-                            // Position sur le cours à la date du dividende.
-                            // Fallback au PRU si pas de cours à cette date.
+                            // Positioned on the price at the dividend's date.
+                            // Falls back to the average cost if there's no price at that date.
                             let closeAtDate = priceHistory
                                 .filter { $0.date <= order.executedAt }
                                 .max(by: { $0.date < $1.date })?
@@ -851,10 +827,9 @@ struct InvestmentPositionDetailView: View {
                         .foregroundStyle(annotationColor(order.orderType).opacity(0.5))
                         .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
 
-                    // La pastille n'est posée que si son cours tient dans le
-                    // domaine ; sinon la règle verticale porte seule l'info
-                    // utile (la DATE de l'ordre) plutôt que de forcer l'échelle
-                    // à s'ouvrir jusqu'à un cours devenu très éloigné.
+                    // The dot is placed only if its price fits within the domain; otherwise the
+                    // vertical rule alone carries the useful info (the order's DATE) rather than
+                    // forcing the scale open up to a price that is now far away.
                     if chartYDomain.contains(markerY) {
                         PointMark(
                             x: .value("Ordre", order.executedAt),
@@ -875,8 +850,8 @@ struct InvestmentPositionDetailView: View {
                     }
                 }
 
-                // Indicateur visuel quand l'utilisateur scrub la chart (vertical line + dot
-                // sur la courbe). N'apparaît que si chartSelectedDate est set.
+                // Visual indicator while the user scrubs the chart (vertical line + dot on
+                // the curve). Only appears when chartSelectedDate is set.
                 if let selected = chartSelectedDate,
                    let snapped = closestPoint(to: selected) {
                     RuleMark(x: .value("Scrub", snapped.date))
@@ -890,18 +865,17 @@ struct InvestmentPositionDetailView: View {
             }
             .chartYScale(domain: chartYDomain)
             .chartXAxis {
-                // Ticks adaptatifs selon la plage temporelle (5A/10A/Max → ticks
-                // annuels avec format yyyy, 1J → heures, etc.).
+                // Ticks adapted to the time range (5Y/10Y/Max → yearly ticks formatted
+                // yyyy, 1D → hours, etc.).
                 let span: TimeInterval = {
                     guard let first = positionPricePoints.first?.date,
                           let last = positionPricePoints.last?.date else { return 0 }
                     return max(0, last.timeIntervalSince(first))
                 }()
                 let config = InvestmentChartXAxisConfig.config(for: localTimeRange, span: span)
-                // ⚠️ `.stride(by:count:)` peut produire des DIZAINES de graduations
-                // sur les longues plages (5A/Max) : les labels se chevauchent ET
-                // gonflent la largeur intrinsèque du chart, ce qui rend toute la
-                // vue scrollable horizontalement. On plafonne à ~5 graduations.
+                // `.stride(by:count:)` can produce DOZENS of ticks on long ranges (5Y/Max):
+                // labels overlap AND inflate the chart's intrinsic width, making the whole
+                // view horizontally scrollable. Capped at ~5 ticks.
                 AxisMarks(position: .bottom, values: .automatic(desiredCount: 5)) { _ in
                     AxisValueLabel(format: config.labelFormat)
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
@@ -909,8 +883,8 @@ struct InvestmentPositionDetailView: View {
                 }
             }
             .chartYAxis {
-                // desiredCount borné (comme EvolutionChart) : un axe Y non borné
-                // pouvait générer trop de graduations/gridlines et alourdir le layout.
+                // Bounded desiredCount (like EvolutionChart): an unbounded Y axis could
+                // generate too many ticks/gridlines and weigh down the layout.
                 AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { _ in
                     AxisValueLabel()
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
@@ -919,9 +893,9 @@ struct InvestmentPositionDetailView: View {
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.08))
                 }
             }
-            // scrub interactif (consomme les drags horizontaux pour que la
-            // chart se sente "fixe" sous le doigt, laisse les drags verticaux passer
-            // au ScrollView parent pour le scroll de page).
+            // Interactive scrub (consumes horizontal drags so the chart feels "pinned"
+            // under the finger, lets vertical drags through to the parent ScrollView for
+            // page scrolling).
             .chartOverlay { proxy in
                 GeometryReader { geo in
                     Rectangle()
@@ -942,8 +916,7 @@ struct InvestmentPositionDetailView: View {
                                     if let date: Date = proxy.value(atX: locationX) {
                                         let previous = chartSelectedDate.flatMap { closestPoint(to: $0)?.date }
                                         chartSelectedDate = date
-                                        // Tick discret au changement de point (pas
-                                        // à chaque pixel parcouru).
+                                        // Discreet tick on each point change (not on every pixel traveled).
                                         if closestPoint(to: date)?.date != previous {
                                             HapticService.shared.selection()
                                         }
@@ -953,34 +926,34 @@ struct InvestmentPositionDetailView: View {
                         )
                 }
             }
-            // ⚠️ PAS de `.frame(maxWidth: .infinity)` ici. Combiné au
-            // `.chartOverlay { GeometryReader }` ci-dessus, il crée sur macOS une
-            // BOUCLE de layout AutoLayout (NSISEngine / _updateConstraintsForSubtree
-            // récursif) → beachball puis crash NSException à l'ouverture d'une
-            // position. EvolutionChart (qui marche) n'a qu'un `.frame(height:)`.
-            // La densité de l'axe X est déjà bornée (desiredCount: 5), donc maxWidth
-            // n'est plus nécessaire pour éviter le scroll horizontal.
+            // NO `.frame(maxWidth: .infinity)` here. Combined with the
+            // `.chartOverlay { GeometryReader }` above, it creates an AutoLayout layout
+            // LOOP on macOS (recursive NSISEngine / _updateConstraintsForSubtree) →
+            // beachball, then an NSException crash when opening a position.
+            // EvolutionChart only has a `.frame(height:)`. The X axis density is already
+            // bounded (desiredCount: 5), so maxWidth isn't needed to avoid horizontal
+            // scrolling.
             .frame(height: 220)
         }
     }
 
-    /// Trouve le point d'historique le plus proche temporellement de `date`.
-    /// Utilisé pour snapper le scrub à un vrai data point (pas une interpolation).
+    /// Finds the history point closest in time to `date`.
+    /// Used to snap the scrub to a real data point (not an interpolation).
     private func closestPoint(to date: Date) -> InvestmentPricePoint? {
         chartPoints.min(by: { a, b in
             abs(a.date.timeIntervalSince(date)) < abs(b.date.timeIntervalSince(date))
         })
     }
 
-    /// Total des dividendes reçus sur la durée de vie de la position. Utile
-    /// pour le breakdown dans la card Performance.
+    /// Total dividends received over the position's lifetime. Used for the
+    /// breakdown in the Performance card.
     private var totalDividends: Double {
         orders.filter { $0.orderType == .dividend }
               .reduce(0) { $0 + $1.quantity * $1.unitPrice }
     }
 
-    /// P&L réalisé sur les ventes uniquement (sans dividendes), utile pour le
-    /// breakdown affiché en mode position fermée.
+    /// Realized P&L on sales only (without dividends), used for the breakdown
+    /// shown for a closed position.
     private var realizedSellsPnL: Double {
         realizedPnL - totalDividends
     }
@@ -990,7 +963,7 @@ struct InvestmentPositionDetailView: View {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
                 SectionHeader(title: "Performance")
                 if valuationIsEstimated {
-                    // Pas de cours synché → un P&L à -100% serait faux et alarmant.
+                    // No synced price → a -100% P&L would be wrong and alarming.
                     HStack(spacing: AppTheme.Spacing.sm) {
                         Image(systemName: "chart.line.uptrend.xyaxis")
                             .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -1000,8 +973,8 @@ struct InvestmentPositionDetailView: View {
                     }
                     .padding(.vertical, AppTheme.Spacing.xs)
                 } else if isClosedPosition {
-                    // Position fermée : on détaille le réalisé pour ne pas
-                    // afficher un P&L = 0 trompeur.
+                    // Closed position: the realized part is detailed, so as not to show a
+                    // misleading P&L of 0.
                     HStack(spacing: AppTheme.Spacing.sm) {
                         StatBadge(
                             label: "P&L total",
@@ -1016,7 +989,7 @@ struct InvestmentPositionDetailView: View {
                             valueColor: realizedPnL >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger
                         )
                     }
-                    // Breakdown : plus-value sur ventes + dividendes
+                    // Breakdown: capital gain on sales + dividends
                     VStack(alignment: .leading, spacing: 4) {
                         breakdownRow(
                             label: "Plus-value sur ventes",
@@ -1045,7 +1018,7 @@ struct InvestmentPositionDetailView: View {
                             valueColor: pnlColor
                         )
                     }
-                    // Breakdown si réalisé > 0 (dividendes ou ventes partielles)
+                    // Breakdown if realized > 0 (dividends or partial sales)
                     if realizedPnL != 0 {
                         VStack(alignment: .leading, spacing: 4) {
                             breakdownRow(
@@ -1124,17 +1097,16 @@ struct InvestmentPositionDetailView: View {
 
     // MARK: - Helpers
 
-    /// Charge le price history en essayant plusieurs identifiers :
-    /// ISIN > ticker > symbole(s) résolu(s) depuis la dernière trace de sync.
+    /// Loads the price history by trying several identifiers:
+    /// ISIN > ticker > symbol(s) resolved by the last sync trace.
     ///
-    /// Le bug avant cette logique : sync via "Synchroniser tous les cours"
-    /// utilisait `bestSyncIdentifier` (ISIN si dispo). OpenFIGI résolvait l'ISIN
-    /// (ex: FR0011871110 → PUST.PA) puis Yahoo renvoyait des points stockés
-    /// sous l'ISIN. Mais ce loader cherchait par `position.ticker` (AMUN.PEA),
-    /// donc le chart restait vide même quand 256 points existaient en base.
+    /// "Sync all prices" uses `bestSyncIdentifier` (the ISIN when available).
+    /// OpenFIGI resolves the ISIN (e.g. FR0011871110 → PUST.PA), and the points
+    /// are stored under that key — looking up by `position.ticker` (AMUN.PEA)
+    /// alone would leave the chart empty even with hundreds of stored points.
     private func loadCachedHistory() {
-        // 1. Essai par ISIN d'abord (priorité haute, identifier canonique)
-        // 2. Puis par ticker
+        // 1. Try the ISIN first (highest priority, canonical identifier)
+        // 2. Then the ticker
         let candidates = [position.isin, position.ticker]
             .filter { !$0.isEmpty }
 
@@ -1146,9 +1118,8 @@ struct InvestmentPositionDetailView: View {
             }
         }
 
-        // 3. Fallback : si la dernière sync a réussi via un symbole résolu
-        //    (ex: ISIN → PUST.PA via OpenFIGI), on essaie de retrouver les
-        //    points stockés sous ce symbole résolu.
+        // 3. Fallback: if the last sync succeeded via a resolved symbol (e.g. ISIN →
+        //    PUST.PA via OpenFIGI), try to find the points stored under that symbol.
         if let trace = InvestmentSyncTraceStore.fetchBest(identifiers: candidates),
            trace.status == .success {
             for symbol in trace.symbolsTried {
@@ -1163,15 +1134,15 @@ struct InvestmentPositionDetailView: View {
         priceHistory = []
     }
 
-    /// recharge la liste des ordres de cette position (chronologique ASC).
+    /// Reloads this position's orders (chronological, ASC).
     private func loadOrders() {
         orders = repository.fetchOrders(positionId: position.id)
     }
 
-    /// Card "Ordres" — historique des opérations + bouton + pour en ajouter.
-    /// Liste les BUY/SELL/DIV en ordre antichronologique (le plus récent en haut).
-    /// tap inactif (anti-modif accidentelle). Swipe leading = Modifier,
-    /// swipe trailing = Supprimer (avec recompute auto qty/PRU).
+    /// "Orders" card — operation history + a + button to add one.
+    /// Lists BUY/SELL/DIV in reverse chronological order (most recent first).
+    /// Tap disabled (prevents accidental edits). Leading swipe = Edit, trailing
+    /// swipe = Delete (with automatic qty/average cost recompute).
     private var ordersCard: some View {
         AppCard {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
@@ -1194,25 +1165,19 @@ struct InvestmentPositionDetailView: View {
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .padding(.vertical, 8)
                 } else {
-                    // Édition/suppression via swipe iOS ET clic droit macOS (RowActions) :
-                    // sur Mac le swipe n'existait pas → un ordre y était inéditable.
-                    // Pas de tap volontaire : un ordre affecte le PnL, on évite les
-                    // modifications par tap accidentel.
+                    // Edit/delete via iOS swipe AND macOS right-click (RowActions). No tap on
+                    // purpose: an order affects the P&L, so accidental tap edits are avoided.
                     let reversed = orders.reversed().map { $0 }
-                    // ⚠️ PAS de `List` sur AUCUNE des deux plateformes — même
-                    // mine que `positionsCard` (InvestmentAccountDetailView) :
-                    // macOS y crashait (boucle de contraintes AutoLayout,
-                    // NSException _postWindowNeedsUpdateConstraints) ; iOS a
-                    // ensuite montré qu'une `List` `.scrollDisabled(true)`
-                    // imbriquée dans un `ScrollView` VIRTUALISE ses rows, donc
-                    // toute hauteur devinée OU mesurée depuis son propre
-                    // contenu est structurellement fragile (mesurer entre
-                    // même en boucle de rétroaction : rétrécir la List rend
-                    // moins de rows, donc mesure moins, donc rétrécit
-                    // encore). Un `VStack` n'a besoin d'aucune hauteur
-                    // devinée — sain sur les deux plateformes, sans branche
-                    // `#if` nécessaire ici (pas de tap sur la row, seulement
-                    // RowActions swipe/clic droit, déjà cross-plateforme).
+                    // NO `List` on EITHER platform — same trap as `positionsCard`
+                    // (InvestmentAccountDetailView): on macOS a nested List hits an AutoLayout
+                    // constraint loop (NSException _postWindowNeedsUpdateConstraints); on iOS a
+                    // `.scrollDisabled(true)` `List` nested in a `ScrollView` VIRTUALIZES its
+                    // rows, so any height guessed OR measured from its own content is
+                    // structurally fragile (measuring even enters a feedback loop: shrinking the
+                    // List renders fewer rows, hence measures less, hence shrinks further). A
+                    // `VStack` needs no guessed height — sound on both platforms, with no `#if`
+                    // branch needed here (no tap on the row, only RowActions swipe/right-click,
+                    // already cross-platform).
                     VStack(spacing: 0) {
                         ForEach(reversed) { order in
                             orderRowContent(order)
@@ -1233,8 +1198,8 @@ struct InvestmentPositionDetailView: View {
         }
     }
 
-    /// Contenu visuel d'un ordre — extrait pour être inséré dans une row de List
-    /// (actions via RowActions : swipe iOS / clic droit macOS).
+    /// Visual content of an order — extracted to be placed in a row (actions via
+    /// RowActions: iOS swipe / macOS right-click).
     @ViewBuilder
     private func orderRowContent(_ order: InvestmentOrder) -> some View {
         HStack(spacing: AppTheme.Spacing.md) {
@@ -1273,7 +1238,7 @@ struct InvestmentPositionDetailView: View {
     private func orderColor(_ type: InvestmentOrderType) -> Color {
         switch type {
         case .buy:      return AppTheme.Colors.danger    // sortie cash = rouge
-        case .sell:     return AppTheme.Colors.success   // entrée cash = vert
+        case .sell:     return AppTheme.Colors.success   // cash inflow = green
         case .dividend: return AppTheme.Colors.accentSecondary
         }
     }
@@ -1290,10 +1255,10 @@ struct InvestmentPositionDetailView: View {
         isSyncing = true
         defer { isSyncing = false }
 
-        // Identifier à privilégier : ISIN si présent (titres traditionnels)
-        // SINON ticker (cryptos n'ont pas d'ISIN ; "BTC", "ETH" etc).
-        // syncMarketHistory route automatiquement vers CoinGecko ou Yahoo
-        // selon que l'identifier soit reconnu comme crypto ou pas.
+        // Preferred identifier: the ISIN when present (traditional securities),
+        // OTHERWISE the ticker (cryptos have no ISIN; "BTC", "ETH" etc).
+        // syncMarketHistory routes automatically to CoinGecko or Yahoo depending on
+        // whether the identifier is recognized as a crypto.
         let identifier = position.bestSyncIdentifier
         guard !identifier.isEmpty else {
             statusMessage = LocalizedStringResource("Aucun ISIN ni ticker — impossible de synchroniser.")
@@ -1322,7 +1287,7 @@ struct InvestmentPositionDetailView: View {
 // MARK: - String trimming helper
 
 private extension String {
-    /// Retire les zéros inutiles en fin de décimale ("12.5000" → "12.5", "10.000000" → "10")
+    /// Strips useless trailing decimal zeros ("12.5000" → "12.5", "10.000000" → "10")
     var trimmedZeros: String {
         guard contains(".") else { return self }
         var s = self

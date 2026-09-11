@@ -1,18 +1,17 @@
 import Foundation
 
-// MARK: - Provider Binance (impl réelle)
+// MARK: - Binance provider
 //
-// Synchronise les balances spot Binance via l'API officielle :
-//   - validate : ping public + fetch account (vérifie les credentials read-only)
-//   - fetchPositions : récupère les balances spot, filtre les non-nuls, convertit en EUR
-//     via CoinGecko (PriceResolver). Les assets sans prix EUR sont retournés avec
-//     `currentValueEUR = nil` (tokens obscurs, choix user décidé en Couche 0).
-//   - fetchTransactions : stub pour cette Couche 1 (besoin de itérer myTrades par symbol,
-//     gestion rate limit complexe → reporté à une Couche 1.5)
+// Syncs Binance spot balances through the official API:
+//   - validate: public ping + fetch account (checks the read-only credentials)
+//   - fetchPositions: fetches spot balances, keeps non-zero ones, converts to
+//     EUR via CoinGecko (PriceResolver). Assets without a EUR price are
+//     returned with `currentValueEUR = nil` (obscure tokens).
+//   - fetchTransactions: iterates myTrades per symbol (see below).
 //
-// La déclaration des métadonnées statiques (id, displayName, credentialFields…) reste
-// dans `LiveSyncRegistry.swift` (struct stub) pour éviter de devoir déplacer 4 fichiers
-// à chaque ajout — c'est l'extension qui apporte l'implémentation réelle ici.
+// The static metadata (id, displayName, credentialFields…) stays declared in
+// `LiveSyncRegistry.swift` (stub struct), so adding a provider doesn't mean
+// moving 4 files — this extension brings the actual implementation.
 
 extension BinanceLiveSyncProvider {
 
@@ -23,9 +22,9 @@ extension BinanceLiveSyncProvider {
         }
 
         let client = BinanceAPIClient()
-        // Ping public d'abord pour discriminer rapidement "réseau ko" vs "credentials ko"
+        // Public ping first, to tell "network down" from "bad credentials" quickly
         try await client.ping()
-        // Puis fetch account avec les credentials — n'expose aucun état ni mutation
+        // Then fetch the account with the credentials — exposes no state, no mutation
         _ = try await client.fetchAccount(apiKey: apiKey, apiSecret: apiSecret)
     }
 
@@ -38,11 +37,11 @@ extension BinanceLiveSyncProvider {
         let client = BinanceAPIClient()
         let account = try await client.fetchAccount(apiKey: apiKey, apiSecret: apiSecret)
 
-        // Filtrer les balances non-nuls (Binance renvoie ~400 assets dont 95% à 0)
+        // Keep non-zero balances (Binance returns ~400 assets, 95% of them at 0)
         let nonZero = account.balances.filter { $0.total > 0 }
         guard !nonZero.isEmpty else { return [] }
 
-        // Récupérer les prix EUR pour TOUS les tickers en 1 req CoinGecko (multi-IDs)
+        // Fetch EUR prices for ALL tickers in 1 CoinGecko request (multi-ID)
         let tickers = nonZero.map { $0.asset }
         let prices = await PriceResolver.shared.resolveNativePrices(tickers: tickers)
 
@@ -60,7 +59,7 @@ extension BinanceLiveSyncProvider {
                 metadata: ["exchange": "binance"]
             )
         }
-        // Tri : valeur EUR décroissante, puis quantité décroissante pour les tokens sans prix
+        // Sort: EUR value descending, then quantity descending for tokens without a price
         .sorted { lhs, rhs in
             switch (lhs.currentValueEUR, rhs.currentValueEUR) {
             case let (l?, r?):  return l > r
@@ -71,19 +70,19 @@ extension BinanceLiveSyncProvider {
         }
     }
 
-    /// Sync l'historique des trades Binance.
+    /// Syncs Binance trade history.
     ///
-    /// Stratégie pour éviter de spam Binance :
-    ///   1. Fetch les balances actuelles → liste des assets détenus
-    ///   2. Filter les assets qui ne sont pas des stables/quote (USDT, USDC, BUSD, DAI)
-    ///   3. Pour chaque asset, tente la paire `<ASSET>USDT` (la + courante chez Binance)
-    ///   4. Sleep 100ms entre requêtes pour rester confortablement sous 1200 weight/min
-    ///   5. Cap à 25 paires pour éviter les wallets > 25 holdings différents
+    /// Strategy to avoid spamming Binance:
+    ///   1. Fetch current balances → list of held assets
+    ///   2. Drop stable/quote assets (USDT, USDC, BUSD, DAI)
+    ///   3. For each asset, try the `<ASSET>USDT` pair (the most common on Binance)
+    ///   4. Sleep 100 ms between requests to stay comfortably under 1200 weight/min
+    ///   5. Cap at 25 pairs for wallets with > 25 different holdings
     ///
-    /// Conversion EUR : on récupère le taux USDT/EUR courant via CoinGecko (1 req)
-    /// et on l'applique uniformément à tous les trades. C'est une APPROXIMATION
-    /// (le vrai taux USDT/EUR au jour J est différent), mais acceptable pour le suivi
-    /// perso. Pour le calcul de PRU précis, l'utilisateur peut éditer les unitPrice manuellement.
+    /// EUR conversion: the current USDT/EUR rate is fetched via CoinGecko (1 req)
+    /// and applied uniformly to every trade. This is an APPROXIMATION (the real
+    /// USDT/EUR rate on the trade day differs), acceptable for personal tracking.
+    /// For a precise average cost, the user can edit the unitPrice manually.
     func fetchTransactions(credentials: [String: String], config: [String: String], since: Date?) async throws -> [LiveSyncTransaction] {
         guard let apiKey = credentials["apiKey"], !apiKey.isEmpty,
               let apiSecret = credentials["apiSecret"], !apiSecret.isEmpty else {
@@ -93,7 +92,7 @@ extension BinanceLiveSyncProvider {
         let client = BinanceAPIClient()
         let account = try await client.fetchAccount(apiKey: apiKey, apiSecret: apiSecret)
 
-        // Filtrer les assets qui méritent un fetch de trades (cap 25)
+        // Keep the assets worth fetching trades for (capped at 25)
         let stableTickers: Set<String> = ["USDT", "USDC", "BUSD", "DAI", "TUSD", "FDUSD"]
         let candidates = account.balances
             .filter { $0.total > 0 && !stableTickers.contains($0.asset.uppercased()) && $0.asset != "BNB" }
@@ -102,37 +101,37 @@ extension BinanceLiveSyncProvider {
 
         guard !candidates.isEmpty else { return [] }
 
-        // Récupérer le taux USDT/EUR pour conversion. CoinGecko renvoie USDT à ~0.92€
-        // (varie autour de 1$, donc autour de 0.92-0.95€ selon EUR/USD).
+        // Fetch the USDT/EUR rate for conversion. CoinGecko returns USDT at ~€0.92
+        // (it hovers around $1, so around €0.92-0.95 depending on EUR/USD).
         let usdtPrices = await PriceResolver.shared.resolveNativePrices(tickers: ["USDT"])
         let usdtEUR = usdtPrices["USDT"] ?? 0.92  // fallback si CoinGecko HS
 
-        // Fetch trades pour chaque asset sur la paire ASSETUSDT
+        // Fetch trades for each asset on the ASSETUSDT pair
         var allTransactions: [LiveSyncTransaction] = []
         for asset in candidates {
             let symbol = "\(asset)USDT"
             do {
                 let trades = try await client.fetchMyTrades(
                     symbol: symbol,
-                    limit: 500,  // 500 = derniers trades sur cette paire
+                    limit: 500,  // 500 = latest trades on this pair
                     apiKey: apiKey,
                     apiSecret: apiSecret
                 )
                 for trade in trades {
-                    // Filter par `since` si fourni (sync incrémentale futur)
+                    // Filter by `since` when provided (incremental sync)
                     if let since, trade.executedAt < since { continue }
 
-                    // Frais : en BNB ou USDT généralement. Converti en EUR si on a le taux.
-                    // Pour MVP, on stocke les frais bruts (en commissionAsset) sans conversion.
-                    // L'utilisateur peut les recalculer manuellement si besoin précis.
+                    // Fees: usually in BNB or USDT. Converted to EUR when the rate is known.
+                    // Fees in other assets are kept at 0 rather than converted; the user can
+                    // recompute them manually if precision matters.
                     let feesEUR: Double = {
                         if trade.commissionAsset.uppercased() == "BNB" {
-                            return 0  // Sans conversion BNB/EUR ici, on met 0 pour éviter de fausser
+                            return 0  // Without a BNB/EUR conversion here, 0 avoids skewing the numbers
                         }
                         if trade.commissionAsset.uppercased() == "USDT" {
                             return trade.commissionDouble * usdtEUR
                         }
-                        // Si frais dans l'asset acheté (cas rare), pas converti
+                        // Fee paid in the purchased asset (rare): not converted
                         return 0
                     }()
 
@@ -151,14 +150,14 @@ extension BinanceLiveSyncProvider {
                     ))
                 }
             } catch {
-                // Skip silencieusement les paires en erreur (rate limit, paire inexistante…)
-                // pour ne pas faire échouer toute la sync sur une seule paire problématique.
+                // Silently skip pairs in error (rate limit, non-existent pair…) so a single
+                // problematic pair doesn't fail the whole sync.
                 continue
             }
 
-            // Sleep entre requêtes pour rester sous le rate limit (1200 weight/min ÷ 10 weight/req
-            // = 120 req/min = 1 req toutes les 500ms). On prend 100ms = 600 req/min en théorie
-            // mais avec la latence réseau on reste largement safe.
+            // Sleep between requests to stay under the rate limit (1200 weight/min ÷ 10
+            // weight/req = 120 req/min = 1 req every 500 ms). 100 ms = 600 req/min in
+            // theory, but network latency keeps this comfortably safe.
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         return allTransactions
@@ -166,14 +165,14 @@ extension BinanceLiveSyncProvider {
 
     // MARK: - Helpers
 
-    /// Mapping ticker → nom complet pour un affichage user-friendly.
-    /// Fallback = le ticker lui-même si pas dans la table.
+    /// Ticker → full name mapping, for user-friendly display.
+    /// Fallback = the ticker itself when not in the table.
     static func assetDisplayName(for ticker: String) -> String {
         nameTable[ticker.uppercased()] ?? ticker.uppercased()
     }
 
-    /// Noms complets des cryptos les plus courantes sur Binance.
-    /// Liste volontairement courte — pour les autres on affiche le ticker.
+    /// Full names of the most common cryptos on Binance.
+    /// Deliberately short list — the ticker is shown for the others.
     private static let nameTable: [String: String] = [
         "BTC": "Bitcoin",
         "ETH": "Ethereum",

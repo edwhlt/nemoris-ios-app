@@ -1,53 +1,50 @@
 import SwiftUI
 import Charts
 
-// MARK: - Phase 2 — Niveau Compte
+// MARK: - Account level
 //
-// Écran de détail d'un compte d'investissement, accessible via NavigationLink depuis
-// la liste des comptes du dashboard. Reproduit la structure du dashboard global mais
-// restreint aux positions de ce compte :
-//   - Hero card (valeur compte + variation + invested + P/L)
-//   - Chart évolution du compte (chips temporelles)
-//   - Donut allocation interne (par type d'actif)
-//   - Liste des positions cliquables (NavigationLink → PositionDetailView)
+// Detail screen of an investment account, reached from the dashboard's
+// account list. Mirrors the global dashboard's structure, restricted to this
+// account's positions:
+//   - Hero card (account value + variation + invested + P/L)
+//   - Account evolution chart (time chips)
+//   - Internal allocation donut (by asset type)
+//   - List of tappable positions (→ PositionDetailView)
 //
-// Toolbar : bouton "+ position" pour ajouter manuellement.
+// Toolbar: "+ position" button to add one manually.
 
 struct InvestmentAccountDetailView: View {
     @Bindable var viewModel: InvestmentsViewModel
     let account: InvestmentAccount
-    /// macOS : retour au dashboard global. Le compte est affiché EN PLEINE PAGE
-    /// dans la colonne du module (navigation interne par état — cf.
-    /// `InvestmentsView.dashboardContent`), il fournit donc lui-même son retour.
-    /// nil sur iOS, où la vue est poussée et le back du `NavigationStack` suffit.
+    /// macOS: back to the global dashboard. The account is shown FULL PAGE in the
+    /// module column (internal navigation by state — see
+    /// `InvestmentsView.dashboardContent`), so it supplies its own back button.
+    /// nil on iOS, where the view is pushed and the `NavigationStack` back is enough.
     var onBack: (() -> Void)? = nil
 
     @State private var localTimeRange: InvestmentTimeRange = .threeMonth
     @State private var evolution: [PortfolioEvolutionPoint] = []
-    /// Explication affichée quand la plage 1J n'a aucun cours intrajournalier
-    /// (courbe volontairement vide plutôt que fabriquée depuis le quotidien).
+    /// Explanation shown when the 1D range has no intraday price (curve left
+    /// empty on purpose rather than fabricated from daily data).
     @State private var oneDayUnavailableNote: String?
-    /// Positions sans price_history → empêchent l'affichage du chart de
-    /// porter sur leur valeur. Affiché en card diagnostic.
+    /// Positions without price history → the chart can't include their value.
+    /// Shown as a diagnostic.
     @State private var positionsWithoutHistory: [InvestmentPosition] = []
     @State private var positions: [InvestmentPosition] = []
-    // add (Bool) + edit (Identifiable item) séparés pour éviter le bug
-    // "edit ouvre parfois le formulaire d'ajout" causé par la race state.
+    // add (Bool) + edit (Identifiable item) kept separate, so a state race can
+    // never make "edit" open the add form.
     @State private var showAddPositionForm = false
     @State private var editingPosition: InvestmentPosition?
     #if os(macOS)
-    /// macOS : la fiche position s'ouvre dans le PANNEAU LATÉRAL global
-    /// (`.adaptivePane` → HStack custom de MainTabView, 100% SwiftUI).
-    /// Historique : le push cliqué profondeur 1 → 2 déclenchait une récursion
-    /// AutoLayout `_postWindowNeedsUpdateConstraints` (macOS 27 beta) même
-    /// PILOTÉ PAR ÉTAT (navigationDestination) — le harnais -nemorisCrashRepro
-    /// ne validait que les pushes programmés hors cycle d'événement, le clic
-    /// réel crashait toujours (23/07). Le panneau n'empile aucune vue dans la
-    /// NavigationStack → la machinerie en cause n'est plus jamais tapée.
+    /// macOS: the position sheet opens in the global SIDE PANE (`.adaptivePane`).
+    /// A clicked push from depth 1 to 2 triggers an AutoLayout
+    /// `_postWindowNeedsUpdateConstraints` recursion on macOS, even when driven
+    /// by state (navigationDestination). The pane stacks no view in the
+    /// NavigationStack, so that machinery is never hit.
     @State private var panePosition: InvestmentPosition?
     #endif
 
-    // Édition / suppression compte
+    // Account edit / delete
     @State private var showAccountEditForm = false
     @State private var showDeleteAccountConfirm = false
     // Suppression position
@@ -55,18 +52,18 @@ struct InvestmentAccountDetailView: View {
 
     // Sync de masse
     @State private var isSyncingAll = false
-    // ⚠️ `LocalizedStringResource`, pas `String` — même raison que
-    // `InvestmentAutoSyncService.lastSummary` : sinon figé dans la langue
-    // active au moment du sync plutôt que résolu à l'affichage.
+    // `LocalizedStringResource`, not `String` — same reason as
+    // `InvestmentAutoSyncService.lastSummary`: otherwise frozen in the language
+    // active at sync time rather than resolved at display.
     @State private var syncAllStatus: LocalizedStringResource?
-    /// Détail "?" — liste des positions du compte avec leur dernier statut de sync.
+    /// "?" detail — the account's positions with their last sync status.
     @State private var showSyncDetail = false
-    /// Skeleton tant que le 1er `refresh()` n'est pas terminé.
+    /// Skeleton until the 1st `refresh()` has finished.
     @State private var hasLoaded = false
     @Environment(\.dismiss) private var dismiss
-    // paneDismiss : fermeture depuis le panneau macOS (drill-down depuis
-    // InvestmentsView, plus un push — cf. \.paneHostContext ci-dessous). Sans
-    // effet sur iOS où cette vue reste poussée (NavigationLink, back auto).
+    // paneDismiss: closing from the macOS pane (drill-down from InvestmentsView,
+    // not a push — see \.paneHostContext below). No effect on iOS, where this
+    // view stays pushed (NavigationLink, automatic back).
     @Environment(\.paneDismiss) private var paneDismiss
     #if os(macOS)
     @Environment(\.paneHostContext) private var paneHostContext
@@ -77,9 +74,9 @@ struct InvestmentAccountDetailView: View {
         positions.reduce(0) { $0 + $1.investedAmount }
     }
 
-    /// Valorisation totale = valeur des positions + trésorerie disponible.
-    /// La trésorerie n'est PAS dans le calcul de performance — elle est neutre
-    /// (cash investi vs cash brut). Performance = positions only.
+    /// Total valuation = positions' value + available cash.
+    /// Cash is NOT part of the performance computation — it's neutral (invested
+    /// cash vs raw cash). Performance = positions only.
     private var totalAccountValue: Double {
         account.currentValue + account.cashBalance
     }
@@ -92,15 +89,15 @@ struct InvestmentAccountDetailView: View {
         performance >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger
     }
 
-    /// True si aucune position du compte n'est syncée (`account.currentValue ≤ 0`)
-    /// mais qu'on a au moins investi quelque chose. Évite l'affichage trompeur
-    /// "€0 / Performance -100%" tant que les cours n'ont pas été récupérés.
+    /// True if no position of the account is synced (`account.currentValue ≤ 0`)
+    /// but something has been invested. Avoids a misleading "€0 / Performance
+    /// -100%" until prices have been fetched.
     private var valuationIsEstimated: Bool {
         account.currentValue <= 0 && invested > 0
     }
 
     /// Hero shows market value if synced, else cost basis (= invested).
-    /// Inclut la trésorerie SI le toggle utilisateur l'autorise.
+    /// Includes cash IF the user toggle allows it.
     private var displayedValuation: Double {
         let baseValuation = valuationIsEstimated ? invested : account.currentValue
         let cash = appState.investmentsIncludeCashInTotal ? account.cashBalance : 0
@@ -141,8 +138,8 @@ struct InvestmentAccountDetailView: View {
                 await syncAllPositions()
             }
         }
-        // Contenu de module (pleine page) sur les DEUX plateformes → toolbar
-        // native. Sur macOS elle porte en plus le retour au dashboard.
+        // Module content (full page) on BOTH platforms → native toolbar. On macOS it
+        // also carries the back-to-dashboard button.
         .navigationTitle(account.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
@@ -179,8 +176,8 @@ struct InvestmentAccountDetailView: View {
             Button("Supprimer le compte", role: .destructive) {
                 viewModel.deleteAccount(id: account.id)
                 appState.dataRefreshToken = UUID()
-                // Les deux : `dismiss` pop (iOS, push), `paneDismiss` ferme le
-                // panneau (macOS) — chacun no-op hors de son contexte.
+                // Both: `dismiss` pops (iOS, push), `paneDismiss` closes the pane (macOS) —
+                // each is a no-op outside its context.
                 dismiss()
                 paneDismiss()
             }
@@ -188,7 +185,7 @@ struct InvestmentAccountDetailView: View {
         } message: {
             Text("Toutes les positions et ordres rattachés à ce compte seront aussi supprimés (cascade).")
         }
-        // Confirmation suppression position (déclenché par contextMenu sur la row)
+        // Position deletion confirmation (triggered by the row's contextMenu)
         .confirmationDialog(
             positionToDelete.map { "Supprimer \"\($0.assetName.isEmpty ? $0.ticker : $0.assetName)\" ?" } ?? "Supprimer cette position ?",
             isPresented: Binding(
@@ -215,8 +212,8 @@ struct InvestmentAccountDetailView: View {
         }
         .onChange(of: localTimeRange) { _, newRange in
             recomputeEvolution()
-            // Plage 1J → fetch on-demand de la série intraday 30 min des
-            // positions du compte, puis recalcul quand les points sont là.
+            // 1D range → on-demand fetch of the account positions' 30-min intraday
+            // series, then recompute once the points are in.
             if newRange == .oneDay {
                 Task {
                     await InvestmentAutoSyncService.shared.syncIntradayIfNeeded(
@@ -228,15 +225,15 @@ struct InvestmentAccountDetailView: View {
         }
     }
 
-    // MARK: - Toolbar (sortie en ViewBuilder pour aider le type-checker)
+    // MARK: - Toolbar (extracted into a ViewBuilder to help the type-checker)
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        // Sync déclenchée par pull-to-refresh sur la ScrollView — pas de bouton dédié.
+        // Sync is triggered by pull-to-refresh on the ScrollView — no dedicated button.
         #if os(macOS)
-        // Retour au dashboard global : le compte occupe la colonne du module
-        // (pas un push), il fournit donc son propre retour. `.navigation` est le
-        // placement du back système, à gauche du titre.
+        // Back to the global dashboard: the account occupies the module column (not
+        // a push), so it supplies its own back button. `.navigation` is the system
+        // back's placement, left of the title.
         if let onBack {
             ToolbarItem(placement: .navigation) {
                 Button(action: onBack) {
@@ -246,14 +243,14 @@ struct InvestmentAccountDetailView: View {
                 .localizedAccessibilityLabel("Tous les comptes")
             }
         }
-        // Menu "⋯" aplati en boutons icône + tooltip dans UNE pilule via
-        // `ToolbarItemGroup` (groupement natif — `ControlGroup` rendait des
-        // boutons isolés), cohérent avec les autres toolbars macOS de l'app.
+        // "⋯" menu flattened into icon buttons + tooltips in ONE pill via
+        // `ToolbarItemGroup` (native grouping — `ControlGroup` rendered isolated
+        // buttons), consistent with the app's other macOS toolbars.
         ToolbarItemGroup(placement: .topBarTrailing) {
             PaneToggleButton(label: "Ajouter une position", systemImage: "plus", isOn: $showAddPositionForm)
-            // Apparaît uniquement si le compte contient des cryptos —
-            // utile pour réparer des valeurs corrompues par d'anciens
-            // sync Yahoo (FET → action FET cotée €53, ETH → Ethernity, etc.)
+            // Only shown if the account holds cryptos — repairs values corrupted by
+            // Yahoo syncs on same-named tickers (FET → the FET stock trading at €53,
+            // ETH → Ethernity, etc.)
             if positions.contains(where: { $0.isCryptoAsset }) {
                 Button {
                     repairCryptoValues()
@@ -306,18 +303,11 @@ struct InvestmentAccountDetailView: View {
 
     // MARK: - Cards
 
-    /// hero+chart sortis de la carte pour effet "premium" Robinhood/Finary.
-    /// KPIs déplacés dans une carte dédiée en dessous pour respiration visuelle.
-    /// Card affichée seulement quand au moins une position n'a pas de cours
-    /// historique récupérable. Liste les positions concernées avec un CTA
-    /// "Synchroniser celles-ci" qui ne sync QUE ces positions (pas les autres).
-    ///
-    /// Diagnostic critique : explique à l'utilisateur que le graphique est incomplet
-    /// parce que ces positions ne contribuent pas (rien à multiplier par leur
-    /// quantity), donc la valeur agrégée est tronquée.
-    /// Chantier B — réduite à une ligne discrète tappable (au lieu d'une carte
-    /// verbeuse listant chaque position). Tap → sync ciblée des positions
-    /// sans historique.
+    /// Shown only when at least one position has no fetchable price history: the
+    /// chart is then incomplete, since those positions contribute nothing (no
+    /// price to multiply their quantity by), so the aggregated value is
+    /// truncated. A discreet tappable line → targeted sync of the positions
+    /// without history (and only those).
     private var missingHistoryDiagnosticCard: some View {
         Button {
             Task { await syncMissingHistoryPositions() }
@@ -345,10 +335,9 @@ struct InvestmentAccountDetailView: View {
         .disabled(isSyncingAll)
     }
 
-    /// Purge les price_history scrappés à tort sur Yahoo pour les tickers
-    /// crypto + reset current_value des positions crypto à 0. l'utilisateur doit
-    /// ensuite relancer LiveSync Binance/wallet pour récupérer les vraies
-    /// valeurs CoinGecko.
+    /// Purges price history wrongly scraped from Yahoo for crypto tickers + resets
+    /// the crypto positions' current_value to 0. The user then reruns the
+    /// Binance/wallet LiveSync to get the real CoinGecko values.
     private func repairCryptoValues() {
         let result = InvestmentRepository().purgeCorruptedCryptoData()
         syncAllStatus = LocalizedStringResource("Crypto réparé : \(result.positionsReset) position(s) reset, \(result.historyRowsDeleted) cours Yahoo purgés. Relance ta sync Binance/wallet.")
@@ -356,10 +345,10 @@ struct InvestmentAccountDetailView: View {
         refresh()
     }
 
-    /// Variante de `syncAllPositions` qui ne sync QUE les positions sans
-    /// historique — utile depuis la card diagnostic. Route automatiquement
-    /// vers CoinGecko ou Yahoo via InvestmentAutoSyncService (aucun load()
-    /// par position — un seul refresh final).
+    /// Variant of `syncAllPositions` that syncs ONLY the positions without
+    /// history — used from the diagnostic line. Routes automatically to CoinGecko
+    /// or Yahoo via InvestmentAutoSyncService (no load() per position — a single
+    /// final refresh).
     private func syncMissingHistoryPositions() async {
         let toSync = positionsWithoutHistory
         guard !toSync.isEmpty, !isSyncingAll else { return }
@@ -383,17 +372,16 @@ struct InvestmentAccountDetailView: View {
                     ? "\(account.name) · valeur estimée"
                     : "\(account.name) · \(account.accountType)",
                 currentValue: displayedValuation,
-                // Quand on bascule sur l'estimation, on annule la variation pour
-                // ne pas afficher un faux -100% trompeur.
+                // When falling back to the estimate, the variation is cancelled so as not to
+                // show a misleading -100%.
                 previousValue: valuationIsEstimated ? displayedValuation : evolution.first?.value,
                 currency: account.currency,
                 rangeLabel: variationRangeLabel(localTimeRange),
-                // ⚠️ basis variation = POSITIONS SEULES (sans cash) ET restreinte à
-                // celles effectivement valorisées dans `evolution` (positionsWithoutHistory
-                // exclues) — sinon le calcul de perf% est gonflé artificiellement, par la
-                // trésorerie ajoutée au currentValue mais absente de evolution.first?.value,
-                // et par toute position sans historique sur la plage (même bug que le
-                // widget/hero global, cf. `portfolioVariationBasisValue`).
+                // Variation basis = POSITIONS ONLY (no cash) AND restricted to those actually
+                // valued in `evolution` (positionsWithoutHistory excluded) — otherwise the
+                // perf % is artificially inflated, by cash added to currentValue but absent
+                // from evolution.first?.value, and by any position without history over the
+                // range (same rule as the global hero, see `portfolioVariationBasisValue`).
                 variationBasisValue: valuationIsEstimated
                     ? displayedValuation
                     : account.currentValue - positionsWithoutHistory.reduce(0) { $0 + $1.currentValue }
@@ -410,8 +398,8 @@ struct InvestmentAccountDetailView: View {
                 }
             }
 
-            // Chart bord-à-bord, chips SOUS le chart (pattern Apple Stocks).
-            // PAS de .clipped() — ça couperait les labels d'axe X (cf. EvolutionChart)
+            // Edge-to-edge chart, chips BELOW the chart (Apple Stocks pattern).
+            // NO .clipped() — it would cut the X-axis labels (see EvolutionChart)
             EvolutionChart(points: evolution, height: 190, timeRange: localTimeRange,
                            currency: account.currency)
                 .padding(.top, AppTheme.Spacing.xs)
@@ -446,9 +434,9 @@ struct InvestmentAccountDetailView: View {
         .padding(.horizontal, AppTheme.Spacing.sm)
     }
 
-    /// Statut de sync de chaque position du compte — lit `outcomesByIdentifier`
-    /// (rempli par TOUTE sync : passe globale, "Synchroniser tout" de ce compte,
-    /// pull-to-refresh d'une fiche position) plutôt qu'un suivi propre à cet écran.
+    /// Sync status of each position of the account — reads `outcomesByIdentifier`
+    /// (filled by EVERY sync: global pass, this account's "Sync all", a position
+    /// sheet's pull-to-refresh) rather than tracking specific to this screen.
     private var syncPositionStatuses: [SyncPositionStatus] {
         let outcomes = InvestmentAutoSyncService.shared.outcomesByIdentifier
         return positions.map { position in
@@ -471,8 +459,7 @@ struct InvestmentAccountDetailView: View {
             : Text("\(syncProblemCount) position(s) non synchronisée(s)")
     }
 
-    /// KPIs en ligne (investi · performance) + trésorerie si > 0. Style épuré
-    /// à plat, plus de carte StatBadge.
+    /// Inline KPIs (invested · performance) + cash if > 0. Clean, flat style.
     private var kpisCard: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             if valuationIsEstimated {
@@ -501,8 +488,7 @@ struct InvestmentAccountDetailView: View {
                 .minimumScaleFactor(0.7)
             }
 
-            // Trésorerie : visible seulement si > 0 pour ne pas encombrer
-            // les comptes sans cash.
+            // Cash: visible only if > 0, so accounts without cash stay uncluttered.
             if account.cashBalance > 0 {
                 HStack(spacing: 8) {
                     Image(systemName: "eurosign.circle.fill")
@@ -535,34 +521,26 @@ struct InvestmentAccountDetailView: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             SectionHeader(title: "Positions (\(positions.count))")
                 .padding(.horizontal, AppTheme.Spacing.sm)
-            // ⚠️ PAS de `List` ici, sur AUCUNE des deux plateformes.
+            // NO `List` here, on EITHER platform.
             //
-            // macOS : ni List imbriquée, ni NavigationLink cliqué, ni PUSH
-            // profondeur 2 ne sont sains (cf. doc de `panePosition`).
+            // macOS: neither a nested List, nor a clicked NavigationLink, nor a depth-2
+            // PUSH is safe (see the `panePosition` doc).
             //
-            // iOS : une `List` `.scrollDisabled(true)` imbriquée dans le
-            // `ScrollView` du compte a besoin d'une hauteur EXPLICITE — et
-            // toute tentative de la dériver du contenu réel échoue pour la
-            // même raison structurelle : `List` VIRTUALISE ses rows (ne
-            // rend que celles proches du viewport). Un estimé fixe par ligne
-            // ("~66pt") casse dès qu'une ligne est plus haute que prévu (nom
-            // long sur 2 lignes) — décalage constaté sur un compte PEA
-            // réel. Le remède tenté ensuite (mesurer la hauteur RÉELLE de
-            // chaque row et sommer) a aggravé le bug au lieu de le
-            // résoudre : réduire la hauteur de la List réduit son viewport,
-            // ce qui réduit le nombre de rows RENDUES (donc mesurées),
-            // ce qui réduit encore la hauteur calculée — une boucle de
-            // rétroaction qui converge vers une poignée de lignes
-            // seulement (retour d'usage : "ça coupe dès 4 positions").
+            // iOS: a `.scrollDisabled(true)` `List` nested in the account's `ScrollView`
+            // needs an EXPLICIT height — and every attempt to derive it from the real
+            // content fails for the same structural reason: `List` VIRTUALIZES its rows
+            // (it only renders those near the viewport). A fixed per-row estimate
+            // ("~66pt") breaks as soon as a row is taller than expected (a long name on
+            // 2 lines). Measuring each row's REAL height and summing makes it worse:
+            // shrinking the List's height shrinks its viewport, which shrinks the
+            // number of rows RENDERED (hence measured), which shrinks the computed
+            // height further — a feedback loop that converges on just a handful of rows.
             //
-            // Un simple `VStack` (comme déjà utilisé sur macOS) n'a besoin
-            // d'AUCUNE hauteur devinée : SwiftUI le dimensionne à son
-            // contenu réel, sans virtualisation, donc sans ce piège.
-            // Contrepartie assumée : le swipe natif (`.swipeActions`, qui
-            // n'existe que dans une vraie `List`) disparaît sur iOS — les
-            // mêmes actions restent joignables par appui long
-            // (`.contextMenu`, déjà branché par `.rowActions` sur les deux
-            // plateformes).
+            // A plain `VStack` needs NO guessed height: SwiftUI sizes it to its real
+            // content, with no virtualization, hence no such trap. The accepted cost:
+            // the native swipe (`.swipeActions`, which only exists in a real `List`) is
+            // gone on iOS — the same actions stay reachable by long press
+            // (`.contextMenu`, wired by `.rowActions` on both platforms).
             VStack(spacing: 0) {
                 ForEach(positions) { position in
                     #if os(macOS)
@@ -605,8 +583,8 @@ struct InvestmentAccountDetailView: View {
                     }
                 }
             }
-            // Carte unique, même langage visuel que .macGroupedRow ailleurs
-            // dans l'app : un seul fond arrondi enveloppant toutes les rows.
+            // A single card, same visual language as .macGroupedRow elsewhere in the
+            // app: one rounded background wrapping every row.
             .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
             #if os(macOS)
             .adaptivePane(item: $panePosition) { pushed in
@@ -630,7 +608,7 @@ struct InvestmentAccountDetailView: View {
 
     private func positionRow(_ position: InvestmentPosition) -> some View {
         HStack(spacing: AppTheme.Spacing.md) {
-            // Pastille colorée par type d'actif (cohérent avec le donut)
+            // Dot colored by asset type (consistent with the donut)
             Circle()
                 .fill(assetTypeColor(position.assetType))
                 .frame(width: 8, height: 8)
@@ -658,8 +636,6 @@ struct InvestmentAccountDetailView: View {
                     .foregroundStyle(AppTheme.Colors.textPrimary)
                 pnlBadge(position)
             }
-            // Chevron supprimé : depuis le passage en List + NavigationLink,
-            // iOS ajoute son propre chevron natif en bout de row.
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
@@ -686,7 +662,7 @@ struct InvestmentAccountDetailView: View {
     // MARK: - Skeleton
 
     @ViewBuilder private var accountDetailSkeleton: some View {
-        // Hero + chart + chips (à plat, chips sous le chart)
+        // Hero + chart + chips (flat, chips below the chart)
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             SkeletonHero()
             SkeletonLine(width: 200, height: 13)
@@ -699,13 +675,13 @@ struct InvestmentAccountDetailView: View {
             }
         }
         .padding(.horizontal, AppTheme.Spacing.sm)
-        // Allocation à plat
+        // Flat allocation
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
             SkeletonLine(width: 130, height: 15)
             SkeletonDonut(size: 150)
         }
         .padding(.horizontal, AppTheme.Spacing.sm)
-        // Positions à plat
+        // Flat positions
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             SkeletonLine(width: 130, height: 15)
             ForEach(0..<4, id: \.self) { _ in
@@ -722,19 +698,19 @@ struct InvestmentAccountDetailView: View {
         recomputeEvolution()
     }
 
-    /// Synchronise tous les cours des positions du compte en une passe.
-    /// Pipeline en 2 étapes :
-    ///   1. LiveSync (Binance/EVM/BTC/SOL) si liens rattachés — refresh des
-    ///      valeurs et insertion des trades crypto via CoinGecko en interne
-    ///   2. InvestmentAutoSyncService.syncHistory pour chaque position →
-    ///      route automatique CoinGecko (cryptos) vs Yahoo (titres), outcomes
-    ///      typés, AUCUN load() par position — un seul refresh final.
+    /// Syncs every price of the account's positions in one pass.
+    /// Two-step pipeline:
+    ///   1. LiveSync (Binance/EVM/BTC/SOL) if links are attached — refreshes the
+    ///      values and inserts crypto trades (via CoinGecko internally)
+    ///   2. InvestmentAutoSyncService.syncHistory for each position → automatic
+    ///      CoinGecko (cryptos) vs Yahoo (securities) routing, typed outcomes, NO
+    ///      load() per position — a single final refresh.
     private func syncAllPositions() async {
         guard !isSyncingAll, !positions.isEmpty else { return }
         isSyncingAll = true
         defer { isSyncingAll = false }
 
-        // 1. LiveSync : refresh des valeurs + trades depuis providers externes
+        // 1. LiveSync: refresh values + trades from external providers
         let linkedLinks = LiveSyncRepository.shared.fetchLinks()
             .filter { $0.accountId == account.id && $0.enabled }
         var liveSyncOK = 0
@@ -747,7 +723,7 @@ struct InvestmentAccountDetailView: View {
             }
         }
 
-        // 2. Sync historique pour CHAQUE position (route auto CoinGecko vs Yahoo)
+        // 2. History sync for EACH position (automatic CoinGecko vs Yahoo routing)
         var success = 0
         var upToDate = 0
         var rateLimited = 0
@@ -777,8 +753,8 @@ struct InvestmentAccountDetailView: View {
         syncAllStatus = parts.isEmpty
             ? LocalizedStringResource("Rien à synchroniser")
             : parts.dropFirst().reduce(parts[0]) { acc, part in LocalizedStringResource("\(acc) · \(part)") }
-        // Refresh local + notification globale (→ bump dataRefreshToken dans
-        // NemorisApp → reload du dashboard). Avant : viewModel.load() PAR position.
+        // Local refresh + global notification (→ bumps dataRefreshToken in
+        // NemorisApp → dashboard reload).
         refresh()
         NotificationCenter.default.post(name: .nemorisInvestmentsDidSync, object: nil)
     }
@@ -806,7 +782,7 @@ struct InvestmentAccountDetailView: View {
         }
     }
 
-    /// Couleur stable par type d'actif — alignée sur la palette du donut.
+    /// Stable color per asset type — aligned with the donut's palette.
     private func assetTypeColor(_ raw: String) -> Color {
         switch InvestmentAssetType(looselyMatching: raw) {
         case .stock:  return AppTheme.Colors.accent
@@ -820,13 +796,13 @@ struct InvestmentAccountDetailView: View {
 }
 
 #if os(macOS)
-/// Contenu du panneau latéral pour une fiche position (contrat AdaptivePane :
-/// la vue présentée garde sa NavigationStack + navigationTitle + toolbar).
-/// Le bouton « Fermer » passe par `\.paneDismiss`, injecté par le wrapper.
-/// `InvestmentPositionDetailView` déclare elle-même son chrome de panneau
-/// (`.paneChrome` : Fermer / Supprimer / Modifier) — ce wrapper ne fait plus que
-/// transmettre les paramètres. Un `NavigationStack` + `.toolbar` ici ferait
-/// remonter un second jeu de boutons dans la barre du module.
+/// Side-pane content for a position sheet (AdaptivePane contract: the
+/// presented view keeps its NavigationStack + navigationTitle + toolbar).
+/// The "Close" button goes through `\.paneDismiss`, injected by the wrapper.
+/// `InvestmentPositionDetailView` declares its own pane chrome (`.paneChrome`:
+/// Close / Delete / Edit) — this wrapper only forwards the parameters. A
+/// `NavigationStack` + `.toolbar` here would lift a second set of buttons
+/// into the module's bar.
 private struct PositionPane: View {
     @Bindable var viewModel: InvestmentsViewModel
     let account: InvestmentAccount

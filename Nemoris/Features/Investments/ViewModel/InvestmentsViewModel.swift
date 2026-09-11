@@ -16,45 +16,43 @@ final class InvestmentsViewModel {
     var isEnrichingPreview = false
     var marketHistory: [InvestmentPricePoint] = []
     var isSyncingMarketData = false
-    /// ⚠️ `LocalizedStringResource`, pas `String` — miroir direct de
-    /// `InvestmentSyncTraceStore.Entry.message`, même raison.
+    /// `LocalizedStringResource`, not `String` — mirrors
+    /// `InvestmentSyncTraceStore.Entry.message`, for the same reason.
     var marketStatusMessage: LocalizedStringResource?
 
-    // état pour le nouveau dashboard graphique
-    /// Plage temporelle sélectionnée pour le chart d'évolution.
+    // state for the chart dashboard
+    /// Time range selected for the evolution chart.
     var selectedTimeRange: InvestmentTimeRange = .threeMonth
-    /// Évolution calculée du portefeuille global sur la plage sélectionnée.
+    /// Computed evolution of the global portfolio over the selected range.
     var portfolioEvolution: [PortfolioEvolutionPoint] = []
-    /// Renseigné quand la plage 1J est sélectionnée mais qu'aucune position n'a
-    /// de cotation intrajournalière : la courbe est alors volontairement vide
-    /// et l'UI affiche cette explication plutôt qu'une ligne fabriquée à partir
-    /// de clôtures quotidiennes.
+    /// Set when the 1D range is selected but no position has intraday quotes: the
+    /// curve is then deliberately empty and the UI shows this explanation rather
+    /// than a line fabricated from daily closes.
     var oneDayUnavailableNote: String?
-    /// Positions exclues de `portfolioEvolution` faute de cours sur la plage
-    /// sélectionnée (`PortfolioEvolutionBuilder.unpricedPositionIds`). Sert à
-    /// restreindre `portfolioVariationBasisValue` aux mêmes positions que
-    /// `portfolioStartValue` — sinon une position sans historique est comptée
-    /// dans la valeur courante mais absente du point de départ, ce qui gonfle
-    /// artificiellement le % de variation affiché (cf. AXE Q, ne jamais laisser
-    /// deux bases de calcul diverger).
+    /// Positions excluded from `portfolioEvolution` for lack of prices over the
+    /// selected range (`PortfolioEvolutionBuilder.unpricedPositionIds`).
+    /// Restricts `portfolioVariationBasisValue` to the same positions as
+    /// `portfolioStartValue` — otherwise a position without history counts in the
+    /// current value but not in the starting point, artificially inflating the
+    /// displayed variation %. Two calculation bases must never diverge.
     var portfolioPositionsWithoutHistory: [InvestmentPosition] = []
-    /// Toggle UI : affiche allocation par type ou par compte.
+    /// UI toggle: shows allocation by type or by account.
     var allocationGroupByAccount: Bool = false
-    /// Cache de TOUTES les positions de TOUS les comptes (chargé dans `load()`).
-    /// Sert de source unique pour tous les calculs agrégés (portfolio total,
-    /// allocations, dashboard stats) à la place de `account.currentValue` qui
-    /// n'est jamais resynchronisé quand les positions sont updated.
+    /// Cache of ALL positions of ALL accounts (loaded in `load()`).
+    /// The single source for every aggregate computation (portfolio total,
+    /// allocations, dashboard stats), instead of `account.currentValue`, which is
+    /// never resynced when positions are updated.
     var allPositions: [InvestmentPosition] = []
 
-    /// Chantier B — sparkline 1 mois par compte (id → points), affichée dans la
-    /// liste des comptes du dashboard (style Apple Stocks). Calculée en fin de
-    /// `load()` depuis le PriceHistoryCache (RAM) — coût négligeable.
+    /// 1-month sparkline per account (id → points), shown in the dashboard's
+    /// account list (Apple Stocks style). Computed at the end of `load()` from the
+    /// PriceHistoryCache (RAM) — negligible cost.
     var accountSparklines: [Int: [PortfolioEvolutionPoint]] = [:]
 
     private let repository: InvestmentRepository
 
-    /// La valeur par défaut vise la base de l'application : aucun site d'appel
-    /// ne change. Les tests injectent une base temporaire.
+    /// The default value targets the app's own database: no call site changes.
+    /// Tests inject a temporary database.
     init(store: SQLiteStore = SQLiteStore()) {
         repository = InvestmentRepository(store: store)
     }
@@ -66,8 +64,8 @@ final class InvestmentsViewModel {
     }
 
     var dashboard: InvestmentDashboardStats {
-        // tout dérivé de allPositions (vrai état) au lieu de
-        // account.currentValue (cache jamais resynchronisé qui restait à 0).
+        // everything derived from allPositions (the real state) instead of
+        // account.currentValue (a cache never resynced, which stayed at 0).
         let totalValuation = allPositions.reduce(0) { $0 + $1.currentValue }
         let totalInvested = allPositions.reduce(0) { $0 + $1.investedAmount }
 
@@ -77,7 +75,7 @@ final class InvestmentsViewModel {
             }
             .sorted { $0.value > $1.value }
 
-        // Pour byAccount : somme des positions de chaque compte (pas account.currentValue)
+        // For byAccount: sum of each account's positions (not account.currentValue)
         let positionsByAccount = Dictionary(grouping: allPositions) { $0.accountId }
         let byAccount = accounts
             .map { account in
@@ -89,8 +87,8 @@ final class InvestmentsViewModel {
         let evolution = accounts
             .map { account in
                 let val = positionsByAccount[account.id]?.reduce(0) { $0 + $1.currentValue } ?? 0
-                // Locale forcée fr_FR : le ViewModel n'a pas accès à l'environnement
-                // SwiftUI ici — cf. commentaire équivalent dans InsightEngine.swift.
+                // Forced fr_FR locale: the ViewModel has no access to the SwiftUI
+                // environment here — see the matching comment in InsightEngine.swift.
                 return InvestmentAllocationItem(name: account.openedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(AppLocalization.locale)), value: val)
             }
             .sorted { $0.name < $1.name }
@@ -110,12 +108,12 @@ final class InvestmentsViewModel {
             selectedAccountId = accounts.first?.id
         }
         loadPositions()
-        // charge le cache global de toutes les positions de tous les comptes
-        // (source unique pour dashboard.totalValuation, allocations, hero, etc.)
+        // loads the global cache of every position of every account
+        // (single source for dashboard.totalValuation, allocations, hero, etc.)
         allPositions = accounts.flatMap { repository.fetchPositions(accountId: $0.id) }
-        // refresh l'évolution pour le dashboard graphique
+        // refreshes the evolution for the chart dashboard
         recomputePortfolioEvolution()
-        // Chantier B : sparkline 1 mois par compte pour la liste du dashboard.
+        // 1-month sparkline per account for the dashboard list.
         var sparklines: [Int: [PortfolioEvolutionPoint]] = [:]
         for account in accounts {
             let points = computeAccountEvolution(accountId: account.id, range: .oneMonth)
@@ -180,18 +178,14 @@ final class InvestmentsViewModel {
         loadPositions()
     }
 
-    /// Charge un CSV de positions.
+    /// Loads a CSV of positions.
     ///
-    /// ⚠️ Passe par `CSVParser`, le lecteur COMMUN. Ce module avait le sien
-    /// — troisième détection de séparateur et troisième découpage de cellules
-    /// de l'app — et il était strictement moins bon : son `inQuotes.toggle()`
-    /// à chaque guillemet cassait les guillemets échappés (`""` à l'intérieur
-    /// d'un champ), et sa détection de séparateur ne regardait que la première
-    /// ligne sans gérer les guillemets.
+    /// Goes through `CSVParser`, the SHARED reader (quoted fields with escaped
+    /// `""`, separator detection that handles quotes).
     ///
-    /// Ce qui reste PROPRE à ce module est la sémantique des colonnes
-    /// (ISIN / quantité / PRU, et non date / montant / libellé) : c'est une
-    /// autre question posée à l'utilisateur, elle garde donc son écran.
+    /// What stays SPECIFIC to this module is the column semantics (ISIN /
+    /// quantity / average cost, not date / amount / label): it's a different
+    /// question put to the user, so it keeps its own screen.
     func loadCSV(content: String) {
         guard let grid = CSVParser.parse(content: content), !grid.headers.isEmpty else {
             csvErrors = ["Fichier CSV vide ou illisible"]
@@ -211,15 +205,13 @@ final class InvestmentsViewModel {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
 
-        /// ⚠️ Passe par le parseur COMMUN. La version locale remplaçait
-        /// aveuglément toutes les virgules par des points : « 1,234.56 »
-        /// devenait « 1.234.56 », donc `nil`, et la ligne était rejetée comme
-        /// « quantité/prix invalides ». Elle ne gérait pas non plus l'espace
-        /// insécable des séparateurs de milliers ni les négatifs comptables
-        /// entre parenthèses.
+        /// Goes through the SHARED parser: it handles "1,234.56" (a blind
+        /// comma → dot replacement would produce "1.234.56", hence `nil`), the
+        /// non-breaking space of thousands separators and accounting negatives in
+        /// parentheses.
         func parseAmount(_ raw: String) -> Double? {
-            // Convention décimale déduite de la valeur : un point APRÈS la
-            // dernière virgule signe un format anglo-saxon.
+            // Decimal convention inferred from the value: a dot AFTER the last comma
+            // signals an English-style format.
             let anglo = raw.lastIndex(of: ".").map { dot in
                 raw.lastIndex(of: ",").map { $0 < dot } ?? true
             } ?? false
@@ -338,16 +330,15 @@ final class InvestmentsViewModel {
 
     // MARK: - Portfolio evolution (Niveau Global)
 
-    /// Calcule l'évolution du portefeuille total sur la plage sélectionnée.
-    /// Pour chaque date couverte par l'historique de prix de l'une des positions,
-    /// on compose la valorisation totale = Σ (qty × close(ticker, date)).
-    /// Si un ticker n'a pas de prix à cette date, on utilise le prix antérieur le plus récent
-    /// (forward-fill) ou à défaut le PRU (averageBuyPrice).
+    /// Computes the total portfolio's evolution over the selected range.
+    /// For each date covered by one of the positions' price history, the total
+    /// valuation = Σ (qty × close(ticker, date)), forward- and back-filled with
+    /// each position's own prices — never with its average cost.
     ///
-    /// Note : pour les comptes sans aucun historique synchronisé, on n'a pas d'évolution
-    /// réelle — la fonction retourne un tableau vide. L'EvolutionChart affiche un placeholder.
+    /// Accounts without any synced history have no real evolution: the function
+    /// returns an empty array and the EvolutionChart shows a placeholder.
     func recomputePortfolioEvolution() {
-        // 1. Récupère TOUTES les positions de TOUS les comptes (pas juste selectedAccountId)
+        // 1. Get ALL positions of ALL accounts (not just selectedAccountId)
         let allPositions = accounts.flatMap { repository.fetchPositions(accountId: $0.id) }
         guard !allPositions.isEmpty else {
             portfolioEvolution = []
@@ -355,18 +346,15 @@ final class InvestmentsViewModel {
             return
         }
 
-        // 2. Historiques par POSITION (pas par ticker) via la résolution robuste
-        //    ISIN → ticker → symbole résolu par la dernière sync.
-        //
-        //    ⚠️ Avant, cette fonction ne cherchait QUE par `position.ticker` : dès
-        //    que l'historique était stocké sous l'ISIN ou sous un symbole résolu
-        //    (ex. ISIN → EWLD.PA via OpenFIGI), le chart GLOBAL restait vide
-        //    ("Aucun historique") alors que les écrans compte/position — qui
-        //    utilisaient déjà la résolution complète — affichaient bien la courbe.
-        // 2. Agrégation déléguée à PortfolioEvolutionBuilder : grille temporelle
-        //    RÉGULIÈRE, back/forward-fill avec les cours de la position, et
-        //    surtout AUCUN repli sur le PRU (qui injectait une valeur d'une
-        //    autre échelle et produisait les "dents de scie").
+        // 2. Histories per POSITION (not per ticker) through the robust resolution
+        //    ISIN → ticker → symbol resolved by the last sync. Looking up by
+        //    `position.ticker` alone would leave the GLOBAL chart empty whenever the
+        //    history is stored under the ISIN or a resolved symbol (e.g. ISIN →
+        //    EWLD.PA via OpenFIGI), while the account/position screens show it.
+        // 3. Aggregation delegated to PortfolioEvolutionBuilder: REGULAR time grid,
+        //    back/forward-fill with the position's prices, and above all NO fallback
+        //    to the average cost (a value on another scale, which produces a
+        //    sawtooth curve).
         let inputs = allPositions.map { position in
             PortfolioSeriesInput(
                 positionId: position.id,
@@ -375,13 +363,12 @@ final class InvestmentsViewModel {
             )
         }
 
-        // ⚠️ 1J sans AUCUNE cotation intrajournalière : ne rien tracer.
+        // 1D without ANY intraday quote: draw nothing.
         //
-        // Sinon le builder compose une courbe à partir de clôtures
-        // QUOTIDIENNES sur une fenêtre de 24 h — au mieux une ligne plate, au
-        // pire deux paliers — présentée comme la journée en cours. C'est la
-        // version agrégée du « 1J n'affiche que 2 points ». Un message clair
-        // vaut mieux qu'une courbe fabriquée dans une autre granularité.
+        // Otherwise the builder would compose a curve from DAILY closes over a 24 h
+        // window — at best a flat line, at worst two steps — presented as the
+        // current day. A clear message beats a curve fabricated at another
+        // granularity.
         if selectedTimeRange == .oneDay {
             let withIntraday = allPositions.filter { !PositionHistoryResolver.intradaySeries(for: $0).isEmpty }.count
             if withIntraday == 0 && !allPositions.isEmpty {
@@ -400,8 +387,8 @@ final class InvestmentsViewModel {
         portfolioPositionsWithoutHistory = allPositions.filter { result.unpricedPositionIds.contains($0.id) }
     }
 
-    /// Allocation par type d'actif (toutes positions confondues) — pour le donut chart.
-    /// utilise le cache `allPositions` (au lieu de fetcher la DB à chaque render).
+    /// Allocation by asset type (all positions) — for the donut chart.
+    /// Uses the `allPositions` cache (instead of fetching the database on every render).
     var allocationByAssetType: [AllocationSlice] {
         Dictionary(grouping: allPositions, by: { InvestmentAssetType.canonicalKey(for: $0.assetType) })
             .map { key, positions in
@@ -412,9 +399,9 @@ final class InvestmentsViewModel {
             .sorted { $0.value > $1.value }
     }
 
-    /// Allocation par compte — pour le donut chart en mode "par compte".
-    /// utilise le cache `allPositions` au lieu de `account.currentValue`
-    /// (qui restait à 0 et faisait disparaître la section).
+    /// Allocation by account — for the donut chart in "by account" mode.
+    /// Uses the `allPositions` cache rather than `account.currentValue` (which
+    /// stays at 0 and would make the section disappear).
     var allocationByAccount: [AllocationSlice] {
         let positionsByAccount = Dictionary(grouping: allPositions) { $0.accountId }
         return accounts
@@ -426,26 +413,25 @@ final class InvestmentsViewModel {
             .sorted { $0.value > $1.value }
     }
 
-    /// Renvoie la valeur du portefeuille au début de la plage temporelle (pour calculer
-    /// la variation affichée dans le hero card). Si pas d'historique, renvoie nil.
+    /// Returns the portfolio's value at the start of the time range (to compute
+    /// the variation shown in the hero card). Nil without history.
     var portfolioStartValue: Double? {
         portfolioEvolution.first?.value
     }
 
-    /// Valorisation totale courante = somme des `currentValue` de toutes les positions
-    /// de tous les comptes. : fixé pour utiliser le cache `allPositions` (la
-    /// version précédente utilisait `account.currentValue` qui n'est jamais synchronisé
-    /// et restait à 0 → hero affichait toujours 0,00 € même avec des positions valorisées).
+    /// Current total valuation = sum of the `currentValue` of every position of
+    /// every account, from the `allPositions` cache (`account.currentValue` is
+    /// never synced and stays at 0).
     var portfolioCurrentValue: Double {
         allPositions.reduce(0) { $0 + $1.currentValue }
     }
 
-    /// Base de comparaison pour le % de variation du hero card — restreinte
-    /// aux positions effectivement valorisées dans `portfolioEvolution` (donc
-    /// dans `portfolioStartValue`). À utiliser à la place de
-    /// `portfolioCurrentValue` comme `variationBasisValue`, sinon une position
-    /// sans historique sur la plage sélectionnée est comptée d'un côté et pas
-    /// de l'autre, ce qui gonfle artificiellement le %.
+    /// Comparison basis for the hero card's variation % — restricted to the
+    /// positions actually valued in `portfolioEvolution` (hence in
+    /// `portfolioStartValue`). Use it instead of `portfolioCurrentValue` as
+    /// `variationBasisValue`; otherwise a position without history over the
+    /// selected range counts on one side and not the other, artificially
+    /// inflating the %.
     var portfolioVariationBasisValue: Double {
         guard !portfolioPositionsWithoutHistory.isEmpty else { return portfolioCurrentValue }
         let excludedIds = Set(portfolioPositionsWithoutHistory.map(\.id))
@@ -454,9 +440,9 @@ final class InvestmentsViewModel {
             .reduce(0) { $0 + $1.currentValue }
     }
 
-    /// Total cash (trésorerie) sur tous les comptes. À ajouter au `portfolioCurrentValue`
-    /// dans le hero global UNIQUEMENT pour affichage cosmétique quand l'utilisateur
-    /// a activé `investmentsIncludeCashInTotal` — JAMAIS pour le calcul de variation%.
+    /// Total cash across all accounts. Added to `portfolioCurrentValue` in the
+    /// global hero ONLY for display, when the user has enabled
+    /// `investmentsIncludeCashInTotal` — NEVER for the variation % computation.
     var portfolioTotalCash: Double {
         accounts.reduce(0) { $0 + $1.cashBalance }
     }
@@ -465,25 +451,24 @@ final class InvestmentsViewModel {
         InvestmentAssetType(looselyMatching: raw)?.label ?? raw.capitalized
     }
 
-    // MARK: - Phase 2 — Évolutions par compte / par position
+    // MARK: - Evolution per account / per position
 
-    /// Calcule l'évolution d'un compte spécifique sur la plage sélectionnée.
-    /// Même algo que `recomputePortfolioEvolution` mais restreint aux positions du compte.
+    /// Computes a specific account's evolution over the selected range.
+    /// Same algorithm as `recomputePortfolioEvolution`, restricted to the account's positions.
     func computeAccountEvolution(accountId: Int, range: InvestmentTimeRange) -> [PortfolioEvolutionPoint] {
         let result = computeAccountEvolutionWithDiagnostic(accountId: accountId, range: range)
         return result.points
     }
 
-    /// Diagnostic d'évolution compte : retourne les points + la liste des positions
-    /// pour lesquelles on n'a trouvé aucun cours historique. Permet à l'UI
-    /// d'afficher "X positions sans historique : ABC, DEF, ..." pour que l'utilisateur
-    /// sache lesquelles synchroniser.
+    /// Account evolution diagnostic: returns the points + the positions for which
+    /// no historical price was found. Lets the UI show "X positions without
+    /// history: ABC, DEF, ..." so the user knows which ones to sync.
     struct AccountEvolutionResult {
         let points: [PortfolioEvolutionPoint]
         let positionsWithoutHistory: [InvestmentPosition]
-        /// Renseigné en 1J quand aucune position du compte n'a de cotation
-        /// intrajournalière : la courbe est vide À DESSEIN (cf. le même garde
-        /// au niveau global), l'UI doit afficher cette explication.
+        /// Set on 1D when no position of the account has intraday quotes: the curve
+        /// is empty ON PURPOSE (see the same guard at the global level); the UI must
+        /// show this explanation.
         var oneDayUnavailableNote: String? = nil
     }
 
@@ -495,11 +480,11 @@ final class InvestmentsViewModel {
             return AccountEvolutionResult(points: [], positionsWithoutHistory: [])
         }
 
-        // Même moteur que le niveau global (grille régulière, jamais de PRU) —
-        // parent et enfant ne peuvent plus diverger, ni sur la résolution des
-        // identifiants, ni sur l'algorithme d'agrégation.
-        // Même garde qu'au niveau global : en 1J sans aucune cotation en
-        // continu, ne pas fabriquer de courbe à partir de clôtures quotidiennes.
+        // Same engine as the global level (regular grid, never the average cost) —
+        // parent and child cannot diverge, neither on identifier resolution nor on
+        // the aggregation algorithm.
+        // Same guard as the global level: on 1D without any continuous quote, don't
+        // fabricate a curve from daily closes.
         if range == .oneDay, positions.allSatisfy({ PositionHistoryResolver.intradaySeries(for: $0).isEmpty }) {
             return AccountEvolutionResult(
                 points: [], positionsWithoutHistory: [],
@@ -519,8 +504,9 @@ final class InvestmentsViewModel {
         return AccountEvolutionResult(points: result.points, positionsWithoutHistory: withoutHistory)
     }
 
-    /// Évolution du cours d'une position (multiplie par qty pour avoir la valeur de la position).
-    /// Si `multiplyByQuantity` = false, renvoie le cours brut (utile pour comparer entrée/sortie).
+    /// Evolution of a position's price (multiplied by qty to get the position's
+    /// value). With `multiplyByQuantity` = false, returns the raw price (useful to
+    /// compare entry/exit).
     func computePositionEvolution(ticker: String,
                                   range: InvestmentTimeRange,
                                   quantity: Double = 1.0) -> [PortfolioEvolutionPoint] {
@@ -535,7 +521,7 @@ final class InvestmentsViewModel {
             .map { PortfolioEvolutionPoint(date: $0.date, value: $0.close * quantity) }
     }
 
-    /// Allocation par type d'actif au sein d'un compte (pour le donut sur AccountDetailView).
+    /// Allocation by asset type within an account (for the donut on AccountDetailView).
     func allocationByAssetType(accountId: Int) -> [AllocationSlice] {
         let positions = repository.fetchPositions(accountId: accountId)
         let grouped = Dictionary(grouping: positions, by: { InvestmentAssetType.canonicalKey(for: $0.assetType) })
@@ -547,17 +533,16 @@ final class InvestmentsViewModel {
         .sorted { $0.value > $1.value }
     }
 
-    /// Helper public — récupère les positions d'un compte (utilisé par AccountDetailView).
+    /// Public helper — fetches an account's positions (used by AccountDetailView).
     func fetchPositions(accountId: Int) -> [InvestmentPosition] {
         repository.fetchPositions(accountId: accountId)
     }
 
-    /// Chantier A — wrapper fin de compatibilité (InvestmentPositionDetailView
-    /// l'appelle toujours). La logique de sync (routage crypto/Yahoo, skip du
-    /// jour, persistance, trace) vit dans `InvestmentAutoSyncService.syncHistory`
-    /// SANS load() interne : ici on fait UN SEUL load() final. Les passes batch
-    /// (auto-sync, "tout synchroniser") n'appellent plus ce wrapper mais le
-    /// service directement — fini le full reload par position (O(N²)).
+    /// Thin wrapper (InvestmentPositionDetailView still calls it). The sync logic
+    /// (crypto/Yahoo routing, same-day skip, persistence, trace) lives in
+    /// `InvestmentAutoSyncService.syncHistory` WITHOUT any internal load(): a
+    /// SINGLE final load() happens here. Batch passes (auto-sync, "sync all")
+    /// call the service directly, so there is no full reload per position.
     func syncMarketHistory(for identifier: String) async {
         isSyncingMarketData = true
         defer { isSyncingMarketData = false }
@@ -566,8 +551,8 @@ final class InvestmentsViewModel {
         InvestmentAutoSyncService.shared.recordOutcome(identifier: identifier, outcome: outcome)
 
         let clean = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Les messages détaillés (symboles essayés, source, nb de points) sont
-        // déjà écrits dans la trace par le service — on les réutilise tels quels.
+        // The detailed messages (symbols tried, source, number of points) are
+        // already written to the trace by the service — reused as-is.
         marketStatusMessage = InvestmentSyncTraceStore.fetch(identifier: clean)?.message
             ?? outcome.shortLabel
 

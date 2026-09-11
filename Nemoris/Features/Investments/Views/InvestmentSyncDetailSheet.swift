@@ -1,14 +1,11 @@
 import SwiftUI
 
-/// Détail d'une synchronisation de cours — partagé par les 3 niveaux
-/// (position / compte / global) pour ne jamais diverger sur ce qui compte
-/// comme "un problème" (cf. doctrine du dépôt : plusieurs implémentations
-/// du même calcul finissent toujours par diverger, AXE Q).
+/// Detail of a price sync — shared by the 3 levels (position / account /
+/// global) so they never disagree on what counts as "a problem": several
+/// implementations of the same computation always end up diverging.
 ///
-/// - `.single` : une seule position (fiche position) — reprend le contenu
-///   de l'ancienne carte "Dernière synchro du cours".
-/// - `.list` : plusieurs positions (compte ou vue globale), triées
-///   problèmes d'abord.
+/// - `.single`: a single position (position sheet).
+/// - `.list`: several positions (account or global view), problems first.
 struct InvestmentSyncDetailSheet: View {
 
     enum Content {
@@ -66,7 +63,7 @@ struct InvestmentSyncDetailSheet: View {
         }
     }
 
-    // MARK: - Mode liste (compte / global)
+    // MARK: - List mode (account / global)
 
     @ViewBuilder
     private func listContent(summary: String?, positions: [SyncPositionStatus]) -> some View {
@@ -135,9 +132,9 @@ struct InvestmentSyncDetailSheet: View {
     }
 }
 
-/// Une position et son résultat de synchronisation — pour les modes
-/// `.list` (compte / global). `outcome == nil` = jamais tentée cette passe,
-/// traité comme un problème (on ne sait rien de son état).
+/// A position and its sync result — for the `.list` modes (account /
+/// global). `outcome == nil` = not attempted in this pass, treated as a
+/// problem (nothing is known about its state).
 struct SyncPositionStatus: Identifiable {
     let id: Int
     let name: String
@@ -146,8 +143,8 @@ struct SyncPositionStatus: Identifiable {
     var isProblem: Bool { outcome?.isProblem ?? true }
 }
 
-/// Bouton "?" compact ouvrant le détail d'une synchronisation — même
-/// composant aux 3 niveaux pour un rendu cohérent.
+/// Compact "?" button opening a sync's detail — the same component at all 3
+/// levels for consistent rendering.
 struct SyncInfoButton: View {
     @Binding var isPresented: Bool
 

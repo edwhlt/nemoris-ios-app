@@ -1,29 +1,18 @@
 import Foundation
 
-/// Cache disque dédié à l'historique de prix des actifs investissements.
+/// Granularity of a price series. The two are stored SEPARATELY because they
+/// share neither deduplication semantics nor retention:
+///   - `.daily`      : 1 point per day, long history (10 years) → ranges ≥ 1M
+///   - `.intraday30m`: 1 point / 30 min over the last hours → ranges 1D / 1W
 ///
-/// Stocke `[InvestmentPricePoint]` par identifiant (ticker ou ISIN, casse uppercase).
-/// Remplace l'ancienne table SQLite `investment_price_history` (DROP en v33) :
-/// les prix ne sont PAS des données utilisateur — ce sont des données récupérables
-/// via les APIs Yahoo/Stooq/CoinGecko, donc ils n'ont pas à polluer la base SQLite
-/// de l'utilisateur (qui doit ne contenir que ses comptes, positions, ordres,
-/// transactions, etc. — bref tout ce qu'il a créé ou importé).
-///
-/// Stockage : `Library/Caches/nemoris/investment_price_history.json`
-/// (auto-purgé par iOS si manque d'espace → comportement souhaité pour du cache).
-/// Granularité d'une série de cours. On stocke les deux SÉPARÉMENT car elles
-/// n'ont ni la même sémantique de déduplication ni la même rétention :
-///   - `.daily`      : 1 point par jour, historique long (10 ans) → plages ≥ 1M
-///   - `.intraday30m`: 1 point / 30 min sur les dernières 48 h → plages 1J / 1S
-///
-/// ⚠️ Ne JAMAIS mélanger les deux sous la même clé : la déduplication par jour
-/// du mode `.daily` écraserait tous les points intraday sauf un.
+/// NEVER mix the two under the same key: the per-day deduplication of
+/// `.daily` would crush every intraday point but one.
 enum PriceResolution: String, Sendable {
     case daily
     case intraday30m
 
-    /// Suffixe de clé de cache (le quotidien garde la clé nue pour rester
-    /// rétro-compatible avec les caches déjà sur disque).
+    /// Cache key suffix (daily keeps the bare key, so caches already on disk stay
+    /// readable).
     var keySuffix: String {
         switch self {
         case .daily:       return ""
@@ -31,14 +20,14 @@ enum PriceResolution: String, Sendable {
         }
     }
 
-    /// Fenêtre de rétention. nil = pas de purge (le quotidien est déjà borné
-    /// par la source à 10 ans).
+    /// Retention window. nil = no purge (daily is already bounded to 10 years by
+    /// the source).
     ///
-    /// ⚠️ 96 h et non 48 h : une rétention de 2 jours vide le cache intraday
-    /// dès le week-end (dernière cotation vendredi 17 h 30 → dimanche matin il
-    /// ne reste RIEN), et la vue 1J devenait alors entièrement dépendante d'un
-    /// appel réseau réussi. 96 h fait tenir la dernière séance jusqu'au lundi.
-    /// Coût : ~200 points par actif au lieu de ~100, négligeable.
+    /// 96 h, not 48 h: a 2-day retention empties the intraday cache over the
+    /// weekend (last quote Friday 17:30 → by Sunday morning NOTHING is left), and
+    /// the 1D view would then depend entirely on a successful network call. 96 h
+    /// keeps the last session until Monday. Cost: ~200 points per asset instead
+    /// of ~100, negligible.
     var retention: TimeInterval? {
         switch self {
         case .daily:       return nil
@@ -48,21 +37,20 @@ enum PriceResolution: String, Sendable {
 }
 
 extension Array where Element == InvestmentPricePoint {
-    /// Fenêtre de la vue 1J, ancrée sur le DERNIER POINT DISPONIBLE — jamais
-    /// sur `Date()`.
+    /// Window of the 1D view, anchored on the LAST AVAILABLE POINT — never on
+    /// `Date()`.
     ///
-    /// ⚠️ C'est LA cause du « 1J n'affiche que 2 points ». Une fenêtre glissante
-    /// calée sur l'instant présent est vide dès qu'on regarde hors séance : un
-    /// ETF de Paris cote jusqu'à 17 h 30, donc consulté le soir à 19 h il reste
-    /// des points, mais samedi, dimanche, ou lundi avant 9 h, TOUTE la dernière
-    /// séance est à plus de 24 h → 0 point intraday → repli silencieux sur la
-    /// série quotidienne, qui n'a elle-même qu'un ou deux points sur 24 h.
-    /// D'où une courbe à 2 points, systématiquement, hors heures de marché.
+    /// A rolling window pinned to the present instant is empty as soon as it's
+    /// viewed outside trading hours: a Paris ETF trades until 17:30, so viewed at
+    /// 19:00 there are still points, but on Saturday, Sunday, or Monday before
+    /// 9:00, the WHOLE last session is more than 24 h old → 0 intraday points →
+    /// silent fallback to the daily series, which itself has only one or two
+    /// points over 24 h. The result would be a 2-point curve, every time, outside
+    /// market hours.
     ///
-    /// En ancrant sur le dernier point connu on obtient les dernières 24 h
-    /// COTÉES : la séance complète pour un titre traditionnel, un vrai 24 h
-    /// glissant pour une crypto (qui cote en continu, donc son dernier point
-    /// est de toute façon récent).
+    /// Anchoring on the last known point gives the last 24 TRADED hours: the full
+    /// session for a traditional security, a true rolling 24 h for a crypto
+    /// (which trades continuously, so its last point is recent anyway).
     func lastQuotedWindow(hours: Double = 24) -> [InvestmentPricePoint] {
         guard let anchor = self.map(\.date).max() else { return [] }
         let cutoff = anchor.addingTimeInterval(-hours * 3600)
@@ -70,6 +58,16 @@ extension Array where Element == InvestmentPricePoint {
     }
 }
 
+/// Disk cache dedicated to investment assets' price history.
+///
+/// Stores `[InvestmentPricePoint]` per identifier (ticker or ISIN, uppercased).
+/// Prices are NOT user data: they can be refetched from the Yahoo/Stooq/
+/// CoinGecko APIs, so they don't belong in the user's SQLite database, which
+/// only holds what the user created or imported (accounts, positions, orders,
+/// transactions…).
+///
+/// Storage: `Library/Caches/nemoris/investment_price_history.json` (purged by
+/// iOS when space runs low → the desired behavior for a cache).
 @MainActor
 final class PriceHistoryCache {
     static let shared = PriceHistoryCache()
@@ -78,27 +76,24 @@ final class PriceHistoryCache {
 
     private init() {}
 
-    /// Toujours store par identifier UPPER pour matcher la sémantique de l'ancien
-    /// `WHERE UPPER(identifier) = UPPER(?)` du SQL. Le suffixe de résolution
-    /// isole les séries intraday des séries quotidiennes.
+    /// Always stored under the UPPERCASED identifier (case-insensitive lookups).
+    /// The resolution suffix isolates intraday series from daily ones.
     private func normalize(_ identifier: String, _ resolution: PriceResolution = .daily) -> String {
         identifier.uppercased() + resolution.keySuffix
     }
 
-    /// Un cours quotidien = UN point par jour calendaire. On déduplique sur le
-    /// début de journée (et pas sur le timestamp exact) car les sources ne
-    /// datent pas leurs points à la même heure : un même jour peut arriver à
-    /// 09:05Z depuis une source et à 15:30Z depuis une autre.
+    /// Deduplication + cleanup according to the resolution:
+    ///   - `.daily`      : a single value per calendar day
+    ///   - `.intraday30m`: a single value per timestamp (EVERY point of the day
+    ///                     is wanted), + purge beyond the retention
     ///
-    /// ⚠️ C'est LA cause du rendu en "code-barres" : deux points le même jour
-    /// créent un segment vertical dans le chart. Le symptôme est intermittent
-    /// (« parfois oui, parfois non ») car il n'apparaît qu'après une sync qui
-    /// a introduit un horodatage différent de celui déjà en cache.
-    /// En cas de doublon, le point le plus récemment écrit gagne.
-    /// Déduplication + nettoyage selon la résolution :
-    ///   - `.daily`      : une seule valeur par jour calendaire
-    ///   - `.intraday30m`: une seule valeur par horodatage (on veut TOUS les
-    ///                     points de la journée), + purge au-delà de la rétention
+    /// A daily price = ONE point per calendar day. Deduplication is on the start
+    /// of the day (not the exact timestamp) because sources don't timestamp their
+    /// points at the same hour: the same day can arrive at 09:05Z from one source
+    /// and at 15:30Z from another. Two points on the same day would draw a
+    /// vertical segment in the chart — a "barcode" rendering that only appears
+    /// after a sync introduces a timestamp different from the cached one. On a
+    /// duplicate, the most recently written point wins.
     private func cleaned(_ points: [InvestmentPricePoint],
                          _ resolution: PriceResolution) -> [InvestmentPricePoint] {
         let usable = points.filter { $0.close.isFinite && $0.close > 0 }
@@ -118,67 +113,66 @@ final class PriceHistoryCache {
         return result
     }
 
-    /// Récupère les points sortés par date croissante, limité à `limit`.
-    /// Déduplique à la lecture : soigne immédiatement les caches déjà pollués
-    /// par l'ancienne écriture (pas besoin d'attendre une resync).
+    /// Fetches the points sorted by ascending date, limited to `limit`.
+    /// Deduplicates on read, so caches holding duplicate days are repaired
+    /// immediately, without waiting for a resync.
     func fetch(identifier: String,
                limit: Int = 365,
                resolution: PriceResolution = .daily) -> [InvestmentPricePoint] {
         let points = cleaned(store.get(normalize(identifier, resolution)) ?? [], resolution)
-        // L'ancien SELECT faisait ORDER BY price_date DESC LIMIT N puis retournait
-        // sorted ASC. On reproduit : prend les N plus récents puis trie ASC.
+        // Take the N most recent points, then sort ascending.
         let sortedDesc = points.sorted { $0.date > $1.date }
         let limited = Array(sortedDesc.prefix(limit))
         return limited.sorted { $0.date < $1.date }
     }
 
-    /// Dernier prix connu pour `identifier`, ou `nil` si absent.
+    /// Last known price for `identifier`, or `nil` if absent.
     func latestClose(identifier: String, resolution: PriceResolution = .daily) -> Double? {
         let points = store.get(normalize(identifier, resolution)) ?? []
         return points.max(by: { $0.date < $1.date })?.close
     }
 
-    /// Date du dernier point connu en cache pour `identifier`, ou `nil` si absent.
-    /// Permet aux syncs de skip un appel API si on a déjà la donnée du jour
-    /// (le passé étant immuable, pas besoin de re-fetcher). En intraday, sert
-    /// au skip "fraîcheur < 25 min".
+    /// Date of the last cached point for `identifier`, or `nil` if absent.
+    /// Lets syncs skip an API call when today's data is already there (the past
+    /// being immutable, no need to refetch). For intraday, it drives the
+    /// "freshness < 25 min" skip.
     func latestDate(identifier: String, resolution: PriceResolution = .daily) -> Date? {
         let points = store.get(normalize(identifier, resolution)) ?? []
         return points.max(by: { $0.date < $1.date })?.date
     }
 
-    /// Merge des nouveaux points dans le cache. Sémantique = UPSERT par pas de
-    /// temps de la résolution (jour calendaire en `.daily`, horodatage exact en
-    /// `.intraday30m`). La rétention de la résolution est appliquée au passage
-    /// (auto-purge des points intraday > 48 h).
-    /// Renvoie le nombre de points effectivement écrits.
+    /// Merges new points into the cache. Semantics = UPSERT per time step of the
+    /// resolution (calendar day for `.daily`, exact timestamp for `.intraday30m`).
+    /// The resolution's retention is applied along the way (intraday points
+    /// beyond the retention are purged).
+    /// Returns the number of points actually written.
     @discardableResult
     func save(identifier: String,
               points: [InvestmentPricePoint],
               resolution: PriceResolution = .daily) -> Int {
         guard !points.isEmpty else { return 0 }
         let key = normalize(identifier, resolution)
-        // L'existant d'abord, les nouveaux ensuite → les nouveaux gagnent.
+        // Existing points first, new ones after → the new ones win.
         let merged = (store.get(key) ?? []) + points
         let result = cleaned(merged, resolution)
         store.set(key, value: result)
         return points.count
     }
 
-    /// Retire tout l'historique de cet identifier (TOUTES résolutions). Utilisé
-    /// par `purgeCorruptedCryptoData` pour les cryptos polluées par des actions
-    /// Yahoo — l'intraday hérité du mauvais instrument doit partir aussi.
+    /// Removes all history for this identifier (EVERY resolution). Used by
+    /// `purgeCorruptedCryptoData` for cryptos polluted by Yahoo stocks — the
+    /// intraday inherited from the wrong instrument must go too.
     func remove(identifier: String) {
         store.remove(normalize(identifier, .daily))
         store.remove(normalize(identifier, .intraday30m))
     }
 
-    /// Toutes les clés en cache.
+    /// All cached keys.
     func allIdentifiers() -> [String] {
         store.allKeys()
     }
 
-    /// Vide tout le cache (lecture + écriture disque).
+    /// Clears the whole cache (read + disk write).
     func clearAll() {
         store.clear()
     }

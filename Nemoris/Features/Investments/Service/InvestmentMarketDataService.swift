@@ -4,8 +4,8 @@ struct InvestmentMarketDataFetchResult {
     let identifier: String
     let source: String
     let points: [InvestmentPricePoint]
-    /// Tous les symboles candidats essayés pendant la résolution (utile pour
-    /// que la trace de sync montre le chemin complet : "EUEA.AS, EUEA, IE...").
+    /// Every candidate symbol tried during resolution (so the sync trace can
+    /// show the full path: "EUEA.AS, EUEA, IE...").
     let attemptedSymbols: [String]
 }
 
@@ -20,13 +20,13 @@ struct InvestmentInstrumentMetadata {
 
 enum InvestmentMarketDataError: LocalizedError {
     case invalidIdentifier
-    /// Aucune source n'a retourné de points. On embarque la liste des symboles
-    /// essayés pour pouvoir afficher un diagnostic verbeux dans la trace de
-    /// sync ("Symboles essayés : EUEA.AS, EUEA, IE0008471009 — aucun trouvé").
+    /// No source returned any points. Carries the list of symbols tried, so a
+    /// verbose diagnostic can be shown in the sync trace ("Symbols tried:
+    /// EUEA.AS, EUEA, IE0008471009 — none found").
     case noData(attemptedSymbols: [String])
-    /// Chantier A : 0 points ET au moins un provider a répondu 429 pendant la
-    /// résolution — distinct de noData (l'actif existe peut-être, on est juste
-    /// bloqué temporairement). `retryAfter` = secondes avant retentative possible.
+    /// 0 points AND at least one provider answered 429 during resolution —
+    /// distinct from noData (the asset may well exist, it's only temporarily
+    /// blocked). `retryAfter` = seconds before a retry is possible.
     case rateLimited(provider: MarketDataProvider, retryAfter: TimeInterval)
 
     var errorDescription: String? {
@@ -57,57 +57,55 @@ struct InvestmentMarketDataService {
         let clean = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { throw InvestmentMarketDataError.invalidIdentifier }
 
-        // On combine MAINTENANT 2 sources pour générer les candidats au lieu
-        // d'une seule (OpenFIGI) :
+        // Candidates come from 2 sources combined:
         //
-        //   1. OpenFIGI : mapping ISIN → ticker + exchange, on en déduit le
-        //      symbole Yahoo via buildSymbolCandidates (ex: NA → .AS).
-        //   2. Yahoo search : on cherche directement l'ISIN sur l'API search
-        //      et on récupère les symboles Yahoo bruts (déjà avec suffixe).
+        //   1. OpenFIGI: ISIN → ticker + exchange mapping, from which the Yahoo
+        //      symbol is derived via buildSymbolCandidates (e.g. NA → .AS).
+        //   2. Yahoo search: the ISIN is searched directly on the search API, which
+        //      returns raw Yahoo symbols (suffix already included).
         //
-        // Avant : si OpenFIGI rendait un mauvais exchCode (ex: pas dans
-        // notre switch), on tombait sur "EUEA" sans suffixe → Yahoo 404 →
-        // fallback raw ISIN → Yahoo 404 aussi → "noData". Maintenant on
-        // empile "EUEA.AS" (vu par Yahoo search) en plus → ça marche.
+        // With OpenFIGI alone, an unexpected exchCode (not in the switch below)
+        // yields "EUEA" without a suffix → Yahoo 404 → raw ISIN fallback → Yahoo 404
+        // as well → "noData". Stacking "EUEA.AS" (seen by Yahoo search) fixes that.
         var candidates: [String] = []
         if isISIN(clean) {
             // Source 1 : OpenFIGI
             if let metadata = await resolveFromOpenFIGI(clean) {
                 candidates.append(contentsOf: buildSymbolCandidates(from: metadata))
             }
-            // Source 2 : Yahoo search — on prend les 3 premiers symboles
-            // retournés (typiquement le bon est dans le top 3)
+            // Source 2: Yahoo search — take the first 3 symbols returned (the right
+            // one is typically in the top 3)
             let yahooSymbols = await searchYahooSymbols(query: clean, isin: clean)
             candidates.append(contentsOf: yahooSymbols)
-            // Fallback : l'ISIN brut (au cas où Yahoo accepte l'ISIN)
+            // Fallback: the raw ISIN (in case Yahoo accepts it)
             candidates.append(clean)
         } else {
-            // Non-ISIN : on essaie le ticker brut + Yahoo search dessus
+            // Not an ISIN: try the raw ticker + Yahoo search on it
             candidates.append(clean)
             let yahooSymbols = await searchYahooSymbols(query: clean, isin: nil)
             candidates.append(contentsOf: yahooSymbols)
         }
 
-        // Dédupe en préservant l'ordre (priorité aux 1ers candidats)
+        // Deduplicate while preserving order (the first candidates take priority)
         var seen = Set<String>()
         let unique = candidates.filter { sym in
             let key = sym.uppercased()
             return seen.insert(key).inserted
         }
 
-        // Essai séquentiel Yahoo puis Stooq pour chaque candidat. On garde
-        // trace de tous les symboles tentés pour la trace de diagnostic.
+        // Try Yahoo then Stooq, in sequence, for each candidate. Every symbol tried
+        // is recorded for the diagnostic trace.
         //
-        // Chantier A : plus de `try?` qui avale tout — chaque erreur est
-        // mémorisée. Un provider rate-limité (breaker ouvert) n'est plus
-        // re-tenté pour les candidats suivants (mais l'autre source continue).
+        // No `try?` swallowing everything — each error is kept. A rate-limited
+        // provider (breaker open) isn't retried for the following candidates (but
+        // the other source carries on).
         var yahooBlocked = false
         var stooqBlocked = false
         var lastRateLimited: (provider: MarketDataProvider, retryAfter: TimeInterval)?
         var lastError: Error?
 
         for symbol in unique {
-            // Les deux sources rate-limitées → inutile de dérouler les candidats restants.
+            // Both sources rate-limited → no point going through the remaining candidates.
             if yahooBlocked && stooqBlocked { break }
 
             if !yahooBlocked {
@@ -144,7 +142,7 @@ struct InvestmentMarketDataService {
             }
         }
 
-        // 0 points + au moins un 429 → l'échec est temporaire, pas "pas de données".
+        // 0 points + at least one 429 → the failure is temporary, not "no data".
         if let lastRateLimited {
             throw InvestmentMarketDataError.rateLimited(
                 provider: lastRateLimited.provider,
@@ -157,28 +155,28 @@ struct InvestmentMarketDataService {
         throw InvestmentMarketDataError.noData(attemptedSymbols: unique)
     }
 
-    /// Cherche un ou plusieurs symboles tradables Yahoo correspondant à une
-    /// query (ISIN, ticker, nom d'actif). Retourne les 3 premiers résultats
-    /// pour permettre des fallbacks (ex: même ETF coté sur 2 exchanges).
+    /// Searches one or more tradable Yahoo symbols matching a query (ISIN,
+    /// ticker, asset name). Returns the first 3 results to allow fallbacks (e.g.
+    /// the same ETF listed on 2 exchanges).
     private func searchYahooSymbols(query: String, isin: String?) async -> [String] {
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "https://query1.finance.yahoo.com/v1/finance/search?q=\(encoded)&quotesCount=10") else {
             return []
         }
         do {
-            // Best-effort : la recherche sert à générer des candidats — en cas
-            // d'échec (y compris 429, breaker ouvert) on continue sans elle.
+            // Best-effort: the search only generates candidates — on failure (including
+            // a 429 with the breaker open), carry on without it.
             let data = try await ResilientHTTP.get(url, provider: .yahoo)
             let decoded = try JSONDecoder().decode(YahooSearchResponse.self, from: data)
-            // Si on a un ISIN, on privilégie les quotes qui matchent l'ISIN
-            // exactement (Yahoo le renvoie quand il est connu)
+            // With an ISIN, prefer the quotes that match the ISIN exactly (Yahoo returns
+            // it when known)
             var ordered = decoded.quotes
             if let isin {
                 let matching = ordered.filter { $0.isin?.uppercased() == isin.uppercased() }
                 let others = ordered.filter { $0.isin?.uppercased() != isin.uppercased() }
                 ordered = matching + others
             }
-            // Prendre les 3 premiers symboles non-vides, dédupliqués
+            // Take the first 3 non-empty symbols, deduplicated
             var seen = Set<String>()
             var out: [String] = []
             for q in ordered.prefix(10) {
@@ -237,8 +235,8 @@ struct InvestmentMarketDataService {
         request.httpBody = "[{\"idType\":\"ID_ISIN\",\"idValue\":\"\(isin)\"}]".data(using: .utf8)
 
         do {
-            // Best-effort (nil si échec) mais via ResilientHTTP pour bénéficier
-            // du pacing 2.5s (25 req/min sans clé) et du breaker 429.
+            // Best-effort (nil on failure) but via ResilientHTTP, to benefit from the
+            // 2.5 s pacing (25 req/min without a key) and the 429 breaker.
             let data = try await ResilientHTTP.send(request, provider: .openFIGI)
             let decoded = try JSONDecoder().decode([OpenFIGIResult].self, from: data)
             guard let first = decoded.first?.data?.first else { return nil }
@@ -266,9 +264,9 @@ struct InvestmentMarketDataService {
         let exchange = (metadata.exchange ?? "").uppercased()
         var candidates: [String] = []
 
-        // Mappings exchCode OpenFIGI/Bloomberg → suffixe Yahoo Finance.
-        // Tableau exhaustif des marchés européens + crypto + US majeurs où
-        // un suffixe est nécessaire côté Yahoo.
+        // OpenFIGI/Bloomberg exchCode → Yahoo Finance suffix mappings.
+        // Exhaustive table of European markets + crypto + major US markets where
+        // Yahoo needs a suffix.
         let suffix: String?
         switch exchange {
         // Euronext
@@ -288,7 +286,7 @@ struct InvestmentMarketDataService {
         case "SW", "SX", "VX":                  suffix = ".SW"  // SIX Swiss
         // Espagne
         case "SM", "MC":                        suffix = ".MC"  // Madrid
-        // Suède / Nordics
+        // Sweden / Nordics
         case "SS", "ST":                        suffix = ".ST"  // Stockholm
         case "DC":                              suffix = ".CO"  // Copenhagen
         case "FH":                              suffix = ".HE"  // Helsinki
@@ -300,8 +298,8 @@ struct InvestmentMarketDataService {
         }
         if let suffix {
             candidates.append(base + suffix)
-            // Si le base contient déjà le suffix (ex: "EUEA.AS"), Yahoo
-            // se débrouille — on l'ajoute aussi sans risque.
+            // If the base already contains the suffix (e.g. "EUEA.AS"), Yahoo copes —
+            // adding it too is harmless.
         }
         candidates.append(base)
         candidates.append(metadata.isin)
@@ -314,26 +312,23 @@ struct InvestmentMarketDataService {
     }
 
     private func fetchFromYahoo(symbol: String) async throws -> [InvestmentPricePoint] {
-        // range=10y : couvre l'historique complet d'un PEA typique (ouvert il
-        //   y a 5-10 ans en moyenne). Donne ~2520 points quotidiens — gros
-        //   par rapport à 1y mais l'upsert par date du PriceHistoryCache
-        //   garantit zéro doublon.
-        // interval=1d : précision quotidienne nécessaire pour les ranges
-        //   courts (1J, 1S, 1M) qui sinon afficheraient une ligne quasi vide.
+        // range=10y: covers the full history of a typical PEA (opened 5-10 years ago
+        //   on average). Gives ~2520 daily points — large compared with 1y, but the
+        //   per-date upsert of PriceHistoryCache guarantees zero duplicates.
+        // interval=1d: daily precision, required for short ranges (1D, 1W, 1M),
+        //   which would otherwise show a nearly empty line.
         //
-        // Coût stockage : ~2520 points × 50 positions ≈ 126k points = qqs MB
-        // dans le cache JSON disque. Largement acceptable.
+        // Storage cost: ~2520 points × 50 positions ≈ 126k points = a few MB in the
+        // JSON disk cache. Comfortably acceptable.
         //
-        // Si une position est plus ancienne que 10y, le chart "Max" sera
-        // tronqué à 10y. Cas marginal (PEA ouvert avant 2015) — on s'en
-        // occupera si le besoin remonte.
+        // A position older than 10 years gets its "Max" chart truncated to 10 years.
         guard let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?range=10y&interval=1d") else {
             return []
         }
-        // ResilientHTTP : pacing + breaker + retry. Un 404 (symbole inconnu)
-        // throw .badStatus → la boucle candidats passe au suivant ; un 429
-        // throw .rateLimited → Yahoo est bloqué pour le reste de la résolution.
+        // ResilientHTTP: pacing + breaker + retry. A 404 (unknown symbol) throws
+        // .badStatus → the candidate loop moves to the next one; a 429 throws
+        // .rateLimited → Yahoo is blocked for the rest of the resolution.
         let data = try await ResilientHTTP.get(url, provider: .yahoo)
         let decoded = try JSONDecoder().decode(YahooChartResponse.self, from: data)
         guard let result = decoded.chart.result?.first,
@@ -357,18 +352,19 @@ struct InvestmentMarketDataService {
         return points.sorted { $0.date < $1.date }
     }
 
-    /// Ouverture de la bougie `idx`, ou nil si la source ne l'a pas fournie
-    /// (tableau absent, plus court que les timestamps, ou valeur nulle/négative).
+    /// Open of candle `idx`, or nil if the source didn't supply it (missing
+    /// array, shorter than the timestamps, or a null/negative value).
     private func openValue(_ opens: [Double?]?, at idx: Int) -> Double? {
         guard let opens, idx < opens.count, let value = opens[idx], value > 0 else { return nil }
         return value
     }
 
-    /// Cours INTRADAY ~30 min sur les dernières 48 h (Yahoo `range=2d&interval=30m`).
-    /// Prend un symbole Yahoo DÉJÀ RÉSOLU — celui porté par les points quotidiens
-    /// synchronisés (`point.identifier`) — pour éviter de repayer la résolution
-    /// OpenFIGI/search à chaque tap sur la plage 1J. Stooq n'a pas d'intraday :
-    /// pas de fallback, un échec = pas de vue 1J pour ce titre (dégradation propre).
+    /// INTRADAY prices, ~30 min over the last 48 h (Yahoo `range=2d&interval=30m`).
+    /// Takes an ALREADY RESOLVED Yahoo symbol — the one carried by the synced
+    /// daily points (`point.identifier`) — to avoid paying for the
+    /// OpenFIGI/search resolution again on every tap of the 1D range. Stooq has
+    /// no intraday: no fallback, a failure = no 1D view for this security
+    /// (clean degradation).
     func fetchIntradayHistory(symbol: String) async throws -> [InvestmentPricePoint] {
         guard let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?range=2d&interval=30m") else {
@@ -447,9 +443,9 @@ private struct YahooIndicators: Decodable {
 
 private struct YahooQuote: Decodable {
     let close: [Double?]
-    /// Yahoo renvoie toujours l'OHLC complet ; on ne garde que l'ouverture
-    /// (le « prix d'entrée » du pas de temps, affiché au scrub du chart).
-    /// Optionnel par prudence : certains instruments exotiques n'ont que `close`.
+    /// Yahoo always returns the full OHLC; only the open is kept (the time step's
+    /// "entry price", shown while scrubbing the chart). Optional out of caution:
+    /// some exotic instruments only have `close`.
     let open: [Double?]?
 }
 

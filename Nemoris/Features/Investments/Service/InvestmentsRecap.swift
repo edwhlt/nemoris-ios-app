@@ -2,18 +2,18 @@ import Foundation
 
 // MARK: - InvestmentsRecap
 //
-// Mini-récap du patrimoine financier, pour le bandeau "Vue d'ensemble" du Dashboard.
-// On ne stocke PAS l'historique mensuel ici — la sparkline reste en option (calcul
-// coûteux on-the-fly côté Investments) ; ici on vise zéro overhead.
+// Mini summary of financial holdings, for the Dashboard's "Overview" banner.
+// Monthly history is NOT stored here — the sparkline stays optional (costly
+// on-the-fly computation on the Investments side); the aim here is zero
+// overhead.
 //
-// ⚠️ Vivait dans `AnnualDashboardViewModel`, déplacé dans le module Investissements :
-// c'est lui le propriétaire de la règle "un compte actif = valorisation OU cash > 0",
-// et le Dashboard n'a pas à la redéfinir.
+// Lives in the Investments module: it owns the rule "an active account =
+// valuation OR cash > 0", and the Dashboard has no business redefining it.
 //
-// ⚠️ Se construit **uniquement** depuis `InvestmentRepository.fetchAccounts()`, qui
-// fait le calcul en UN SELECT avec CTE. Ne jamais passer par `InvestmentsViewModel`
-// pour ça : son `load()` déclenche une requête par compte, l'historique de prix de
-// chaque position et les sparklines.
+// Built **only** from `InvestmentRepository.fetchAccounts()`, which does the
+// computation in ONE SELECT with a CTE. Never go through
+// `InvestmentsViewModel` for this: its `load()` fires one query per account,
+// each position's price history and the sparklines.
 
 struct InvestmentsRecap {
     let totalCurrentValue: Double
@@ -29,15 +29,15 @@ struct InvestmentsRecap {
 
     static let empty = InvestmentsRecap(totalCurrentValue: 0, totalInvested: 0, activeAccountCount: 0)
 
-    /// Agrège les comptes d'investissement.
+    /// Aggregates the investment accounts.
     ///
-    /// Les comptes vides sont exclus : la live sync peut créer des comptes "fantômes"
-    /// sans aucun ordre, qui gonfleraient le compteur sans rien apporter.
+    /// Empty accounts are excluded: live sync can create "ghost" accounts with no
+    /// order at all, which would inflate the count without adding anything.
     ///
-    /// `totalCurrentValue` **inclut le cash** (`cashBalance`) — c'est la valeur du
-    /// compte au sens patrimonial. Le module Investissements, lui, expose le cash
-    /// séparément via `portfolioTotalCash` ; les deux chiffres sont donc légitimement
-    /// différents et cette asymétrie est intentionnelle.
+    /// `totalCurrentValue` **includes cash** (`cashBalance`) — it's the account's
+    /// value in the net-worth sense. The Investments module exposes cash
+    /// separately via `portfolioTotalCash`; the two figures therefore
+    /// legitimately differ, and this asymmetry is intentional.
     static func from(accounts: [InvestmentAccount]) -> InvestmentsRecap {
         let actives = accounts.filter { $0.currentValue > 0 || $0.cashBalance > 0 }
         guard !actives.isEmpty else { return .empty }

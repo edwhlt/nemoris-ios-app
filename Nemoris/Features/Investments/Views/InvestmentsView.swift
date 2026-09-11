@@ -3,8 +3,8 @@ import UniformTypeIdentifiers
 import Charts
 import TipKit
 
-/// Chantier D — wrapper Identifiable pour présenter l'import intelligent
-/// pré-rempli via `.sheet(item:)` (document déposé par un raccourci Siri).
+/// Identifiable wrapper to present the smart import pre-filled via
+/// `.sheet(item:)` (a document dropped by a Siri shortcut).
 struct PreloadedInvestmentImport: Identifiable {
     let id = UUID()
     let urls: [URL]
@@ -15,44 +15,42 @@ struct InvestmentsView: View {
     @State private var viewModel = InvestmentsViewModel()
     private let overviewTip = InvestmentsOverviewTip()
 
-    // sheet add/edit séparées pour éviter la race entre `editingAccount` et
-    // `showAccountForm` (qui causait "edit ouvre le formulaire d'ajout" parfois).
-    // - `showAddAccountForm` (Bool) : nouvelle entrée
-    // - `editingAccount` (Identifiable optional) : édition via `.sheet(item:)`
+    // Separate add/edit sheets, so `editingAccount` and the add flag can never
+    // race (which could make "edit" open the add form).
+    // - `showAddAccountForm` (Bool): new entry
+    // - `editingAccount` (optional Identifiable): editing via `.sheet(item:)`
     @State private var showAddAccountForm = false
     @State private var editingAccount: InvestmentAccount?
     @State private var accountToDelete: InvestmentAccount?
 
     #if os(macOS)
-    /// macOS : push des comptes PILOTÉ PAR ÉTAT (navigationDestination) — même
-    /// prévention que `positionsCard` (InvestmentAccountDetailView). Au niveau
-    /// racine le NavigationLink cliqué est empiriquement sain (le crash
-    /// `_postWindowNeedsUpdateConstraints` n'apparaît que depuis une vue déjà
-    /// poussée), mais on aligne le pattern par cohérence.
+    /// macOS: the selected account replaces the dashboard in the module column
+    /// (state-driven, see `dashboardContent`) — no push, which is unsafe on macOS
+    /// (see `InvestmentAccountDetailView.positionsCard`).
     @State private var pushedAccount: InvestmentAccount?
-    /// Pour fermer le panneau au retour vers le dashboard (cf. `onBack`).
+    /// To close the pane when returning to the dashboard (see `onBack`).
     @Environment(InspectorPaneCenter.self) private var paneCenter: InspectorPaneCenter?
     #endif
 
     @State private var showAddPositionForm = false
     @State private var editingPosition: InvestmentPosition?
 
-    /// 2026-08-08 : point d'entrée du catalogue LiveSync (Binance/EVM/BTC/SOL),
-    /// déplacé depuis Settings — c'est une option du module Investissements,
-    /// pas un réglage global (cf. `LiveSyncSettingsView.swift`, en-tête).
-    /// Aucun compte n'est fourni ici (`accountId: nil`) : `LiveSyncLinkFormView`
-    /// en crée un dédié à la volée. Pour lier une source à un compte EXISTANT,
-    /// voir `InvestmentAccountFormView.linkedSourcesSection`.
+    /// Entry point of the LiveSync catalog (Binance/EVM/BTC/SOL) — an option of
+    /// the Investments module, not a global setting (see the header of
+    /// `LiveSyncSettingsView.swift`). No account is supplied here
+    /// (`accountId: nil`): `LiveSyncLinkFormView` creates a dedicated one on the
+    /// fly. To link a source to an EXISTING account, see
+    /// `InvestmentAccountFormView.linkedSourcesSection`.
     @State private var showLiveSyncCatalog = false
-    /// Coach investissement — présenté en panneau, comme les autres outils du module.
+    /// Investment coach — presented as a pane, like the module's other tools.
     @State private var showCoach = false
 
-    // Phase 2 : import devient un sheet dédié, plus un onglet.
+    // Import is a dedicated sheet.
     @State private var showImportSheet = false
     @State private var showFilePicker = false
     @State private var showCSVAccountPicker = false
 
-    /// Chantier D — import intelligent pré-rempli par un raccourci Siri.
+    /// Smart import pre-filled by a Siri shortcut.
     @State private var preloadedImport: PreloadedInvestmentImport?
 
     @State private var csvRawContent = ""
@@ -63,9 +61,9 @@ struct InvestmentsView: View {
     @State private var datePolicy: Int = 1
     @State private var importResultMessage: String?
 
-    /// Skeleton tant que le 1er `viewModel.load()` n'est pas terminé.
+    /// Skeleton until the 1st `viewModel.load()` has finished.
     @State private var hasLoaded = false
-    /// Détail "?" du statut de sync — liste TOUTES les positions, tous comptes confondus.
+    /// "?" detail of the sync status — lists ALL positions, across all accounts.
     @State private var showSyncDetail = false
 
     var isEmbedded: Bool = false
@@ -77,10 +75,10 @@ struct InvestmentsView: View {
     }
 
     @ViewBuilder private var navContent: some View {
-        // ── TEMP DEBUG (bissection crash macOS fiche position) — À RETIRER ──
-        // Lancé avec l'argument -nemorisCrashRepro : rejoue le PARCOURS RÉEL
-        // en programmé (push compte à 0,8 s puis push position à 2,3 s).
-        // Sans l'argument : strictement aucun changement.
+        // ── Debug (macOS position sheet navigation) ──
+        // Launched with the -nemorisCrashRepro argument: replays the REAL path
+        // programmatically (account push at 0.8 s, then position push at 2.3 s).
+        // Without the argument: strictly no change.
         if CommandLine.arguments.contains("-nemorisCrashRepro"),
            let acc = viewModel.accounts.first,
            let pos = viewModel.fetchPositions(accountId: acc.id).first {
@@ -90,8 +88,8 @@ struct InvestmentsView: View {
         }
     }
 
-    // ── TEMP DEBUG — À RETIRER avec la branche -nemorisCrashRepro ──
-    // Rejoue le parcours réel à profondeur 2 sans interaction : racine →
+    // ── Debug — goes with the -nemorisCrashRepro branch ──
+    // Replays the real path at depth 2 without interaction: root →
     // push InvestmentAccountDetailView → push InvestmentPositionDetailView.
     private struct CrashReproDriver: View {
         @Bindable var viewModel: InvestmentsViewModel
@@ -119,23 +117,21 @@ struct InvestmentsView: View {
 
     @ViewBuilder private var dashboardContent: some View {
         #if os(macOS)
-        // macOS : le détail d'un compte remplace le dashboard DANS LA COLONNE
-        // (navigation interne au module, pilotée par état). Ni push — qui
-        // désynchronisait l'affichage au changement de module et déclenchait la
-        // récursion AutoLayout à la profondeur 2 — ni panneau : un compte, c'est
-        // des graphiques, ça a besoin de toute la largeur. L'inspecteur reste
-        // réservé aux feuilles (positions) et aux formulaires.
+        // macOS: an account's detail replaces the dashboard IN THE COLUMN (internal
+        // module navigation, state-driven). Neither a push — which desynchronizes the
+        // display when switching modules and triggers the AutoLayout recursion at
+        // depth 2 — nor the pane: an account is charts, it needs the full width. The
+        // inspector stays reserved for sheets (positions) and forms.
         if let account = pushedAccount {
             InvestmentAccountDetailView(
                 viewModel: viewModel,
                 account: account,
-                // Le panneau est fermé EXPLICITEMENT ici (action user) et non via
-                // un `onDisappear` du site de présentation : muter l'état du
-                // panneau pendant le démontage d'une vue provoque une réentrance
-                // du moteur de rendu SwiftUI (crash). Sans cette fermeture, on
-                // revenait au dashboard avec la fiche d'une position encore
-                // ouverte à côté — et son bouton « Fermer » ne répondait plus,
-                // le binding qu'il pilote n'existant plus.
+                // The pane is closed EXPLICITLY here (user action), not via an
+                // `onDisappear` at the presentation site: mutating the pane's state while a
+                // view is being torn down causes a SwiftUI render-engine reentrancy (crash).
+                // Without this, returning to the dashboard would leave a position's sheet
+                // open beside it — with a "Close" button that no longer responds, since the
+                // binding it drives no longer exists.
                 onBack: {
                     paneCenter?.dismissCurrent()
                     pushedAccount = nil
@@ -152,36 +148,33 @@ struct InvestmentsView: View {
     @ViewBuilder private var globalDashboard: some View {
         ZStack {
             AppTheme.Colors.background.ignoresSafeArea()
-            // Phase 2 : un seul écran d'accueil = dashboard global.
-            // L'accès aux comptes/positions se fait par drill-down (NavigationLink).
-            // L'import CSV est accessible via le toolbar Menu (anciennement onglet).
+            // A single home screen = the global dashboard.
+            // Accounts/positions are reached by drill-down.
+            // Import is reachable through the toolbar menu.
             dashboardTab
         }
         .localizedNavigationTitle("Investissements")
         .toolbar {
             #if os(macOS)
-            // macOS : les 2 actions du menu "⋯" deviennent des boutons icône
-            // seule + tooltip natif, groupés dans UNE pilule via
-            // `ToolbarItemGroup` (le groupement natif — `ControlGroup` rendait
-            // des boutons isolés).
+            // macOS: the 2 actions of the "⋯" menu become icon-only buttons + native
+            // tooltips, grouped in ONE pill via `ToolbarItemGroup` (native grouping —
+            // `ControlGroup` rendered isolated buttons).
             ToolbarItemGroup(placement: .topBarTrailing) {
                 PaneToggleButton(label: "Coach investissement", systemImage: "lightbulb", isOn: $showCoach)
                 PaneToggleButton(label: "Ajouter un compte", systemImage: "building.columns", isOn: $showAddAccountForm)
-                // Entrée d'import UNIQUE : le parcours intelligent gère déjà
-                // PDF / capture d'écran / image / CSV (cf. branche iOS).
-                // ⚠️ Redirige vers l'OUTIL d'importation, il ne l'ouvre pas
-                // dans le volet latéral : l'import est un parcours à part
-                // entière (choix des fichiers, mapping, revue), pas une
-                // fiche de détail à afficher à côté du module.
+                // SINGLE import entry: the smart path already handles PDF / screenshot /
+                // image / CSV (see the iOS branch).
+                // It redirects to the import TOOL rather than opening it in the side pane:
+                // import is a full journey (file choice, mapping, review), not a detail
+                // sheet to show beside the module.
                 Button {
                     appState.openImportTool(destination: .investments)
                 } label: {
                     Label("Importer un relevé…", systemImage: "square.and.arrow.down")
                 }
                 .localizedHelp("Importer un relevé…")
-                // Déplacé depuis Settings : c'est une option du
-                // module, pas un réglage global. `ToolbarPaywallGate` gère le
-                // même verrouillage Pro que l'ancienne entrée Settings.
+                // An option of the module, not a global setting. `ToolbarPaywallGate`
+                // applies the Pro lock.
                 ToolbarPaywallGate(feature: .investmentsLiveSync) {
                     PaneToggleButton(label: "Lier un exchange / wallet", systemImage: "arrow.triangle.2.circlepath", isOn: $showLiveSyncCatalog)
                 }
@@ -200,20 +193,18 @@ struct InvestmentsView: View {
                     } label: {
                         Label("Ajouter un compte", systemImage: "building.columns")
                     }
-                    // Entrée d'import UNIQUE : le parcours intelligent gère déjà
-                    // PDF / capture d'écran / image / CSV. Si Apple Intelligence
-                    // n'est pas dispo, il propose lui-même le repli vers l'import
-                    // CSV déterministe (mapping de colonnes) — l'offline-first
-                    // reste garanti sans IA.
+                    // SINGLE import entry: the smart path already handles PDF / screenshot /
+                    // image / CSV. If Apple Intelligence isn't available, it offers the fallback
+                    // to the deterministic CSV import (column mapping) itself — offline-first
+                    // stays guaranteed without AI.
                     Button {
                         appState.openImportTool(destination: .investments)
                     } label: {
                         Label("Importer un relevé…", systemImage: "square.and.arrow.down")
                     }
-                    // Déplacé depuis Settings. Le verrouillage Pro
-                    // s'applique au CONTENU présenté (`.paywallOverlay` sur le
-                    // pane ci-dessous), pas à cette entrée de menu — même
-                    // doctrine que le reste de ce Menu, jamais gaté lui-même.
+                    // The Pro lock applies to the presented CONTENT (`.paywallOverlay` on the
+                    // pane below), not to this menu entry — same doctrine as the rest of this
+                    // Menu, which is never gated itself.
                     Button {
                         showLiveSyncCatalog = true
                     } label: {
@@ -226,22 +217,21 @@ struct InvestmentsView: View {
             }
             #endif
         }
-        // Add : sheet déclenchée par un Bool, passe toujours nil → mode création.
+        // Add: sheet triggered by a Bool, always passes nil → creation mode.
         .adaptivePane(isPresented: $showAddAccountForm) {
             InvestmentAccountFormView(account: nil) { account, isNew in
                 viewModel.saveAccount(account, isNew: isNew)
             }
         }
-        // Edit : sheet item-driven, fresh View pour chaque account → pas de stale state.
+        // Edit: item-driven sheet, a fresh View for each account → no stale state.
         .adaptivePane(item: $editingAccount) { account in
             InvestmentAccountFormView(account: account) { updated, isNew in
                 viewModel.saveAccount(updated, isNew: isNew)
             }
         }
-        // Catalogue LiveSync (déplacé depuis Settings) : accountId nil, un
-        // compte dédié est créé par `LiveSyncLinkFormView.save()`. `onDismiss`
-        // recharge la liste des comptes pour que le nouveau compte (créé même
-        // si la 1ʳᵉ sync échoue) apparaisse immédiatement.
+        // LiveSync catalog: accountId nil, a dedicated account is created by
+        // `LiveSyncLinkFormView.save()`. `onDismiss` reloads the account list so the
+        // new account (created even if the 1st sync fails) appears immediately.
         .adaptivePane(isPresented: $showCoach) {
             CoachView(domain: .investments)
         }
@@ -287,9 +277,9 @@ struct InvestmentsView: View {
             importTab
                 .paneChrome("Importer un CSV", cancelLabel: "Fermer", onCancel: { showImportSheet = false })
         }
-        // Chantier D — import intelligent ouvert par un raccourci Siri (document
-        // pré-rempli). Consomme aussi l'URL en attente si la vue vient d'être
-        // montée par navigateToTab(.investments) avant que .onChange ne s'attache.
+        // Smart import opened by a Siri shortcut (pre-filled document). Also
+        // consumes the pending URL if the view was just mounted by
+        // navigateToTab(.investments) before .onChange got attached.
         .adaptivePane(item: $preloadedImport) { item in
             InvestmentPDFImportView(preloadedFileURLs: item.urls,
                                     onFallbackToCSV: { showImportSheet = true })
@@ -312,12 +302,10 @@ struct InvestmentsView: View {
                 importResultMessage = "Impossible de lire le fichier CSV"
                 return
             }
-            // ⚠️ On SNIFFE avant de décoder. L'ancienne chaîne
-            // `utf8 ?? windowsCP1252 ?? isoLatin1` ne pouvait pas échouer :
-            // `isoLatin1` accepte n'importe quelle suite d'octets, donc un PDF
-            // ou une capture déposés ici devenaient des centaines de milliers
-            // de caractères de binaire présentés comme un CSV — exactement la
-            // classe de bug documentée dans `ImportFormatSniffer`.
+            // SNIFF before decoding. A `utf8 ?? windowsCP1252 ?? isoLatin1` chain can't
+            // fail: `isoLatin1` accepts any byte sequence, so a PDF or a capture dropped
+            // here would become hundreds of thousands of binary characters presented as
+            // a CSV — see `ImportFormatSniffer`.
             let kind = ImportFormatSniffer.detect(data: data, fileExtension: url.pathExtension)
             guard kind == .text, let rawContent = ImportFormatSniffer.decodeText(data) else {
                 importResultMessage = kind == .unknown
@@ -329,10 +317,10 @@ struct InvestmentsView: View {
             viewModel.loadCSV(content: rawContent)
             hydrateDefaultMappingIfNeeded()
         }
-        // viewModel.load() est appelé dans .task du dashboardTab pour piloter le skeleton.
+        // viewModel.load() is called in the dashboardTab's .task to drive the skeleton.
     }
 
-    // MARK: - Chantier A — statut de sync (hook minimal, restylé au chantier B)
+    // MARK: - Sync status
 
     @MainActor
     private static let syncRelativeFormatter: RelativeDateTimeFormatter = {
@@ -356,9 +344,9 @@ struct InvestmentsView: View {
                 }
             } else if let last = service.lastSyncAt {
                 Text("Actualisé \(Self.syncRelativeFormatter.localizedString(for: last, relativeTo: Date()))")
-                // Erreurs éventuelles de la dernière passe, en une ligne discrète.
-                // `lastSyncHadIssues` (pas un `.contains("erreur")` sur le texte
-                // résolu — cassé dès que l'app n'est plus en français).
+                // Possible errors of the last pass, on one discreet line.
+                // `lastSyncHadIssues` (not a `.contains("erreur")` on the resolved text —
+                // that breaks as soon as the app isn't in French).
                 if let summary = service.lastSummary, service.lastSyncHadIssues {
                     (Text("· ") + Text(summary))
                         .lineLimit(1)
@@ -373,10 +361,10 @@ struct InvestmentsView: View {
         .foregroundStyle(AppTheme.Colors.textSecondary)
     }
 
-    /// Statut de sync de TOUTES les positions, tous comptes confondus — même
-    /// source (`outcomesByIdentifier`) que les niveaux compte/position, alimentée
-    /// par n'importe quel déclencheur de sync (passe globale, "Synchroniser
-    /// tout" d'un compte, pull-to-refresh d'une position).
+    /// Sync status of ALL positions, across all accounts — same source
+    /// (`outcomesByIdentifier`) as the account/position levels, fed by any sync
+    /// trigger (global pass, an account's "Sync all", a position's
+    /// pull-to-refresh).
     private var allSyncPositionStatuses: [SyncPositionStatus] {
         let outcomes = InvestmentAutoSyncService.shared.outcomesByIdentifier
         return viewModel.allPositions.map { position in
@@ -389,7 +377,7 @@ struct InvestmentsView: View {
         }
     }
 
-    /// Ligne KPI compacte "Investi X · Plus-value Y" (remplace la carte 2 badges).
+    /// Compact KPI line "Invested X · Gain Y".
     @ViewBuilder
     private func kpiInlineLine(invested: Double, performance: Double) -> some View {
         HStack(spacing: 6) {
@@ -425,9 +413,9 @@ struct InvestmentsView: View {
                     .padding(.horizontal, AppTheme.Spacing.md)
                     .padding(.top, AppTheme.Spacing.sm)
 
-                // ── Hero + chart + chips (style Apple Stocks épuré) ──────
-                // Tout vit directement sur le fond : grand chiffre, chart qui
-                // respire bord-à-bord, chips SOUS le chart (pattern Stocks).
+                // ── Hero + chart + chips (clean Apple Stocks style) ──────
+                // Everything lives directly on the background: large figure, edge-to-edge
+                // chart, chips BELOW the chart (Stocks pattern).
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
                     InvestmentHeroCard(
                         title: "Valorisation totale",
@@ -436,17 +424,17 @@ struct InvestmentsView: View {
                         previousValue: viewModel.portfolioStartValue,
                         currency: "EUR",
                         rangeLabel: variationRangeLabel(viewModel.selectedTimeRange),
-                        // basis variation = positions PRICED seules, même sous-ensemble
-                        // que portfolioStartValue (cf. portfolioVariationBasisValue)
+                        // variation basis = PRICED positions only, the same subset as
+                        // portfolioStartValue (see portfolioVariationBasisValue)
                         variationBasisValue: viewModel.portfolioVariationBasisValue
                     )
 
-                    // KPI en ligne discrète (remplace la carte 2 StatBadge).
+                    // Discreet inline KPI.
                     kpiInlineLine(invested: stats.totalInvested, performance: stats.performance)
                         .padding(.top, 2)
 
-                    // Chart sur fond direct. PAS de .clipped() ici : ça couperait
-                    // les labels d'axe X qui sont positionnés sous le plot area.
+                    // Chart directly on the background. NO .clipped() here: it would cut the
+                    // X-axis labels, which sit below the plot area.
                     EvolutionChart(
                         points: viewModel.portfolioEvolution,
                         height: 210,
@@ -454,8 +442,8 @@ struct InvestmentsView: View {
                     )
                     .padding(.top, AppTheme.Spacing.xs)
 
-                    // 1J sans aucune cotation en continu : on explique, au lieu
-                    // de laisser croire à une panne devant un chart vide.
+                    // 1D without any continuous quote: explain it, rather than let an empty
+                    // chart look like a failure.
                     if let note = viewModel.oneDayUnavailableNote {
                         Text(note)
                             .font(AppTheme.Typography.bodySmall)
@@ -470,9 +458,9 @@ struct InvestmentsView: View {
                             set: { newValue in
                                 viewModel.selectedTimeRange = newValue
                                 viewModel.recomputePortfolioEvolution()
-                                // Plage 1J → il faut la série INTRADAY (30 min).
-                                // Fetch on-demand (skip si fraîche < 25 min) puis
-                                // recalcul quand les points sont arrivés.
+                                // 1D range → needs the INTRADAY series (30 min).
+                                // On-demand fetch (skipped if fresher than 25 min), then recompute once
+                                // the points have arrived.
                                 if newValue == .oneDay {
                                     Task {
                                         await InvestmentAutoSyncService.shared.syncIntradayIfNeeded(
@@ -483,21 +471,20 @@ struct InvestmentsView: View {
                                 }
                             }
                         ),
-                        // Compte le plus ancien comme référence : pas de sens
-                        // d'afficher 10A si l'utilisateur le plus ancien a 6 mois.
+                        // Oldest account as the reference: no point showing 10Y if the oldest
+                        // account is 6 months old.
                         ranges: InvestmentTimeRange.availableRanges(
                             since: viewModel.accounts.map(\.openedAt).min() ?? Date()
                         )
                     )
 
-                    // Chantier A — statut de la sync auto (spinner + progression
-                    // pendant, "Actualisé il y a X" après).
+                    // Auto-sync status (spinner + progress during, "Updated X ago" after).
                     syncStatusLine
                         .padding(.top, 2)
                 }
                 .padding(.horizontal, AppTheme.Spacing.sm)
 
-                // ── Allocation (donut à plat, sans carte) ────────────────
+                // ── Allocation (flat donut, no card) ─────────────────────────
                 allocationSection
 
                 // ── Liste comptes (NavigationLink vers AccountDetailView) ─
@@ -512,44 +499,44 @@ struct InvestmentsView: View {
             }
         }
         .background(AppTheme.Colors.background)
-        // `.task(id:)` se redéclenche dès que dataRefreshToken change. Permet aux
-        // child views (PositionDetail, AccountDetail) de marquer le global comme
-        // dirty après save/delete d'un ordre via `appState.dataRefreshToken = UUID()`.
+        // `.task(id:)` re-fires whenever dataRefreshToken changes. Lets child views
+        // (PositionDetail, AccountDetail) mark the global view dirty after saving /
+        // deleting an order via `appState.dataRefreshToken = UUID()`.
         .task(id: appState.dataRefreshToken) {
-            // 1-frame guard : laisse le skeleton s'afficher avant la requête SQLite.
+            // 1-frame guard: lets the skeleton show before the SQLite query.
             await Task.yield()
             viewModel.load()
-            // Recompute si on a des comptes mais pas encore d'évolution chargée
+            // Recompute if there are accounts but no evolution loaded yet
             if viewModel.portfolioEvolution.isEmpty && !viewModel.accounts.isEmpty {
                 viewModel.recomputePortfolioEvolution()
             }
             hasLoaded = true
         }
-        // Chantier A — déclencheur d'auto-sync à l'ouverture du module.
-        // ⚠️ Task SÉPARÉE du .task(id: dataRefreshToken) ci-dessus : la fin de
-        // passe bumpe le token, ce qui annulerait/relancerait cette task et
-        // re-déclencherait la sync en boucle.
+        // Auto-sync trigger on opening the module.
+        // A task SEPARATE from the .task(id: dataRefreshToken) above: the end of the
+        // pass bumps the token, which would cancel/restart that task and re-trigger
+        // the sync in a loop.
         .task {
             await InvestmentAutoSyncService.shared.autoSyncIfNeeded(trigger: .investmentsOpened)
         }
         .refreshable {
-            // Pull-to-refresh : force une passe complète (bypass de l'intervalle
-            // 4 h, pas du verrou isSyncing). Le reload principal arrive via
-            // .nemorisInvestmentsDidSync → bump du token ; reloadAll() en filet
-            // si la passe n'a rien fait (toggle off / sync déjà en cours).
+            // Pull-to-refresh: forces a full pass (bypasses the 4 h interval, not the
+            // isSyncing lock). The main reload arrives via .nemorisInvestmentsDidSync →
+            // token bump; reloadAll() as a safety net if the pass did nothing (toggle
+            // off / sync already running).
             await InvestmentAutoSyncService.shared.autoSyncIfNeeded(trigger: .pullToRefresh)
             reloadAll()
         }
     }
 
-    /// Helper centralisé : reload positions + évolution. Utilisé par pull-to-refresh.
+    /// Central helper: reloads positions + evolution. Used by pull-to-refresh.
     private func reloadAll() {
         viewModel.load()
         viewModel.recomputePortfolioEvolution()
     }
 
-    /// Chantier D — présente l'import intelligent pré-rempli et libère l'URL en
-    /// attente (one-shot). No-op si nil ou si une sheet est déjà en cours.
+    /// Presents the pre-filled smart import and releases the pending URL
+    /// (one-shot). No-op if nil or if a sheet is already up.
     private func consumePendingInvestmentImport(_ urls: [URL]) {
         guard !urls.isEmpty, preloadedImport == nil else { return }
         appState.pendingInvestmentImportURLs = []
@@ -560,12 +547,12 @@ struct InvestmentsView: View {
 
     @ViewBuilder private var investmentsSkeleton: some View {
         VStack(spacing: AppTheme.Spacing.md) {
-            // Hero + KPI line + chart + chips (à plat, style Apple Stocks)
+            // Hero + KPI line + chart + chips (flat, Apple Stocks style)
             VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
                 SkeletonHero()
                 SkeletonLine(width: 200, height: 13)
                 SkeletonChart(height: 210)
-                // TimeRange chips SOUS le chart, pleine largeur
+                // TimeRange chips BELOW the chart, full width
                 HStack(spacing: 4) {
                     ForEach(0..<7, id: \.self) { _ in
                         SkeletonBlock(width: 40, height: 28, cornerRadius: 14)
@@ -575,7 +562,7 @@ struct InvestmentsView: View {
             }
             .padding(.horizontal, AppTheme.Spacing.sm)
 
-            // Allocation donut à plat
+            // Flat allocation donut
             VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
                 HStack {
                     SkeletonLine(width: 110, height: 15)
@@ -586,7 +573,7 @@ struct InvestmentsView: View {
             }
             .padding(.horizontal, AppTheme.Spacing.sm)
 
-            // Liste comptes à plat
+            // Flat account list
             VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
                 SkeletonLine(width: 130, height: 15)
                 SkeletonAccountRow()
@@ -597,7 +584,7 @@ struct InvestmentsView: View {
         }
     }
 
-    /// Donut allocation à plat (sans carte) + toggle "Par type"/"Par compte".
+    /// Flat allocation donut (no card) + "By type"/"By account" toggle.
     @ViewBuilder
     private var allocationSection: some View {
         let slices = viewModel.allocationGroupByAccount
@@ -626,33 +613,28 @@ struct InvestmentsView: View {
         }
     }
 
-    /// Section comptes à plat (sans carte) avec NavigationLink vers AccountDetailView.
-    /// Chantier B : style Apple Stocks — rows aérées, sparkline 1M au centre,
-    /// valeur en chiffres alignés à droite. Actions via RowActions (swipe iOS / clic droit macOS).
+    /// Flat account section (no card), drilling down to AccountDetailView.
+    /// Apple Stocks style — airy rows, 1M sparkline in the middle, value in
+    /// right-aligned figures. Actions via RowActions (iOS swipe / macOS right-click).
     @ViewBuilder
     private func accountsListSection() -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             SectionHeader(title: "Comptes (\(viewModel.accounts.count))")
                 .padding(.horizontal, AppTheme.Spacing.sm)
-            // ⚠️ PAS de `List` sur AUCUNE des deux plateformes — cf. le
-            // commentaire détaillé équivalent dans
-            // `InvestmentAccountDetailView.positionsCard` : une `List`
-            // `.scrollDisabled(true)` imbriquée dans un `ScrollView` VIRTUALISE
-            // ses rows, donc toute hauteur devinée OU mesurée depuis son
-            // propre contenu (les deux ont été essayés) est structurellement
-            // fragile — la variante "mesurée" entre même en boucle de
-            // rétroaction (rétrécir la List rend moins de rows, donc mesure
-            // moins, donc rétrécit encore). Un `VStack` n'a besoin d'aucune
-            // hauteur devinée : SwiftUI le dimensionne à son contenu réel.
-            // Contrepartie assumée sur iOS : le swipe natif disparaît, les
-            // mêmes actions restent joignables par appui long (`.contextMenu`,
-            // déjà branché par `.rowActions` sur les deux plateformes).
+            // NO `List` on EITHER platform — see the matching detailed comment in
+            // `InvestmentAccountDetailView.positionsCard`: a `.scrollDisabled(true)`
+            // `List` nested in a `ScrollView` VIRTUALIZES its rows, so any height guessed
+            // OR measured from its own content is structurally fragile — the "measured"
+            // variant even enters a feedback loop (shrinking the List renders fewer
+            // rows, hence measures less, hence shrinks further). A `VStack` needs no
+            // guessed height: SwiftUI sizes it to its real content. The accepted cost on
+            // iOS: the native swipe is gone, the same actions stay reachable by long
+            // press (`.contextMenu`, wired by `.rowActions` on both platforms).
             VStack(spacing: 0) {
                 ForEach(viewModel.accounts) { account in
                     #if os(macOS)
-                    // macOS : le détail compte s'ouvre dans le PANNEAU
-                    // (adaptivePane), pas un push — cohérent avec le reste du
-                    // drill-down de l'app (Tricount, tiers, transactions…).
+                    // macOS: selecting an account swaps the module's content for its detail
+                    // (see `dashboardContent`) — no push.
                     Button {
                         pushedAccount = account
                     } label: {
@@ -688,19 +670,17 @@ struct InvestmentsView: View {
                     }
                 }
             }
-            // Carte unique, même langage visuel que .macGroupedRow ailleurs
-            // dans l'app — un seul fond arrondi enveloppant toutes les rows,
-            // séparées par de simples Divider. Pas de first/last par row : un
-            // seul groupe, pas de section.
+            // A single card, same visual language as .macGroupedRow elsewhere in the app
+            // — one rounded background wrapping every row, separated by plain Dividers.
+            // No first/last per row: a single group, no section.
             .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
-            // Pas de présentation ici (macOS) : `pushedAccount` bascule le
-            // CONTENU du module (cf. `dashboardContent`) — le compte s'affiche
-            // en pleine largeur, pas dans le panneau.
+            // No presentation here (macOS): `pushedAccount` swaps the module's CONTENT
+            // (see `dashboardContent`) — the account shows at full width, not in the pane.
         }
     }
 
-    /// Row d'un compte dans la liste du dashboard global (style Apple Stocks).
-    /// Affiche : nom · broker/type · sparkline 1M · valeur courante alignée.
+    /// An account's row in the global dashboard list (Apple Stocks style).
+    /// Shows: name · broker/type · 1M sparkline · current value, right-aligned.
     private func accountRow(_ account: InvestmentAccount) -> some View {
         HStack(spacing: AppTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 3) {
@@ -715,33 +695,31 @@ struct InvestmentsView: View {
             }
             Spacer(minLength: AppTheme.Spacing.sm)
 
-            // Sparkline 1 mois (enfin utilisée) — masquée si pas assez d'historique.
+            // 1-month sparkline — hidden when there isn't enough history.
             if let spark = viewModel.accountSparklines[account.id] {
                 InvestmentSparkline(points: spark, height: 28, width: 56)
             }
 
             VStack(alignment: .trailing, spacing: 2) {
-                // Total = positions + trésorerie (cohérent avec le hero compte)
+                // Total = positions + cash (consistent with the account hero)
                 Text(account.totalValuation, format: .currency(code: account.currency))
                     .font(.system(size: 16, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(AppTheme.Colors.textPrimary)
-                // Cash en sous-ligne discrète si > 0 — l'utilisateur voit que sur ce
-                // compte une partie du capital est en trésorerie
+                // Cash as a discreet sub-line if > 0 — the user sees that part of this
+                // account's capital is held as cash
                 if account.cashBalance > 0 {
                     Text("dont \(account.cashBalance, format: .currency(code: account.currency)) cash")
                         .font(.system(size: 10))
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
             }
-            // Chevron supprimé : depuis le passage en List + NavigationLink,
-            // iOS ajoute son propre chevron natif en bout de row. On évite le doublon.
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
     }
 
-    /// État vide quand aucun compte n'existe encore — incite à en créer un.
+    /// Empty state when no account exists yet — encourages creating one.
     private var emptyAccountsCard: some View {
         AppCard {
             EmptyStateView(
@@ -752,7 +730,7 @@ struct InvestmentsView: View {
         }
     }
 
-    /// Label affiché à côté du % de variation dans le hero ("sur 1 mois", etc.)
+    /// Label shown next to the variation % in the hero ("over 1 month", etc.)
     private func variationRangeLabel(_ range: InvestmentTimeRange) -> LocalizedStringResource {
         switch range {
         case .oneDay:     return "sur 1 jour"
@@ -961,7 +939,7 @@ struct InvestmentsView: View {
 
 // MARK: - Form Views
 
-// Accessible aussi depuis InvestmentAccountDetailView (édition compte)
+// Also reachable from InvestmentAccountDetailView (account edit)
 struct InvestmentAccountFormView: View {
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
     @Environment(\.paneDismiss) private var dismiss
@@ -975,20 +953,17 @@ struct InvestmentAccountFormView: View {
     @State private var openedAt: Date
     @State private var cashBalance: Double
 
-    /// 2026-08-08 : gestion des liens LiveSync (Binance/EVM/BTC/SOL) rattachés
-    /// à CE compte — déplacée depuis l'ancien écran Settings global, cf.
-    /// `LiveSyncSettingsView.swift` (en-tête). `nil` pour une création (pas
-    /// encore d'id de compte à filtrer).
+    /// Management of the LiveSync links (Binance/EVM/BTC/SOL) attached to THIS
+    /// account — see the header of `LiveSyncSettingsView.swift`. `nil` for a
+    /// creation (no account id to filter on yet).
     @State private var linkedSources: [InvestmentLiveSyncLink] = []
     @State private var showLinkPicker = false
     @State private var selectedLinkForDetail: InvestmentLiveSyncLink?
 
     private var isNew: Bool { account == nil }
 
-    /// init() set tous les @State au build time depuis l'account passé en
-    /// argument. Avant on faisait `.onAppear { populateFields() }`, ce qui causait
-    /// des bugs de stale state quand SwiftUI réutilisait l'instance d'une présentation
-    /// précédente. Ici les valeurs sont figées dès la construction de la View.
+    /// init() sets every @State at build time from the given account, so SwiftUI
+    /// reusing the instance of a previous presentation can't leave stale values.
     init(account: InvestmentAccount?, onSave: @escaping (InvestmentAccount, Bool) -> Void) {
         self.account = account
         self.onSave = onSave
@@ -1029,9 +1004,8 @@ struct InvestmentAccountFormView: View {
                     Text("Cash en attente de placement (dividendes pas réinvestis, ventes en attente, dépôts récents). Vient s'ajouter à la valeur des positions pour le total du compte.")
                 }
 
-                // Valeurs DÉRIVÉES (depuis migration v30) : affichées en lecture
-                // seule sur l'édition d'un compte existant. Pour une création,
-                // section explicative seulement.
+                // DERIVED values: shown read-only when editing an existing account. For a
+                // creation, an explanatory section only.
                 if let account {
                     Section {
                         LabeledContent("Valeur des positions",
@@ -1064,8 +1038,8 @@ struct InvestmentAccountFormView: View {
                     }
                 }
 
-                // Un compte tout juste créé n'a pas encore d'id à filtrer —
-                // section visible uniquement en édition, comme le Récap.
+                // A freshly created account has no id to filter on yet — the section is
+                // visible only when editing, like the Summary.
                 if let account {
                     linkedSourcesSection(account)
                 }
@@ -1081,10 +1055,10 @@ struct InvestmentAccountFormView: View {
             .adaptivePane(item: $selectedLinkForDetail, onDismiss: loadLinkedSources) { link in
                 LiveSyncLinkDetailView(link: link, onChange: loadLinkedSources)
             }
-            // Pas de .onAppear pour repopulate les champs éditables — l'init()
-            // le fait déjà, ce qui évite la stale state quand SwiftUI réutilise
-            // l'instance. `linkedSources` est une liste auxiliaire en
-            // LECTURE, pas un champ éditable : `.onAppear` ci-dessus est sûr.
+            // No .onAppear to repopulate the editable fields — init() already does it,
+            // which avoids stale state when SwiftUI reuses the instance.
+            // `linkedSources` is an auxiliary READ-ONLY list, not an editable field: the
+            // `.onAppear` above is safe.
             .paneChrome(isNew ? "Nouveau compte" : "Modifier compte",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
                         confirmLabel: "Enregistrer", confirmIcon: "checkmark",
@@ -1095,11 +1069,9 @@ struct InvestmentAccountFormView: View {
                     broker: broker,
                     currency: currency.uppercased(),
                     accountType: accountType,
-                    // Les 2 champs sont conservés dans le struct pour
-                    // rétro-compat des lectures, mais le repo n'écrit
-                    // plus ces colonnes (droppées en v30). On passe les
-                    // valeurs existantes pour une édition ou 0 pour
-                    // une création — sans effet sur le persisté.
+                    // Both fields stay on the struct for reads, but the repository doesn't write
+                    // these columns (they are derived). Existing values are passed when editing,
+                    // 0 when creating — no effect on what's persisted.
                     currentValue: account?.currentValue ?? 0,
                     investedAmount: account?.investedAmount ?? 0,
                     openedAt: openedAt,
@@ -1109,7 +1081,7 @@ struct InvestmentAccountFormView: View {
             }
     }
 
-    // MARK: - Synchronisation (LiveSync)
+    // MARK: - Sync (LiveSync)
 
     @ViewBuilder
     private func linkedSourcesSection(_ account: InvestmentAccount) -> some View {
@@ -1170,7 +1142,7 @@ struct InvestmentAccountFormView: View {
     }
 }
 
-// Accessible aussi depuis InvestmentAccountDetailView + InvestmentPositionDetailView
+// Also reachable from InvestmentAccountDetailView + InvestmentPositionDetailView
 struct InvestmentPositionFormView: View {
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
     @Environment(\.paneDismiss) private var dismiss
@@ -1187,9 +1159,8 @@ struct InvestmentPositionFormView: View {
 
     private var isNew: Bool { position == nil }
 
-    /// init() set @State au build time depuis la position passée. Évite
-    /// la stale state qui causait "modifications pas enregistrées" quand la même
-    /// instance était réutilisée par SwiftUI entre deux présentations.
+    /// init() sets the @State at build time from the given position, so a reused
+    /// SwiftUI instance can't lose edits between two presentations.
     init(accountId: Int, position: InvestmentPosition?, onSave: @escaping (InvestmentPosition, Bool) -> Void) {
         self.accountId = accountId
         self.position = position
@@ -1201,8 +1172,9 @@ struct InvestmentPositionFormView: View {
         _currentValue = State(initialValue: position?.currentValue ?? 0)
     }
 
-    /// Validation ISIN : 12 chars (2 lettres pays + 10 alphanum). On laisse passer
-    /// vide (optionnel) ou exactement 12 chars conformes — sinon on alerte l'utilisateur.
+    /// ISIN validation: 12 chars (2 country letters + 10 alphanumerics). Empty
+    /// (optional) or exactly 12 compliant chars pass — otherwise the user is
+    /// alerted.
     private var isinValidationError: String? {
         let trimmed = isin.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if trimmed.isEmpty { return nil }
@@ -1255,9 +1227,9 @@ struct InvestmentPositionFormView: View {
                     Text("Mise à jour automatiquement par la synchronisation de cours, ou modifiable manuellement.")
                 }
 
-                // Champs DÉRIVÉS des ordres. Affichés en lecture seule
-                // pour éviter toute confusion : si l'utilisateur les modifiait ici, le
-                // premier add/edit d'ordre écraserait silencieusement leurs valeurs.
+                // Fields DERIVED from orders. Shown read-only to avoid any confusion: if the
+                // user edited them here, the first order add/edit would silently overwrite
+                // their values.
                 if let position {
                     Section {
                         LabeledContent("Quantité",
@@ -1283,12 +1255,12 @@ struct InvestmentPositionFormView: View {
                 }
             }
             .nemorisFormStyle()
-            // Pas de .onAppear — init() set tout au build time.
+            // No .onAppear — init() sets everything at build time.
             .paneChrome(isNew ? "Nouvelle position" : "Modifier position",
                         cancelLabel: "Annuler", onCancel: { dismiss() },
                         confirmLabel: "Enregistrer", confirmIcon: "checkmark",
-                        // Bloque le save si ISIN saisi mais format invalide — évite
-                        // de persister un ISIN bidon qui ferait planter la sync.
+                        // Blocks saving if an ISIN was entered in an invalid format — avoids
+                        // persisting a bogus ISIN that would break the sync.
                         confirmDisabled: assetName.trimmingCharacters(in: .whitespaces).isEmpty
                               || isinValidationError != nil) {
                 onSave(InvestmentPosition(
@@ -1298,10 +1270,9 @@ struct InvestmentPositionFormView: View {
                     assetName: assetName,
                     ticker: ticker.uppercased(),
                     isin: isin.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
-                    // Pour une nouvelle position : 0/0/today (seront recalculés
-                    // au premier add d'ordre). Pour une édition : on relit
-                    // les valeurs DÉRIVÉES existantes (le repo ne les écrit
-                    // de toute façon plus).
+                    // For a new position: 0/0/today (recomputed on the first order add). For an
+                    // edit: the existing DERIVED values are read back (the repository doesn't
+                    // write them anyway).
                     quantity: position?.quantity ?? 0,
                     averageBuyPrice: position?.averageBuyPrice ?? 0,
                     currentValue: currentValue,

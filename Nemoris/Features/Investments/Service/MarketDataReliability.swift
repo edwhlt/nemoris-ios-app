@@ -1,51 +1,53 @@
 import Foundation
 
-// MARK: - Chantier A — Résilience des fetchs de cours (rate-limiting, retries, outcomes typés)
+// MARK: - Resilience of price fetches (rate limiting, retries, typed outcomes)
 //
-// Couche transverse utilisée par TOUS les appels réseau "données de marché" :
+// Cross-cutting layer used by EVERY "market data" network call:
 //   - InvestmentMarketDataService (Yahoo chart/search, Stooq CSV, OpenFIGI POST)
 //   - PriceResolver (CoinGecko market_chart)
 //
-// 3 briques :
-//   1. `ProviderRateLimiter` (actor) — pacing entre 2 requêtes d'un même provider
-//      + circuit breaker après un 429 (cooldown pendant lequel AUCUN appel ne part).
-//   2. `ResilientHTTP` — GET/POST avec timeout court, retry backoff exponentiel
-//      + jitter sur 5xx/erreurs réseau, typage propre du 429 (header Retry-After).
-//   3. `PositionSyncOutcome` — résultat typé d'une sync de cours par position,
-//      consommé par InvestmentAutoSyncService et les vues (fini le matching de
-//      succès par sous-chaîne de message).
+// 3 building blocks:
+//   1. `ProviderRateLimiter` (actor) — pacing between 2 requests to the same
+//      provider + circuit breaker after a 429 (a cooldown during which NO call
+//      goes out).
+//   2. `ResilientHTTP` — GET/POST with a short timeout, exponential backoff
+//      retry + jitter on 5xx/network errors, clean typing of the 429
+//      (Retry-After header).
+//   3. `PositionSyncOutcome` — typed result of a per-position price sync,
+//      consumed by InvestmentAutoSyncService and the views (no matching of
+//      success on a message substring).
 
-// MARK: - Providers de données de marché
+// MARK: - Market data providers
 
-/// Tout service HTTP tiers cadencé par `ProviderRateLimiter`.
+/// Any third-party HTTP service paced by `ProviderRateLimiter`.
 ///
-/// ⚠️ S'appelait `MarketDataProvider` : le renommage accompagne l'arrivée de providers qui
-/// n'ont rien de boursier (registre d'entreprises, référentiel des communes). Le pacing,
-/// le disjoncteur 429 et le backoff sont exactement les mêmes besoins — d'où la
-/// mutualisation plutôt qu'une seconde couche parallèle. `typealias` conservé une version.
+/// Covers providers that have nothing to do with markets too (company
+/// registry, municipality reference): pacing, the 429 breaker and backoff are
+/// exactly the same needs — hence one shared layer rather than a second,
+/// parallel one.
 enum RemoteProvider: String, Sendable, CaseIterable {
     case yahoo
     case stooq
     case openFIGI
     case coinGecko
-    /// recherche-entreprises.api.gouv.fr — ~7 req/s d'après la doc gouv.
+    /// recherche-entreprises.api.gouv.fr — ~7 req/s according to the official docs.
     case sireneGouv
-    /// geo.api.gouv.fr — référentiel des communes, sans clé.
+    /// geo.api.gouv.fr — municipality reference, no key.
     case geoGouv
 
-    /// Délai minimal entre 2 requêtes vers le même provider (pacing).
+    /// Minimum delay between 2 requests to the same provider (pacing).
     var minInterval: TimeInterval {
         switch self {
         case .yahoo:      return 0.4
         case .stooq:      return 0.5
-        case .openFIGI:   return 2.5   // 25 req/min sans clé API
+        case .openFIGI:   return 2.5   // 25 req/min without an API key
         case .coinGecko:  return 2.2   // ~30 req/min free tier
         case .sireneGouv: return 0.15  // 7 req/s
         case .geoGouv:    return 0.1
         }
     }
 
-    /// Durée du circuit breaker après un 429 sans header Retry-After.
+    /// Circuit breaker duration after a 429 without a Retry-After header.
     var defaultCooldown: TimeInterval {
         switch self {
         case .yahoo:      return 120
@@ -57,7 +59,7 @@ enum RemoteProvider: String, Sendable, CaseIterable {
         }
     }
 
-    /// Nom affichable dans les messages utilisateur (FR).
+    /// Name displayed in user-facing messages.
     var displayName: String {
         switch self {
         case .yahoo:      return "Yahoo"
@@ -70,14 +72,14 @@ enum RemoteProvider: String, Sendable, CaseIterable {
     }
 }
 
-/// Compatibilité descendante — à retirer une fois les appelants migrés.
+/// Former name, kept for existing callers.
 typealias MarketDataProvider = RemoteProvider
 
-// MARK: - Erreurs typées
+// MARK: - Typed errors
 
 enum MarketDataFetchError: Error, Sendable {
-    /// Le provider a renvoyé un 429 (ou son breaker est encore ouvert).
-    /// `retryAfter` = secondes restantes avant la prochaine tentative possible.
+    /// The provider returned a 429 (or its breaker is still open).
+    /// `retryAfter` = seconds left before the next possible attempt.
     case rateLimited(provider: MarketDataProvider, retryAfter: TimeInterval)
     case timeout
     case network(String)
@@ -86,24 +88,24 @@ enum MarketDataFetchError: Error, Sendable {
 
 // MARK: - Rate limiter / circuit breaker par provider
 
-/// Sérialise les requêtes par provider (pacing `minInterval`) et ouvre un
-/// circuit breaker après un 429 : tant que le cooldown court, `waitTurn` throw
-/// immédiatement SANS appel réseau — les appelants savent typologiquement
-/// qu'ils sont limités et depuis combien de temps.
+/// Serializes requests per provider (`minInterval` pacing) and opens a circuit
+/// breaker after a 429: while the cooldown runs, `waitTurn` throws immediately
+/// WITHOUT a network call — callers know, through the type, that they are
+/// limited and for how long.
 actor ProviderRateLimiter {
 
     static let shared = ProviderRateLimiter()
     private init() {}
 
-    /// Date du dernier slot de requête RÉSERVÉ par provider (pas forcément
-    /// déjà exécuté : le slot est posé avant le sleep pour que 2 tasks
-    /// concurrentes ne prennent pas le même créneau).
+    /// Date of the last request slot RESERVED per provider (not necessarily
+    /// executed yet: the slot is set before the sleep so 2 concurrent tasks don't
+    /// take the same slot).
     private var lastRequestAt: [MarketDataProvider: Date] = [:]
-    /// Breaker : aucun appel vers ce provider avant cette date.
+    /// Breaker: no call to this provider before this date.
     private var cooldownUntil: [MarketDataProvider: Date] = [:]
 
-    /// Attend son tour pour `provider`. Throw `.rateLimited` immédiatement si
-    /// le breaker est ouvert (aucun appel réseau ne doit partir).
+    /// Waits for its turn for `provider`. Throws `.rateLimited` immediately if
+    /// the breaker is open (no network call must go out).
     func waitTurn(_ provider: MarketDataProvider) async throws {
         if let until = cooldownUntil[provider] {
             let remaining = until.timeIntervalSinceNow
@@ -113,8 +115,8 @@ actor ProviderRateLimiter {
             cooldownUntil[provider] = nil
         }
 
-        // Réservation atomique du slot AVANT le sleep : le prochain appelant
-        // calculera son créneau après le nôtre (pas de double-booking).
+        // Atomic slot reservation BEFORE the sleep: the next caller will compute its
+        // slot after ours (no double booking).
         let now = Date()
         let earliest: Date
         if let last = lastRequestAt[provider] {
@@ -130,15 +132,15 @@ actor ProviderRateLimiter {
         }
     }
 
-    /// Ouvre le breaker suite à un 429. `retryAfter` = valeur du header
-    /// Retry-After si le provider l'a fournie, sinon cooldown par défaut.
+    /// Opens the breaker after a 429. `retryAfter` = the Retry-After header value
+    /// when the provider supplied it, otherwise the default cooldown.
     func reportRateLimited(_ provider: MarketDataProvider, retryAfter: TimeInterval?) {
         let cooldown = retryAfter ?? provider.defaultCooldown
         cooldownUntil[provider] = Date().addingTimeInterval(cooldown)
         print("[ProviderRateLimiter] \(provider.rawValue) limité (429) — breaker ouvert \(Int(cooldown))s")
     }
 
-    /// Secondes restantes de cooldown pour `provider`, nil si le breaker est fermé.
+    /// Seconds of cooldown left for `provider`, nil if the breaker is closed.
     func cooldownRemaining(_ provider: MarketDataProvider) -> TimeInterval? {
         guard let until = cooldownUntil[provider] else { return nil }
         let remaining = until.timeIntervalSinceNow
@@ -146,12 +148,12 @@ actor ProviderRateLimiter {
     }
 }
 
-// MARK: - HTTP résilient
+// MARK: - Resilient HTTP
 
-/// Wrapper URLSession commun aux fetchs de cours :
-///   waitTurn (pacing/breaker) → requête timeout court → gestion typée du 429
-///   (Retry-After) → retry backoff expo + jitter sur 5xx / timeouts réseau.
-/// Les 4xx (hors 429) ne sont PAS retentés (échec déterministe).
+/// URLSession wrapper shared by price fetches:
+///   waitTurn (pacing/breaker) → short-timeout request → typed 429 handling
+///   (Retry-After) → exponential backoff retry + jitter on 5xx / network timeouts.
+/// 4xx (except 429) are NOT retried (deterministic failure).
 enum ResilientHTTP {
 
     static func get(
@@ -176,13 +178,13 @@ enum ResilientHTTP {
         var lastError: Error = MarketDataFetchError.network("Erreur inconnue")
 
         for attempt in 0...max(0, maxRetries) {
-            // Breaker ouvert → throw .rateLimited immédiat, AUCUN appel réseau.
+            // Breaker open → throw .rateLimited immediately, NO network call.
             try await ProviderRateLimiter.shared.waitTurn(provider)
 
             do {
                 let (data, response) = try await URLSession.shared.data(for: request)
                 guard let http = response as? HTTPURLResponse else {
-                    // Quasi impossible en HTTPS — échec non-retryable.
+                    // Nearly impossible over HTTPS — non-retryable failure.
                     throw MarketDataFetchError.network("Réponse non-HTTP")
                 }
                 switch http.statusCode {
@@ -199,23 +201,23 @@ enum ResilientHTTP {
                     // Erreur serveur transitoire → retryable.
                     lastError = MarketDataFetchError.badStatus(http.statusCode)
                 default:
-                    // Autre 4xx (404 symbole inconnu, 401…) : déterministe, pas de retry.
+                    // Other 4xx (404 unknown symbol, 401…): deterministic, no retry.
                     throw MarketDataFetchError.badStatus(http.statusCode)
                 }
             } catch let error as MarketDataFetchError {
-                // rateLimited / badStatus 4xx / réponse non-HTTP : throw direct.
+                // rateLimited / 4xx badStatus / non-HTTP response: throw directly.
                 throw error
             } catch is CancellationError {
                 throw CancellationError()
             } catch let urlError as URLError where urlError.code == .timedOut {
                 lastError = MarketDataFetchError.timeout
             } catch {
-                // Autres erreurs réseau (connexion perdue, DNS…) → retryable.
+                // Other network errors (connection lost, DNS…) → retryable.
                 lastError = MarketDataFetchError.network(error.localizedDescription)
             }
 
-            // Backoff expo + jitter avant la prochaine tentative :
-            // 0.8 × 2^attempt + random(0…0.4) secondes.
+            // Exponential backoff + jitter before the next attempt:
+            // 0.8 × 2^attempt + random(0…0.4) seconds.
             if attempt < maxRetries {
                 let backoff = 0.8 * pow(2.0, Double(attempt)) + Double.random(in: 0...0.4)
                 try await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
@@ -225,8 +227,8 @@ enum ResilientHTTP {
         throw lastError
     }
 
-    /// Parse le header `Retry-After` (format secondes uniquement — le format
-    /// HTTP-date est ignoré, aucun de nos providers ne l'utilise).
+    /// Parses the `Retry-After` header (seconds format only — the HTTP-date
+    /// format is ignored, none of our providers uses it).
     private static func parseRetryAfter(_ response: HTTPURLResponse) -> TimeInterval? {
         guard let raw = response.value(forHTTPHeaderField: "Retry-After") else { return nil }
         guard let seconds = TimeInterval(raw.trimmingCharacters(in: .whitespaces)), seconds > 0 else {
@@ -236,19 +238,19 @@ enum ResilientHTTP {
     }
 }
 
-// MARK: - Résultat typé d'une sync de cours par position
+// MARK: - Typed result of a per-position price sync
 
 enum PositionSyncOutcome: Sendable, Equatable {
     case success(points: Int, source: String)
-    /// Dernier point du cache = aujourd'hui (ou vendredi un week-end pour les
-    /// titres traditionnels) — aucun appel réseau nécessaire.
+    /// The cache's last point = today (or Friday over a weekend for traditional
+    /// securities) — no network call needed.
     case upToDate
     case noData(symbolsTried: [String])
     case rateLimited(provider: MarketDataProvider, retryAfter: TimeInterval)
     case networkError(String)
     case invalidIdentifier
 
-    /// Libellé court pour affichage compact (chips, lignes de statut).
+    /// Short label for compact display (chips, status lines).
     var shortLabel: LocalizedStringResource {
         switch self {
         case .success(let points, let source):
@@ -267,9 +269,9 @@ enum PositionSyncOutcome: Sendable, Equatable {
         }
     }
 
-    /// Vrai pour tout ce qui n'est pas un succès franc — sert à isoler les
-    /// positions à surfacer dans le détail "?" (le reste est du bruit une fois
-    /// qu'on sait que la passe a globalement marché).
+    /// True for anything that isn't a clear success — isolates the positions to
+    /// surface in the "?" detail (the rest is noise once the pass is known to
+    /// have broadly worked).
     var isProblem: Bool {
         switch self {
         case .success, .upToDate: return false
@@ -292,9 +294,9 @@ enum PositionSyncOutcome: Sendable, Equatable {
 // MARK: - Notification de fin de sync investissements
 
 extension Notification.Name {
-    /// Postée (main thread) après une passe de synchronisation investissements
-    /// (LiveSync exchanges/wallets + historique des cours) — l'UI doit recharger.
-    /// Observée dans NemorisApp → bump de AppState.dataRefreshToken.
-    /// Miroir du pattern `nemorisSyncDidApplyRemoteChanges` (CloudSyncEngine).
+    /// Posted (main thread) after an investments sync pass (LiveSync
+    /// exchanges/wallets + price history) — the UI must reload.
+    /// Observed in NemorisApp → bumps AppState.dataRefreshToken.
+    /// Mirrors the `nemorisSyncDidApplyRemoteChanges` pattern (CloudSyncEngine).
     static let nemorisInvestmentsDidSync = Notification.Name("nemorisInvestmentsDidSync")
 }

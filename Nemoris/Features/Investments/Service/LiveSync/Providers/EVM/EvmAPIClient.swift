@@ -1,31 +1,32 @@
 import Foundation
 
-// MARK: - Client Etherscan V2 Multichain API
+// MARK: - Etherscan V2 Multichain API client
 //
-// Etherscan V2 (lancée fin 2024) unifie l'accès aux explorers EVM via UN SEUL endpoint
-// `https://api.etherscan.io/v2/api` paramétré par `chainid`. Une seule clé API gratuite
-// fonctionne pour les 6 chaînes qu'on supporte. Sans clé : 5 req/s. Avec clé : 100k/jour.
+// Etherscan V2 unifies access to EVM explorers through ONE endpoint,
+// `https://api.etherscan.io/v2/api`, parameterized by `chainid`. A single free
+// API key works for the 6 supported chains (100k requests/day). The key is
+// required: the account/balance module is no longer served anonymously.
 //
-// Docs officielles : https://docs.etherscan.io/etherscan-v2/
+// Official docs: https://docs.etherscan.io/etherscan-v2/
 
 struct EvmAPIClient {
 
-    /// Base URL unifiée Etherscan V2 (toutes chaînes via `chainid`).
+    /// Unified Etherscan V2 base URL (every chain via `chainid`).
     private let baseURL = URL(string: "https://api.etherscan.io/v2/api")!
 
-    /// Clé API optionnelle. Si vide → 5 req/s sans clé.
+    /// API key (required by Etherscan V2 for the account/balance module).
     let apiKey: String?
 
     init(apiKey: String? = nil) {
-        // Strip whitespace + traiter "" comme nil
+        // Strip whitespace + treat "" as nil
         let trimmed = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.apiKey = (trimmed?.isEmpty == false) ? trimmed : nil
     }
 
     // MARK: - Chain ID mapping
     //
-    // Mapping interne ID Nemoris → chainid Etherscan V2.
-    // Doit rester cohérent avec `EvmWalletLiveSyncProvider.supportedChains`.
+    // Internal Nemoris ID → Etherscan V2 chainid.
+    // Must stay consistent with `EvmWalletLiveSyncProvider.supportedChains`.
 
     static let chainIdMap: [String: Int] = [
         "eth":      1,       // Ethereum Mainnet
@@ -36,17 +37,17 @@ struct EvmAPIClient {
         "base":     8453     // Base
     ]
 
-    /// Mapping inverse : chainid Etherscan → ID interne (utile pour PriceResolver
-    /// qui veut le slug CoinGecko via `platformIDs`).
+    /// Reverse mapping: Etherscan chainid → internal ID (used by PriceResolver,
+    /// which needs the CoinGecko slug via `platformIDs`).
     static func internalChainID(forEtherscanChainID id: Int) -> String? {
         chainIdMap.first(where: { $0.value == id })?.key
     }
 
     // MARK: - Endpoints
 
-    /// Balance native (ETH/MATIC/BNB selon chaîne), retournée en wei (entier).
-    /// Convertir en unité native en divisant par 1e18.
-    /// Throw `LiveSyncError` typé en cas d'erreur réseau/parsing.
+    /// Native balance (ETH/MATIC/BNB depending on the chain), returned in wei
+    /// (integer). Divide by 1e18 to get native units.
+    /// Throws a typed `LiveSyncError` on network/parsing errors.
     func fetchNativeBalance(address: String, chainId: Int) async throws -> Double {
         let response: BalanceResponse = try await get(
             params: [
@@ -63,9 +64,9 @@ struct EvmAPIClient {
         return wei / 1_000_000_000_000_000_000.0  // 1e18 wei = 1 ETH/MATIC/BNB
     }
 
-    /// Récupère les transferts ERC-20 récents pour découvrir les contracts détenus.
-    /// `limit` cap les txs retournées (50-100 suffit pour décrouvrir les holdings).
-    /// Renvoie les contracts uniques rencontrés (dédup + symbol/decimals préservés).
+    /// Fetches recent ERC-20 transfers to discover the contracts held.
+    /// `limit` caps the returned transactions (50-100 is enough to discover holdings).
+    /// Returns the unique contracts encountered (deduplicated, symbol/decimals kept).
     func fetchTokenContracts(address: String, chainId: Int, limit: Int = 100) async throws -> [TokenContractInfo] {
         let response: TokenTxResponse = try await get(
             params: [
@@ -79,7 +80,7 @@ struct EvmAPIClient {
             ]
         )
 
-        // Dédup par contractAddress en gardant la 1ère occurrence (la plus récente).
+        // Deduplicate by contractAddress, keeping the 1st occurrence (the most recent).
         var seen = Set<String>()
         var contracts: [TokenContractInfo] = []
         for tx in response.result {
@@ -96,8 +97,8 @@ struct EvmAPIClient {
         return contracts
     }
 
-    /// Balance d'un token ERC-20 spécifique, en raw units (string). À diviser par
-    /// 10^decimals pour obtenir la quantité réelle.
+    /// Balance of a specific ERC-20 token, in raw units (string). Divide by
+    /// 10^decimals to get the real quantity.
     func fetchTokenBalance(address: String, contractAddress: String, chainId: Int) async throws -> String {
         let response: BalanceResponse = try await get(
             params: [
@@ -114,8 +115,8 @@ struct EvmAPIClient {
 
     // MARK: - HTTP helper
 
-    /// GET vers `baseURL` avec params encodés. Ajoute la clé API si fournie.
-    /// Parse la réponse comme JSON typé.
+    /// GET to `baseURL` with encoded params. Adds the API key when provided.
+    /// Parses the response as typed JSON.
     private func get<T: Decodable>(params: [String: String]) async throws -> T {
         var allParams = params
         if let apiKey {
@@ -153,14 +154,14 @@ struct EvmAPIClient {
 
 // MARK: - DTO Decodable
 
-/// Réponse standard Etherscan pour balance/tokenbalance — string `result`.
+/// Standard Etherscan response for balance/tokenbalance — string `result`.
 private struct BalanceResponse: Decodable {
     let status: String          // "1" = OK, "0" = erreur (souvent address invalide)
     let message: String
     let result: String
 }
 
-/// Réponse pour tokentx — `result` est un array de transferts.
+/// Response for tokentx — `result` is an array of transfers.
 private struct TokenTxResponse: Decodable {
     let status: String
     let message: String
@@ -174,7 +175,7 @@ private struct TokenTransfer: Decodable {
     let tokenDecimal: String
 }
 
-/// Infos extraites d'un transfert ERC-20 — utilisé pour identifier les tokens à requêter.
+/// Info extracted from an ERC-20 transfer — used to identify the tokens to query.
 struct TokenContractInfo: Hashable {
     let contractAddress: String  // 0x... lowercased
     let symbol: String

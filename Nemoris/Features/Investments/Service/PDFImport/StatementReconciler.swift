@@ -1,45 +1,42 @@
 import Foundation
 
-// MARK: - Fusion des deux extractions d'un relevé
+// MARK: - Merging the two extractions of a statement
 //
-// Moteur PUR (aucun accès réseau, disque, IA ni SwiftUI) — même doctrine que
-// `InvestmentStatementExtractor` et `PortfolioEvolutionBuilder` : testable hors
-// Xcode par `run_statement_extractor_tests.sh`.
+// PURE engine (no network, disk, AI or SwiftUI access) — same doctrine as
+// `InvestmentStatementExtractor` and `PortfolioEvolutionBuilder`: testable
+// outside Xcode via `run_statement_extractor_tests.sh`.
 //
-// ─── Pourquoi ce fichier existe ────────────────────────────────────────────
+// ─── What the merge must get right ─────────────────────────────────────────
 //
-// L'ancienne fusion vivait dans `InvestmentPDFParser` et tenait en une règle :
-// « le déterministe fait autorité sur les ISIN qu'il a reconnus, l'IA complète
-// le reste ». Trois défauts mesurés sur un relevé réel de 34 opérations :
+// The naive rule — "the deterministic extraction is authoritative on the ISINs
+// it recognized, the AI fills in the rest" — fails in three ways:
 //
-//   1. **La quantité restait à 1 partout.** Sur un relevé en TABLEAU, le
-//      libellé « Quantité » n'apparaît qu'UNE fois, dans l'en-tête de colonne —
-//      pas sur chacune des 34 lignes de données. L'ancrage par ISIN, qui
-//      cherche un nombre APRÈS un libellé, ne peut donc pas la lire, et
-//      `valuation(...)` retombe sur « quantité inconnue ⇒ 1 × montant ». Le
-//      déterministe ABAISSAIT alors sa propre confiance (0,60) pour le
-//      signaler… mais gardait quand même l'autorité, y compris quand l'IA,
-//      elle, avait correctement lu la colonne.
-//   2. **Le compte gonflait** (36-37 lignes pour 34 opérations réelles) : une
-//      opération vue par l'IA sans ISIN — ou avec un ISIN mal recopié — était
-//      ajoutée SANS AUCUNE vérification de doublon, `knownISINs` ne pouvant
-//      par construction jamais contenir la chaîne vide.
-//   3. **L'utilisateur voyait « aucune IA utilisée »** : chaque ligne rendue
-//      venait du déterministe, note comprise, alors que le modèle avait bel et
-//      bien tourné et produit de meilleurs nombres.
+//   1. **Quantity stuck at 1 everywhere.** On a TABLE statement, the
+//      "Quantity" label appears ONCE, in the column header — not on each
+//      data row. ISIN anchoring, which looks for a number AFTER a label,
+//      cannot read it, and `valuation(...)` falls back to "unknown quantity ⇒
+//      1 × amount". The deterministic pass LOWERS its own confidence (0.60)
+//      to flag it… but keeping authority anyway discards the AI's correct
+//      reading of the column.
+//   2. **An inflated count**: an operation seen by the AI without an ISIN —
+//      or with a miscopied ISIN — gets added WITHOUT ANY duplicate check,
+//      since `knownISINs` can by construction never contain the empty string.
+//   3. **"No AI used" shown to the user**: every returned row comes from the
+//      deterministic pass, note included, even though the model ran and
+//      produced better numbers.
 //
-// La règle devient donc : le déterministe reste l'ossature (il ne se trompe
-// jamais d'ISIN ni de date), mais **il cède ses nombres dès qu'il admet lui-même
-// le doute**, et une ligne n'est ajoutée que si elle ne correspond à aucune
-// opération déjà connue.
+// Hence the rule: the deterministic pass stays the backbone (it never gets an
+// ISIN or a date wrong), but **it yields its numbers as soon as it admits
+// doubt itself**, and a row is added only if it matches no already-known
+// operation.
 
-/// Vue minimale d'une opération, indépendante du modèle qui la porte.
+/// Minimal view of an operation, independent of the model carrying it.
 ///
-/// ⚠️ Un protocole, et pas le type concret : la fusion doit s'appliquer aussi
-/// bien aux `ExtractedStatementOrder` (moteur pur, date en chaîne) qu'aux
-/// `PDFExtractedOrder` (modèle d'UI, date en `Date`, identité et sélection).
-/// Écrire la règle deux fois, une par modèle, c'est la classe de bug que ce
-/// dépôt paie déjà ailleurs (, quatre calculs d'enveloppes divergents).
+/// A protocol, not the concrete type: the merge must apply both to
+/// `ExtractedStatementOrder` (pure engine, date as a string) and to
+/// `PDFExtractedOrder` (UI model, date as `Date`, identity and selection).
+/// Writing the rule twice, once per model, is exactly how two
+/// implementations of the same computation end up diverging.
 protocol StatementOrderFields {
     var orderType: String { get }
     var assetName: String { get }
@@ -50,7 +47,7 @@ protocol StatementOrderFields {
     var fees: Double { get set }
     var confidence: Double { get set }
     var notes: String? { get set }
-    /// Date d'exécution normalisée en yyyy-MM-dd.
+    /// Execution date normalized as yyyy-MM-dd.
     var isoDay: String { get }
 }
 
@@ -60,24 +57,24 @@ extension ExtractedStatementOrder: StatementOrderFields {
 
 enum StatementReconciler {
 
-    /// En dessous de cette confiance, une opération déterministe a DÉDUIT au
-    /// moins un de ses nombres au lieu de le lire (`InvestmentStatementExtractor.
-    /// parseBlock` : -0,15 quand la quantité manque, -0,1 quand la valorisation
-    /// est déduite). Choisi pour qu'une opération parfaitement lue (0,85) ne
-    /// soit jamais réécrite, et qu'une opération douteuse le soit toujours.
+    /// Below this confidence, a deterministic operation DEDUCED at least one of
+    /// its numbers instead of reading it (`InvestmentStatementExtractor.
+    /// parseBlock`: -0.15 when the quantity is missing, -0.1 when the valuation
+    /// is deduced). Chosen so a perfectly read operation (0.85) is never
+    /// rewritten, and a doubtful one always is.
     static let uncertainConfidence = 0.75
 
-    /// Marque portée par une opération dont les nombres viennent du modèle.
-    /// Visible dans la fiche de l'ordre après import — sans elle, rien ne
-    /// distingue après coup une lecture renforcée d'une lecture de premier jet.
+    /// Marker carried by an operation whose numbers come from the model. Visible
+    /// on the order sheet after import — without it, nothing tells a reinforced
+    /// reading from a first-pass one afterwards.
     static let textTag = "Quantité/prix relus par l'IA"
     static let imageTag = "Quantité/prix relus sur l'image (tableau)"
 
-    // MARK: - Fusion complète
+    // MARK: - Full merge
 
-    /// Ossature déterministe renforcée par l'IA, PLUS les opérations que seule
-    /// l'IA a vues (formats en prose, lignes sans ISIN — que l'ancrage ne peut
-    /// pas voir par construction).
+    /// Deterministic backbone reinforced by the AI, PLUS the operations only the
+    /// AI saw (prose formats, rows without an ISIN — which anchoring cannot see
+    /// by construction).
     static func reconcile<T: StatementOrderFields>(ai: [T], deterministic: [T],
                                                    tag: String = textTag) -> [T] {
         let candidates = dedupe(ai)
@@ -91,43 +88,41 @@ enum StatementReconciler {
             consumed.insert(match)
             result[index] = merging(result[index], with: candidates[match], tag: tag)
         }
-        // ⚠️ Une opération de l'IA n'est ajoutée que si elle ne correspond à
-        // AUCUNE opération déjà retenue — c'est ce qui manquait : une ligne
-        // sans ISIN passait systématiquement, d'où un relevé de 34 opérations
-        // qui en rendait 36 ou 37, et un compte différent à chaque analyse
-        // puisque le modèle ne rate pas les mêmes lignes d'une fois sur l'autre.
+        // An AI operation is added only if it matches NO operation already kept:
+        // otherwise a row without an ISIN always slips through, inflating the count,
+        // and differently on each analysis since the model doesn't miss the same
+        // rows every time.
         for (index, candidate) in candidates.enumerated() where !consumed.contains(index) {
             result.append(candidate)
         }
         return result
     }
 
-    // MARK: - Fusion d'une paire
+    // MARK: - Merging a pair
 
-    /// Applique une opération candidate sur une opération de base.
+    /// Applies a candidate operation onto a base operation.
     ///
-    /// Le ticker est TOUJOURS repris quand il manque (le déterministe ne le
-    /// cherche pas : il n'a pas de forme normalisée). Les NOMBRES ne sont repris
-    /// que si la base admet le doute — la date, le nom, le type et l'ISIN
-    /// restent à la base, qui ne s'y trompe pas.
+    /// The ticker is ALWAYS taken when missing (the deterministic pass doesn't
+    /// look for it: it has no normalized form). The NUMBERS are taken only if the
+    /// base admits doubt — date, name, type and ISIN stay with the base, which
+    /// never gets them wrong.
     private static func merging<T: StatementOrderFields>(_ base: T, with candidate: T,
                                                           tag: String) -> T {
         var merged = base
         if merged.ticker.isEmpty { merged.ticker = candidate.ticker }
         guard base.confidence < uncertainConfidence, candidate.quantity > 0 else { return merged }
 
-        // ⚠️ Le MONTANT lu par le déterministe prime sur le prix rendu par le
-        // modèle quand les deux se contredisent. Un montant est extrait par un
-        // motif qui exige des centimes ou une devise collée (cf.
-        // `signedAmount`) : c'est un nombre réellement présent dans le
-        // document. Un modèle, lui, recopie volontiers le TOTAL dans le champ
-        // « prix unitaire » — sans ce garde-fou, une opération de 982,40 €
-        // devenait 4 × 982,40 = 3 929,60 €.
+        // The AMOUNT read by the deterministic pass wins over the price returned by
+        // the model when the two contradict each other. An amount is extracted by a
+        // pattern that requires cents or an attached currency (see `signedAmount`):
+        // it's a number really present in the document. A model readily copies the
+        // TOTAL into the "unit price" field — without this guard, a €982.40
+        // operation would become 4 × 982.40 = €3,929.60.
         let gross = abs(base.quantity * base.unitPrice)
         var price: Double? = candidate.unitPrice > 0 ? candidate.unitPrice : nil
         if gross > 0, let proposed = price,
            abs(proposed * candidate.quantity - gross) > max(0.05, gross * 0.05) {
-            price = nil   // le prix sera redéduit du montant réellement lu
+            price = nil   // the price will be re-derived from the amount actually read
         }
 
         let valued = InvestmentStatementExtractor.valuation(
@@ -137,14 +132,12 @@ enum StatementReconciler {
         merged.quantity = valued.quantity
         merged.unitPrice = valued.unitPrice
 
-        // ⚠️ Un modèle confond parfois « Commission » avec « Montant brut »
-        // dans un footer à plusieurs colonnes monétaires adjacentes (Montant
-        // brut | Commission | Frais | Montant net) — constaté sur un cas réel
-        // où les frais rendus valaient EXACTEMENT le montant brut, doublant
-        // le total affiché (`totalCost = quantité × prix + frais`). Une
-        // commission plausible reste une PETITE fraction du montant de
-        // l'opération ; au-delà, c'est probablement une autre colonne qui a
-        // été lue. Même doctrine que le garde-fou sur `price` ci-dessus.
+        // A model sometimes confuses "Commission" with "Gross amount" in a footer
+        // with several adjacent money columns (Gross amount | Commission | Fees |
+        // Net amount) — returned fees equal to EXACTLY the gross amount double the
+        // displayed total (`totalCost = quantity × price + fees`). A plausible
+        // commission stays a SMALL fraction of the operation's amount; beyond that,
+        // another column was probably read. Same doctrine as the `price` guard above.
         let trueGross = abs(valued.quantity * valued.unitPrice)
         let feesArePlausible = trueGross == 0 || candidate.fees < trueGross * 0.5
         if merged.fees == 0, candidate.fees > 0, feesArePlausible {
@@ -161,23 +154,23 @@ enum StatementReconciler {
         return notes + " · " + tag
     }
 
-    // MARK: - « Est-ce la même opération ? »
+    // MARK: - "Is it the same operation?"
 
-    /// Une seule notion d'identité, partagée par le renforcement ET la
-    /// déduplication : deux réponses différentes à cette question feraient
-    /// corriger une ligne tout en la rajoutant ensuite en double.
+    /// A single notion of identity, shared by reinforcement AND deduplication:
+    /// two different answers to this question would correct a row and then add
+    /// it again as a duplicate.
     static func isSameOperation<T: StatementOrderFields>(_ a: T, _ b: T) -> Bool {
         let isinA = a.isin.uppercased(), isinB = b.isin.uppercased()
         if !isinA.isEmpty, !isinB.isEmpty {
-            // ISIN identique : le jour OU le montant suffit à confirmer. Le
-            // « ou » compte — certains relevés datent l'opération, le modèle
-            // rend parfois la date de règlement.
+            // Same ISIN: the day OR the amount is enough to confirm. The "or" matters —
+            // some statements date the operation, the model sometimes returns the
+            // settlement date.
             guard isinA == isinB else { return false }
             return a.isoDay == b.isoDay || closeAmounts(a, b)
         }
-        // Sans ISIN comparable, le jour devient obligatoire : c'est le seul
-        // champ assez discriminant pour ne pas fusionner deux opérations
-        // distinctes du même titre.
+        // Without a comparable ISIN, the day becomes mandatory: it's the only field
+        // discriminating enough not to merge two distinct operations on the same
+        // security.
         guard a.isoDay == b.isoDay, !a.isoDay.isEmpty else { return false }
         return closeAmounts(a, b) || similarNames(a.assetName, b.assetName)
     }
@@ -189,9 +182,9 @@ enum StatementReconciler {
         return abs(totalA - totalB) <= max(0.02, max(totalA, totalB) * 0.01)
     }
 
-    /// Noms « assez proches » : un relevé écrit « AM.PEA EM.ES.T.ACC » là où un
-    /// modèle rend « Epargne PEA Emerging Markets ». On ne cherche donc pas
-    /// l'égalité, mais l'inclusion d'une forme normalisée dans l'autre.
+    /// "Close enough" names: a statement writes "AM.PEA EM.ES.T.ACC" where a model
+    /// returns "Epargne PEA Emerging Markets". So equality isn't required, only
+    /// the inclusion of one normalized form in the other.
     private static func similarNames(_ a: String, _ b: String) -> Bool {
         let normalizedA = normalize(a), normalizedB = normalize(b)
         guard normalizedA.count >= 5, normalizedB.count >= 5 else { return false }
@@ -206,17 +199,16 @@ enum StatementReconciler {
 
     private static func matchIndex<T: StatementOrderFields>(for order: T, in pool: [T],
                                                             excluding consumed: Set<Int>) -> Int? {
-        // Appariement UN POUR UN : deux achats du même titre le même jour sont
-        // deux opérations réelles, chacune ayant son ancre ISIN côté
-        // déterministe. Sans exclusion des candidats déjà consommés, elles
-        // pointeraient toutes les deux vers la même ligne de l'IA — la seconde
-        // resterait non corrigée et la ligne restante repartirait en doublon.
+        // ONE-TO-ONE matching: two purchases of the same security on the same day
+        // are two real operations, each with its own ISIN anchor on the
+        // deterministic side. Without excluding candidates already consumed, both
+        // would point at the same AI row — the second would stay uncorrected and
+        // the leftover row would come back as a duplicate.
         //
-        // ⚠️ Deux passes, et l'ordre compte. Quand plusieurs candidats
-        // conviennent (même titre, même jour, deux montants différents), celui
-        // dont le MONTANT coïncide est le bon ; se contenter du premier venu
-        // apparierait les deux opérations à l'envers et échangerait leurs
-        // quantités.
+        // Two passes, and the order matters. When several candidates fit (same
+        // security, same day, two different amounts), the one whose AMOUNT matches
+        // is the right one; settling for the first one found would pair the two
+        // operations the wrong way round and swap their quantities.
         if let strong = pool.indices.first(where: {
             !consumed.contains($0) && isSameOperation(order, pool[$0]) && closeAmounts(order, pool[$0])
         }) { return strong }
@@ -225,17 +217,17 @@ enum StatementReconciler {
         }
     }
 
-    // MARK: - Déduplication interne
+    // MARK: - Internal deduplication
 
-    /// Retire les répétitions d'une même source. Un modèle relance parfois la
-    /// même opération à la fin d'une longue liste, et deux blocs de texte
-    /// consécutifs peuvent se recouvrir.
+    /// Removes repetitions within a single source. A model sometimes repeats the
+    /// same operation at the end of a long list, and two consecutive text blocks
+    /// can overlap.
     ///
-    /// ⚠️ Prédicat STRICT, pas `isSameOperation`. Ce dernier est fait pour
-    /// rapprocher deux LECTURES de la même opération, donc volontairement
-    /// tolérant (il accepte un jour identique sans montant comparable). Appliqué
-    /// à une seule et même source, il fusionnerait deux achats réels du même
-    /// titre passés le même jour à des cours différents.
+    /// STRICT predicate, not `isSameOperation`. The latter is meant to match two
+    /// READINGS of the same operation, hence deliberately tolerant (it accepts an
+    /// identical day without a comparable amount). Applied within one source, it
+    /// would merge two real purchases of the same security made the same day at
+    /// different prices.
     static func dedupe<T: StatementOrderFields>(_ orders: [T]) -> [T] {
         var kept: [T] = []
         for order in orders where !kept.contains(where: { isRepetition($0, order) }) {
@@ -249,7 +241,7 @@ enum StatementReconciler {
         let sameTitle = (!a.isin.isEmpty && a.isin.uppercased() == b.isin.uppercased())
             || similarNames(a.assetName, b.assetName)
         guard sameTitle else { return false }
-        // Deux montants nuls des deux côtés : rien ne les distingue non plus.
+        // Two zero amounts on both sides: nothing tells them apart either.
         let totalA = abs(a.quantity * a.unitPrice), totalB = abs(b.quantity * b.unitPrice)
         return closeAmounts(a, b) || (totalA == 0 && totalB == 0)
     }

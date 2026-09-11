@@ -1,53 +1,54 @@
 import Foundation
 import CryptoKit
 
-// MARK: - Client bas niveau Binance Spot API
+// MARK: - Low-level Binance Spot API client
 //
-// Implémente l'authentification HMAC SHA256 requise par Binance (cf. docs officielles
+// Implements the HMAC SHA256 authentication required by Binance (see the
+// official docs:
 // https://developers.binance.com/docs/binance-spot-api-docs/rest-api/general-api-information).
 //
-// Flow auth :
-//   1. Construire la query string avec timestamp=<ms_epoch>
-//   2. HMAC-SHA256(secret, query) → signature hex
-//   3. Ajouter "&signature=<hex>" à la query
-//   4. GET avec header "X-MBX-APIKEY: <apiKey>"
+// Auth flow:
+//   1. Build the query string with timestamp=<ms_epoch>
+//   2. HMAC-SHA256(secret, query) → hex signature
+//   3. Append "&signature=<hex>" to the query
+//   4. GET with the "X-MBX-APIKEY: <apiKey>" header
 //
-// On vise read-only :
-//   - /api/v3/ping       (public, test connectivité)
-//   - /api/v3/account    (signed, balances spot)
+// Read-only by design:
+//   - /api/v3/ping       (public, connectivity test)
+//   - /api/v3/account    (signed, spot balances)
 //
-// La clé fournie par l'utilisateur DOIT être créée en mode "Enable Reading" only (pas de
-// trading ni de withdrawal). Le code ne fait que des GET — aucun risque même si la
-// clé avait par erreur des permissions plus larges.
+// The key supplied by the user MUST be created with "Enable Reading" only (no
+// trading or withdrawal). The code only issues GETs — no risk even if the key
+// mistakenly has broader permissions.
 
 struct BinanceAccountResponse: Decodable {
     let balances: [Balance]
-    // makerCommission, takerCommission, canTrade, canDeposit... ignorés pour MVP
+    // makerCommission, takerCommission, canTrade, canDeposit... ignored
 
     struct Balance: Decodable {
         let asset: String       // Ex: "BTC", "ETH", "USDT"
-        let free: String        // Quantité libre (string Binance pour précision)
-        let locked: String      // Quantité bloquée (ordres ouverts, staking flexible…)
+        let free: String        // Free quantity (a Binance string, for precision)
+        let locked: String      // Locked quantity (open orders, flexible staking…)
 
-        /// Total = free + locked, parsé en Double. 0 si parse échoue.
+        /// Total = free + locked, parsed as Double. 0 if parsing fails.
         var total: Double {
             (Double(free) ?? 0) + (Double(locked) ?? 0)
         }
     }
 }
 
-/// Un trade tel que retourné par /api/v3/myTrades.
-/// Binance utilise des `String` pour les nombres décimaux pour préserver la précision.
+/// A trade as returned by /api/v3/myTrades.
+/// Binance uses `String` for decimal numbers to preserve precision.
 struct BinanceTrade: Decodable {
     let id: Int                  // Trade ID unique chez Binance
     let symbol: String           // Ex: "BTCUSDT"
-    let price: String            // Prix unitaire en quote (USDT pour BTCUSDT)
-    let qty: String              // Quantité en base (BTC pour BTCUSDT)
+    let price: String            // Unit price in the quote asset (USDT for BTCUSDT)
+    let qty: String              // Quantity in the base asset (BTC for BTCUSDT)
     let quoteQty: String         // qty × price (= total en quote)
     let commission: String       // Frais en commissionAsset
-    let commissionAsset: String  // Souvent "BNB" si BNB activé, sinon quote (USDT)
+    let commissionAsset: String  // Often "BNB" when BNB fees are enabled, otherwise the quote asset (USDT)
     let time: Int64              // Timestamp ms UTC
-    let isBuyer: Bool            // true → l'utilisateur a acheté (entrée en position)
+    let isBuyer: Bool            // true → the user bought (entering the position)
 
     var priceDouble: Double      { Double(price) ?? 0 }
     var qtyDouble: Double        { Double(qty) ?? 0 }
@@ -57,8 +58,8 @@ struct BinanceTrade: Decodable {
 
 struct BinanceAPIClient {
 
-    /// URL de base de l'API spot Binance. api.binance.com pour prod global.
-    /// api.binance.us pour Binance US (séparée juridiquement, autre fingerprint).
+    /// Base URL of the Binance spot API. api.binance.com for global production;
+    /// api.binance.us for Binance US (legally separate, different fingerprint).
     private let baseURL: URL
 
     init(baseURL: URL = URL(string: "https://api.binance.com")!) {
@@ -67,8 +68,8 @@ struct BinanceAPIClient {
 
     // MARK: - Public endpoints
 
-    /// Ping public — test connectivité sans auth. Utile pour vérifier que les serveurs
-    /// Binance répondent depuis le device (souvent bloqué dans certains pays).
+    /// Public ping — connectivity test without auth. Useful to check that Binance
+    /// servers answer from the device (often blocked in some countries).
     func ping() async throws {
         let url = baseURL.appendingPathComponent("api/v3/ping")
         let (_, response) = try await URLSession.shared.data(from: url)
@@ -77,7 +78,7 @@ struct BinanceAPIClient {
 
     // MARK: - Signed endpoints
 
-    /// Récupère les balances spot. Throw `LiveSyncError` en cas d'erreur de creds/réseau/parsing.
+    /// Fetches spot balances. Throws `LiveSyncError` on credential/network/parsing errors.
     func fetchAccount(apiKey: String, apiSecret: String) async throws -> BinanceAccountResponse {
         let endpoint = "api/v3/account"
         let request = try buildSignedRequest(endpoint: endpoint, apiKey: apiKey, apiSecret: apiSecret, params: [:])
@@ -92,11 +93,11 @@ struct BinanceAPIClient {
         }
     }
 
-    /// Historique des trades pour une paire donnée.
-    /// `symbol` obligatoire (ex: "BTCUSDT"). Cap par défaut 500 (max Binance = 1000).
-    /// Retourne array vide si la paire n'existe pas / l'utilisateur n'a jamais tradé dessus.
+    /// Trade history for a given pair.
+    /// `symbol` required (e.g. "BTCUSDT"). Default cap 500 (Binance max = 1000).
+    /// Returns an empty array if the pair doesn't exist / the user never traded it.
     ///
-    /// Coût rate limit : 10 weight par requête. Avec quota 1200/min → ~120 paires/min max.
+    /// Rate-limit cost: 10 weight per request. With a 1200/min quota → ~120 pairs/min max.
     func fetchMyTrades(symbol: String, limit: Int = 500, apiKey: String, apiSecret: String) async throws -> [BinanceTrade] {
         let endpoint = "api/v3/myTrades"
         let request = try buildSignedRequest(
@@ -111,8 +112,8 @@ struct BinanceAPIClient {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        // Binance renvoie 400 quand la paire n'existe pas (ex: PNUTUSDT pour un asset
-        // trop nouveau). On traite ça comme "0 trades" plutôt que comme une erreur.
+        // Binance returns 400 when the pair doesn't exist (e.g. PNUTUSDT for a very
+        // new asset). Treated as "0 trades" rather than as an error.
         if let http = response as? HTTPURLResponse, http.statusCode == 400 {
             return []
         }
@@ -127,21 +128,21 @@ struct BinanceAPIClient {
 
     // MARK: - Helpers (signing)
 
-    /// Construit une URLRequest signée pour un endpoint privé.
-    /// Throw si encodage URL impossible.
+    /// Builds a signed URLRequest for a private endpoint.
+    /// Throws if URL encoding is impossible.
     private func buildSignedRequest(
         endpoint: String,
         apiKey: String,
         apiSecret: String,
         params: [String: String]
     ) throws -> URLRequest {
-        // 1. Construire la query avec timestamp (recvWindow par défaut 5000ms suffit)
+        // 1. Build the query with the timestamp
         var queryParams = params
         queryParams["timestamp"] = "\(Int(Date().timeIntervalSince1970 * 1000))"
-        queryParams["recvWindow"] = "10000" // tolérance 10s vs serveur
+        queryParams["recvWindow"] = "10000" // 10 s tolerance against the server clock
 
-        // Encoder avec ordre stable (alpha) pour reproductibilité (Binance s'en fiche
-        // mais c'est plus propre pour debug).
+        // Encode in a stable (alphabetical) order for reproducibility (Binance
+        // doesn't care, but it makes debugging cleaner).
         let sortedKeys: [String] = queryParams.keys.sorted()
         let pairs: [String] = sortedKeys.map { paramKey -> String in
             let value = queryParams[paramKey] ?? ""
@@ -150,7 +151,7 @@ struct BinanceAPIClient {
         }
         let queryString: String = pairs.joined(separator: "&")
 
-        // 2. Signer en HMAC-SHA256 avec apiSecret.
+        // 2. Sign with HMAC-SHA256 using apiSecret.
         let secretBytes: [UInt8] = Array(apiSecret.utf8)
         let queryBytes: [UInt8] = Array(queryString.utf8)
         let symmetricKey = SymmetricKey(data: secretBytes)
@@ -169,11 +170,11 @@ struct BinanceAPIClient {
         return request
     }
 
-    /// Vérifie le code HTTP et convertit en `LiveSyncError` typé.
+    /// Checks the HTTP status and converts it into a typed `LiveSyncError`.
     /// - 200 → OK
-    /// - 401 → credentials invalides
-    /// - 429 / 418 → rate limit (Binance utilise 418 pour ban temporaire)
-    /// - autres → networkError
+    /// - 401 → invalid credentials
+    /// - 429 / 418 → rate limit (Binance uses 418 for a temporary ban)
+    /// - others → networkError
     private static func checkHTTPResponse(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else {
             throw LiveSyncError.networkError("Réponse HTTP invalide")

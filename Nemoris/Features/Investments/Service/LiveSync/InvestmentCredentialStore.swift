@@ -1,17 +1,17 @@
 import Foundation
 import Security
 
-// MARK: - Stockage Keychain pour les credentials live sync
+// MARK: - Keychain storage for live sync credentials
 //
-// Les clés API / secrets ne touchent JAMAIS la base SQLite. Ils sont stockés
-// chiffrés dans le Keychain iOS avec ces propriétés :
-//   - Service : "fr.hedwin.nemoris.livesync" (espace de noms commun)
-//   - Account : "<providerId>_<linkId>" (unique par lien provider↔compte)
-//   - Accessibility : `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`
-//       → déchiffrable seulement après le 1er déverrouillage (pas en background avant)
-//       → "ThisDeviceOnly" = pas de sync iCloud Keychain (privacy strict)
+// API keys / secrets NEVER touch the SQLite database. They are stored
+// encrypted in the iOS Keychain with these properties:
+//   - Service: "fr.hedwin.nemoris.livesync" (shared namespace)
+//   - Account: "<providerId>_<linkId>" (unique per provider↔account link)
+//   - Accessibility: `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`
+//       → decryptable only after the first unlock (not in background before)
+//       → "ThisDeviceOnly" = no iCloud Keychain sync (strict privacy)
 //
-// Format de stockage : les credentials [String: String] sont sérialisés en JSON UTF-8.
+// Storage format: the [String: String] credentials are serialized as UTF-8 JSON.
 
 enum InvestmentCredentialStoreError: LocalizedError {
     case encodingFailed
@@ -29,21 +29,21 @@ enum InvestmentCredentialStoreError: LocalizedError {
     }
 }
 
-/// `@unchecked Sendable` : la classe ne contient que `service` (constante) et
-/// utilise `SecItem*` qui sont thread-safe côté système.
+/// `@unchecked Sendable`: the class only holds `service` (a constant) and uses
+/// `SecItem*`, which is thread-safe on the system side.
 final class InvestmentCredentialStore: @unchecked Sendable {
 
     static let shared = InvestmentCredentialStore()
     private init() {}
 
-    /// Espace de noms Keychain commun à tous les liens live sync.
-    /// Choisi pour rester sous le bundle ID pour clarité dans Réglages → Mots de passe.
+    /// Keychain namespace shared by every live sync link.
+    /// Kept under the bundle ID for clarity in Settings → Passwords.
     private let service = "fr.hedwin.nemoris.livesync"
 
     // MARK: - Public API
 
-    /// Stocke (ou remplace) les credentials d'un lien donné.
-    /// `linkId` doit être l'ID retourné par `LiveSyncRepository.addLink`.
+    /// Stores (or replaces) a given link's credentials.
+    /// `linkId` must be the ID returned by `LiveSyncRepository.addLink`.
     func store(linkId: Int, providerId: String, credentials: [String: String]) throws {
         guard let data = try? JSONEncoder().encode(credentials) else {
             throw InvestmentCredentialStoreError.encodingFailed
@@ -51,8 +51,8 @@ final class InvestmentCredentialStore: @unchecked Sendable {
 
         let account = accountKey(linkId: linkId, providerId: providerId)
 
-        // On supprime d'abord (idempotent), puis on ajoute proprement.
-        // SecItemUpdate est plus rapide mais plus complexe à gérer pour le cas "n'existe pas encore".
+        // Delete first (idempotent), then add cleanly. SecItemUpdate is faster but
+        // harder to handle for the "doesn't exist yet" case.
         deleteRaw(account: account)
 
         let attributes: [String: Any] = [
@@ -68,7 +68,7 @@ final class InvestmentCredentialStore: @unchecked Sendable {
         }
     }
 
-    /// Récupère les credentials d'un lien. Retourne nil si non trouvé.
+    /// Fetches a link's credentials. Returns nil if not found.
     func load(linkId: Int, providerId: String) -> [String: String]? {
         let account = accountKey(linkId: linkId, providerId: providerId)
         let query: [String: Any] = [
@@ -86,17 +86,17 @@ final class InvestmentCredentialStore: @unchecked Sendable {
         return try? JSONDecoder().decode([String: String].self, from: data)
     }
 
-    /// Supprime les credentials d'un lien.
-    /// Ne lève pas d'erreur si rien n'était stocké (cas suppression d'un lien orphelin).
+    /// Deletes a link's credentials.
+    /// Doesn't throw if nothing was stored (deleting an orphaned link).
     func delete(linkId: Int, providerId: String) {
         let account = accountKey(linkId: linkId, providerId: providerId)
         deleteRaw(account: account)
     }
 
-    // MARK: - Helpers privés
+    // MARK: - Private helpers
 
-    /// Concaténation stable pour identifier un lien : "<provider>_<id>".
-    /// Ex: "binance_3", "evm_wallet_7".
+    /// Stable concatenation identifying a link: "<provider>_<id>".
+    /// E.g. "binance_3", "evm_wallet_7".
     private func accountKey(linkId: Int, providerId: String) -> String {
         "\(providerId)_\(linkId)"
     }
@@ -108,6 +108,6 @@ final class InvestmentCredentialStore: @unchecked Sendable {
             kSecAttrAccount as String: account
         ]
         SecItemDelete(query as CFDictionary)
-        // Ignore le status — errSecItemNotFound est OK
+        // Status ignored — errSecItemNotFound is fine
     }
 }

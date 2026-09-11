@@ -1,39 +1,39 @@
 import SwiftUI
 import Charts
 
-// MARK: - Composants graphiques investissements style Finary
+// MARK: - Investment chart components
 //
-// Réutilisables aux 3 niveaux de profondeur : Global (dashboard), Compte, Valeur.
-// Respectent strictement la DA Nemoris (AppTheme.Colors / AppTheme.Typography).
+// Reusable at the 3 depth levels: Global (dashboard), Account, Security.
+// Strictly follow the Nemoris design language (AppTheme.Colors / AppTheme.Typography).
 //
-// Composants exportés :
+// Exported components:
 //   - InvestmentTimeRange (enum)
-//   - TimeRangeChips (Picker chips horizontal)
+//   - TimeRangeChips (horizontal chip picker)
 //   - PortfolioEvolutionPoint (data model)
-//   - InvestmentHeroCard (big valuation + variation %)
-//   - EvolutionChart (line smooth + area gradient + drag-to-inspect)
-//   - AllocationDonutChart (SectorMark donut + légende)
-//   - InvestmentSparkline (mini line chart pour cards compte)
+//   - InvestmentHeroCard (large valuation + variation %)
+//   - EvolutionChart (smooth line + area gradient + drag-to-inspect)
+//   - AllocationDonutChart (SectorMark donut + legend)
+//   - InvestmentSparkline (mini line chart for account cards)
 
 // MARK: - Time Range
 
-/// Configuration de l'axe X : unité de stride (espacement entre les ticks) +
-/// format date pour les labels. Calculé selon la plage temporelle pour que les
-/// labels restent lisibles sans se chevaucher.
+/// X-axis configuration: stride unit (spacing between ticks) + date format for
+/// the labels. Computed from the time range so labels stay readable without
+/// overlapping.
 struct InvestmentChartXAxisConfig {
     let strideUnit: Calendar.Component
     let strideCount: Int
-    /// Format d'affichage des labels (ex: "Jun 25", "2024", "12/05").
+    /// Label display format (e.g. "Jun 25", "2024", "12/05").
     let labelFormat: Date.FormatStyle
 
     static func config(for range: InvestmentTimeRange?, span: TimeInterval) -> InvestmentChartXAxisConfig {
-        // span en secondes — utilisé pour `.all` qui n'a pas de startDate.
+        // span in seconds — used for `.all`, which has no startDate.
         let oneDay: TimeInterval = 86_400
         let oneMonth: TimeInterval = 30 * oneDay
         let oneYear: TimeInterval = 365 * oneDay
 
-        // Détermine la "vraie" durée affichée. Pour .all on prend le span réel
-        // calculé depuis les points du chart.
+        // Determines the "real" displayed duration. For .all, the real span computed
+        // from the chart's points is used.
         let effective: TimeInterval = {
             guard let range else { return span }
             switch range {
@@ -50,13 +50,13 @@ struct InvestmentChartXAxisConfig {
         }()
 
         if effective <= 2 * oneDay {
-            // 1 jour : ticks aux heures
+            // 1 day: hourly ticks
             return .init(
                 strideUnit: .hour, strideCount: 6,
                 labelFormat: .dateTime.hour()
             )
         } else if effective <= 14 * oneDay {
-            // 1-2 semaines : ticks tous les 2 jours, format "JJ MMM"
+            // 1-2 weeks: a tick every 2 days, "DD MMM" format
             return .init(
                 strideUnit: .day, strideCount: 2,
                 labelFormat: .dateTime.day().month(.abbreviated)
@@ -74,7 +74,7 @@ struct InvestmentChartXAxisConfig {
                 labelFormat: .dateTime.month(.abbreviated)
             )
         } else if effective <= 3 * oneYear {
-            // 1-3 ans : ticks tous les 3 mois, format "MMM yy"
+            // 1-3 years: a tick every 3 months, "MMM yy" format
             return .init(
                 strideUnit: .month, strideCount: 3,
                 labelFormat: .dateTime.month(.abbreviated).year(.twoDigits)
@@ -108,11 +108,10 @@ enum InvestmentTimeRange: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Abréviation affichée sur la chip — indépendante de `rawValue` (identité
-    /// interne uniquement) pour pouvoir varier par langue sans toucher à des
-    /// comparaisons/persistances qui s'appuieraient sur le rawValue.
-    /// `rawValue` reste toujours en français (1J/1S/1M…) — `label` suit
-    /// `AppLocalization.locale` pour l'affichage.
+    /// Abbreviation shown on the chip — independent of `rawValue` (internal
+    /// identity only), so it can vary by language without touching comparisons or
+    /// persistence that rely on the rawValue. `rawValue` always stays French
+    /// (1J/1S/1M…) — `label` follows `AppLocalization.locale` for display.
     var label: String {
         let isEnglish = AppLocalization.locale.language.languageCode?.identifier == "en"
         guard isEnglish else { return rawValue }
@@ -129,11 +128,10 @@ enum InvestmentTimeRange: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Sélection des ranges qui font sens étant donnée une date la plus ancienne
-    /// dispo (création du compte ou du portefeuille). Ex: compte ouvert il y a
-    /// 3 mois → 5A/10A retirées (pas de données à afficher), 6M kept (devient
-    /// équivalent à Max sur cette plage). Évite les chips qui ouvrent des
-    /// charts vides et donc trompeurs.
+    /// Ranges that make sense given the oldest available date (account or
+    /// portfolio creation). E.g. an account opened 3 months ago → 5Y/10Y removed
+    /// (no data to show), 6M kept (equivalent to Max over that span). Avoids chips
+    /// that open empty, hence misleading, charts.
     static func availableRanges(since earliestDate: Date) -> [InvestmentTimeRange] {
         let interval = Date().timeIntervalSince(earliestDate)
         let day: TimeInterval = 86_400
@@ -142,7 +140,7 @@ enum InvestmentTimeRange: String, CaseIterable, Identifiable {
             case .all:        return true
             case .oneDay:     return interval >= day
             case .oneWeek:    return interval >= 7 * day
-            case .oneMonth:   return interval >= 25 * day  // tolérance : 1M dès 25j d'historique
+            case .oneMonth:   return interval >= 25 * day  // tolerance: 1M from 25 days of history
             case .threeMonth: return interval >= 80 * day
             case .sixMonth:   return interval >= 150 * day
             case .oneYear:    return interval >= 300 * day
@@ -152,7 +150,7 @@ enum InvestmentTimeRange: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Date de début pour le filtre. `nil` = tout l'historique.
+    /// Start date for the filter. `nil` = the whole history.
     var startDate: Date? {
         let cal = Calendar.current
         let now = Date()
@@ -172,8 +170,8 @@ enum InvestmentTimeRange: String, CaseIterable, Identifiable {
 
 // MARK: - Time Range Chips
 
-/// Sélecteur horizontal de plage temporelle (style Finary/Boursorama).
-/// Chips minimalistes avec accent sur la sélection.
+/// Horizontal time range picker (Finary/Boursorama style).
+/// Minimal chips with an accent on the selection.
 struct TimeRangeChips: View {
     @Binding var selection: InvestmentTimeRange
     var ranges: [InvestmentTimeRange] = InvestmentTimeRange.allCases
@@ -205,8 +203,8 @@ struct TimeRangeChips: View {
 
 // MARK: - Portfolio Evolution Point
 
-/// Point d'évolution du portefeuille (au niveau global, compte ou position).
-/// `value` est la valorisation totale à cette date (qty × close pour les positions sous-jacentes).
+/// Portfolio evolution point (at the global, account or position level).
+/// `value` is the total valuation at that date (qty × close for the underlying positions).
 struct PortfolioEvolutionPoint: Identifiable, Hashable {
     var id: Date { date }
     let date: Date
@@ -214,19 +212,18 @@ struct PortfolioEvolutionPoint: Identifiable, Hashable {
 }
 
 extension Array where Element == PortfolioEvolutionPoint {
-    /// Assainit une série avant de la donner à Swift Charts.
+    /// Sanitizes a series before handing it to Swift Charts.
     ///
-    /// ⚠️ Prévention du rendu en "code-barres" : DEUX POINTS LE MÊME JOUR
-    /// créent un segment vertical dans une aire/courbe, et une série qui en
-    /// contient beaucoup se rend comme un peigne de barres verticales. Le
-    /// symptôme est intermittent (« parfois oui, parfois non ») car les
-    /// doublons n'apparaissent qu'après une synchro ayant introduit un
-    /// horodatage différent pour un jour déjà connu.
+    /// Prevents a "barcode" rendering: TWO POINTS ON THE SAME DAY draw a vertical
+    /// segment in an area/line, and a series holding many of them renders as a
+    /// comb of vertical bars. The symptom is intermittent, since duplicates only
+    /// appear after a sync introduced a different timestamp for an already-known
+    /// day.
     ///
-    /// On garantit ici : valeurs finies, un seul point par jour calendaire
-    /// (le dernier connu gagne), série triée par date croissante.
-    /// Pas de rejet d'outliers ici : sur un portefeuille agrégé une forte
-    /// progression est légitime (contrairement au cours d'un titre isolé).
+    /// Guaranteed here: finite values, a single point per calendar day (the last
+    /// known one wins), a series sorted by ascending date. No outlier rejection
+    /// here: on an aggregated portfolio a sharp rise is legitimate (unlike a
+    /// single security's price).
     func sanitizedForChart() -> [PortfolioEvolutionPoint] {
         let cal = Calendar.current
         var byDay: [Date: PortfolioEvolutionPoint] = [:]
@@ -239,9 +236,9 @@ extension Array where Element == PortfolioEvolutionPoint {
 
 // MARK: - Chart Scrub Readout
 
-/// Un repère (valeur + date facultative) affiché dans le bandeau de lecture
-/// d'un chart. La date est optionnelle car certains repères n'en ont pas de
-/// pertinente (ex : le PRU, qui est une moyenne pondérée sur plusieurs ordres).
+/// A marker (value + optional date) shown in a chart's reading band. The date
+/// is optional because some markers have no meaningful one (e.g. the average
+/// cost, a weighted average over several orders).
 struct ChartReadoutPoint: Equatable {
     let date: Date?
     let value: Double
@@ -252,39 +249,38 @@ struct ChartReadoutPoint: Equatable {
     }
 }
 
-/// Bandeau de lecture affiché SOUS le hero et AU-DESSUS du chart.
+/// Reading band shown BELOW the hero and ABOVE the chart.
 ///
-/// Il répond à la question « combien ça vaut là où je pose le doigt » sans
-/// dépendre d'une annotation flottante dans le plot : une annotation collée au
-/// point est tronquée dès que le point est près du haut ou d'un bord du chart,
-/// ce qui rendait les valeurs illisibles pendant le scrub.
+/// It answers "how much is it worth where my finger is" without relying on a
+/// floating annotation in the plot: an annotation stuck to the point gets
+/// truncated as soon as the point is near the top or an edge of the chart,
+/// making the values unreadable while scrubbing.
 ///
-/// Le bandeau est TOUJOURS rendu (jamais conditionné à `isScrubbing`) : aucune
-/// hauteur qui saute quand on pose/lève le doigt, et l'écart reste lisible au
-/// repos.
+/// The band is ALWAYS rendered (never conditional on `isScrubbing`): no height
+/// jump when the finger goes down/up, and the difference stays readable at
+/// rest.
 ///
-/// Deux modes selon `referenceLabel` :
-///   - **nil** (charts agrégés global / compte) : une seule valeur mise en
-///     avant, `reference` ne sert QUE de base au calcul de variation. Parler
-///     d'un prix d'entrée et de sortie n'a aucun sens sur une valorisation de
-///     portefeuille — ce sont des positions qui entrent et sortent en continu.
-///   - **non-nil** (chart de position) : deux colonnes, typiquement l'ouverture
-///     et la clôture de la bougie pointée, qui sont bien des prix.
+/// Two modes depending on `referenceLabel`:
+///   - **nil** (aggregated global / account charts): a single highlighted
+///     value, `reference` ONLY serves as the basis of the variation. Talking
+///     about an entry and exit price makes no sense on a portfolio valuation —
+///     positions come and go continuously.
+///   - **non-nil** (position chart): two columns, typically the open and the
+///     close of the pointed candle, which really are prices.
 struct ChartScrubReadout: View {
-    /// Base du calcul de variation. Affichée en colonne seulement si
-    /// `referenceLabel` est renseigné.
+    /// Basis of the variation. Shown as a column only when `referenceLabel` is set.
     let reference: ChartReadoutPoint?
-    /// Valeur mise en avant (point sous le doigt, ou dernier point au repos).
+    /// Highlighted value (point under the finger, or last point at rest).
     let current: ChartReadoutPoint?
     var currency: String = "EUR"
     var referenceLabel: LocalizedStringKey? = nil
     var currentLabel: LocalizedStringKey = "Valeur"
-    /// Précision affichée sous la variation, ex. « depuis le début de la plage ».
+    /// Precision shown under the variation, e.g. "since the start of the range".
     var deltaCaption: LocalizedStringKey? = nil
-    /// `true` quand l'utilisateur parcourt la courbe : on met la valeur courante
-    /// en avant (accent) pour signaler que c'est elle qui bouge.
+    /// `true` while the user scrubs the curve: the current value is highlighted
+    /// (accent) to signal that it's the one moving.
     var isScrubbing: Bool = false
-    /// Ajoute l'heure aux dates (plages intraday : 1J).
+    /// Adds the time to dates (intraday ranges: 1D).
     var showsTime: Bool = false
 
     private var delta: Double? {
@@ -355,9 +351,9 @@ struct ChartScrubReadout: View {
             }
         }
         .animation(.easeInOut(duration: 0.12), value: isScrubbing)
-        // Hauteur minimale figée : la colonne date peut disparaître (repère sans
-        // date, ex. PRU) — sans ce plancher le chart remonterait de quelques
-        // points au premier scrub.
+        // Fixed minimum height: the date column can disappear (a marker without a
+        // date, e.g. the average cost) — without this floor the chart would jump up
+        // a few points on the first scrub.
         .frame(minHeight: 44, alignment: .top)
     }
 
@@ -396,20 +392,20 @@ struct ChartScrubReadout: View {
 
 // MARK: - Investment Hero Card
 
-/// Carte "hero" en haut d'un écran investments (Niveau Global ou Compte).
-/// Affiche la valorisation en très gros + variation absolue + variation % sur la plage sélectionnée.
+/// "Hero" card at the top of an investments screen (Global or Account level).
+/// Shows the valuation very large + absolute variation + variation % over the selected range.
 struct InvestmentHeroCard: View {
     let title: LocalizedStringResource
     let currentValue: Double
     let previousValue: Double?
     let currency: String
-    /// Si fourni, label affiché à côté du %, ex : "sur 1 mois"
+    /// When provided, label shown next to the %, e.g. "over 1 month"
     var rangeLabel: LocalizedStringResource? = nil
-    /// valeur à utiliser COMME BASE pour le calcul de variation, distincte du
-    /// `currentValue` cosmétique. Indispensable quand `currentValue` inclut la trésorerie
-    /// (qui inflerait artificiellement la perf) — on passe ici la valeur des positions
-    /// seules pour avoir une variation cohérente avec `previousValue` (positions seules
-    /// aussi). Si nil, fallback sur `currentValue`.
+    /// Value to use AS THE BASIS of the variation computation, distinct from the
+    /// display `currentValue`. Required when `currentValue` includes cash (which
+    /// would artificially inflate the performance) — pass the positions' value
+    /// alone here, so the variation is consistent with `previousValue` (positions
+    /// only too). If nil, falls back to `currentValue`.
     var variationBasisValue: Double? = nil
 
     private var basisForVariation: Double { variationBasisValue ?? currentValue }
@@ -440,7 +436,7 @@ struct InvestmentHeroCard: View {
                 .font(AppTheme.Typography.labelMedium)
                 .foregroundStyle(AppTheme.Colors.textSecondary)
 
-            // Valeur en très gros — passe par MoneyText pour respecter le masquage global
+            // Very large value — goes through MoneyText to honor global masking
             MoneyText(
                 amount: currentValue,
                 currency: currency,
@@ -452,7 +448,7 @@ struct InvestmentHeroCard: View {
             .lineLimit(1)
             .minimumScaleFactor(0.6)
 
-            // Variation : pastille capsule teintée (vert/rouge) + label de plage à côté.
+            // Variation: tinted capsule pill (green/red) + range label next to it.
             if let abs = variationAbs, let pct = variationPct {
                 HStack(spacing: 8) {
                     HStack(spacing: 4) {
@@ -484,41 +480,41 @@ struct InvestmentHeroCard: View {
 
 // MARK: - Evolution Chart
 
-/// Graphique d'évolution de la valeur (portefeuille / compte / position).
-/// Line smooth + area gradient sous + interaction drag pour inspecter un point précis.
+/// Value evolution chart (portfolio / account / position).
+/// Smooth line + area gradient underneath + drag interaction to inspect a precise point.
 struct EvolutionChart: View {
     let points: [PortfolioEvolutionPoint]
     var height: CGFloat = 200
-    /// Si fourni, callback notifié quand l'utilisateur drag pour inspecter un point.
+    /// When provided, callback notified while the user drags to inspect a point.
     var onSelectPoint: ((PortfolioEvolutionPoint?) -> Void)? = nil
-    /// Plage temporelle pour adapter la granularité des labels d'axe X.
-    /// nil = on calcule depuis les points (utilisé pour les charts sans chip).
+    /// Time range, to adapt the X-axis label granularity.
+    /// nil = computed from the points (used for charts without chips).
     var timeRange: InvestmentTimeRange? = nil
-    /// Devise des montants du bandeau de lecture.
+    /// Currency of the reading band's amounts.
     var currency: String = "EUR"
-    /// Bandeau entrée/sortie + variation au-dessus du chart. À désactiver pour
-    /// un chart purement décoratif.
+    /// Entry/exit + variation band above the chart. Disable it for a purely
+    /// decorative chart.
     var showsReadout: Bool = true
 
     @State private var selectedDate: Date? = nil
 
-    /// Série effectivement tracée : assainie (un seul point par jour, valeurs
-    /// finies, triée). Garde-fou anti "code-barres" — cf. `sanitizedForChart()`.
-    /// TOUT le rendu doit passer par ici, jamais par `points` brut.
+    /// Series actually drawn: sanitized (one point per day, finite values,
+    /// sorted). Anti-"barcode" guard — see `sanitizedForChart()`. ALL rendering
+    /// must go through here, never through raw `points`.
     private var cleanPoints: [PortfolioEvolutionPoint] { points.sanitizedForChart() }
 
-    /// Span temporel réel couvert par les points (fallback quand timeRange == nil).
+    /// Real time span covered by the points (fallback when timeRange == nil).
     private var pointsSpan: TimeInterval {
         guard let first = cleanPoints.first?.date, let last = cleanPoints.last?.date else { return 0 }
         return max(0, last.timeIntervalSince(first))
     }
 
-    /// Config d'axe X adaptative selon la plage temporelle.
+    /// X-axis configuration adapted to the time range.
     private var xAxisConfig: InvestmentChartXAxisConfig {
         InvestmentChartXAxisConfig.config(for: timeRange, span: pointsSpan)
     }
 
-    /// Couleur dynamique : vert si tendance haussière sur la plage, rouge sinon.
+    /// Dynamic color: green if the trend over the range is up, red otherwise.
     private var trendColor: Color {
         guard let first = cleanPoints.first?.value, let last = cleanPoints.last?.value else {
             return AppTheme.Colors.accent
@@ -531,30 +527,30 @@ struct EvolutionChart: View {
         return cleanPoints.min { abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate)) }
     }
 
-    /// Domaine Y avec un padding visuel pour ne pas coller aux bords.
-    /// Recalculé à partir des SEULS points de la plage affichée : changer de
-    /// plage doit rééquilibrer l'ordonnée, pas seulement l'abscisse.
+    /// Y domain with visual padding so the curve doesn't touch the edges.
+    /// Recomputed from the displayed range's points ONLY: changing the range must
+    /// rebalance the y-axis, not just the x-axis.
     private var yDomain: ClosedRange<Double> {
         ChartYDomain.compute(values: cleanPoints.map(\.value))
     }
 
-    /// Valeur minimale réelle des points (pas le min du yDomain qui inclut le padding visuel).
-    /// Sert de yStart pour l'AreaMark afin que le remplissage s'arrête au plus bas point
-    /// au lieu de descendre jusqu'aux abscisses.
+    /// The points' real minimum (not the yDomain minimum, which includes visual
+    /// padding). Used as the AreaMark's yStart so the fill stops at the lowest
+    /// point instead of reaching down to the x-axis.
     private var minValue: Double {
         cleanPoints.map(\.value).min() ?? 0
     }
 
-    /// Base de la variation = premier point de la plage affichée. Jamais montrée
-    /// en colonne : sur une valorisation agrégée (portefeuille, compte) il n'y a
-    /// pas de « prix d'entrée » — les positions entrent et sortent en continu.
-    /// Elle ne sert qu'à chiffrer la hausse ou la baisse sur la plage.
+    /// Variation basis = first point of the displayed range. Never shown as a
+    /// column: an aggregated valuation (portfolio, account) has no "entry price"
+    /// — positions come and go continuously. It only quantifies the rise or fall
+    /// over the range.
     private var readoutReference: ChartReadoutPoint? {
         cleanPoints.first.map { ChartReadoutPoint(date: $0.date, value: $0.value) }
     }
 
-    /// Valeur mise en avant = point sous le doigt pendant le scrub, dernier
-    /// point de la plage sinon.
+    /// Highlighted value = the point under the finger while scrubbing, otherwise
+    /// the range's last point.
     private var readoutCurrent: ChartReadoutPoint? {
         let point = selectedPoint ?? cleanPoints.last
         return point.map { ChartReadoutPoint(date: $0.date, value: $0.value) }
@@ -580,7 +576,7 @@ struct EvolutionChart: View {
     @ViewBuilder
     private var chartBody: some View {
         if cleanPoints.isEmpty {
-            // Placeholder élégant — pas un EmptyStateView lourd
+            // Understated placeholder — not a heavy EmptyStateView
             VStack(spacing: 8) {
                 Image(systemName: "chart.xyaxis.line")
                     .font(.system(size: 28, weight: .light))
@@ -601,9 +597,9 @@ struct EvolutionChart: View {
                     .interpolationMethod(.monotone)
                     .lineStyle(StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round))
 
-                    // yStart fixé au plus bas point réel (pas yDomain.lowerBound qui
-                    // inclut le padding visuel bas) → le remplissage s'arrête au niveau
-                    // du minimum de la courbe au lieu de toucher les abscisses.
+                    // yStart set to the real lowest point (not yDomain.lowerBound, which includes
+                    // the bottom visual padding) → the fill stops at the curve's minimum instead
+                    // of touching the x-axis.
                     AreaMark(
                         x: .value("Date", point.date),
                         yStart: .value("Min", minValue),
@@ -619,11 +615,10 @@ struct EvolutionChart: View {
                     .interpolationMethod(.monotone)
                 }
 
-                // Marqueur sélection : règle verticale + point sur la courbe.
-                // ⚠️ Pas d'annotation flottante ici : collée au point, elle est
-                // tronquée dès que le point approche le haut ou un bord du plot
-                // (c'est ce qui rendait les valeurs illisibles au scrub). Les
-                // chiffres sont lus dans `ChartScrubReadout`, au-dessus du chart.
+                // Selection marker: vertical rule + point on the curve.
+                // No floating annotation here: stuck to the point, it gets truncated as soon
+                // as the point nears the top or an edge of the plot. The figures are read in
+                // `ChartScrubReadout`, above the chart.
                 if let selectedPoint {
                     RuleMark(x: .value("Sélection", selectedPoint.date))
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
@@ -639,22 +634,21 @@ struct EvolutionChart: View {
             }
             .chartYScale(domain: yDomain)
             .chartXAxis {
-                // Ticks + format de label adaptatifs : depending on la plage
-                // temporelle (1J → heures, 10A → années) via
-                // `InvestmentChartXAxisConfig`. Sans ça, Swift Charts choisit
-                // un format auto sans année, ce qui rend illisible un "Max"
-                // qui couvre plusieurs années.
-                // Plafond de ~5 graduations : `.stride` en produisait des dizaines
-                // sur les longues plages (labels superposés + largeur intrinsèque
-                // du chart qui explose → vue scrollable horizontalement).
+                // Adaptive ticks + label format depending on the time range (1D → hours,
+                // 10Y → years) via `InvestmentChartXAxisConfig`. Without it, Swift Charts
+                // picks an automatic format without the year, which makes a multi-year "Max"
+                // unreadable.
+                // Capped at ~5 ticks: `.stride` produces dozens on long ranges (overlapping
+                // labels + the chart's intrinsic width blowing up → a horizontally
+                // scrollable view).
                 AxisMarks(position: .bottom, values: .automatic(desiredCount: 5)) { _ in
                     AxisValueLabel(format: xAxisConfig.labelFormat)
                         .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
                         .font(.system(size: 10))
                 }
             }
-            // Style Apple Stocks : pas de grille Y, juste 2-3 repères de valeur
-            // discrets à droite. Le chart respire, la ligne est la vedette.
+            // Apple Stocks style: no Y grid, just 2-3 discreet value markers on the
+            // right. The chart breathes, the line is the star.
             .chartYAxis {
                 AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { _ in
                     AxisValueLabel()
@@ -667,17 +661,16 @@ struct EvolutionChart: View {
                     Rectangle()
                         .fill(.clear)
                         .contentShape(Rectangle())
-                        // utiliser .gesture avec minimumDistance > 0 + détection
-                        // de direction → laisse le ScrollView parent gérer les drags
-                        // verticaux (scroll) sans qu'on les intercepte. Avant on avait
-                        // minimumDistance: 0 qui capturait tous les touches et faisait
-                        // bouger la page pendant le scrub.
+                        // .gesture with minimumDistance > 0 + direction detection → lets the parent
+                        // ScrollView handle vertical drags (scrolling) without intercepting them. A
+                        // minimumDistance of 0 would capture every touch and move the page while
+                        // scrubbing.
                         .gesture(
                             DragGesture(minimumDistance: 8)
                                 .onChanged { value in
                                     let dx = abs(value.translation.width)
                                     let dy = abs(value.translation.height)
-                                    // Drag à dominance verticale → c'est un scroll, on n'intercepte pas
+                                    // Vertically dominant drag → it's a scroll, not intercepted
                                     guard dx > dy else {
                                         if selectedDate != nil {
                                             selectedDate = nil
@@ -691,9 +684,8 @@ struct EvolutionChart: View {
                                     if let date: Date = proxy.value(atX: locationX) {
                                         let previous = selectedPoint?.date
                                         selectedDate = date
-                                        // Tick discret à chaque changement de point
-                                        // (pas à chaque pixel) — repère tactile
-                                        // pendant qu'on lit les chiffres au-dessus.
+                                        // Discreet tick on each point change (not on each pixel) — a tactile cue
+                                        // while reading the figures above.
                                         if selectedPoint?.date != previous {
                                             HapticService.shared.selection()
                                         }
@@ -714,22 +706,22 @@ struct EvolutionChart: View {
 
 // MARK: - Allocation Donut Chart
 
-/// Élément d'allocation pour le donut chart (nom + valeur + couleur stable).
+/// Allocation item for the donut chart (name + value + stable color).
 struct AllocationSlice: Identifiable, Hashable {
     var id: String { name }
     let name: String
     let value: Double
 }
 
-/// Donut chart d'allocation (par type d'actif ou par compte) + légende.
-/// Couleurs dérivées de la palette accent + variantes.
+/// Allocation donut chart (by asset type or by account) + legend.
+/// Colors derived from the accent palette + variants.
 struct AllocationDonutChart: View {
     let slices: [AllocationSlice]
     var currency: String = "EUR"
     var size: CGFloat = 180
 
-    /// Palette stable : accent vert primaire + variations + accentSecondary brun.
-    /// On parcourt en boucle pour les > 6 catégories.
+    /// Stable palette: primary green accent + variations + brown accentSecondary.
+    /// Cycles through for > 6 categories.
     private static let palette: [Color] = [
         AppTheme.Colors.accent,
         AppTheme.Colors.accentSecondary,
@@ -767,7 +759,7 @@ struct AllocationDonutChart: View {
             }
             .frame(width: size, height: size)
             .overlay {
-                // Total au centre du donut
+                // Total at the center of the donut
                 VStack(spacing: 2) {
                     Text("TOTAL")
                         .font(.system(size: 9, weight: .semibold))
@@ -782,7 +774,7 @@ struct AllocationDonutChart: View {
                 .padding(.horizontal, 8)
             }
 
-            // Légende verticale
+            // Vertical legend
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(slices.enumerated()), id: \.element.id) { index, slice in
                     HStack(spacing: 8) {
@@ -808,14 +800,14 @@ struct AllocationDonutChart: View {
 
 // MARK: - Investment Sparkline
 
-/// Mini line chart pour les cards compte ou row de position.
-/// Pas de label, pas d'axes — juste une ligne avec une couleur de tendance.
+/// Mini line chart for account cards or a position row.
+/// No label, no axes — just a line with a trend color.
 struct InvestmentSparkline: View {
     let points: [PortfolioEvolutionPoint]
     var height: CGFloat = 32
     var width: CGFloat = 80
 
-    /// Même garde-fou que `EvolutionChart` : série assainie (un point par jour).
+    /// Same guard as `EvolutionChart`: sanitized series (one point per day).
     private var cleanPoints: [PortfolioEvolutionPoint] { points.sanitizedForChart() }
 
     private var trendColor: Color {
@@ -827,7 +819,7 @@ struct InvestmentSparkline: View {
 
     var body: some View {
         if cleanPoints.count < 2 {
-            // Pas assez de données → placeholder discret
+            // Not enough data → discreet placeholder
             RoundedRectangle(cornerRadius: 2)
                 .fill(AppTheme.Colors.textSecondary.opacity(0.1))
                 .frame(width: width, height: height)

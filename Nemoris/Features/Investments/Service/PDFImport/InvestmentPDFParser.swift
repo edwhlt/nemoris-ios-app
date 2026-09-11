@@ -9,21 +9,23 @@ import UIKit
 import FoundationModels
 #endif
 
-/// Extracteur + parser IA pour les relevés d'ordres d'investissement.
-/// Supporte PDF, images (OCR via Vision), CSV et texte brut.
+/// Extractor + AI parser for investment order statements.
+/// Supports PDF, images (OCR via Vision), CSV and plain text.
 ///
-/// **Pipeline :**
-/// 1. PDFKit extrait le texte brut page par page
-/// 2. Apple Foundation Models (iOS 26+) analyse chaque page et identifie les ordres
-/// 3. Les ordres sont agrégés par ISIN/ticker pour preview
+/// **Pipeline:**
+/// 1. PDFKit extracts the raw text page by page
+/// 2. The configured AI backend analyzes each page and identifies the orders
+/// 3. Orders are aggregated by ISIN/ticker for the preview
 ///
-/// **Universel :** le prompt IA est conçu pour gérer n'importe quel format bancaire
+/// **Universal:** the AI prompt is designed to handle any bank format
 /// (Boursorama, Trade Republic, Degiro, Fortuneo, Bourse Direct, etc.)
+/// The prompt text stays in French: it is content for a model asked to answer
+/// the user in their own language.
 final class InvestmentPDFParser: Sendable {
 
     @MainActor static let shared = InvestmentPDFParser()
 
-    /// Indique si le parsing IA est disponible (Foundation Models iOS 26+).
+    /// Whether AI parsing is available (Foundation Models iOS 26+).
     @MainActor var isAIAvailable: Bool {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
@@ -33,28 +35,27 @@ final class InvestmentPDFParser: Sendable {
         return false
     }
 
-    // MARK: - Primitives partagées (OCR, décodage image)
+    // MARK: - Shared primitives (OCR, image decoding)
 
-    /// Décode des octets en `CGImage`.
+    /// Decodes bytes into a `CGImage`.
     ///
-    /// ⚠️ Par ImageIO, JAMAIS par UIImage/NSImage. Sur macOS, `UIImage` est un
-    /// alias de `NSImage` et le shim `.cgImage` appelle
-    /// `NSImage.cgImage(forProposedRect:context:hints:)` — une API AppKit à
-    /// affinité thread principal. L'invoquer depuis une tâche détachée gelait
-    /// l'app entière (symptôme macOS uniquement : sur iOS, `UIImage` n'a pas
-    /// cette contrainte). `CGImageSource` est thread-safe et identique sur les
-    /// deux plateformes.
+    /// Through ImageIO, NEVER through UIImage/NSImage. On macOS, `UIImage` is an
+    /// alias of `NSImage` and the `.cgImage` shim calls
+    /// `NSImage.cgImage(forProposedRect:context:hints:)` — an AppKit API with
+    /// main-thread affinity. Invoking it from a detached task freezes the whole
+    /// app (macOS only: on iOS, `UIImage` has no such constraint). `CGImageSource`
+    /// is thread-safe and identical on both platforms.
     nonisolated static func decodeImage(from data: Data) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
-    /// OCR d'une image en mémoire, appelable HORS du main actor.
+    /// OCR of an in-memory image, callable OFF the main actor.
     ///
-    /// ⚠️ Vision est SYNCHRONE et gourmand (1 à 5 s sur une capture plein
-    /// écran). Appelé depuis un contexte `@MainActor`, il bloque le thread
-    /// principal : l'app paraît figée et la barre de progression ne se peint
-    /// jamais. Les appelants doivent l'exécuter dans un `Task.detached`.
+    /// Vision is SYNCHRONOUS and expensive (1 to 5 s on a full-screen capture).
+    /// Called from a `@MainActor` context, it blocks the main thread: the app
+    /// looks frozen and the progress bar never paints. Callers must run it in a
+    /// `Task.detached`.
     nonisolated static func ocrText(from data: Data) -> String? {
         guard let cgImage = decodeImage(from: data) else {
             print("[PDFParser] Data image illisible")
@@ -63,22 +64,22 @@ final class InvestmentPDFParser: Sendable {
         return recognizeText(in: cgImage)
     }
 
-    /// Rasterise UNE page PDF en `CGImage`, pour la confier à un modèle
-    /// multimodal — la mise en page réelle (colonnes, tableau) reste visible,
-    /// contrairement au texte que `PDFPage.string` aplatit en une suite de
-    /// lignes sans plus aucune notion de colonne.
+    /// Rasterizes ONE PDF page into a `CGImage`, to hand it to a multimodal model
+    /// — the real layout (columns, table) stays visible, unlike the text that
+    /// `PDFPage.string` flattens into a sequence of lines with no notion of
+    /// columns left.
     ///
-    /// ⚠️ Par un `CGContext` bitmap brut + `PDFPage.draw(with:to:)`, jamais
-    /// par `PDFPage.thumbnail(of:for:)` : cette API renvoie un `UIImage`/
-    /// `NSImage`, et en tirer un `CGImage` retombe sur le même piège que
-    /// `decodeImage` ci-dessus (`.cgImage` d'un `NSImage` est une API AppKit
-    /// à affinité thread principal sur macOS). `CGContext`/`PDFDocument`
-    /// sont thread-safe, donc appelable depuis un `Task.detached`.
+    /// Through a raw bitmap `CGContext` + `PDFPage.draw(with:to:)`, never through
+    /// `PDFPage.thumbnail(of:for:)`: that API returns a `UIImage`/`NSImage`, and
+    /// getting a `CGImage` out of it falls into the same trap as `decodeImage`
+    /// above (`.cgImage` of an `NSImage` is an AppKit API with main-thread
+    /// affinity on macOS). `CGContext`/`PDFDocument` are thread-safe, so this is
+    /// callable from a `Task.detached`.
     ///
-    /// Pas de flip vertical nécessaire : un `CGContext` bitmap créé via
-    /// `CGContext(data:...)` a, comme l'espace PDF, l'origine en bas à
-    /// gauche — c'est `UIGraphicsImageRenderer` (origine haut-gauche façon
-    /// UIKit) qui aurait exigé l'inverse.
+    /// No vertical flip needed: a bitmap `CGContext` created via
+    /// `CGContext(data:...)` has, like PDF space, its origin at the bottom left —
+    /// it's `UIGraphicsImageRenderer` (UIKit-style top-left origin) that would
+    /// have required the opposite.
     nonisolated static func renderPageImage(pdfData: Data, pageIndex: Int, scale: CGFloat = 2.0) -> CGImage? {
         guard let document = PDFDocument(data: pdfData),
               pageIndex >= 0, pageIndex < document.pageCount,
@@ -122,10 +123,10 @@ final class InvestmentPDFParser: Sendable {
         return result
     }
 
-    // MARK: - Parse universel (détecte le type de fichier)
+    // MARK: - Universal parse (detects the file type)
 
-    /// Chantier C — résultat d'un parsing de page/bloc : ordres OU positions
-    /// (mode snapshot) + le mode détecté par l'IA.
+    /// Result of parsing a page/block: orders OR positions (snapshot mode) + the
+    /// mode detected by the AI.
     struct PageParse {
         var orders: [PDFExtractedOrder] = []
         var positions: [PDFExtractedPosition] = []
@@ -133,12 +134,10 @@ final class InvestmentPDFParser: Sendable {
         var isEmpty: Bool { orders.isEmpty && positions.isEmpty }
     }
 
-    // MARK: - Détection du format par le CONTENU
+    // MARK: - Format detection by CONTENT
 
-    /// Délègue au sniffer partagé du pipeline. Conservé comme façade parce que
-    /// le nom est utilisé un peu partout, mais la LOGIQUE n'existe plus qu'à un
-    /// seul endroit — elle était dupliquée ici et dans les deux extensions de
-    /// partage, avec le risque que les copies divergent.
+    /// Delegates to the pipeline's shared sniffer. Kept as a façade because the
+    /// name is used in many places, but the LOGIC exists in one place only.
     static func detectKind(data: Data, fileExtension: String = "") -> ImportSourceKind {
         ImportFormatSniffer.detect(data: data, fileExtension: fileExtension)
     }
@@ -151,16 +150,13 @@ final class InvestmentPDFParser: Sendable {
         ImportFormatSniffer.looksLikeText(data)
     }
 
-    /// Interprète UNE unité déjà lue, image comprise.
+    /// Interprets ONE already-read unit, images included.
     ///
-    /// ⚠️ Ce parseur n'ouvre plus de fichiers et n'orchestre plus de batch : la
-    /// lecture appartient à `ImportPipeline`. C'est ce qui répare au passage
-    /// une asymétrie réelle — l'ancienne boucle appelait `textUnits`, qui JETAIT
-    /// l'image, donc l'import d'investissements faisait systématiquement un OCR
-    /// même avec un backend multimodal disponible. La décision « l'image
-    /// passe au modèle, pas son OCR » n'avait été câblée que côté transactions,
-    /// alors que la mise en page d'une capture de courtier (colonnes, PRU
-    /// aligné à droite) porte exactement le même genre de sens.
+    /// This parser neither opens files nor orchestrates batches: reading belongs
+    /// to `ImportPipeline`. An image unit goes to the model as an image when a
+    /// backend can read one — the layout of a broker capture (columns, average
+    /// cost right-aligned) carries meaning that OCR would flatten, exactly as for
+    /// the transaction import.
     @MainActor func analyze(_ unit: ImportDocumentReader.Unit,
                             unitNumber: Int) async -> PDFPageResult {
         func failed(_ diagnostic: ImportUnitDiagnostic, kind: ImportSourceKind) -> PDFPageResult {
@@ -170,7 +166,7 @@ final class InvestmentPDFParser: Sendable {
         }
 
         switch unit.content {
-        // ─── L'unité EST une image et un modèle sait la lire ────────────────
+        // ─── The unit IS an image and a model can read it ───────────────────
         case .image(let image):
             let raw = await AIEnrichmentBackend.completeText(
                 feature: .investmentImport,
@@ -180,22 +176,19 @@ final class InvestmentPDFParser: Sendable {
             )
             let parsed = raw.map { Self.parsePageResponse($0, pageNumber: unitNumber) } ?? PageParse()
 
-            // ⚠️ Repli OCR quand la lecture d'image ne donne RIEN. Ce chemin
-            // n'avait aucun filet : le modèle est la seule source, donc une
-            // réponse tronquée ou un JSON irréparable rendait « 0 opération »
-            // — et comme une génération n'est pas déterministe, la MÊME capture
-            // donnait tantôt N opérations, tantôt aucune, sans que rien ne
-            // change côté app. L'OCR ramène du texte, donc l'extraction
-            // déterministe ET une seconde chance au modèle.
+            // OCR fallback when reading the image yields NOTHING. The model is otherwise
+            // the only source, so a truncated answer or an unrepairable JSON would give
+            // "0 operations" — and since generation isn't deterministic, the SAME capture
+            // would sometimes give N operations, sometimes none. OCR brings back text,
+            // hence the deterministic extraction AND a second chance for the model.
             if parsed.isEmpty, let data = unit.imageSourceData,
                let text = await Task.detached(priority: .userInitiated, operation: {
                    Self.ocrText(from: data)
                }).value,
                !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 print("[PDFParser] Unité \(unitNumber) : lecture image sans résultat, repli OCR")
-                // Le « texte lu » du diagnostic devient l'OCR, pas la réponse
-                // vide du modèle : c'est lui qui permet de comprendre ce que
-                // l'app a réellement vu de la capture.
+                // The diagnostic's "text read" becomes the OCR, not the model's empty
+                // answer: that's what shows what the app actually saw in the capture.
                 return await parseUnit(text: text, unitNumber: unitNumber, kind: .image)
             }
 
@@ -204,9 +197,9 @@ final class InvestmentPDFParser: Sendable {
             }
             return PDFPageResult(
                 pageNumber: unitNumber,
-                // Le « texte lu » du diagnostic devient la réponse du modèle :
-                // sur ce chemin aucun texte n'est extrait, et c'est la seule
-                // chose qui reste exploitable pour comprendre un échec.
+                // The diagnostic's "text read" becomes the model's answer: no text is
+                // extracted on this path, and it's the only thing left to understand a
+                // failure.
                 rawText: raw ?? "",
                 orders: StatementReconciler.dedupe(parsed.orders),
                 positions: parsed.positions,
@@ -216,8 +209,8 @@ final class InvestmentPDFParser: Sendable {
                 kind: .image
             )
 
-        // ─── Format structuré (OFX de courtier) ─────────────────────────────
-        // Les champs sont nommés par le format : ni modèle, ni ancrage ISIN.
+        // ─── Structured format (broker OFX) ─────────────────────────────────
+        // The fields are named by the format: no model, no ISIN anchoring.
         case .records(let payloads):
             let orders = payloads.compactMap { payload -> PDFExtractedOrder? in
                 guard case .investmentOrder(let order) = payload else { return nil }
@@ -231,8 +224,8 @@ final class InvestmentPDFParser: Sendable {
                 kind: unit.kind, usedDeterministicFallback: true
             )
 
-        // ─── Table (CSV / feuille de classeur) ──────────────────────────────
-        // Passe par l'écran de mapping des colonnes, en amont.
+        // ─── Table (CSV / spreadsheet sheet) ────────────────────────────────
+        // Goes through the column mapping screen, upstream.
         case .grid:
             return failed(.malformedStructure("table non mappée"), kind: unit.kind)
 
@@ -249,37 +242,35 @@ final class InvestmentPDFParser: Sendable {
         }
     }
 
-    /// Analyse d'une unité TEXTE.
+    /// Analysis of a TEXT unit.
     ///
-    /// ─── Ordre de lecture : L'IMAGE D'ABORD quand un modèle sait la lire ────
+    /// ─── Reading order: THE IMAGE FIRST when a model can read it ────────
     ///
-    /// Une page d'avis d'opéré est un TABLEAU. `PDFPage.string` l'aplatit en
-    /// une suite de lignes où les colonnes sont irrémédiablement mélangées —
-    /// mesuré sur un avis BoursoBank réel, la quantité « 4 » se retrouve trois
-    /// lignes sous son en-tête, de l'autre côté du code ISIN. Aucune fenêtre
-    /// de recherche autour d'un libellé ne couvrira toutes les mises en page
-    /// de tous les courtiers, et chaque nouveau format en réclamerait une de
-    /// plus.
+    /// A trade confirmation page is a TABLE. `PDFPage.string` flattens it into a
+    /// sequence of lines where the columns are irretrievably mixed — on a real
+    /// BoursoBank confirmation, the quantity "4" ends up three lines below its
+    /// header, on the other side of the ISIN code. No search window around a
+    /// label will cover every layout of every broker, and each new format would
+    /// demand yet another one.
     ///
-    /// Le modèle multimodal, lui, voit la GRILLE. C'est déjà la décision prise
-    /// pour les captures d'écran (« l'image passe au modèle, pas son
-    /// OCR ») ; elle vaut tout autant pour une page PDF, qui est une image que
-    /// l'on se trouve pouvoir aussi lire en texte.
+    /// The multimodal model sees the GRID. It's the same rule as for screenshots
+    /// ("the image goes to the model, not its OCR"); it applies just as much to a
+    /// PDF page, which is an image that happens to be readable as text too.
     ///
-    /// ⚠️ Le texte aplati est joint À L'IMAGE plutôt que jeté : il porte les
-    /// caractères EXACTS (montants au centime, ISIN), là où une lecture
-    /// purement visuelle peut confondre un chiffre. Le modèle a donc la
-    /// structure d'un côté et les valeurs sûres de l'autre.
+    /// The flattened text is attached TO THE IMAGE rather than dropped: it carries
+    /// the EXACT characters (amounts to the cent, ISINs), where a purely visual
+    /// reading may confuse a digit. The model thus gets the structure on one side
+    /// and the reliable values on the other.
     ///
-    /// Trois étages, chacun rattrapant le précédent :
-    ///   1. lecture VISUELLE de la page (si un backend multimodal est actif) ;
-    ///   2. lecture TEXTE (génération guidée Apple, sinon JSON) ;
-    ///   3. extraction DÉTERMINISTE, toujours exécutée — elle ne coûte aucune
-    ///      I/O, fonctionne sans le moindre backend, et vérifie l'arithmétique
-    ///      (`quantité × cours = montant`) qu'aucun modèle ne garantit.
+    /// Three stages, each catching the previous one:
+    ///   1. VISUAL reading of the page (if a multimodal backend is active);
+    ///   2. TEXT reading (Apple guided generation, otherwise JSON);
+    ///   3. DETERMINISTIC extraction, always run — it costs no I/O, works without
+    ///      any backend, and checks the arithmetic (`quantity × price = amount`)
+    ///      that no model guarantees.
     ///
-    /// `pdfSourceData`/`pdfPageIndex` : présents UNIQUEMENT pour une page PDF
-    /// (jamais pour un bloc de texte brut ou un OCR de capture).
+    /// `pdfSourceData`/`pdfPageIndex`: present ONLY for a PDF page (never for a
+    /// raw text block or a capture's OCR).
     @MainActor private func parseUnit(text: String, unitNumber: Int,
                                       kind: ImportSourceKind,
                                       pdfSourceData: Data? = nil,
@@ -300,21 +291,19 @@ final class InvestmentPDFParser: Sendable {
             }
         }
 
-        // Repli texte : pas de backend multimodal, rendu impossible, ou lecture
-        // visuelle muette.
+        // Text fallback: no multimodal backend, rendering impossible, or a silent
+        // visual reading.
         if !readVisually {
             (parsed, diagnostic) = await parsePage(text: text, pageNumber: unitNumber)
         }
 
-        // Extraction déterministe menée SYSTÉMATIQUEMENT, pas seulement en
-        // repli : elle ne coûte rien (aucune I/O) et elle est exacte là où le
-        // petit modèle embarqué dérape.
+        // Deterministic extraction run SYSTEMATICALLY, not only as a fallback: it
+        // costs nothing (no I/O) and it's exact where the small on-device model slips.
         //
-        // ⚠️ Constaté sur une capture réelle à deux lignes : le modèle a
-        // recopié le nom et l'ISIN de la PREMIÈRE opération sur la seconde.
-        // Associer un libellé au bon code sur un texte OCR en colonne est
-        // précisément ce qu'un ancrage par ISIN fait sans se tromper. On
-        // réconcilie donc les deux sources plutôt que de choisir un camp.
+        // On a two-row capture, a model can copy the FIRST operation's name and ISIN
+        // onto the second. Associating a label with the right code on column OCR
+        // text is precisely what ISIN anchoring does without error. The two sources
+        // are therefore reconciled rather than picking one side.
         let deterministic = InvestmentStatementExtractor.extractOrders(from: text)
             .map { Self.convert($0, pageNumber: unitNumber) }
 
@@ -324,15 +313,13 @@ final class InvestmentPDFParser: Sendable {
 
         let usedFallback = !deterministic.isEmpty && parsed.orders.isEmpty
 
-        // ⚠️ Ordres ET positions s'excluent pour une même unité. Le modèle
-        // rend parfois les deux sur un relevé d'opérations — les mêmes titres,
-        // vus une fois comme opérations et une fois comme lignes détenues.
-        // Les garder tous les deux comptait chaque titre DEUX fois dans la
-        // revue (34 opérations réelles rendues en 36-37 éléments), et aurait
-        // créé à l'import une position en double de son propre ordre. Le
-        // prompt tranche déjà en faveur des ordres, plus précis pour
-        // l'historique : on applique la même règle côté code plutôt que de
-        // faire confiance au modèle pour l'avoir respectée.
+        // Orders AND positions are mutually exclusive for a given unit. The model
+        // sometimes returns both on an operations statement — the same securities,
+        // seen once as operations and once as holdings. Keeping both would count
+        // each security TWICE in the review, and at import would create a position
+        // duplicating its own order. The prompt already favors orders (more precise
+        // for history); the same rule is applied in code rather than trusting the
+        // model to have followed it.
         let positions = merged.isEmpty ? parsed.positions : []
 
         if !merged.isEmpty || !positions.isEmpty {
@@ -340,8 +327,8 @@ final class InvestmentPDFParser: Sendable {
                 pageNumber: unitNumber, rawText: text,
                 orders: merged, positions: positions,
                 detectedMode: merged.isEmpty ? parsed.mode : .orders,
-                // On garde la trace d'un échec IA même quand le déterministe a
-                // sauvé la mise : c'est l'information utile en support.
+                // An AI failure is recorded even when the deterministic pass saved the day:
+                // it's the useful information for support.
                 parsingNote: diagnostic.isFailure ? diagnostic.userMessage : nil,
                 diagnostic: .extracted, kind: kind,
                 usedDeterministicFallback: usedFallback
@@ -358,17 +345,17 @@ final class InvestmentPDFParser: Sendable {
         )
     }
 
-    /// Rend la page PDF en image et la fait lire par le modèle multimodal.
+    /// Renders the PDF page as an image and has the multimodal model read it.
     ///
-    /// C'est le chemin PRIMAIRE d'une page PDF dès qu'un backend sait lire une
-    /// image : la mise en page d'un avis d'opéré EST l'information (colonnes
-    /// Date | Quantité | Valeur | Exécution), et `PDFPage.string` la détruit.
+    /// This is the PRIMARY path for a PDF page as soon as a backend can read an
+    /// image: a trade confirmation's layout IS the information (Date | Quantity |
+    /// Security | Execution columns), and `PDFPage.string` destroys it.
     ///
-    /// ⚠️ Le texte aplati accompagne l'image dans le prompt. Il ne s'agit pas
-    /// de redondance : l'image donne la STRUCTURE, le texte donne les
-    /// CARACTÈRES EXACTS (un montant au centime, un ISIN de 12 signes), que
-    /// même un bon modèle de vision peut altérer. Borné, parce que la fenêtre
-    /// de contexte sert d'abord à l'image.
+    /// The flattened text accompanies the image in the prompt. It isn't
+    /// redundancy: the image gives the STRUCTURE, the text gives the EXACT
+    /// CHARACTERS (an amount to the cent, a 12-character ISIN) that even a good
+    /// vision model can alter. Bounded, because the context window serves the
+    /// image first.
     @MainActor private static func parsePageImage(
         pdfSourceData: Data, pdfPageIndex: Int, pageText: String, pageNumber: Int
     ) async -> PageParse {
@@ -405,7 +392,7 @@ final class InvestmentPDFParser: Sendable {
         return parsed
     }
 
-    /// Pont moteur déterministe (pur) → modèle d'UI.
+    /// Bridge from the (pure) deterministic engine → UI model.
     static func convert(_ order: ExtractedStatementOrder, pageNumber: Int) -> PDFExtractedOrder {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -426,7 +413,7 @@ final class InvestmentPDFParser: Sendable {
         )
     }
 
-    /// Découpe un long texte en chunks d'environ `maxChars`, en coupant sur les sauts de ligne.
+    /// Splits a long text into chunks of about `maxChars`, cutting on line breaks.
     static func splitTextIntoChunks(_ text: String, maxChars: Int) -> [String] {
         guard text.count > maxChars else { return [text] }
         var chunks: [String] = []
@@ -444,35 +431,27 @@ final class InvestmentPDFParser: Sendable {
 
     // MARK: - Parsing IA page par page
 
-    /// Parse une seule page. Retourne ordres OU positions (mode snapshot)
-    /// selon la classification faite par l'IA, PLUS un diagnostic — sans lui,
-    /// un échec du modèle est indiscernable d'un document réellement vide
-    /// côté UI.
+    /// Parses a single page. Returns orders OR positions (snapshot mode)
+    /// depending on the AI's classification, PLUS a diagnostic — without it, a
+    /// model failure is indistinguishable from a genuinely empty document in the
+    /// UI.
     ///
-    /// ⚠️ CORRECTIF : cette fonction n'appelait QUE Foundation
-    /// Models, en dur — jamais `AIEnrichmentBackend`, le point de dispatch
-    /// par fonctionnalité livré en. Un utilisateur ayant configuré un
-    /// serveur local ou une clé cloud pour « Import de portefeuille »
-    /// n'avait donc JAMAIS d'IA sur le texte d'une page PDF : sans Apple
-    /// Intelligence disponible, `parsePageWithAI` n'était jamais atteinte, et
-    /// tout retombait sur le seul moteur déterministe — exactement le
-    /// symptôme rapporté (« aucune IA utilisée sur le PDF », quantité jamais
-    /// détectée sur un format que le déterministe ne couvre pas).
+    /// Goes through `AIEnrichmentBackend`, the per-feature dispatch point: a user
+    /// who configured a local server or a cloud key for "Portfolio import" gets
+    /// AI on the page text even without Apple Intelligence.
     ///
-    /// Ce chemin TEXTE n'est depuis lors plus le premier essai d'une page PDF :
-    /// `parseUnit` fait d'abord lire l'IMAGE de la page quand un backend
-    /// multimodal est actif (cf. `parsePageImage`). Il reste le chemin de tous
-    /// les autres cas — pas de backend multimodal, rendu impossible, blocs de
-    /// texte brut, OCR d'une capture.
+    /// This TEXT path isn't the first attempt for a PDF page: `parseUnit` first
+    /// has the page's IMAGE read when a multimodal backend is active (see
+    /// `parsePageImage`). It remains the path for every other case — no
+    /// multimodal backend, rendering impossible, raw text blocks, a capture's OCR.
     @MainActor private func parsePage(text: String, pageNumber: Int) async -> (PageParse, ImportUnitDiagnostic) {
-        // ⚠️ Une page PDF n'est PAS découpée par le lecteur, contrairement à un
-        // texte brut (`ImportDocumentReader.textUnits`) : elle arrive ENTIÈRE.
-        // Un relevé de mouvements listant plusieurs dizaines d'opérations
-        // dépasse largement la fenêtre du modèle embarqué, et le `prefix(...)`
-        // posé plus bas amputait alors la fin de la page en silence — le modèle
-        // ne voyait qu'une partie des lignes. C'est aussi une source de
-        // variabilité : selon l'endroit exact de la coupure, la dernière
-        // opération visible est complète ou tronquée, donc lue ou perdue.
+        // A PDF page is NOT split by the reader, unlike raw text
+        // (`ImportDocumentReader.textUnits`): it arrives WHOLE. A statement listing
+        // dozens of operations far exceeds the on-device model's window, and the
+        // `prefix(...)` set below would then silently cut off the end of the page —
+        // the model would only see part of the rows. It's also a source of
+        // variability: depending on exactly where the cut falls, the last visible
+        // operation is complete or truncated, hence read or lost.
         let chunks = Self.splitTextIntoChunks(text, maxChars: Self.aiChunkSize)
             .prefix(Self.maxAIChunks)
         guard chunks.count > 1 else {
@@ -492,28 +471,27 @@ final class InvestmentPDFParser: Sendable {
                 diagnostic = chunkDiagnostic
             }
         }
-        // Les blocs se lisent indépendamment : une opération à cheval sur une
-        // coupure peut être rendue par les deux.
+        // Blocks are read independently: an operation straddling a cut may be
+        // returned by both.
         merged.orders = StatementReconciler.dedupe(merged.orders)
         return (merged, merged.isEmpty ? diagnostic : .extracted)
     }
 
-    /// Taille d'un bloc envoyé au modèle. Sous la fenêtre du modèle embarqué,
-    /// et sous le `prefix` de garde des deux chemins d'appel.
+    /// Size of a block sent to the model. Below the on-device model's window, and
+    /// below the guard `prefix` of both call paths.
     private static let aiChunkSize = 3500
-    /// Plafond de blocs par unité : au-delà, l'analyse d'un seul document
-    /// prendrait plusieurs minutes pour un gain marginal — l'extraction
-    /// déterministe, elle, voit de toute façon le texte entier.
+    /// Cap on blocks per unit: beyond it, analyzing a single document would take
+    /// several minutes for a marginal gain — the deterministic extraction sees
+    /// the whole text anyway.
     private static let maxAIChunks = 8
 
-    /// Un bloc, un appel au modèle — par le backend résolu pour l'import de
-    /// portefeuille.
+    /// One block, one model call — through the backend resolved for portfolio
+    /// import.
     ///
-    /// `usesGuidedGeneration` reflète le backend RÉSOLU pour cette
-    /// fonctionnalité (préférence utilisateur + disponibilité réelle) — pas un
-    /// simple test de plateforme : un iPhone iOS 26+ dont l'utilisateur a
-    /// choisi « Serveur local » doit passer par le chemin générique lui aussi,
-    /// pas par Foundation Models envers et contre son réglage.
+    /// `usesGuidedGeneration` reflects the backend RESOLVED for this feature
+    /// (user preference + real availability) — not a mere platform test: an
+    /// iOS 26+ iPhone whose user chose "Local server" must take the generic path
+    /// too, not Foundation Models against their setting.
     @MainActor private func parseChunk(text: String, pageNumber: Int) async -> (PageParse, ImportUnitDiagnostic) {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *), AIEnrichmentBackend.usesGuidedGeneration(for: .investmentImport) {
@@ -523,11 +501,10 @@ final class InvestmentPDFParser: Sendable {
         return await parsePageWithGenericBackend(text: text, pageNumber: pageNumber)
     }
 
-    /// Chemin non-Apple (serveur local, Claude, OpenAI) : pas de génération
-    /// guidée possible (`@Generable` est propre à Foundation Models,),
-    /// donc JSON en texte libre — le même `parsePageResponse`/`systemInstructions`
-    /// que le repli image, pour ne jamais avoir deux prompts ou deux parseurs
-    /// à faire diverger.
+    /// Non-Apple path (local server, Claude, OpenAI): no guided generation
+    /// possible (`@Generable` is specific to Foundation Models), hence free-text
+    /// JSON — the same `parsePageResponse`/`systemInstructions` as the image
+    /// fallback, so there are never two prompts or two parsers to diverge.
     @MainActor private func parsePageWithGenericBackend(text: String, pageNumber: Int) async -> (PageParse, ImportUnitDiagnostic) {
         let payload = String(text.prefix(8000))
         let raw = await AIEnrichmentBackend.completeText(
@@ -549,14 +526,14 @@ final class InvestmentPDFParser: Sendable {
     private func parsePageWithAI(text: String, pageNumber: Int) async -> (PageParse, ImportUnitDiagnostic) {
         guard SystemLanguageModel.default.isAvailable else { return (PageParse(), .aiUnavailable) }
 
-        // Le texte envoyé est borné : la fenêtre de contexte du modèle embarqué
-        // est étroite et un dépassement fait échouer TOUTE la page.
+        // The text sent is bounded: the on-device model's context window is narrow,
+        // and overflowing it fails the WHOLE page.
         let payload = String(text.prefix(4000))
 
-        // 1er choix : GÉNÉRATION GUIDÉE. Le schéma `@Generable` contraint le
-        // décodage côté modèle — plus de JSON à réparer, et mesuré ~3× plus
-        // rapide que la génération libre (7,5 s contre 21,4 s sur le même
-        // relevé) parce que le modèle n'écrit plus la syntaxe.
+        // 1st choice: GUIDED GENERATION. The `@Generable` schema constrains decoding
+        // on the model side — no JSON to repair, and measured ~3× faster than free
+        // generation (7.5 s vs 21.4 s on the same statement) because the model no
+        // longer writes the syntax.
         let session = LanguageModelSession(instructions: Self.guidedInstructions)
         do {
             let response = try await session.respond(
@@ -570,8 +547,8 @@ final class InvestmentPDFParser: Sendable {
             print("[PDFParser] Génération guidée KO unité \(pageNumber) : \(error)")
         }
 
-        // 2e choix : génération libre + JSON. Conservée parce qu'un modèle peut
-        // refuser un schéma qu'il honore mal sur un document atypique.
+        // 2nd choice: free generation + JSON. Kept because a model may reject a
+        // schema it honors poorly on an atypical document.
         let legacySession = LanguageModelSession(instructions: Self.systemInstructions)
         do {
             let response = try await legacySession.respond(
@@ -585,8 +562,7 @@ final class InvestmentPDFParser: Sendable {
         }
     }
 
-    /// Message d'erreur lisible par l'utilisateur (les erreurs Foundation
-    /// Models sont verbeuses et anglophones).
+    /// User-readable error message (Foundation Models errors are verbose).
     @available(iOS 26.0, macOS 26.0, *)
     private static func humanize(_ error: Error) -> String {
         let raw = String(describing: error).lowercased()
@@ -602,12 +578,11 @@ final class InvestmentPDFParser: Sendable {
         return "erreur du moteur d'analyse"
     }
 
-    // MARK: - Schéma de génération guidée
+    // MARK: - Guided generation schema
 
-    /// Schéma imposé au modèle. Chaque champ est NON optionnel : la génération
-    /// guidée les remplit toujours, ce qui supprime la classe de bugs du
-    /// décodage JSON (une clé manquante faisait perdre la page ENTIÈRE, pas
-    /// seulement la ligne fautive).
+    /// Schema imposed on the model. Every field is NON-optional: guided generation
+    /// always fills them, which removes the JSON decoding class of bugs (a
+    /// missing key would lose the WHOLE page, not just the faulty row).
     @available(iOS 26.0, macOS 26.0, *)
     @Generable
     struct AIStatementExtraction {
@@ -661,10 +636,10 @@ final class InvestmentPDFParser: Sendable {
         var currency: String
     }
 
-    /// Instructions de la génération guidée — volontairement COURTES (~500
-    /// caractères contre 7 600 pour la génération libre) : le schéma porte
-    /// déjà la structure, et chaque token d'instruction est pris sur la
-    /// fenêtre de contexte disponible pour le document lui-même.
+    /// Guided generation instructions — deliberately SHORT (~500 characters vs
+    /// 7,600 for free generation): the schema already carries the structure, and
+    /// every instruction token is taken from the context window available for the
+    /// document itself.
     @available(iOS 26.0, macOS 26.0, *)
     static let guidedInstructions = """
     Tu extrais des opérations d'investissement depuis un relevé bancaire, un avis d'opéré ou une capture d'écran d'application de courtage (le texte peut venir d'un OCR, donc être en colonne et mal aligné).
@@ -685,8 +660,8 @@ final class InvestmentPDFParser: Sendable {
         """
     }
 
-    /// Conversion schéma guidé → modèle interne, avec les mêmes filtres de
-    /// validité que le chemin JSON (date parsable, type d'ordre reconnu).
+    /// Guided schema → internal model conversion, with the same validity filters
+    /// as the JSON path (parsable date, recognized order type).
     @available(iOS 26.0, macOS 26.0, *)
     static func convert(_ extraction: AIStatementExtraction, pageNumber: Int) -> PageParse {
         let formatter = DateFormatter()
@@ -695,8 +670,8 @@ final class InvestmentPDFParser: Sendable {
         let orders: [PDFExtractedOrder] = extraction.orders.compactMap { raw in
             guard let executedAt = Self.parseDate(raw.executedAt, formatter: formatter),
                   let orderType = Self.normalizeOrderType(raw.orderType) else { return nil }
-            // Même valorisation que l'extraction déterministe : un dividende
-            // vaut son MONTANT, pas « quantité × cours » (qui donnerait 0 €).
+            // Same valuation as the deterministic extraction: a dividend is worth its
+            // AMOUNT, not "quantity × price" (which would give €0).
             let valued = InvestmentStatementExtractor.valuation(
                 orderType: orderType, quantity: raw.quantity,
                 unitPrice: raw.unitPrice, gross: raw.unitPrice * raw.quantity)
@@ -734,7 +709,7 @@ final class InvestmentPDFParser: Sendable {
     }
     #endif
 
-    // MARK: - Prompt système
+    // MARK: - System prompt
 
     static let systemInstructions = """
     Tu es un assistant spécialisé dans l'extraction de données d'investissement depuis des relevés bancaires ET des captures d'écran d'applications de courtage.
@@ -888,24 +863,23 @@ final class InvestmentPDFParser: Sendable {
 
     // MARK: - JSON Parser
 
-    /// Chantier C — parse la réponse IA bi-mode (ordres OU positions) en `PageParse`.
+    /// Parses the dual-mode AI answer (orders OR positions) into a `PageParse`.
     static func parsePageResponse(_ raw: String, pageNumber: Int) -> PageParse {
-        // Même réparation que côté transactions : isolement de l'objet ET
-        // recollage des chaînes coupées par la mise en forme du modèle.
+        // Same repair as on the transaction side: isolating the object AND
+        // re-joining strings split by the model's formatting.
         let jsonStr = LenientJSON.extractObject(from: raw)
         guard jsonStr.contains("{") else {
             print("[PDFParser] Pas de JSON trouvé dans la réponse IA page \(pageNumber)")
             return PageParse()
         }
-        // Chemin rapide : le document entier est valide.
+        // Fast path: the whole document is valid.
         var payload = jsonStr.data(using: .utf8)
             .flatMap { try? JSONDecoder().decode(AIPageResponse.self, from: $0) }
 
-        // ⚠️ Repli OBJET PAR OBJET quand il ne l'est pas. Une seule faute de
-        // ponctuation du modèle (virgule finale, guillemet de clé oublié) faisait
-        // sinon perdre TOUTES les opérations de la page, y compris celles
-        // parfaitement formées — constaté côté transactions, même moteur, même
-        // classe de réponse. Une ligne cassée ne doit coûter qu'une ligne.
+        // OBJECT-BY-OBJECT fallback when it isn't. A single punctuation mistake from
+        // the model (trailing comma, forgotten key quote) would otherwise lose EVERY
+        // operation of the page, including the perfectly formed ones. A broken row
+        // must cost only one row.
         if payload == nil {
             let decoder = JSONDecoder()
             let salvagedOrders = LenientJSON.innermostObjects(in: raw).compactMap { object in
@@ -927,7 +901,7 @@ final class InvestmentPDFParser: Sendable {
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
 
-        // Ordres (tolérant : même sans "mode", on parse les ordres présents)
+        // Orders (tolerant: even without "mode", the orders present are parsed)
         let orders: [PDFExtractedOrder] = (payload.orders ?? []).compactMap { raw in
             let date = Self.parseDate(raw.executed_at, formatter: dateFormatter)
             guard let executedAt = date else {
@@ -938,10 +912,9 @@ final class InvestmentPDFParser: Sendable {
                 print("[PDFParser] Type d'ordre inconnu '\(raw.order_type ?? "nil")' — ordre ignoré")
                 return nil
             }
-            // ⚠️ Le modèle rend volontiers un dividende avec `quantity: 1` et
-            // `unit_price: 0` — soit un montant de 0 €. Le champ `total`, quand
-            // il existe, porte la vraie valeur : la valorisation partagée
-            // rétablit un produit exact.
+            // The model readily returns a dividend with `quantity: 1` and
+            // `unit_price: 0` — an amount of €0. The `total` field, when present,
+            // carries the real value: the shared valuation restores an exact product.
             let valued = InvestmentStatementExtractor.valuation(
                 orderType: orderType,
                 quantity: raw.quantity?.value,
@@ -963,7 +936,7 @@ final class InvestmentPDFParser: Sendable {
             )
         }
 
-        // Positions (mode snapshot) — on ignore les lignes sans quantité exploitable.
+        // Positions (snapshot mode) — rows without a usable quantity are ignored.
         let positions: [PDFExtractedPosition] = (payload.positions ?? []).compactMap { raw in
             let qty = raw.quantity?.value ?? 0
             guard qty > 0 else { return nil }
@@ -981,8 +954,8 @@ final class InvestmentPDFParser: Sendable {
             )
         }
 
-        // Mode : celui déclaré par l'IA (l'IA écrit "positions", pas
-        // "positionsSnapshot"), avec fallback déduit du contenu.
+        // Mode: the one declared by the AI (the AI writes "positions", not
+        // "positionsSnapshot"), with a fallback inferred from the content.
         let mode: PDFDocumentMode = {
             switch payload.mode?.lowercased() {
             case "orders":               return .orders
@@ -998,8 +971,8 @@ final class InvestmentPDFParser: Sendable {
         return PageParse(orders: orders, positions: positions, mode: mode)
     }
 
-    /// Normalise les types d'ordre retournés par l'IA vers BUY/SELL/DIV.
-    /// L'IA peut retourner des variantes FR, EN, ou longues.
+    /// Normalizes the order types returned by the AI to BUY/SELL/DIV.
+    /// The AI may return French, English or long variants.
     static func normalizeOrderType(_ raw: String) -> String? {
         let upper = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         // Achats
@@ -1015,7 +988,7 @@ final class InvestmentPDFParser: Sendable {
         return nil
     }
 
-    /// Parse une date avec plusieurs formats courants dans les relevés bancaires.
+    /// Parses a date with several formats common in bank statements.
     static func parseDate(_ string: String?, formatter: DateFormatter) -> Date? {
         guard var s = string?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
 
@@ -1041,23 +1014,23 @@ final class InvestmentPDFParser: Sendable {
         return nil
     }
 
-    // MARK: - Agrégation par position
+    // MARK: - Aggregation by position
 
-    /// Clé de regroupement commune : ISIN (prioritaire), sinon ticker, sinon nom.
-    /// Partagée par les deux agrégations ET par l'UI, qui doit pouvoir cocher /
-    /// décocher TOUS les éléments bruts d'un même groupe affiché.
+    /// Shared grouping key: ISIN (preferred), otherwise ticker, otherwise name.
+    /// Shared by both aggregations AND by the UI, which must be able to tick /
+    /// untick ALL the raw items of a displayed group.
     static func groupKey(isin: String, ticker: String, assetName: String) -> String {
         if !isin.isEmpty { return isin.uppercased() }
         if !ticker.isEmpty { return ticker.uppercased() }
         return assetName.uppercased()
     }
 
-    /// Regroupe les ordres par ISIN (prioritaire) ou ticker.
+    /// Groups orders by ISIN (preferred) or ticker.
     ///
-    /// ⚠️ NE FILTRE PAS sur `isSelected` : c'est à l'appelant de le faire avant
-    /// l'import. Filtrer ici faisait DISPARAÎTRE une ligne de l'aperçu dès
-    /// qu'on la décochait (l'aperçu est construit depuis cette agrégation) —
-    /// impossible de la re-cocher ensuite.
+    /// Does NOT filter on `isSelected`: that's up to the caller before the
+    /// import. Filtering here would make a row DISAPPEAR from the preview as soon
+    /// as it's unticked (the preview is built from this aggregation) — and it
+    /// could never be ticked again.
     static func aggregateByPosition(_ orders: [PDFExtractedOrder]) -> [PDFPositionGroup] {
         var groups: [String: PDFPositionGroup] = [:]
 
@@ -1081,12 +1054,12 @@ final class InvestmentPDFParser: Sendable {
         return Array(groups.values).sorted { $0.assetName < $1.assetName }
     }
 
-    /// Chantier C — dédup des positions extraites d'une capture (mode snapshot)
-    /// par ISIN > ticker > nom. Additionne les quantités si la même ligne apparaît
-    /// sur plusieurs chunks/pages ; garde le PRU et la valeur de la 1re occurrence
-    /// (une capture n'affiche qu'une valeur par ligne).
+    /// Deduplicates positions extracted from a capture (snapshot mode) by ISIN >
+    /// ticker > name. Adds up quantities if the same row appears on several
+    /// chunks/pages; keeps the first occurrence's average cost and value (a
+    /// capture shows only one value per row).
     ///
-    /// ⚠️ NE FILTRE PAS sur `isSelected` (même raison que `aggregateByPosition`).
+    /// Does NOT filter on `isSelected` (same reason as `aggregateByPosition`).
     static func aggregatePositions(_ positions: [PDFExtractedPosition]) -> [PDFExtractedPosition] {
         var groups: [String: PDFExtractedPosition] = [:]
         var order: [String] = []
@@ -1109,14 +1082,14 @@ final class InvestmentPDFParser: Sendable {
         return order.compactMap { groups[$0] }
     }
 
-    // MARK: - DTO décodage IA
+    // MARK: - AI decoding DTOs
 
-    /// Nombre tolérant : un petit modèle écrit souvent `"quantity": "7"` ou
-    /// `"unit_price": "34,53"` au lieu d'un littéral numérique.
+    /// Tolerant number: a small model often writes `"quantity": "7"` or
+    /// `"unit_price": "34,53"` instead of a numeric literal.
     ///
-    /// ⚠️ Sans ça, `JSONDecoder` lève sur la ligne fautive et **toute la page**
-    /// est perdue, pas seulement l'opération concernée — un document de dix
-    /// opérations était jeté pour un seul champ mal typé.
+    /// Without it, `JSONDecoder` throws on the faulty row and **the whole page**
+    /// is lost, not just the operation concerned — a ten-operation document
+    /// would be discarded for a single mistyped field.
     struct LenientDouble: Decodable {
         let value: Double?
         init(from decoder: Decoder) throws {
@@ -1139,15 +1112,15 @@ final class InvestmentPDFParser: Sendable {
     }
 
     private struct AIOrder: Decodable {
-        /// Optionnel : une clé absente ne doit pas invalider le lot entier.
+        /// Optional: a missing key must not invalidate the whole batch.
         let order_type: String?
         let asset_name: String?
         let ticker: String?
         let isin: String?
         let quantity: LenientDouble?
         let unit_price: LenientDouble?
-        /// Montant total de l'opération. Seul champ renseigné sur une ligne de
-        /// dividende, qui n'a ni quantité ni cours.
+        /// Total amount of the operation. The only field filled on a dividend row,
+        /// which has neither quantity nor price.
         let total: LenientDouble?
         let amount: LenientDouble?
         let fees: LenientDouble?

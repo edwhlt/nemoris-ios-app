@@ -1,20 +1,21 @@
 import Foundation
 
-// MARK: - Provider Solana Wallet (impl réelle)
+// MARK: - Solana wallet provider
 //
-// Flow fetchPositions :
-//   1. fetchBalance(address) → SOL natif en unités humaines
-//   2. fetchTokenAccounts(address) → tous les SPL tokens (filtrés > 0)
-//   3. Résolution EUR via PriceResolver :
+// fetchPositions flow:
+//   1. fetchBalance(address) → native SOL in human units
+//   2. fetchTokenAccounts(address) → every SPL token (filtered > 0)
+//   3. EUR resolution via PriceResolver:
 //      - SOL via resolveNativePrices(["SOL"])
-//      - Tokens SPL via resolveTokenPrices avec chain="solana" + mintAddress
+//      - SPL tokens via resolveTokenPrices with chain="solana" + mintAddress
 //
-// Coût : 2 requêtes RPC + 1-2 requêtes CoinGecko = très rapide (< 2s).
+// Cost: 2 RPC requests + 1-2 CoinGecko requests = very fast (< 2 s).
 //
-// Limite connue : on n'a PAS les symboles humains (USDC, BONK, JUP...) directement
-// depuis le RPC — seulement les mint addresses. CoinGecko `/simple/token_price` accepte
-// les mint addresses pour `platform=solana` donc on a les prix EUR. Pour les NOMS, on
-// utilise une mini table de mappage des SPL populaires + fallback "Token <mint truncated>".
+// Known limit: the RPC does NOT return human symbols (USDC, BONK, JUP...) —
+// only mint addresses. CoinGecko `/simple/token_price` accepts mint addresses
+// for `platform=solana`, so EUR prices are available. For NAMES, a small
+// mapping table of popular SPL tokens is used, with a "Token <truncated mint>"
+// fallback.
 
 extension SolanaWalletLiveSyncProvider {
 
@@ -36,7 +37,7 @@ extension SolanaWalletLiveSyncProvider {
         // 1. SOL native
         let solBalance = try await client.fetchBalance(address: address)
 
-        // 2. SPL tokens (gérer le cas où le RPC échoue mais SOL a marché)
+        // 2. SPL tokens (handles the case where the RPC fails but SOL succeeded)
         let tokenAccounts = (try? await client.fetchTokenAccounts(address: address)) ?? []
 
         // 3. Prix EUR
@@ -96,18 +97,19 @@ extension SolanaWalletLiveSyncProvider {
     }
 
     func fetchTransactions(credentials: [String: String], config: [String: String], since: Date?) async throws -> [LiveSyncTransaction] {
-        // Stub Couche 3b. À venir :
-        //   - getSignaturesForAddress → liste des signatures de tx
-        //   - getTransaction (par signature) → détails (entrées/sorties)
-        //   - Parsing complexe vs EVM (Solana a un format account model bien différent)
+        // Not implemented yet. To do:
+        //   - getSignaturesForAddress → list of transaction signatures
+        //   - getTransaction (per signature) → details (inflows/outflows)
+        //   - More complex parsing than EVM (Solana's account model is very different)
         return []
     }
 
     // MARK: - Mint mapping
 
-    /// Mapping mint address → (nom complet, ticker). Liste des SPL populaires.
-    /// Fallback : ("Token <mint[..6]>", "SPL").
-    /// Les mint addresses sont publiques et standard — pas de risque sécurité à les hardcoder.
+    /// Mint address → (full name, ticker) mapping. Popular SPL tokens.
+    /// Fallback: ("Token <mint[..6]>", "SPL").
+    /// Mint addresses are public and standard — no security risk in hardcoding
+    /// them.
     private static let mintTable: [String: (name: String, ticker: String)] = [
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": ("USD Coin", "USDC"),
         "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": ("Tether", "USDT"),
@@ -121,7 +123,7 @@ extension SolanaWalletLiveSyncProvider {
 
     private static func mintLookup(_ mint: String) -> (name: String, ticker: String) {
         if let known = mintTable[mint] { return known }
-        // Fallback : truncate mint address pour avoir un identifier humain
+        // Fallback: truncate the mint address to get a human-readable identifier
         let prefix = String(mint.prefix(6))
         return ("Token \(prefix)…", "SPL")
     }

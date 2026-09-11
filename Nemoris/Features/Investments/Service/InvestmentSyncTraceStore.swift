@@ -1,20 +1,20 @@
 import Foundation
 
-/// Log léger de la dernière tentative de synchronisation des cours, par
-/// identifier (ticker ou ISIN). Persisté dans UserDefaults pour rester dispo
-/// après relaunch sans payer le coût d'une table SQLite supplémentaire.
+/// Lightweight log of the last price sync attempt, per identifier (ticker or
+/// ISIN). Persisted in UserDefaults to survive a relaunch without the cost of
+/// an extra SQLite table.
 ///
-/// Utilisé par `InvestmentPositionDetailView` pour afficher "Dernière sync :
-/// il y a X min · success/error · message" — au lieu d'un sync silencieux où
-/// l'utilisateur ne sait jamais ce qui s'est passé.
+/// Used by `InvestmentPositionDetailView` to show "Last sync: X min ago ·
+/// success/error · message" — instead of a silent sync where the user never
+/// knows what happened.
 enum InvestmentSyncTraceStore {
 
     enum Status: String, Codable {
         case success
-        case noData       // Yahoo + Stooq ont répondu mais 0 points
-        case error        // Réseau, erreur HTTP, parsing
+        case noData       // Yahoo + Stooq answered but with 0 points
+        case error        // Network, HTTP error, parsing
         case invalidId    // Identifier vide
-        case rateLimited  // 429 provider (breaker ouvert) — réessayer plus tard
+        case rateLimited  // Provider 429 (breaker open) — retry later
     }
 
     struct Entry: Codable {
@@ -22,30 +22,30 @@ enum InvestmentSyncTraceStore {
         let attemptedAt: Date
         let status: Status
         let message: LocalizedStringResource
-        let symbolsTried: [String]  // Liste des symbols essayés sur Yahoo/Stooq
+        let symbolsTried: [String]  // Symbols tried on Yahoo/Stooq
         let source: String?         // "yahoo" / "stooq" si success
-        let pointsCount: Int        // Nb de points récupérés si success
+        let pointsCount: Int        // Number of points fetched on success
     }
 
     private static let storageKey = "investment_sync_trace_v1"
 
-    /// Enregistre une tentative pour un identifier donné. Remplace l'entrée
-    /// précédente (on ne garde que la plus récente — c'est ce qui intéresse l'utilisateur).
+    /// Records an attempt for a given identifier. Replaces the previous entry
+    /// (only the latest is kept — that's what matters to the user).
     static func record(_ entry: Entry) {
         var all = loadAll()
-        // Clé case-insensitive : sync sur "FR0000121329" et "fr0000121329" partagent la même trace
+        // Case-insensitive key: a sync on "FR0000121329" and on "fr0000121329" share the same trace
         all[entry.identifier.uppercased()] = entry
         save(all)
     }
 
-    /// Récupère la dernière tentative pour un identifier.
+    /// Fetches the last attempt for an identifier.
     static func fetch(identifier: String) -> Entry? {
         let key = identifier.uppercased()
         return loadAll()[key]
     }
 
-    /// Récupère la meilleure entrée disponible parmi plusieurs identifiers
-    /// (priorité ISIN > ticker pour matcher la logique `bestSyncIdentifier`).
+    /// Fetches the best available entry among several identifiers (ISIN >
+    /// ticker priority, matching `bestSyncIdentifier`).
     static func fetchBest(identifiers: [String]) -> Entry? {
         for id in identifiers where !id.isEmpty {
             if let entry = fetch(identifier: id) { return entry }
@@ -53,14 +53,14 @@ enum InvestmentSyncTraceStore {
         return nil
     }
 
-    /// Reset complet — utile pour debug ou après un wipe de la DB.
+    /// Full reset — useful for debugging or after a database wipe.
     static func clear() {
         UserDefaults.standard.removeObject(forKey: storageKey)
     }
 
-    /// Efface la trace pour un identifier précis. À appeler quand la position
-    /// correspondante est supprimée, sinon la trace reste dans UserDefaults
-    /// et se réaffiche si l'utilisateur recrée une position avec le même ticker/ISIN.
+    /// Clears the trace for one identifier. Call it when the matching position is
+    /// deleted; otherwise the trace stays in UserDefaults and reappears if the
+    /// user recreates a position with the same ticker/ISIN.
     static func clear(identifiers: [String]) {
         var all = loadAll()
         for id in identifiers where !id.isEmpty {
@@ -107,7 +107,7 @@ extension InvestmentSyncTraceStore.Status {
 }
 
 extension InvestmentSyncTraceStore.Entry {
-    /// "il y a 5 min" / "il y a 2 h" / "il y a 3 j"
+    /// Relative age as shown to the user ("5 min", "2 h", "3 d" ago).
     var humanizedAttemptedAt: String {
         let formatter = RelativeDateTimeFormatter()
         formatter.locale = AppLocalization.locale

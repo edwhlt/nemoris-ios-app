@@ -2,14 +2,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 import PhotosUI
 
-/// Vue d'import intelligent (PDF, image/screenshot, CSV) pour les investissements.
+/// Smart import view (PDF, image/screenshot, CSV) for investments.
 ///
-/// **Flux :**
-/// 1. Sélection du fichier OU d'une capture (photothèque) + compte cible
-/// 2. Extraction texte (PDFKit / Vision OCR) + parsing IA page par page (progress bar)
-/// 3. Preview des ordres OU positions détectés — l'utilisateur peut cocher/décocher
-/// 4. Résumé + bouton Importer
-/// 5. Commit en base : création positions + ordres (BUY synthétique en mode snapshot)
+/// **Flow:**
+/// 1. Pick the file OR a capture (photo library) + target account
+/// 2. Text extraction (PDFKit / Vision OCR) + AI parsing page by page (progress bar)
+/// 3. Preview of the detected orders OR positions — the user can tick/untick
+/// 4. Summary + Import button
+/// 5. Database commit: positions + orders created (synthetic BUY in snapshot mode)
 struct InvestmentPDFImportView: View {
 
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
@@ -23,10 +23,9 @@ struct InvestmentPDFImportView: View {
 
     // Parsing
     @State private var pageResults: [PDFPageResult] = []
-    /// Sortie brute du pipeline, conservée pour le détail par source et son
-    /// inspection JSON. `pageResults` en est une projection : on garde
-    /// l'original plutôt que de tenter de reconstruire l'origine des éléments
-    /// à partir de la projection.
+    /// Raw pipeline output, kept for the per-source detail and its JSON
+    /// inspection. `pageResults` is a projection of it: the original is kept
+    /// rather than trying to rebuild the elements' origin from the projection.
     @State private var batch = ImportBatchResult()
     @State private var allOrders: [PDFExtractedOrder] = []
     /// Chantier C — positions extraites en mode capture de portefeuille.
@@ -43,40 +42,38 @@ struct InvestmentPDFImportView: View {
     @State private var showAccountPicker = false
     @State private var pdfURLs: [URL] = []
 
-    // Chantier C — captures depuis la photothèque (screenshots de PEA/CTO).
+    // Captures from the photo library (screenshots of PEA/brokerage apps).
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var pickedImages: [Data] = []
-    /// Documents fournis par l'entonnoir unifié (déjà chargés en mémoire).
+    /// Documents supplied by the unified funnel (already loaded in memory).
     @State private var preloadedSources: [ImportDocumentSource] = []
 
     private let repository = InvestmentRepository()
     private let parser = InvestmentPDFParser.shared
 
-    /// Repli proposé quand Apple Intelligence n'est pas disponible : bascule
-    /// vers l'import CSV déterministe (mapping de colonnes, sans IA). nil =
-    /// aucun repli proposé.
+    /// Fallback offered when Apple Intelligence isn't available: switches to the
+    /// deterministic CSV import (column mapping, no AI). nil = no fallback offered.
     private let onFallbackToCSV: (() -> Void)?
 
-    /// Init standard (ouverture depuis le menu ⋯).
+    /// Standard init (opened from the ⋯ menu).
     init(onFallbackToCSV: (() -> Void)? = nil) {
         self.onFallbackToCSV = onFallbackToCSV
         self.onFinished = nil
     }
 
-    /// Chantier D — init pré-rempli avec les fichiers déposés par un raccourci
-    /// Siri ou la share extension. L'utilisateur choisit le compte cible puis
-    /// lance l'analyse (aucun import automatique).
+    /// Init pre-filled with the files dropped by a Siri shortcut or the share
+    /// extension. The user picks the target account, then starts the analysis
+    /// (no automatic import).
     init(preloadedFileURLs urls: [URL], onFallbackToCSV: (() -> Void)? = nil) {
         _pdfURLs = State(initialValue: urls)
         self.onFallbackToCSV = onFallbackToCSV
         self.onFinished = nil
     }
 
-    /// Entrée depuis l'entonnoir d'import unifié (`ImportEntryView`) : la
-    /// destination, le compte cible et les documents sont DÉJÀ choisis, on
-    /// démarre donc directement sur l'analyse. `onFinished` ferme tout
-    /// l'entonnoir — sans lui, « Terminer » ne dépilerait que cet écran et
-    /// ramènerait sur la sélection de fichiers.
+    /// Entry from the unified import funnel (`ImportEntryView`): the destination,
+    /// the target account and the documents are ALREADY chosen, so the analysis
+    /// starts right away. `onFinished` closes the whole funnel — without it,
+    /// "Done" would only pop this screen and return to file selection.
     init(preloadedSources sources: [ImportDocumentSource],
          accountId: Int,
          onFinished: @escaping () -> Void) {
@@ -87,10 +84,10 @@ struct InvestmentPDFImportView: View {
         self.onFinished = onFinished
     }
 
-    /// Résultat d'une analyse déjà faite en ARRIÈRE-PLAN par
-    /// `DocumentImportCoordinator` : on ouvre directement la relecture. C'est
-    /// ce qui permet à l'utilisateur de fermer l'import pendant l'analyse et de
-    /// revenir dessus par le bandeau sans rien reperdre.
+    /// Result of an analysis already done in the BACKGROUND by
+    /// `DocumentImportCoordinator`: the review opens directly. That's what lets
+    /// the user close the import during the analysis and come back to it through
+    /// the banner without losing anything.
     init(preparsedBatch: ImportBatchResult,
          accountId: Int,
          onFinished: @escaping () -> Void) {
@@ -105,7 +102,7 @@ struct InvestmentPDFImportView: View {
         self.onFinished = onFinished
     }
 
-    /// Fermeture de l'entonnoir parent, quand cette vue y est hébergée.
+    /// Closes the parent funnel, when this view is hosted in it.
     private var onFinished: (() -> Void)?
 
     enum ImportStep {
@@ -135,8 +132,8 @@ struct InvestmentPDFImportView: View {
             }
             .paneChrome("Import intelligent", cancelLabel: "Fermer", onCancel: { dismiss() })
         .onAppear { loadAccounts() }
-        // Entrée par l'entonnoir unifié : documents et compte sont déjà
-        // choisis, l'analyse démarre seule (aucun bouton intermédiaire).
+        // Entry through the unified funnel: documents and account are already
+        // chosen, the analysis starts on its own (no intermediate button).
         .task {
             guard step == .parsing, pageResults.isEmpty, !preloadedSources.isEmpty else { return }
             startParsing()
@@ -147,18 +144,17 @@ struct InvestmentPDFImportView: View {
                 UTType.pdf,
                 UTType.image, UTType.jpeg, UTType.png, UTType.heic, UTType.tiff, UTType.bmp, UTType.webP,
                 UTType.commaSeparatedText, UTType.tabSeparatedText, UTType.plainText,
-                UTType.data  // fallback pour tout format
+                UTType.data  // fallback for any format
             ],
             allowsMultipleSelection: true
         ) { result in
             guard case .success(let urls) = result, !urls.isEmpty else { return }
             pdfURLs = urls
         }
-        // Chantier C — chargement des captures choisies dans la photothèque.
-        // Fichiers et captures se CUMULENT désormais (un relevé PDF plus une
-        // capture de la même appli sont deux vues complémentaires du même
-        // portefeuille) : la déduplication par ISIN/ticker de `aggregatePositions`
-        // absorbe les recouvrements.
+        // Loading the captures chosen in the photo library. Files and captures
+        // ACCUMULATE (a PDF statement plus a capture of the same app are two
+        // complementary views of the same portfolio): the ISIN/ticker deduplication
+        // of `aggregatePositions` absorbs the overlaps.
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             Task {
@@ -173,11 +169,11 @@ struct InvestmentPDFImportView: View {
         }
     }
 
-    // MARK: - Step 1 : Sélection fichier + compte
+    // MARK: - Step 1: file + account selection
 
     private var selectFileView: some View {
         Form {
-            // IA disponibilité
+            // AI availability
             if !parser.isAIAvailable {
                 Section {
                     HStack(spacing: 12) {
@@ -194,12 +190,12 @@ struct InvestmentPDFImportView: View {
                     }
                     .padding(.vertical, 4)
 
-                    // Repli sans IA : l'import CSV déterministe (mapping de
-                    // colonnes) reste pleinement disponible — offline-first.
+                    // Fallback without AI: the deterministic CSV import (column mapping) stays
+                    // fully available — offline-first.
                     if let onFallbackToCSV {
                         Button {
                             dismiss()
-                            // Laisse la sheet se fermer avant d'en présenter une autre.
+                            // Let the sheet close before presenting another one.
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                                 onFallbackToCSV()
                             }
@@ -239,7 +235,7 @@ struct InvestmentPDFImportView: View {
                 }
                 .buttonStyle(.plain)
 
-                // Chantier C — capture depuis la photothèque (screenshot d'app PEA/CTO).
+                // Capture from the photo library (screenshot of a PEA/brokerage app).
                 PhotosPicker(selection: $photoItems, maxSelectionCount: 10, matching: .images) {
                     HStack {
                         Image(systemName: "photo.on.rectangle.angled")
@@ -338,12 +334,12 @@ struct InvestmentPDFImportView: View {
         (!pdfURLs.isEmpty || !pickedImages.isEmpty) && selectedAccountId != nil && parser.isAIAvailable
     }
 
-    // MARK: - Step 2 : Parsing en cours
+    // MARK: - Step 2: parsing in progress
 
-    /// Même écran de traitement que l'import de transactions
-    /// (`DocumentAnalysisProgressSection`) : barre déterminée dès que le nombre
-    /// d'unités est connu, et vocabulaire neutre — « Page X / Y » n'avait aucun
-    /// sens pour une capture d'écran ou un CSV.
+    /// Same processing screen as the transaction import
+    /// (`DocumentAnalysisProgressSection`): a determinate bar as soon as the
+    /// number of units is known, and neutral wording — "Page X / Y" means nothing
+    /// for a screenshot or a CSV.
     private var parsingView: some View {
         Form {
             Section {
@@ -363,13 +359,13 @@ struct InvestmentPDFImportView: View {
         .nemorisFormStyle()
     }
 
-    // MARK: - Step 3 : Preview des ordres
+    // MARK: - Step 3: order preview
 
     private var previewView: some View {
-        // Form (pas List) : review type formulaire → boxes arrondies natives
-        // macOS via nemorisFormStyle(), insetGrouped natif sur iOS.
+        // Form (not List): a form-like review → native rounded boxes on macOS via
+        // nemorisFormStyle(), native insetGrouped on iOS.
         Form {
-            // Résumé
+            // Summary
             Section {
                 if !allOrders.isEmpty {
                     HStack {
@@ -390,9 +386,8 @@ struct InvestmentPDFImportView: View {
                     }
                 }
                 HStack {
-                    // Vocabulaire adapté au format réel : « page » n'a de sens
-                    // que pour un PDF depuis que l'import accepte captures,
-                    // images et CSV.
+                    // Wording matched to the real format: "page" only makes sense for a PDF,
+                    // and the import also accepts captures, images and CSV.
                     Label("\(pageResults.count) \(analyzedUnitLabel)", systemImage: analyzedUnitIcon)
                     Spacer()
                 }
@@ -413,10 +408,9 @@ struct InvestmentPDFImportView: View {
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                         Text("Rien à importer")
                             .font(.headline)
-                        // Raison PRÉCISE plutôt qu'un message unique : sans
-                        // elle, impossible de distinguer un OCR muet, une IA
-                        // indisponible, une IA en échec et un document
-                        // réellement sans opération.
+                        // A PRECISE reason rather than a single message: without it, a silent OCR,
+                        // an unavailable AI, a failed AI and a document genuinely without any
+                        // operation can't be told apart.
                         Text(emptyStateReason)
                             .font(.subheadline)
                             .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -426,8 +420,8 @@ struct InvestmentPDFImportView: View {
                     .padding(.vertical, 24)
                 }
 
-                // Détail PAR UNITÉ (même bloc que l'import de transactions) :
-                // pourquoi chacune n'a rien donné, et le texte réellement lu.
+                // Detail PER UNIT (same block as the transaction import): why each one
+                // yielded nothing, and the text actually read.
                 ImportSourceBreakdownSection(
                     summaries: batch.perSource(),
                     noun: "ligne",
@@ -435,7 +429,7 @@ struct InvestmentPDFImportView: View {
                 DocumentAnalysisDiagnosticsSection(
                     units: pageResults.map { $0.analysisUnit(sourceName: $0.sourceName) })
             } else {
-                // Mode capture de portefeuille — positions détectées
+                // Portfolio capture mode — detected positions
                 if !allPositions.isEmpty {
                     let posGroups = InvestmentPDFParser.aggregatePositions(allPositions)
                     Section {
@@ -450,7 +444,7 @@ struct InvestmentPDFImportView: View {
                     }
                 }
 
-                // Mode ordres — groupés par position
+                // Order mode — grouped by position
                 if !allOrders.isEmpty {
                     let groups = InvestmentPDFParser.aggregateByPosition(allOrders)
                     Section {
@@ -493,9 +487,8 @@ struct InvestmentPDFImportView: View {
                     }
                 }
 
-                // Même quand des lignes ont été trouvées, les unités en échec
-                // restent listées : sur un PDF de plusieurs pages, certaines
-                // peuvent n'avoir rien donné sans que ce soit visible.
+                // Even when rows were found, failed units stay listed: on a multi-page PDF,
+                // some may have yielded nothing without it being visible.
                 ImportSourceBreakdownSection(
                     summaries: batch.perSource(),
                     noun: "ligne",
@@ -535,14 +528,13 @@ struct InvestmentPDFImportView: View {
         return "Importer \(orders) ordre(s)"
     }
 
-    /// Row de preview d'une position détectée (mode snapshot) avec toggle sélection.
+    /// Preview row of a detected position (snapshot mode) with a selection toggle.
     @ViewBuilder
     private func positionRow(_ position: PDFExtractedPosition) -> some View {
-        // ⚠️ La row affichée est AGRÉGÉE : elle peut fusionner plusieurs lignes
-        // brutes venues de pages ou de captures différentes. Le toggle doit
-        // donc porter sur TOUT le groupe — matcher sur le seul `id` ne
-        // décochait que la première ligne brute, et les autres étaient
-        // importées quand même.
+        // The displayed row is AGGREGATED: it can merge several raw rows coming
+        // from different pages or captures. The toggle must therefore apply to the
+        // WHOLE group — matching on the `id` alone would untick only the first raw
+        // row, and the others would still be imported.
         let key = InvestmentPDFParser.groupKey(isin: position.isin,
                                                ticker: position.ticker,
                                                assetName: position.assetName)
@@ -596,7 +588,7 @@ struct InvestmentPDFImportView: View {
             }
         }
         .padding(.vertical, 2)
-        // Décoché = grisé, jamais masqué : la ligne reste visible et re-cochable.
+        // Unticked = greyed out, never hidden: the row stays visible and can be ticked again.
         .opacity(binding.wrappedValue ? 1 : 0.45)
     }
 
@@ -612,7 +604,7 @@ struct InvestmentPDFImportView: View {
         )
 
         HStack(spacing: 10) {
-            // Toggle sélection
+            // Selection toggle
             Toggle(isOn: binding) {
                 EmptyView()
             }
@@ -621,7 +613,7 @@ struct InvestmentPDFImportView: View {
             .scaleEffect(0.7)
             .frame(width: 36)
 
-            // Icône type
+            // Type icon
             Image(systemName: orderTypeIcon(order.orderType))
                 .font(.title3)
                 .foregroundStyle(orderTypeColor(order.orderType))
@@ -661,7 +653,7 @@ struct InvestmentPDFImportView: View {
             }
         }
         .padding(.vertical, 2)
-        // Décoché = grisé, jamais masqué (cf. `positionRow`).
+        // Unticked = greyed out, never hidden (see `positionRow`).
         .opacity(binding.wrappedValue ? 1 : 0.45)
     }
 
@@ -681,7 +673,7 @@ struct InvestmentPDFImportView: View {
             .foregroundStyle(color)
     }
 
-    // MARK: - Step 4 : Import en cours
+    // MARK: - Step 4: import in progress
 
     private var importingView: some View {
         VStack(spacing: 24) {
@@ -697,7 +689,7 @@ struct InvestmentPDFImportView: View {
         }
     }
 
-    // MARK: - Step 5 : Terminé
+    // MARK: - Step 5: done
 
     private var doneView: some View {
         VStack(spacing: 20) {
@@ -738,8 +730,8 @@ struct InvestmentPDFImportView: View {
             Spacer()
 
             Button {
-                // Hébergée dans l'entonnoir unifié : `dismiss()` ne dépilerait
-                // que cet écran et ramènerait sur la sélection de fichiers.
+                // Hosted in the unified funnel: `dismiss()` would only pop this screen and
+                // return to file selection.
                 if let onFinished { onFinished() } else { dismiss() }
             } label: {
                 Text("Fermer")
@@ -749,10 +741,9 @@ struct InvestmentPDFImportView: View {
                     .background(AppTheme.Colors.accent, in: RoundedRectangle(cornerRadius: 12))
                     .foregroundStyle(.white)
             }
-            // Sans ça, macOS applique le chrome de bouton par défaut (teinté
-            // par l'accent de l'app) par-dessus le fond déjà accent — le
-            // texte blanc devient illisible (même bug que `SettingsView`
-            // "Passer Pro" / `ReferenceDataView.accountRow`).
+            // Without it, macOS applies the default button chrome (tinted with the
+            // app's accent) on top of the already accent-colored background — the
+            // white text becomes unreadable.
             .buttonStyle(.plain)
             .padding(.horizontal, 24)
             .padding(.bottom, 16)
@@ -801,9 +792,9 @@ struct InvestmentPDFImportView: View {
         }
     }
 
-    // MARK: - Résumé & diagnostic
+    // MARK: - Summary & diagnostics
 
-    /// Nature du document analysé (toutes les unités viennent du même fichier).
+    /// Nature of the analyzed document (every unit comes from the same file).
     private var analyzedKind: ImportSourceKind {
         pageResults.first?.kind ?? .unknown
     }
@@ -827,8 +818,8 @@ struct InvestmentPDFImportView: View {
         pageResults.contains { $0.usedDeterministicFallback }
     }
 
-    /// Raison la plus informative parmi les unités analysées : un vrai échec
-    /// (OCR muet, IA en erreur) prime sur un simple « rien de reconnu ».
+    /// The most informative reason among the analyzed units: a real failure
+    /// (silent OCR, AI error) wins over a plain "nothing recognized".
     private var emptyStateReason: String {
         let diagnostics = pageResults.map(\.diagnostic)
         if let hard = diagnostics.first(where: {
@@ -841,14 +832,14 @@ struct InvestmentPDFImportView: View {
         return ImportUnitDiagnostic.nothingRecognized.userMessage
     }
 
-    // (Le texte lu est désormais affiché PAR UNITÉ par le bloc de diagnostic
-    // partagé, plutôt que concaténé et tronqué pour tout le document.)
+    // (The text read is shown PER UNIT by the shared diagnostic block, rather
+    // than concatenated and truncated for the whole document.)
 
     // MARK: - Actions
 
     private func loadAccounts() {
         accounts = repository.fetchAccounts()
-        // Ne jamais écraser un compte déjà imposé (entonnoir unifié).
+        // Never overwrite an account already imposed (unified funnel).
         if selectedAccountId == nil, accounts.count == 1 {
             selectedAccountId = accounts.first?.id
         }
@@ -863,8 +854,8 @@ struct InvestmentPDFImportView: View {
         let urls = pdfURLs
         let images = pickedImages
         Task {
-            // Chargement en mémoire (hors main thread), fichiers ET captures :
-            // le parcours d'analyse est ensuite le même pour les deux.
+            // Loaded into memory (off the main thread), files AND captures: the
+            // analysis path is then the same for both.
             var sources: [ImportDocumentSource] = preloadedSources
             sources += urls.compactMap { url in
                 let granted = url.startAccessingSecurityScopedResource()
@@ -876,18 +867,17 @@ struct InvestmentPDFImportView: View {
                 sources.append(ImportDocumentSource(data: data, displayName: "Capture \(index + 1)"))
             }
 
-            // Lecture (parallèle) puis analyse, par le pipeline unifié — le
-            // même que l'import de transactions. Ce module avait son propre
-            // orchestrateur, avec son propre découpage et sa propre détection
-            // de format : deux copies qui ont fini par diverger.
+            // Reading (parallel) then analysis, through the unified pipeline — the same
+            // one as the transaction import. A separate orchestrator for this module,
+            // with its own splitting and format detection, would inevitably diverge.
             let readout = await ImportPipeline.read(sources: sources, destination: .investments)
             let batch = await ImportPipeline.analyze(readout, destination: .investments) { done, total in
                 parsingCurrent = done
                 parsingTotal = total
             }
-            // Les numéros d'unité sont déjà GLOBAUX (attribués par le pipeline
-            // sur l'ensemble des sources), et les ordres les portent déjà :
-            // c'est ce qui alimente leurs notes « Import PDF — p.N ».
+            // Unit numbers are already GLOBAL (assigned by the pipeline across all
+            // sources), and the orders carry them already: that's what feeds their
+            // "PDF import — p.N" notes.
             await MainActor.run { finishParsing(batch) }
         }
     }
@@ -923,14 +913,14 @@ struct InvestmentPDFImportView: View {
             var ordersInserted = 0
             var errors: [String] = []
 
-            // Charger les positions existantes du compte pour détecter les doublons
+            // Load the account's existing positions to detect duplicates
             var existingPositions = repo.fetchPositions(accountId: accountId)
 
-            // ── Mode capture de portefeuille : positions snapshot ────────────
-            // Nouvelle position → création + BUY synthétique (qty @ PRU) pour
-            // matérialiser qty/PRU (dérivés des ordres depuis v30) + current_value.
-            // Position existante → maj current_value (+ backfill ISIN), SANS
-            // toucher aux ordres saisis par l'utilisateur (pas d'écrasement silencieux).
+            // ── Portfolio capture mode: snapshot positions ──────────────────
+            // New position → creation + synthetic BUY (qty @ average cost) to
+            // materialize qty/average cost (derived from orders) + current_value.
+            // Existing position → current_value update (+ ISIN backfill), WITHOUT
+            // touching the orders entered by the user (no silent overwrite).
             for snap in posSnapshots {
                 let existing = existingPositions.first { pos in
                     if !snap.isin.isEmpty && !pos.isin.isEmpty {
@@ -961,8 +951,8 @@ struct InvestmentPDFImportView: View {
                         errors.append("Échec création position \(snap.assetName)")
                         continue
                     }
-                    // BUY synthétique : notes préfixées "Sync " pour rester
-                    // éligible à deleteSyntheticOrders (comme LiveSync).
+                    // Synthetic BUY: notes prefixed "Sync " so it stays eligible for
+                    // deleteSyntheticOrders (like LiveSync).
                     let key = snap.isin.isEmpty ? snap.ticker : snap.isin
                     let synthetic = InvestmentOrder(
                         id: 0,
@@ -976,7 +966,7 @@ struct InvestmentPDFImportView: View {
                         externalId: "aisnap_\(key)_\(Self.dateString(Date()))_\(snap.quantity)"
                     )
                     _ = repo.addOrder(synthetic)
-                    // current_value = valeur de marché de la capture.
+                    // current_value = the capture's market value.
                     var created = InvestmentPosition(
                         id: newId, accountId: accountId,
                         assetType: snap.assetType, assetName: snap.assetName,
@@ -987,13 +977,13 @@ struct InvestmentPDFImportView: View {
                     created.currentValue = marketValue
                     _ = repo.updatePosition(created)
                     positionsCreated += 1
-                    // Réinjecte dans la liste locale pour dédupe intra-batch.
+                    // Fed back into the local list for intra-batch deduplication.
                     existingPositions.append(created)
                 }
             }
 
             for group in groups {
-                // Chercher une position existante par ISIN ou ticker
+                // Look for an existing position by ISIN or ticker
                 let existing = existingPositions.first { pos in
                     if !group.isin.isEmpty && !pos.isin.isEmpty {
                         return pos.isin.uppercased() == group.isin.uppercased()
@@ -1009,7 +999,7 @@ struct InvestmentPDFImportView: View {
                     positionId = existing.id
                     positionsReused += 1
                 } else {
-                    // Créer la position
+                    // Create the position
                     guard let newId = repo.addPositionAndGetId(
                         accountId: accountId,
                         assetType: group.assetType,
@@ -1025,7 +1015,7 @@ struct InvestmentPDFImportView: View {
                     positionsCreated += 1
                 }
 
-                // Insérer les ordres
+                // Insert the orders
                 for order in group.orders {
                     guard let orderType = InvestmentOrderType(rawValue: order.orderType) else {
                         errors.append("Type inconnu \(order.orderType) pour \(order.assetName)")
@@ -1047,7 +1037,7 @@ struct InvestmentPDFImportView: View {
                     if repo.addOrder(investOrder) {
                         ordersInserted += 1
                     } else {
-                        // Peut être un doublon (externalId déjà présent) — pas une erreur grave
+                        // May be a duplicate (externalId already present) — not a serious error
                         print("[PDFImport] Ordre probablement déjà présent: \(order.assetName) \(order.executedAt)")
                     }
                 }

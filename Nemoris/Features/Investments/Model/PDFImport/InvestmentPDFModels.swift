@@ -1,28 +1,28 @@
 import Foundation
 
-// MARK: - Modèles pour l'import PDF d'ordres d'investissement
+// MARK: - Models for importing investment orders from documents
 
-/// Un ordre extrait du PDF par l'IA, avant validation user.
+/// An order extracted from the document, before user validation.
 struct PDFExtractedOrder: Identifiable, Hashable {
     let id = UUID()
     var orderType: String       // "BUY" | "SELL" | "DIV"
     var assetName: String       // Nom lisible (ex: "Epargne MSCI World")
     var ticker: String          // Ticker / symbole (ex: "CW8")
-    var isin: String            // ISIN si détecté (ex: "LU1681043599")
+    var isin: String            // ISIN when detected (e.g. "LU1681043599")
     var quantity: Double
-    var unitPrice: Double       // Prix unitaire d'exécution
+    var unitPrice: Double       // Execution unit price
     var fees: Double            // Frais de courtage
     var executedAt: Date
     var currency: String        // EUR, USD, etc.
-    var notes: String?          // Infos complémentaires extraites
-    var pageNumber: Int         // Page source dans le PDF
-    var confidence: Double      // 0…1 — confiance de l'IA sur cet ordre
-    var isSelected: Bool = true // l'utilisateur peut décocher avant import
+    var notes: String?          // Additional extracted info
+    var pageNumber: Int         // Source page in the PDF
+    var confidence: Double      // 0…1 — the extraction's confidence in this order
+    var isSelected: Bool = true // the user can untick it before importing
 
-    /// Coût total brut
+    /// Gross total cost
     var totalCost: Double { quantity * unitPrice + fees }
 
-    /// Asset type déduit du nom / ISIN
+    /// Asset type inferred from the name / ISIN
     var assetType: String {
         let upper = (assetName + " " + ticker).uppercased()
         if upper.contains("ETF") || upper.contains("TRACKER") { return "ETF" }
@@ -33,9 +33,9 @@ struct PDFExtractedOrder: Identifiable, Hashable {
     }
 }
 
-/// Conformance au moteur de fusion PUR (`StatementReconciler`), pour que la
-/// règle « cette seconde lecture parle-t-elle de la même opération ? » soit
-/// écrite UNE fois et s'applique aussi bien au modèle d'UI qu'au modèle pur.
+/// Conformance to the PURE merge engine (`StatementReconciler`), so the rule
+/// "is this second reading about the same operation?" is written ONCE and
+/// applies to the UI model as well as to the pure model.
 extension PDFExtractedOrder: StatementOrderFields {
     private static let isoDay: DateFormatter = {
         let formatter = DateFormatter()
@@ -47,36 +47,36 @@ extension PDFExtractedOrder: StatementOrderFields {
     var isoDay: String { Self.isoDay.string(from: executedAt) }
 }
 
-/// Mode détecté par l'IA pour un document/page : relevé d'ORDRES (avis d'opéré)
-/// ou CAPTURE DE PORTEFEUILLE (liste de positions avec qté/PRU/valeur, sans dates
-/// d'exécution — typiquement un screenshot d'app PEA/CTO).
+/// Mode detected for a document/page: ORDER statement (trade confirmation) or
+/// PORTFOLIO CAPTURE (list of positions with quantity/average cost/value, no
+/// execution dates — typically a screenshot of a PEA/brokerage app).
 enum PDFDocumentMode: String, Codable {
     case orders
     case positionsSnapshot
     case unknown
 }
 
-/// Une position extraite d'une capture de portefeuille (Chantier C — mode snapshot).
-/// Contrairement à un ordre, il n'y a pas de date d'exécution : on connaît l'état
-/// courant (qté détenue, PRU, valeur de marché) mais pas l'historique.
+/// A position extracted from a portfolio capture (snapshot mode).
+/// Unlike an order, there is no execution date: the current state (quantity
+/// held, average cost, market value) is known, but not the history.
 struct PDFExtractedPosition: Identifiable, Hashable {
     let id = UUID()
     var assetName: String        // Nom lisible (ex: "Epargne MSCI World")
     var ticker: String           // Ticker / symbole
-    var isin: String             // ISIN si détecté
-    var quantity: Double         // Quantité détenue
+    var isin: String             // ISIN when detected
+    var quantity: Double         // Quantity held
     var averageBuyPrice: Double  // PRU (prix de revient unitaire)
-    var currentValue: Double?    // Valeur de marché actuelle si affichée (sinon nil)
+    var currentValue: Double?    // Current market value when displayed (otherwise nil)
     var currency: String
     var pageNumber: Int
     var confidence: Double
-    var isSelected: Bool = true  // l'utilisateur peut décocher avant import
+    var isSelected: Bool = true  // the user can untick it before importing
 
-    /// Coût d'acquisition estimé (qté × PRU). Sert de valeur par défaut si la
-    /// capture n'affiche pas de valeur de marché.
+    /// Estimated acquisition cost (quantity × average cost). Serves as the
+    /// default value when the capture shows no market value.
     var investedCost: Double { quantity * averageBuyPrice }
 
-    /// Asset type déduit du nom / ticker (même heuristique que PDFExtractedOrder).
+    /// Asset type inferred from the name / ticker (same heuristic as PDFExtractedOrder).
     var assetType: String {
         let upper = (assetName + " " + ticker).uppercased()
         if upper.contains("ETF") || upper.contains("TRACKER") { return "ETF" }
@@ -87,43 +87,41 @@ struct PDFExtractedPosition: Identifiable, Hashable {
     }
 }
 
-// ⚠️ `ImportSourceKind` et `ImportUnitDiagnostic` vivaient ici sous les noms
-// `InvestmentDocumentKind` / `PDFPageDiagnostic`. Ils sont partagés par les DEUX
-// imports depuis et ne portent rien de spécifique aux investissements :
-// ils sont remontés dans `Features/Import/Pipeline/ImportElement.swift`, socle
-// commun du pipeline unifié.
+// `ImportSourceKind` and `ImportUnitDiagnostic` are shared by both imports
+// and live in `Features/Import/Pipeline/ImportElement.swift`, the common
+// base of the unified pipeline.
 
-/// Résultat du parsing d'une page PDF / capture / bloc de texte.
+/// Result of parsing a PDF page / capture / text block.
 struct PDFPageResult: Identifiable {
     let id = UUID()
     let pageNumber: Int
     let rawText: String
     var orders: [PDFExtractedOrder]
-    /// Chantier C — positions extraites si la page est une capture de portefeuille.
+    /// Positions extracted when the page is a portfolio capture.
     var positions: [PDFExtractedPosition] = []
-    /// Mode détecté par l'IA pour cette page.
+    /// Mode detected for this page.
     var detectedMode: PDFDocumentMode = .orders
-    var parsingNote: String?    // Commentaire IA (ex: "page de résumé, pas d'ordres")
-    /// Pourquoi cette page n'a rien donné (diagnostic affiché dans l'UI).
+    var parsingNote: String?    // AI comment (e.g. "summary page, no orders")
+    /// Why this page yielded nothing (diagnostic shown in the UI).
     var diagnostic: ImportUnitDiagnostic = .extracted
-    /// Nature réelle du document (sniffée), pour le vocabulaire de l'UI.
+    /// Actual nature of the document (sniffed), for the UI's wording.
     var kind: ImportSourceKind = .unknown
-    /// Vrai si les opérations viennent de l'extracteur déterministe (sans IA).
+    /// True if the operations come from the deterministic extractor (no AI).
     var usedDeterministicFallback: Bool = false
-    /// Fichier d'origine, quand l'import agrège plusieurs documents. Sert au
-    /// bloc de diagnostic partagé avec l'import de transactions.
+    /// Source file, when the import aggregates several documents. Feeds the
+    /// diagnostic block shared with the transaction import.
     var sourceName: String = ""
 }
 
-/// Résumé de l'import final.
+/// Summary of the final import.
 struct PDFImportResult {
     let positionsCreated: Int
     let ordersInserted: Int
-    let positionsReused: Int    // Positions existantes auxquelles on a rattaché des ordres
+    let positionsReused: Int    // Existing positions that orders were attached to
     let errors: [String]
 }
 
-/// Agrégation : regroupe les ordres par ISIN/ticker pour créer ou réutiliser des positions.
+/// Aggregation: groups orders by ISIN/ticker to create or reuse positions.
 struct PDFPositionGroup: Identifiable {
     let id = UUID()
     let isin: String

@@ -123,13 +123,13 @@ struct CoachView: View {
                     Text(domain == .transactions ? "Mes objectifs de dépenses" : "Mes objectifs d'investissement")
                         .font(AppTheme.Typography.bodyMedium)
                         .foregroundStyle(AppTheme.Colors.textPrimary)
-                    // Wrap requis : une branche est du texte libre saisi par
-                    // l'utilisateur (`String`, jamais traduit — normal),
-                    // l'autre un placeholder statique traduisible. Le ternaire
-                    // unifie l'expression en `String`, donc `Text(String)`
-                    // resterait verbatim sans ce wrap — cf. CLAUDE.md §5. Le
-                    // texte libre n'a de toute façon aucune clé correspondante
-                    // et s'affiche tel quel (repli normal de LocalizedStringKey).
+                    // Wrap required: one branch is free text typed by the user
+                    // (`String`, never translated — expected), the other a
+                    // translatable static placeholder. The ternary unifies the
+                    // expression as `String`, so `Text(String)` would stay
+                    // verbatim without this wrap. The free text has no matching
+                    // key anyway and displays as-is (LocalizedStringKey's normal
+                    // fallback).
                     Text(LocalizedStringKey(store.profile(for: domain).hasObjectives
                          ? store.profile(for: domain).objectives
                          : "Dis à CE coach ce que tu veux atteindre — il s'y réfère dans chaque recommandation."))

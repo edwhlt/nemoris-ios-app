@@ -1,31 +1,33 @@
 import Foundation
 
-// MARK: - Provider EVM Wallet (impl réelle multi-chain)
+// MARK: - EVM wallet provider (multi-chain)
 //
-// Synchronise les balances d'un wallet EVM (Ethereum, Polygon, BSC, Arbitrum, Optimism, Base).
-// Utilise Etherscan V2 Multichain API (1 endpoint paramétré par chainid).
+// Syncs an EVM wallet's balances (Ethereum, Polygon, BSC, Arbitrum,
+// Optimism, Base). Uses the Etherscan V2 Multichain API (one endpoint
+// parameterized by chainid).
 //
-// Flow `fetchPositions` :
-//   1. Lire chain depuis `config["chain"]` (ex: "eth", "polygon")
-//   2. Fetch native balance (1 req) → ETH/MATIC/BNB selon chaîne
-//   3. Fetch tokentx récents (1 req) → liste des contracts ERC-20 détenus historiquement
-//   4. Pour chaque contract unique trouvé (cap 25 pour éviter trop de requêtes) →
-//      fetch tokenbalance (N req sequentiel pour respecter rate limit 5 req/s sans clé)
-//   5. Filter balance > 0 (les contracts vus en historique mais soldés à 0 disparaissent)
-//   6. Convert EUR via PriceResolver (1 req batch CoinGecko par contract address)
+// `fetchPositions` flow:
+//   1. Read the chain from `config["chain"]` (e.g. "eth", "polygon")
+//   2. Fetch the native balance (1 req) → ETH/MATIC/BNB depending on the chain
+//   3. Fetch recent tokentx (1 req) → ERC-20 contracts held historically
+//   4. For each unique contract found (capped at 25 to avoid too many
+//      requests) → fetch tokenbalance (N sequential requests to respect the
+//      5 req/s rate limit without a key)
+//   5. Keep balance > 0 (contracts seen in history but emptied disappear)
+//   6. Convert to EUR via PriceResolver (1 batched CoinGecko request by contract address)
 //
-// Coût en requêtes : 2 + N (N ≤ 25 → max ~5 secondes sans clé Etherscan).
+// Request cost: 2 + N (N ≤ 25 → at most ~5 seconds without an Etherscan key).
 
 extension EvmWalletLiveSyncProvider {
 
-    /// Cap au nombre de tokens ERC-20 à requêter pour éviter de spam Etherscan.
-    /// Les wallets gros traders (>25 tokens distincts) auront un sous-ensemble.
+    /// Cap on the number of ERC-20 tokens to query, to avoid spamming Etherscan.
+    /// Heavy-trader wallets (>25 distinct tokens) get a subset.
     private static let maxTokenLookups = 25
 
     func validate(credentials: [String: String], config: [String: String]) async throws {
         let (address, chainId, _) = try Self.parseConfig(credentials: credentials, config: config)
         let client = EvmAPIClient(apiKey: credentials["etherscanApiKey"])
-        // Une simple balance call valide l'adresse + la connectivité
+        // A simple balance call validates the address + connectivity
         _ = try await client.fetchNativeBalance(address: address, chainId: chainId)
     }
 
@@ -36,11 +38,11 @@ extension EvmWalletLiveSyncProvider {
         // 1. Native balance
         let nativeBalance = try await client.fetchNativeBalance(address: address, chainId: chainId)
 
-        // 2. Découvrir les contracts ERC-20 via l'historique tokentx (last 100 transferts)
+        // 2. Discover ERC-20 contracts via the tokentx history (last 100 transfers)
         let contracts = (try? await client.fetchTokenContracts(address: address, chainId: chainId)) ?? []
         let cappedContracts = Array(contracts.prefix(Self.maxTokenLookups))
 
-        // 3. Fetch balance de chaque contract (séquentiel — rate limit 5 req/s sans clé)
+        // 3. Fetch each contract's balance (sequential — 5 req/s rate limit without a key)
         var tokenBalances: [(contract: TokenContractInfo, qty: Double)] = []
         for contract in cappedContracts {
             do {
@@ -54,19 +56,19 @@ extension EvmWalletLiveSyncProvider {
                 if qty > 0 {
                     tokenBalances.append((contract, qty))
                 }
-                // Petit délai (200ms) sans clé pour rester sous 5 req/s confortable
+                // Small delay (200 ms) without a key, to stay comfortably under 5 req/s
                 if credentials["etherscanApiKey"]?.isEmpty != false {
                     try? await Task.sleep(nanoseconds: 200_000_000)
                 }
             } catch {
-                // Skip un token cassé sans faire échouer toute la sync
+                // Skip a broken token without failing the whole sync
                 continue
             }
         }
 
-        // 4. Résoudre les prix EUR :
-        //    - Native via resolveNativePrices (par ticker comme "ETH", "MATIC")
-        //    - Tokens via resolveTokenPrices (par contract address sur la chaîne CoinGecko)
+        // 4. Resolve EUR prices:
+        //    - Native via resolveNativePrices (by ticker such as "ETH", "MATIC")
+        //    - Tokens via resolveTokenPrices (by contract address on the CoinGecko chain)
         let nativeTicker = Self.nativeCurrencyTicker(forChain: chainInternalId)
         let nativePrices = await PriceResolver.shared.resolveNativePrices(tickers: [nativeTicker])
         let nativePriceEUR = nativePrices[nativeTicker]
@@ -79,7 +81,7 @@ extension EvmWalletLiveSyncProvider {
         // 5. Assemble LiveSyncPosition[]
         var positions: [LiveSyncPosition] = []
 
-        // Native d'abord (toujours présent même si balance == 0)
+        // Native first (always present, even when balance == 0)
         if nativeBalance > 0 {
             positions.append(LiveSyncPosition(
                 assetType: "crypto",
@@ -125,19 +127,19 @@ extension EvmWalletLiveSyncProvider {
     }
 
     func fetchTransactions(credentials: [String: String], config: [String: String], since: Date?) async throws -> [LiveSyncTransaction] {
-        // Stub Couche 2. À venir :
-        //   - module=account&action=txlist (transactions ETH natives)
-        //   - module=account&action=tokentx (transferts ERC-20)
-        //   - Mapping vers InvestmentOrderType (.buy/.sell selon direction in/out)
-        //   - Filtrage par adresse (les txs IN sont des achats, OUT des ventes)
-        //   - Conversion EUR au moment de la tx via PriceResolver historique (pas dispo MVP)
+        // Not implemented yet. To do:
+        //   - module=account&action=txlist (native ETH transactions)
+        //   - module=account&action=tokentx (ERC-20 transfers)
+        //   - Mapping to InvestmentOrderType (.buy/.sell by in/out direction)
+        //   - Filtering by address (IN transactions are purchases, OUT are sales)
+        //   - EUR conversion at transaction time via historical PriceResolver (not available)
         return []
     }
 
     // MARK: - Helpers
 
-    /// Parse + valide la config user. Throw si manquant/invalide.
-    /// Retourne (address, chainIdEtherscan, chainInternalID).
+    /// Parses + validates the user config. Throws if missing/invalid.
+    /// Returns (address, chainIdEtherscan, chainInternalID).
     private static func parseConfig(
         credentials: [String: String],
         config: [String: String]
@@ -155,7 +157,7 @@ extension EvmWalletLiveSyncProvider {
         return (address, chainId, chainInternalId)
     }
 
-    /// Ticker de la devise native par chaîne. Utilisé pour le lookup CoinGecko.
+    /// Native currency ticker per chain. Used for the CoinGecko lookup.
     static func nativeCurrencyTicker(forChain chainInternalId: String) -> String {
         switch chainInternalId {
         case "eth", "arbitrum", "optimism", "base":  return "ETH"
@@ -165,7 +167,7 @@ extension EvmWalletLiveSyncProvider {
         }
     }
 
-    /// Nom complet de la devise native pour affichage.
+    /// Native currency's full name, for display.
     static func nativeCurrencyName(forChain chainInternalId: String) -> String {
         switch chainInternalId {
         case "eth":      return "Ethereum"

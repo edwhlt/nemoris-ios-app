@@ -1,38 +1,37 @@
 import SwiftUI
 
-// MARK: - Couche 0g → repris 2026-08-08 : gestion des liens live sync
-// intégrée au module Investissements (n'est plus un écran de Settings).
+// MARK: - Live sync link management, within the Investments module
 //
-// 3 niveaux :
-//   1. LiveSyncProviderPickerView: catalogue des providers disponibles
-//   2. LiveSyncLinkFormView: form de credentials + config (généré dynamiquement)
-//   3. LiveSyncLinkDetailView: détail d'UN lien (statut, sync, édition, suppression)
+// 3 levels:
+//   1. LiveSyncProviderPickerView: catalog of available providers
+//   2. LiveSyncLinkFormView: credentials + config form (generated dynamically)
+//   3. LiveSyncLinkDetailView: detail of ONE link (status, sync, edit, delete)
 //
-// Points d'entrée (2, tous les deux ouvrent `LiveSyncProviderPickerView`) :
-//   - `InvestmentsView` (toolbar module, "Lier un exchange / wallet") — pas de
-//     compte pré-existant : `accountId: nil`, un compte dédié est créé à la
-//     volée par `LiveSyncLinkFormView.save()`.
-//   - `InvestmentAccountFormView` (fiche "Modifier le compte", section
-//     "Synchronisation") — `accountId: account.id`, le nouveau lien est
-//     rattaché directement à CE compte.
+// Entry points (2, both open `LiveSyncProviderPickerView`):
+//   - `InvestmentsView` (module toolbar, "Link an exchange / wallet") — no
+//     pre-existing account: `accountId: nil`, a dedicated account is created
+//     on the fly by `LiveSyncLinkFormView.save()`.
+//   - `InvestmentAccountFormView` ("Edit account" sheet, "Sync" section) —
+//     `accountId: account.id`, the new link is attached directly to THAT
+//     account.
 //
-// Il n'y a plus de liste globale des liens indépendante d'un compte : chaque
-// lien est TOUJOURS visible et gérable depuis la fiche du compte auquel il
-// est rattaché (cf. `InvestmentAccountFormView.linkedSourcesSection`).
+// There is no global list of links independent of an account: every link is
+// ALWAYS visible and manageable from the sheet of the account it's attached
+// to (see `InvestmentAccountFormView.linkedSourcesSection`).
 
 // MARK: - Provider picker (catalogue)
 
 struct LiveSyncProviderPickerView: View {
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
     @Environment(\.paneDismiss) private var dismiss
-    /// Compte auquel rattacher le nouveau lien. `nil` = créé depuis le
-    /// catalogue du module (pas de compte pré-existant) : `LiveSyncLinkFormView`
-    /// crée alors un compte dédié à la volée. Non-nil = créé depuis la fiche
-    /// d'un compte existant, le lien lui est directement rattaché.
+    /// Account to attach the new link to. `nil` = created from the module's
+    /// catalog (no pre-existing account): `LiveSyncLinkFormView` then creates a
+    /// dedicated account on the fly. Non-nil = created from an existing
+    /// account's sheet, the link is attached to it directly.
     var accountId: Int? = nil
-    /// État à la place d'un `NavigationLink` : un push depuis ce contenu, une
-    /// fois hébergé dans le panneau macOS, ferait remonter le titre/back-button
-    /// du form de credentials dans la barre du MODULE. Sheet niveau 2 à la place.
+    /// State instead of a `NavigationLink`: a push from this content, once hosted
+    /// in the macOS pane, would lift the credentials form's title/back button
+    /// into the MODULE's bar. A level-2 sheet instead.
     @State private var selectedProviderType: InvestmentLiveSyncProvider.Type?
 
     var body: some View {
@@ -97,7 +96,7 @@ struct LiveSyncProviderPickerView: View {
     }
 }
 
-// MARK: - Form de credentials (création/édition)
+// MARK: - Credentials form (creation/edit)
 
 struct LiveSyncLinkFormView: View {
     @Environment(\.paneDismiss) private var dismiss
@@ -105,20 +104,19 @@ struct LiveSyncLinkFormView: View {
 
     let providerType: InvestmentLiveSyncProvider.Type
     let existingLink: InvestmentLiveSyncLink?
-    /// Compte cible pour un NOUVEAU lien. Ignoré en édition (`existingLink`
-    /// porte déjà son propre `accountId`, jamais réassigné ici). `nil` en
-    /// création = aucun compte fourni par l'appelant → `save()` en crée un.
+    /// Target account for a NEW link. Ignored when editing (`existingLink`
+    /// already carries its own `accountId`, never reassigned here). `nil` on
+    /// creation = no account supplied by the caller → `save()` creates one.
     var accountId: Int? = nil
 
     @State private var displayName: String = ""
     @State private var credentials: [String: String] = [:]
     @State private var selectedChain: String = ""
     @State private var saveError: String?
-    /// Vrai pendant `save()` (persistance + première synchronisation). Sans ce
-    /// garde, un lien se créait même avec des identifiants invalides (ex. clé
-    /// Etherscan manquante) sans qu'aucun signal n'apparaisse avant le premier
-    /// "Synchroniser maintenant" — un user ne voyant rien se produire au tap
-    /// "Enregistrer" pouvait retenter et créer un doublon local.
+    /// True during `save()` (persistence + first sync). Without this guard, a
+    /// link would be created even with invalid credentials (e.g. a missing
+    /// Etherscan key) with no signal before the first "Sync now" — a user seeing
+    /// nothing happen on "Save" could retry and create a local duplicate.
     @State private var isSaving = false
 
     private var isEditing: Bool { existingLink != nil }
@@ -127,9 +125,9 @@ struct LiveSyncLinkFormView: View {
         guard !displayName.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
         for field in providerType.credentialFields {
             let val = credentials[field.key] ?? ""
-            // .anyString = champ optionnel (peut être vide) → on saute la check
+            // .anyString = optional field (may be empty) → skip the check
             if case .anyString = field.validation { continue }
-            // Vide ou invalide → blocage
+            // Empty or invalid → blocked
             if val.isEmpty || !field.isValid(val) { return false }
         }
         if providerType.supportsChainSelection && selectedChain.isEmpty { return false }
@@ -137,8 +135,8 @@ struct LiveSyncLinkFormView: View {
     }
 
     var body: some View {
-        // Fond via .background (borné par le Form) et non ZStack+Color gourmand :
-        // ce dernier étire la fenêtre à l'infini sur macOS (cf. N.1a SettingsView).
+        // Background via .background (bounded by the Form), not a greedy ZStack +
+        // Color: the latter stretches the window infinitely on macOS.
         Form {
                 Section("Nom d'affichage") {
                     TextField("Ex: \(suggestedName)", text: $displayName)
@@ -240,9 +238,9 @@ struct LiveSyncLinkFormView: View {
 
     private func populate() {
         guard let link = existingLink else {
-            // Suggestion de nom par défaut (l'utilisateur peut écraser)
+            // Default name suggestion (the user can overwrite it)
             displayName = suggestedName
-            // Chaîne par défaut = première dispo si applicable
+            // Default chain = the first available one, if applicable
             if providerType.supportsChainSelection, let first = providerType.supportedChains.first {
                 selectedChain = first.id
             }
@@ -259,7 +257,7 @@ struct LiveSyncLinkFormView: View {
 
     private func save() async {
         saveError = nil
-        // Trim toutes les valeurs avant sauvegarde
+        // Trim every value before saving
         var cleanCreds: [String: String] = [:]
         for field in providerType.credentialFields {
             let raw = (credentials[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -294,16 +292,12 @@ struct LiveSyncLinkFormView: View {
             }
             linkId = existing.id
         } else {
-            // CREATE — un compte cible est TOUJOURS assigné dès la création :
-            // celui fourni par l'appelant (fiche compte → "Lier une source à
-            // ce compte") ou, à défaut, un nouveau compte dédié créé ici même
-            // (catalogue du module → aucun compte pré-existant). Avant ce
-            // chantier, un lien créé sans accountId restait invisible tant que
-            // son premier sync manuel n'avait pas réussi (l'auto-création du
-            // compte n'avait lieu que dans `persistPositions`, au moment de la
-            // sync) — désormais le compte existe et apparaît dans la liste des
-            // comptes Investissements dès l'enregistrement, même si la sync
-            // qui suit échoue.
+            // CREATE — a target account is ALWAYS assigned at creation: the one
+            // supplied by the caller (account sheet → "Link a source to this
+            // account") or, failing that, a new dedicated account created right here
+            // (module catalog → no pre-existing account). The account therefore exists
+            // and appears in the Investments account list as soon as it's saved, even
+            // if the sync that follows fails.
             let targetAccountId: Int
             if let accountId {
                 targetAccountId = accountId
@@ -338,7 +332,7 @@ struct LiveSyncLinkFormView: View {
                     linkId: newId, providerId: providerType.id, credentials: cleanCreds
                 )
             } catch {
-                // Rollback : supprimer le lien créé puisque les credentials n'ont pas pu être stockés
+                // Rollback: delete the created link, since the credentials couldn't be stored
                 LiveSyncRepository.shared.deleteLink(id: newId)
                 saveError = "Erreur Keychain : \(error.localizedDescription)"
                 return
@@ -346,12 +340,11 @@ struct LiveSyncLinkFormView: View {
             linkId = newId
         }
 
-        // Première synchronisation immédiate (création ET édition) : le compte
-        // existe déjà à ce stade, donc même un échec réseau ici laisse un lien
-        // pleinement visible et gérable depuis la fiche du compte plutôt qu'un
-        // état "en attente" silencieux. Best-effort : on informe par toast mais
-        // on ne bloque jamais la fermeture du formulaire dessus (les
-        // identifiants, eux, sont déjà correctement persistés).
+        // Immediate first sync (creation AND edit): the account already exists at
+        // this point, so even a network failure here leaves a link fully visible
+        // and manageable from the account sheet rather than a silent "pending"
+        // state. Best-effort: reported through a toast, but it never blocks closing
+        // the form (the credentials themselves are already persisted).
         if let freshLink = LiveSyncRepository.shared.fetchLink(id: linkId) {
             if let syncError = await LiveSyncRegistry.shared.syncLink(freshLink) {
                 appState.postToast(.error, "« \(displayName) » enregistré, mais la sync a échoué : \(syncError)")
@@ -369,22 +362,22 @@ struct LiveSyncLinkFormView: View {
     }
 }
 
-// MARK: - Detail view (statut / sync / modifier / supprimer)
+// MARK: - Detail view (status / sync / edit / delete)
 
 struct LiveSyncLinkDetailView: View {
     let link: InvestmentLiveSyncLink
     let onChange: () -> Void
 
-    // paneDismiss : fermeture uniforme sheet iOS / panneau macOS — cette vue
-    // est TOUJOURS présentée via `.adaptivePane` (jamais poussée par
-    // NavigationLink), donc c'est le seul mécanisme de fermeture pertinent ici.
+    // paneDismiss: uniform closing for the iOS sheet / macOS pane — this view is
+    // ALWAYS presented via `.adaptivePane` (never pushed by NavigationLink), so
+    // it's the only relevant closing mechanism here.
     @Environment(\.paneDismiss) private var paneDismiss
     @Environment(AppState.self) private var appState
     @State private var showDeleteConfirm = false
-    /// Remplace l'ancien `NavigationLink` vers le form de credentials : un push
-    /// interne depuis cette vue, une fois hébergée dans le panneau macOS (pas
-    /// de `NavigationStack` locale dans ce cas), n'aurait aucun contexte de
-    /// navigation où pousser. `.adaptivePane` marche dans les deux contextes.
+    /// Instead of a `NavigationLink` to the credentials form: an internal push
+    /// from this view, once hosted in the macOS pane (no local `NavigationStack`
+    /// in that case), would have no navigation context to push into.
+    /// `.adaptivePane` works in both contexts.
     @State private var showEditForm = false
     @State private var enabledLocal: Bool
     @State private var isSyncing = false
@@ -436,9 +429,9 @@ struct LiveSyncLinkDetailView: View {
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
                 }
-                // `LocalizedStringResource` n'a pas de `.isEmpty` — inutile de
-                // toute façon : `persistPositions`/`persistTransactions`
-                // renvoient `nil` (pas `""`) quand il n'y a rien à dire.
+                // `LocalizedStringResource` has no `.isEmpty` — not needed anyway:
+                // `persistPositions`/`persistTransactions` return `nil` (not `""`) when
+                // there is nothing to say.
                 if let message = liveLink.lastSyncMessage {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Statut")
@@ -500,9 +493,9 @@ struct LiveSyncLinkDetailView: View {
         .scrollContentBackground(.hidden)
         .nemorisFormStyle()
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        // Toujours présentée en pane/sheet (jamais poussée) → paneChrome
-        // inconditionnel sur les deux plateformes (Fermer / iOS sheet native,
-        // macOS panneau ou sheet niveau 2 selon le contexte d'ouverture).
+        // Always presented as a pane/sheet (never pushed) → paneChrome
+        // unconditionally on both platforms (Close / native iOS sheet, macOS pane
+        // or level-2 sheet depending on where it was opened from).
         .paneChrome(link.displayName, cancelLabel: "Fermer", onCancel: { paneDismiss() })
         .adaptivePane(isPresented: $showEditForm) {
             if let providerType {
@@ -531,7 +524,7 @@ struct LiveSyncLinkDetailView: View {
         isSyncing = true
         lastSyncFeedback = nil
         let error = await LiveSyncRegistry.shared.syncLink(liveLink)
-        // Re-fetch pour récupérer les nouvelles colonnes last_sync_* mises à jour par le Registry
+        // Re-fetch to get the last_sync_* columns updated by the Registry
         if let refreshed = LiveSyncRepository.shared.fetchLink(id: link.id) {
             liveLink = refreshed
         }
@@ -544,9 +537,8 @@ struct LiveSyncLinkDetailView: View {
         }
         isSyncing = false
         onChange()
-        // Chantier A : le module Investissements doit refléter la sync manuelle
-        // (positions persistées même en cas d'erreur partielle) → bump du
-        // dataRefreshToken via NemorisApp.
+        // The Investments module must reflect the manual sync (positions persisted
+        // even on a partial error) → bump dataRefreshToken via NemorisApp.
         NotificationCenter.default.post(name: .nemorisInvestmentsDidSync, object: nil)
     }
 }

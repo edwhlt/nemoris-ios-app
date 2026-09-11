@@ -1,22 +1,22 @@
 import Foundation
 
-// MARK: - Client Solana RPC public
+// MARK: - Public Solana RPC client
 //
-// Protocol JSON-RPC 2.0 vers le RPC public officiel Solana (`api.mainnet-beta.solana.com`).
-// Gratuit, pas de clé, mais rate limit raisonnable. Pour usage prod intensif, l'utilisateur peut
-// passer son propre endpoint (Helius, QuickNode, Triton, etc.) — futur amélioration.
+// JSON-RPC 2.0 to Solana's official public RPC (`api.mainnet-beta.solana.com`).
+// Free, no key, reasonable rate limit. For heavy use, a custom endpoint
+// (Helius, QuickNode, Triton, etc.) could be supported later.
 //
-// Méthodes utilisées :
-//   - getBalance(address)               → balance SOL en lamports (1e9 = 1 SOL)
-//   - getTokenAccountsByOwner(address)  → tokens SPL (USDC, USDT, BONK, JUP, etc.)
+// Methods used:
+//   - getBalance(address)               → SOL balance in lamports (1e9 = 1 SOL)
+//   - getTokenAccountsByOwner(address)  → SPL tokens (USDC, USDT, BONK, JUP, etc.)
 //
-// Docs : https://solana.com/docs/rpc/http
+// Docs: https://solana.com/docs/rpc/http
 
 struct SolanaAPIClient {
 
     private let baseURL = URL(string: "https://api.mainnet-beta.solana.com")!
 
-    /// Balance native SOL en lamports (Double pour précision dans la conversion).
+    /// Native SOL balance in lamports (Double for precision in the conversion).
     /// 1 SOL = 10^9 lamports.
     func fetchBalance(address: String) async throws -> Double {
         let body = JSONRPCRequest(
@@ -28,11 +28,11 @@ struct SolanaAPIClient {
         return Double(lamports) / 1_000_000_000.0  // 1e9 lamports = 1 SOL
     }
 
-    /// Tokens SPL détenus par le wallet. Renvoie tous les comptes de tokens associés.
-    /// Filter qty > 0 fait par le caller (le RPC retourne aussi les comptes vidés).
+    /// SPL tokens held by the wallet. Returns every associated token account.
+    /// The qty > 0 filter is done by the caller (the RPC also returns emptied accounts).
     func fetchTokenAccounts(address: String) async throws -> [SolanaTokenAccount] {
-        // Le 2ème param `programId` = TOKEN_PROGRAM_ID (constant pour SPL standard)
-        // Le 3ème param `encoding: jsonParsed` demande à Solana de décoder le compte
+        // The 2nd param `programId` = TOKEN_PROGRAM_ID (constant for standard SPL)
+        // The 3rd param `encoding: jsonParsed` asks Solana to decode the account
         let body = JSONRPCRequest(
             method: "getTokenAccountsByOwner",
             params: [
@@ -44,7 +44,7 @@ struct SolanaAPIClient {
         let response: JSONRPCResponse<GetTokenAccountsResult> = try await post(body)
         return response.result.value.compactMap { wrapped -> SolanaTokenAccount? in
             let info = wrapped.account.data.parsed.info
-            // Skip accounts à 0 (l'utilisateur a fermé le SPL token account sans le delete)
+            // Skip zero accounts (the user closed the SPL token account without deleting it)
             guard let amount = Double(info.tokenAmount.amount), amount > 0 else { return nil }
             let qty = amount / pow(10.0, Double(info.tokenAmount.decimals))
             return SolanaTokenAccount(
@@ -70,7 +70,7 @@ struct SolanaAPIClient {
         do {
             let decoded = try JSONDecoder().decode(JSONRPCResponse<T>.self, from: data)
             if let error = decoded.error {
-                // Solana renvoie 200 avec un body `error` quand l'adresse est invalide
+                // Solana returns 200 with an `error` body when the address is invalid
                 throw LiveSyncError.parseError("Solana RPC error \(error.code) : \(error.message)")
             }
             return decoded
@@ -97,14 +97,14 @@ struct SolanaAPIClient {
 
 /// Compte SPL token tel qu'extrait par notre client (forme aplatie).
 struct SolanaTokenAccount: Hashable {
-    let mintAddress: String     // Adresse du contract SPL (équivalent ERC-20 contract)
-    let quantity: Double        // Quantité ajustée par decimals (= unité humaine)
+    let mintAddress: String     // SPL contract address (equivalent of an ERC-20 contract)
+    let quantity: Double        // Quantity adjusted by decimals (= human units)
     let decimals: Int
 }
 
 // MARK: - JSON-RPC 2.0 wrapper
 
-/// Body d'une requête JSON-RPC. `params` est un mix de types donc on encode à la main.
+/// JSON-RPC request body. `params` mixes types, so it's encoded by hand.
 private struct JSONRPCRequest: Encodable {
     let jsonrpc = "2.0"
     let id: Int = 1
@@ -114,8 +114,8 @@ private struct JSONRPCRequest: Encodable {
     enum CodingKeys: String, CodingKey { case jsonrpc, id, method, params }
 }
 
-/// Valeur typée pour JSON-RPC params (string, number, object…).
-/// Solana attend des arrays mixtes : `[address (string), {programId: ...}, {encoding: ...}]`.
+/// Typed value for JSON-RPC params (string, number, object…).
+/// Solana expects mixed arrays: `[address (string), {programId: ...}, {encoding: ...}]`.
 private enum JSONRPCValue: Encodable {
     case string(String)
     case object([String: String])
@@ -129,7 +129,7 @@ private enum JSONRPCValue: Encodable {
     }
 }
 
-/// Réponse JSON-RPC générique paramétrée par le type de `result`.
+/// Generic JSON-RPC response parameterized by the `result` type.
 private struct JSONRPCResponse<T: Decodable>: Decodable {
     let result: T
     let error: RPCError?
@@ -139,7 +139,7 @@ private struct JSONRPCResponse<T: Decodable>: Decodable {
         let message: String
     }
 
-    // Custom decoding pour gérer `result` qui peut être manquant si `error` présent.
+    // Custom decoding to handle `result`, which may be missing when `error` is present.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.error = try container.decodeIfPresent(RPCError.self, forKey: .error)
@@ -185,7 +185,7 @@ private struct SPLAccountWrapper: Decodable {
         let tokenAmount: TokenAmount
     }
     struct TokenAmount: Decodable {
-        let amount: String   // raw amount as string (très grands nombres)
+        let amount: String   // raw amount as a string (very large numbers)
         let decimals: Int
     }
 }

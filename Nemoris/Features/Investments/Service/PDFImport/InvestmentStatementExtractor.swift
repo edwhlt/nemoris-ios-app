@@ -1,63 +1,60 @@
 import Foundation
 
-// MARK: - Extraction déterministe d'opérations depuis un relevé / une capture
+// MARK: - Deterministic extraction of operations from a statement / capture
 //
-// Moteur PUR (aucun accès réseau, disque, IA ni SwiftUI) — même doctrine que
-// `PortfolioEvolutionBuilder` et `MerchantQueryPlanner` : testable hors Xcode.
+// PURE engine (no network, disk, AI or SwiftUI access) — same doctrine as
+// `PortfolioEvolutionBuilder` and `MerchantQueryPlanner`: testable outside Xcode.
 //
-// ─── Pourquoi ce moteur existe ─────────────────────────────────────────────
+// ─── Why a deterministic engine ─────────────────────────────────────────────
 //
-// L'import de relevés reposait à 100 % sur Apple Foundation Models. Trois
-// conséquences, toutes constatées :
-//   1. Sur un appareil sans Apple Intelligence (iOS 18-25, Mac non éligible,
-//      fonctionnalité désactivée), l'import ne pouvait RIEN extraire — alors
-//      qu'un relevé bancaire est un format tabulaire très régulier.
-//   2. Quand le modèle échouait (contexte dépassé, JSON malformé), l'erreur
-//      était avalée et l'écran affichait « Rien à importer », indiscernable
-//      d'un document réellement vide.
-//   3. Aucun garde-fou : une extraction 100 % probabiliste sans filet.
+// Relying on AI alone for statement import has three consequences:
+//   1. On a device without an AI backend (iOS 18-25, an ineligible Mac, the
+//      feature disabled), the import could extract NOTHING — even though a
+//      bank statement is a very regular tabular format.
+//   2. When the model fails (context exceeded, malformed JSON), the result
+//      is indistinguishable from a genuinely empty document.
+//   3. No safety net: a 100% probabilistic extraction.
 //
-// Ce moteur n'essaie PAS de battre l'IA sur les formats libres. Il couvre le
-// cas dominant — une ligne d'opération identifiée par son ISIN — et sert de
-// repli systématique quand l'IA n'a rien produit.
+// This engine does NOT try to beat the AI on free-form formats. It covers the
+// dominant case — an operation row identified by its ISIN — and serves as a
+// systematic backbone reconciled with the AI's reading.
 //
-// ─── Ancrage sur l'ISIN ────────────────────────────────────────────────────
+// ─── Anchoring on the ISIN ─────────────────────────────────────────────────
 //
-// L'ISIN est le seul identifiant réellement fiable dans un relevé : format
-// normalisé (ISO 6166), présent sur tous les avis d'opéré et la plupart des
-// écrans de courtiers. On découpe donc le texte en blocs autour de chaque ISIN
-// trouvé, puis on cherche les autres champs DANS ce bloc. Un texte OCR d'app
-// mobile arrive en colonne (un champ par ligne), un PDF arrive en tableau :
-// le découpage par ISIN absorbe les deux.
+// The ISIN is the only truly reliable identifier in a statement: a
+// normalized format (ISO 6166), present on every trade confirmation and most
+// broker screens. The text is therefore split into blocks around each ISIN
+// found, then the other fields are looked for IN that block. Mobile app OCR
+// text arrives as a column (one field per line), a PDF arrives as a table:
+// splitting by ISIN absorbs both.
 
-/// Une opération reconnue sans IA. Volontairement distincte de
-/// `PDFExtractedOrder` (qui porte de l'état d'UI) : ce moteur reste pur.
+/// An operation recognized without AI. Deliberately distinct from
+/// `PDFExtractedOrder` (which carries UI state): this engine stays pure.
 struct ExtractedStatementOrder: Equatable, Codable, Hashable, Sendable {
     var orderType: String        // "BUY" | "SELL" | "DIV"
     var assetName: String
     var isin: String
-    /// Symbole boursier court. Le SEUL champ que l'ancrage par ISIN ne cherche
-    /// pas (il n'a pas de forme normalisée) : il est rempli par la
-    /// réconciliation, depuis l'IA ou depuis un format structuré qui le nomme.
-    /// Valeur par défaut pour que les sites de construction du moteur
-    /// déterministe restent inchangés.
+    /// Short stock symbol. The ONLY field ISIN anchoring doesn't look for (it has
+    /// no normalized form): it's filled by the reconciliation, from the AI or
+    /// from a structured format that names it. Defaulted so the deterministic
+    /// engine's construction sites stay unchanged.
     var ticker: String = ""
     var quantity: Double
     var unitPrice: Double
     var fees: Double
-    /// Date au format yyyy-MM-dd (chaîne : le moteur ne dépend pas de Calendar).
+    /// Date as yyyy-MM-dd (a string: the engine doesn't depend on Calendar).
     var executedAt: String
     var currency: String
     var notes: String?
-    /// Confiance : dégradée quand un champ a dû être déduit plutôt que lu.
+    /// Confidence: lowered when a field had to be deduced rather than read.
     var confidence: Double
 }
 
 enum InvestmentStatementExtractor {
 
-    // MARK: - Point d'entrée
+    // MARK: - Entry point
 
-    /// Extrait toutes les opérations reconnaissables d'un texte brut.
+    /// Extracts every recognizable operation from raw text.
     static func extractOrders(from text: String) -> [ExtractedStatementOrder] {
         let lines = text
             .components(separatedBy: .newlines)
@@ -68,28 +65,22 @@ enum InvestmentStatementExtractor {
 
         var results: [ExtractedStatementOrder] = []
         for (index, anchor) in anchors.enumerated() {
-            // ⚠️ Deux fenêtres, bornées par les ancres VOISINES et jamais l'une
-            // par l'autre — c'est ce qui empêche un champ de remonter du bloc
-            // précédent ou suivant, sans pour autant l'enfermer dans un nombre
-            // de lignes arbitraire :
+            // Two windows, bounded by the NEIGHBORING anchors and never by each other —
+            // which keeps a field from leaking in from the previous or next block,
+            // without locking it into an arbitrary number of lines:
             //
-            //   • APRÈS l'ISIN, jusqu'à l'ISIN suivant : le cas dominant pour
-            //     un avis d'opéré (« Quantité exécutée : 2,000 » vient après
-            //     le code).
-            //   • AVANT l'ISIN, depuis l'ISIN précédent : nécessaire pour un
-            //     vrai TABLEAU (pas un texte en colonne). Ici l'ISIN est la
-            //     2ᵉ sous-ligne de sa cellule (« Code ISIN : … » sous le nom
-            //     du titre), alors qu'une cellule voisine de la MÊME ligne
-            //     visuelle — la quantité, alignée avec la date — se retrouve
-            //     AVANT lui une fois le tableau aplati en texte par PDFKit.
-            //     Bug réel : « 4 » (quantité) invisible parce que la seule
-            //     fenêtre alors cherchée était celle d'APRÈS l'ISIN.
+            //   • AFTER the ISIN, up to the next ISIN: the dominant case for a trade
+            //     confirmation ("Executed quantity: 2,000" comes after the code).
+            //   • BEFORE the ISIN, from the previous ISIN: needed for a real TABLE (not
+            //     column text). There the ISIN is the 2nd sub-line of its cell ("ISIN
+            //     code: …" under the security's name), while a neighboring cell of the
+            //     SAME visual row — the quantity, aligned with the date — ends up BEFORE
+            //     it once PDFKit flattens the table into text.
             //
-            // Le libellé (« Quantité », « Cours », « Frais ») protège contre
-            // les faux positifs sur la fenêtre AVANT — un en-tête de banque ne
-            // contient jamais ces mots — donc l'élargir ne coûte rien en
-            // précision, contrairement à un nombre de lignes fixe qui peut
-            // couper le tableau au mauvais endroit selon sa mise en page.
+            // The label ("Quantité", "Cours", "Frais") guards against false positives in
+            // the BEFORE window — a bank header never contains those words — so widening
+            // it costs nothing in precision, unlike a fixed number of lines that could
+            // cut the table in the wrong place depending on its layout.
             let fieldsUpper = index == anchors.count - 1
                 ? lines.count - 1
                 : min(lines.count - 1, anchors[index + 1].line - 1)
@@ -115,9 +106,9 @@ enum InvestmentStatementExtractor {
         let isin: String
     }
 
-    /// Un ISIN : 2 lettres pays + 9 alphanumériques + 1 chiffre de contrôle.
-    /// On valide la clé de Luhn pour écarter les faux positifs (une référence
-    /// interne de banque peut avoir la même forme).
+    /// An ISIN: 2 country letters + 9 alphanumerics + 1 check digit.
+    /// The Luhn key is validated to rule out false positives (an internal bank
+    /// reference can have the same shape).
     private static let isinPattern = try? NSRegularExpression(
         pattern: "\\b([A-Z]{2}[A-Z0-9]{9}[0-9])\\b")
 
@@ -137,8 +128,8 @@ enum InvestmentStatementExtractor {
         return anchors
     }
 
-    /// Validation ISO 6166 : lettres converties en nombres (A=10 … Z=35), puis
-    /// Luhn sur la chaîne de chiffres obtenue.
+    /// ISO 6166 validation: letters converted to numbers (A=10 … Z=35), then Luhn
+    /// on the resulting digit string.
     static func isValidISIN(_ isin: String) -> Bool {
         guard isin.count == 12 else { return false }
         var digits = ""
@@ -152,7 +143,7 @@ enum InvestmentStatementExtractor {
             }
         }
         var sum = 0
-        var double = true   // on double en partant de la droite, hors dernier chiffre
+        var double = true   // double starting from the right, excluding the last digit
         for ch in digits.dropLast().reversed() {
             guard let d = ch.wholeNumberValue else { return false }
             if double {
@@ -167,50 +158,46 @@ enum InvestmentStatementExtractor {
         return (10 - (sum % 10)) % 10 == check
     }
 
-    // MARK: - Parsing d'un bloc
+    // MARK: - Parsing a block
 
     private static func parseBlock(fields: [String], nameWindow: [String], isin: String) -> ExtractedStatementOrder? {
         let joined = fields.joined(separator: "\n")
         let upper = joined.uppercased()
-        // Repli sur le nom quand la nature ou la date sont AU-DESSUS du code
-        // (certains formats titrent « Achat — 15/03/2024 » avant l'ISIN).
+        // Fall back on the name when the type or the date are ABOVE the code (some
+        // formats title "Achat — 15/03/2024" before the ISIN).
         let fallback = nameWindow.joined(separator: "\n")
 
         guard let orderType = detectOrderType(in: upper) ?? detectOrderType(in: fallback.uppercased()) else { return nil }
         guard let date = firstDate(in: joined) ?? firstDate(in: fallback) else { return nil }
 
-        // ⚠️ Repli AVANT l'ISIN pour chaque champ numérique — mais restreint au
-        // PRÉAMBULE de CE bloc, pas tout `nameWindow`.
+        // Fallback BEFORE the ISIN for each numeric field — but restricted to THIS
+        // block's PREAMBLE, not the whole `nameWindow`.
         //
-        // Sur un vrai tableau, l'en-tête de colonne (« Quantité ») et sa
-        // valeur (« 4 ») sont légitimement avant l'ISIN (bug réel corrigé
-        // ici). Mais sur une capture à plusieurs opérations consécutives,
-        // `nameWindow` contient AUSSI la fin des champs du bloc PRÉCÉDENT
-        // (sa propre quantité, son propre cours) — et un dividende sans cours
-        // affiché happait alors le cours du titre acheté juste avant lui.
+        // On a real table, the column header ("Quantité") and its value ("4") are
+        // legitimately before the ISIN. But on a capture with several consecutive
+        // operations, `nameWindow` ALSO contains the end of the PREVIOUS block's
+        // fields (its own quantity, its own price) — and a dividend without a
+        // displayed price would grab the price of the security bought just before it.
         //
-        // La ligne de nom la plus proche de l'ISIN (déjà calculée par
-        // `assetName` ci-dessous, ici anticipée) marque la frontière : tout ce
-        // qui la précède appartient structurellement au bloc d'AVANT.
+        // The name line closest to the ISIN (computed by `assetName` below,
+        // anticipated here) marks the boundary: everything before it structurally
+        // belongs to the PREVIOUS block.
         let preambleStart = nameLineIndex(in: nameWindow) ?? 0
         let preamble = preambleStart < nameWindow.count
             ? Array(nameWindow[preambleStart...]).joined(separator: "\n")
             : ""
 
-        // `firstNumberNearLabel`, pas `firstNumber`, sur ce repli : dans un
-        // tableau, l'EN-TÊTE de colonne et sa VALEUR sont sur deux lignes
-        // DIFFÉRENTES (ligne d'en-tête, puis ligne de données) — `firstNumber`
-        // exige la même ligne. La variante tolérante cherche sur les quelques
-        // lignes suivant le libellé, après avoir retiré les dates reconnues :
-        // sans ce retrait, le jour d'une date sur la ligne de données
-        // (« 13/01/2025 4 … ») serait pris pour la quantité qui le suit.
-        // ⚠️ La variante tolérante s'applique aux DEUX fenêtres, pas seulement
-        // au préambule. Dans un tableau, l'en-tête de colonne et sa valeur sont
-        // sur deux lignes distinctes des deux côtés de l'ancre — les frais de
-        // l'avis d'opéré BoursoBank (« Commission … » puis « 1,11 EUR … »)
-        // tombaient APRÈS le code ISIN, donc dans une fenêtre où seule la
-        // recherche stricte, même-ligne, était tentée : la commission n'était
-        // jamais lue.
+        // `firstNumberNearLabel`, not `firstNumber`, for this fallback: in a table,
+        // the column HEADER and its VALUE are on two DIFFERENT lines (header line,
+        // then data line) — `firstNumber` requires the same line. The tolerant
+        // variant searches the few lines following the label, after removing the
+        // recognized dates: otherwise the day of a date on the data line
+        // ("13/01/2025 4 …") would be taken for the quantity that follows it.
+        // The tolerant variant applies to BOTH windows, not only the preamble. In a
+        // table, the column header and its value sit on two distinct lines on both
+        // sides of the anchor — a confirmation's fees ("Commission …" then
+        // "1,11 EUR …") fall AFTER the ISIN code, in a window where a strict,
+        // same-line search would never read them.
         let quantity = firstNumber(in: joined, labels: quantityLabels)
             ?? firstNumberNearLabel(in: joined, labels: quantityLabels)
             ?? firstNumberNearLabel(in: preamble, labels: quantityLabels)
@@ -221,72 +208,65 @@ enum InvestmentStatementExtractor {
             ?? firstNumberNearLabel(in: joined, labels: feeLabels)
             ?? firstNumberNearLabel(in: preamble, labels: feeLabels) ?? 0
 
-        // ⚠️ Le montant LIBELLÉ prime sur « le premier montant du bloc ».
+        // The LABELED amount wins over "the block's first amount".
         //
-        // Bug réel (avis d'opéré BoursoBank) : le bloc s'ouvre sur « Code ISIN
-        // … Cours exécuté : 55,62 EUR », donc `signedAmount` retenait le COURS
-        // comme montant de l'opération — le vrai total, « Montant transaction
-        // brut 222,48 EUR », arrivant plus bas. Conséquence en cascade : la
-        // quantité ne pouvait plus se déduire (55,62 ÷ 55,62 = 1) et l'ordre
-        // s'importait en « 1 × 55,62 € » au lieu de « 4 × 55,62 € ».
+        // A BoursoBank confirmation block opens on "Code ISIN … Cours exécuté :
+        // 55,62 EUR", so taking the first amount would pick the PRICE as the
+        // operation's amount — the real total, "Montant transaction brut
+        // 222,48 EUR", comes further down. The quantity could then no longer be
+        // deduced (55.62 ÷ 55.62 = 1), and the order would import as "1 × €55.62"
+        // instead of "4 × €55.62".
         //
-        // Un relevé qui donne un total le LIBELLE toujours ; le repli non
-        // libellé reste pour les captures d'app, où le montant est seul sur sa
-        // ligne sans en-tête.
+        // A statement that gives a total always LABELS it; the unlabeled fallback
+        // remains for app captures, where the amount sits alone on its line with no
+        // header.
         let gross = firstNumber(in: joined, labels: totalLabels)
             ?? firstNumberNearLabel(in: joined, labels: totalLabels)
             ?? firstNumber(in: preamble, labels: totalLabels)
             ?? firstNumberNearLabel(in: preamble, labels: totalLabels)
             ?? signedAmount(in: joined) ?? signedAmount(in: preamble)
 
-        // ⚠️ Frais IMPLAUSIBLES rejetés avant tout repli. `firstNumberNearLabel`
-        // n'a aucune notion de COLONNE : sur la ligne de VALEURS d'un footer à
-        // 4 colonnes (« Montant brut | Commission | Frais | Montant net »),
-        // elle rend le PREMIER nombre de la ligne — qui est le montant brut,
-        // pas la commission, dès que « Commission » n'est pas la 1ʳᵉ colonne.
-        // Bug réel mesuré : les frais rendus valaient EXACTEMENT le montant
-        // brut, doublant le total affiché (`quantité × prix + frais`). Une
-        // commission plausible reste une PETITE fraction du montant de
-        // l'opération ; un nombre trouvé « pour les frais » qui se rapproche
-        // du brut n'est pas une lecture, c'est une confusion de colonne — on
-        // le traite comme si rien n'avait été trouvé, pour laisser la place
-        // au repli par soustraction ci-dessous.
+        // IMPLAUSIBLE fees rejected before any fallback. `firstNumberNearLabel` has
+        // no notion of COLUMN: on the VALUE line of a 4-column footer ("Montant brut
+        // | Commission | Frais | Montant net"), it returns the line's FIRST number —
+        // which is the gross amount, not the commission, whenever "Commission" isn't
+        // the 1st column. Returned fees equal to EXACTLY the gross amount double the
+        // displayed total (`quantity × price + fees`). A plausible commission stays a
+        // SMALL fraction of the operation's amount; a number found "for the fees"
+        // that approaches the gross amount isn't a reading, it's a column mix-up —
+        // treated as if nothing had been found, leaving room for the subtraction
+        // fallback below.
         if let grossValue = gross, grossValue > 0, fees >= grossValue * 0.5 {
             fees = 0
         }
 
-        // ⚠️ Repli par SOUSTRACTION quand aucun libellé de frais direct n'a
-        // payé (« Commission »/« Frais » introuvables, ou rejetés ci-dessus
-        // comme implausibles). Un footer à 4 colonnes (Montant brut |
-        // Commission | Frais (♦) | Montant net au débit) regroupe souvent ses
-        // 4 EN-TÊTES d'un bloc avant ses 4 VALEURS une fois le tableau aplati
-        // par PDFKit — la valeur de « Commission » peut alors se retrouver à
-        // plus de `lineSpan` lignes de son libellé, ou dans la mauvaise
-        // colonne d'une ligne de valeurs groupées. Plutôt que de complexifier
-        // la recherche par position, on déduit les frais de la différence
-        // entre le montant NET et le montant BRUT — deux totaux que le
-        // document donne presque toujours, chacun bien identifié par son
-        // propre libellé complet en fin de ligne, sans dépendre de la
-        // position d'une cellule isolée dans une mise en page qui varie d'un
-        // courtier à l'autre. `abs(...)` marche dans les deux sens : un achat
-        // paie plus que le brut (net > brut), une vente reçoit moins (net <
-        // brut).
+        // Fallback by SUBTRACTION when no direct fee label worked ("Commission" /
+        // "Frais" not found, or rejected above as implausible). A 4-column footer
+        // (Montant brut | Commission | Frais (♦) | Montant net au débit) often groups
+        // its 4 HEADERS in one block before its 4 VALUES once PDFKit flattens the
+        // table — the "Commission" value may then land more than `lineSpan` lines
+        // from its label, or in the wrong column of a grouped value line. Rather than
+        // complicating the search by position, the fees are deduced from the
+        // difference between the NET and the GROSS amounts — two totals the document
+        // almost always gives, each clearly identified by its own full label at the
+        // end of the line, independent of an isolated cell's position in a layout
+        // that varies from one broker to the next. `abs(...)` works both ways: a
+        // purchase pays more than the gross (net > gross), a sale receives less
+        // (net < gross).
         if fees == 0, let grossValue = gross {
-            // ⚠️ `lastNumberNearLabel`, pas `firstNumberNearLabel` : « Montant
-            // net » est la DERNIÈRE colonne du footer, alors que la variante
-            // « first » — pensée pour « Montant brut », en 1ʳᵉ colonne —
-            // renverrait ENCORE le montant brut sur la ligne de valeurs
-            // groupées, rendant `net == grossValue` et la soustraction nulle.
+            // `lastNumberNearLabel`, not `firstNumberNearLabel`: "Montant net" is the
+            // footer's LAST column, whereas the "first" variant — meant for "Montant
+            // brut", the 1st column — would STILL return the gross amount on the grouped
+            // value line, making `net == grossValue` and the subtraction zero.
             let net = lastNumber(in: joined, labels: netLabels)
                 ?? lastNumberNearLabel(in: joined, labels: netLabels)
                 ?? lastNumber(in: preamble, labels: netLabels)
                 ?? lastNumberNearLabel(in: preamble, labels: netLabels)
             if let net {
                 let derived = abs(net - grossValue)
-                // Garde-fou : des frais ne dépassent normalement pas le
-                // montant brut lui-même — au-delà, les deux nombres trouvés
-                // ne décrivent probablement pas la même opération (deux
-                // lignes voisines d'un relevé à plusieurs opérations).
+                // Guard: fees don't normally exceed the gross amount itself — beyond that,
+                // the two numbers found probably don't describe the same operation (two
+                // neighboring rows of a multi-operation statement).
                 if derived > 0.001, derived < grossValue {
                     fees = derived
                 }
@@ -301,17 +281,15 @@ enum InvestmentStatementExtractor {
                                   unitPrice: priceFromLabel,
                                   gross: gross)
 
-        // ⚠️ Une quantité DÉRIVÉE de `montant ÷ cours`, quand les DEUX sont
-        // libellés dans le document, n'est pas une supposition : c'est une
-        // vérification. `4 × 55,62 = 222,48` reproduit exactement le montant
-        // brut imprimé sur l'avis. Elle reste donc AU-DESSUS du seuil de
-        // relecture (`StatementReconciler.uncertainConfidence`) — sans quoi un
-        // modèle qui répond « quantité 1 » écrase une valeur arithmétiquement
-        // exacte, ce qui était le cas et annulait tout le bénéfice de la
-        // déduction.
+        // A quantity DERIVED from `amount ÷ price`, when BOTH are labeled in the
+        // document, isn't a guess: it's a check. `4 × 55.62 = 222.48` reproduces
+        // exactly the gross amount printed on the confirmation. It therefore stays
+        // ABOVE the review threshold (`StatementReconciler.uncertainConfidence`) —
+        // otherwise a model answering "quantity 1" would overwrite an arithmetically
+        // exact value.
         //
-        // Sans ces deux ancrages, en revanche, la quantité vaut « 1 » faute de
-        // mieux : c'est une vraie inconnue, et l'IA doit pouvoir la corriger.
+        // Without both anchors, on the other hand, the quantity is "1" for lack of
+        // anything better: a real unknown, which the AI must be able to correct.
         let quantityIsVerified = quantity == nil
             && valuation.quantity > 0 && gross != nil && priceFromLabel != nil
         if quantityIsVerified {
@@ -336,34 +314,34 @@ enum InvestmentStatementExtractor {
             fees: fees,
             executedAt: date,
             currency: detectCurrency(in: upper),
-            // Note NEUTRE plutôt que « sans IA » : l'opération peut être
-            // renforcée juste après par `StatementReconciler`, et la note
-            // aurait alors affirmé le contraire de ce qui s'est passé.
+            // A NEUTRAL note rather than "without AI": the operation may be reinforced
+            // right after by `StatementReconciler`, and the note would then claim the
+            // opposite of what happened.
             notes: "Extraction automatique (ancrage ISIN)",
             confidence: max(0.2, min(1, confidence))
         )
     }
 
-    // MARK: - Valorisation d'une opération
+    // MARK: - Valuing an operation
 
-    /// Quantité et prix unitaire cohérents, de sorte que
-    /// `quantité × prix` soit TOUJOURS le montant réel de l'opération.
+    /// Consistent quantity and unit price, so that `quantity × price` is ALWAYS
+    /// the operation's real amount.
     ///
-    /// ⚠️ Un DIVIDENDE n'a ni quantité ni cours d'exécution : sa valeur EST le
-    /// montant crédité. Le forcer dans le moule « quantité × prix » donnait un
-    /// prix nul, donc un dividende à **0 €** — constaté sur un avis d'opéré
-    /// réel. Même défaut pour un achat dont le document ne nomme pas la
-    /// quantité : elle tombait à 0, et le total avec elle.
+    /// A DIVIDEND has neither a quantity nor an execution price: its value IS the
+    /// credited amount. Forcing it into the "quantity × price" mold would give a
+    /// zero price, hence a **€0** dividend. Same trap for a purchase whose
+    /// document doesn't name the quantity: it would fall to 0, and the total
+    /// with it.
     ///
-    /// Règle : quand le document donne un MONTANT, l'opération ne vaut jamais
-    /// zéro. À quantité inconnue, on retient 1 et le montant devient le prix
-    /// unitaire — la valeur est juste, et c'est ce qui compte pour le
-    /// portefeuille. Quand la quantité est connue (100 titres pour 34,53 € de
-    /// coupon), le prix unitaire s'en déduit et le produit reste exact.
+    /// Rule: when the document gives an AMOUNT, the operation is never worth
+    /// zero. With an unknown quantity, 1 is used and the amount becomes the unit
+    /// price — the value is right, and that's what matters for the portfolio.
+    /// When the quantity is known (100 shares for a €34.53 coupon), the unit
+    /// price is derived from it and the product stays exact.
     ///
-    /// Moteur PUR, partagé avec le chemin IA (`InvestmentPDFParser.convert`) :
-    /// une extraction déterministe et une extraction par modèle ne doivent pas
-    /// valoriser différemment la même opération.
+    /// PURE engine, shared with the AI path (`InvestmentPDFParser.convert`): a
+    /// deterministic extraction and a model extraction must not value the same
+    /// operation differently.
     static func valuation(orderType: String,
                           quantity: Double?,
                           unitPrice: Double?,
@@ -372,36 +350,32 @@ enum InvestmentStatementExtractor {
         let knownQuantity = (quantity ?? 0) > 0 ? quantity! : nil
         let knownPrice = (unitPrice ?? 0) > 0 ? unitPrice! : nil
 
-        // Cas nominal : les deux sont lus dans le document.
+        // Nominal case: both are read from the document.
         if let knownQuantity, let knownPrice {
             return (knownQuantity, knownPrice, false)
         }
-        // Prix absent mais montant connu : on le déduit.
+        // Price missing but amount known: deduce it.
         if let knownQuantity, amount > 0 {
             return (knownQuantity, amount / knownQuantity, true)
         }
-        // ⚠️ Quantité absente, mais PRIX et MONTANT connus : `quantité =
-        // montant ÷ prix`. C'est de l'arithmétique, pas une heuristique de
-        // mise en page — donc valable quel que soit le courtier, là où aucune
-        // fenêtre de recherche autour d'un libellé ne peut couvrir toutes les
-        // dispositions possibles.
+        // Quantity missing, but PRICE and AMOUNT known: `quantity = amount ÷ price`.
+        // That's arithmetic, not a layout heuristic — so it holds whatever the
+        // broker, where no search window around a label can cover every possible
+        // arrangement.
         //
-        // Cas réel (avis d'opéré BoursoBank) : la quantité « 4 » se trouve
-        // TROIS lignes sous son en-tête de colonne, une fois le tableau aplati
-        // par PDFKit — introuvable par libellé. Mais « Montant transaction
-        // brut 222,48 EUR » et « Cours exécuté : 55,62 EUR » sont tous les
-        // deux libellés, et leur quotient vaut exactement 4.
+        // On a BoursoBank confirmation, the quantity "4" sits THREE lines below its
+        // column header once PDFKit flattens the table — unfindable by label. But
+        // "Montant transaction brut 222,48 EUR" and "Cours exécuté : 55,62 EUR" are
+        // both labeled, and their quotient is exactly 4.
         if let knownPrice, amount > 0 {
             let derived = amount / knownPrice
-            // Garde-fou : un rapport absurde signale qu'on a comparé deux
-            // grandeurs sans rapport (un montant de frais avec un cours, par
-            // exemple) — mieux vaut alors ne rien déduire.
+            // Guard: an absurd ratio means two unrelated quantities were compared (a fee
+            // amount with a price, for example) — better to deduce nothing then.
             if derived.isFinite, derived > 0, derived < 1_000_000 {
                 return (snappedToWhole(derived), knownPrice, true)
             }
         }
-        // Quantité absente et aucun montant : le prix devient celui d'une
-        // « unité ».
+        // Quantity missing and no amount: the price becomes that of one "unit".
         if let knownPrice, knownQuantity == nil {
             return (1, knownPrice, true)
         }
@@ -412,12 +386,12 @@ enum InvestmentStatementExtractor {
         return (knownQuantity ?? 0, knownPrice ?? 0, false)
     }
 
-    /// Arrondit une quantité déduite d'une division quand elle frôle un entier.
+    /// Rounds a quantity deduced from a division when it's very close to an
+    /// integer.
     ///
-    /// ⚠️ Tolérance très serrée, et volontairement : les parts d'ETF et de fonds
-    /// se détiennent en fractions (0,347 part), donc on ne « corrige » que le
-    /// résidu d'arrondi d'une division exacte (222,48 ÷ 55,62), jamais une
-    /// quantité réellement fractionnaire.
+    /// Very tight tolerance, on purpose: ETF and fund shares are held in
+    /// fractions (0.347 share), so only the rounding residue of an exact division
+    /// (222.48 ÷ 55.62) is "corrected", never a genuinely fractional quantity.
     private static func snappedToWhole(_ value: Double) -> Double {
         let rounded = value.rounded()
         guard rounded >= 1, abs(value - rounded) < 0.001 else { return value }
@@ -426,18 +400,17 @@ enum InvestmentStatementExtractor {
 
     // MARK: - Champs
 
-    /// Mots-clés d'opération, du plus spécifique au plus général : « ACHAT
-    /// COMPTANT » et « SOUSCRIPTION » avant le simple « ACH », sinon un libellé
-    /// contenant « ACHAT » dans une phrase parasite déclencherait un faux BUY.
+    /// Operation keywords, from the most specific to the most general: "ACHAT
+    /// COMPTANT" and "SOUSCRIPTION" before the plain "ACH", otherwise a label
+    /// containing "ACHAT" in an unrelated phrase would trigger a false BUY.
     private static let buyKeywords  = ["ACHAT", "ACQUISITION", "SOUSCRIPTION", "BUY", "KAUF", "COMPRA", "ACH "]
     private static let sellKeywords = ["VENTE", "CESSION", "RACHAT", "SELL", "VERKAUF", "VENTA", "VTE "]
     private static let divKeywords  = ["COUPON", "DIVIDENDE", "DIVIDEND", "DISTRIBUTION", "DÉTACHEMENT", "DETACHEMENT"]
 
     static func detectOrderType(in upperText: String) -> String? {
-        // Dividende testé en premier : « COUPONS » peut cohabiter avec le nom
-        // d'un titre obligataire contenant « ACHAT » n'a pas de sens, mais un
-        // relevé mixte liste souvent achats ET coupons — c'est le bloc qui
-        // tranche, et le mot dividende y est le plus discriminant.
+        // Dividend tested first: a mixed statement often lists purchases AND coupons
+        // — the block decides, and the dividend word is the most discriminating one
+        // in it.
         if divKeywords.contains(where: { upperText.contains($0) })  { return "DIV" }
         if sellKeywords.contains(where: { upperText.contains($0) }) { return "SELL" }
         if buyKeywords.contains(where: { upperText.contains($0) })  { return "BUY" }
@@ -451,19 +424,18 @@ enum InvestmentStatementExtractor {
         return "EUR"
     }
 
-    /// Libellés des champs, FR et EN — un relevé Interactive Brokers ou Trade
-    /// Republic écrit « Quantity » / « Price », pas « Quantité » / « Cours ».
+    /// Field labels, FR and EN — an Interactive Brokers or Trade Republic
+    /// statement writes "Quantity" / "Price", not "Quantité" / "Cours".
     private static let quantityLabels = [
         "QUANTITÉ EXÉCUTÉE", "QUANTITE EXECUTEE", "QUANTITÉ", "QUANTITE",
         "QTÉ", "QTE", "NOMBRE DE PARTS", "NOMBRE", "QUANTITY", "SHARES", "UNITS"
     ]
-    /// ⚠️ « Cours exécuté » PRIME sur « Cours demandé » : un ordre à cours
-    /// limité peut demander un prix et s'exécuter à un autre. Le label générique
-    /// « COURS » matcherait « Cours demandé », qui apparaît souvent AVANT
-    /// « Cours exécuté » dans un avis d'opéré — donc en premier sur une
-    /// recherche naïve — alors que c'est le prix RÉEL de la transaction qui
-    /// doit être retenu. Les labels les plus spécifiques passent donc devant
-    /// le générique.
+    /// "Cours exécuté" WINS over "Cours demandé": a limit order can request one
+    /// price and execute at another. The generic "COURS" label would match
+    /// "Cours demandé", which often appears BEFORE "Cours exécuté" in a trade
+    /// confirmation — hence first in a naive search — whereas the transaction's
+    /// REAL price is the one to keep. The most specific labels therefore come
+    /// before the generic one.
     private static let priceLabels = [
         "COURS EXÉCUTÉ", "COURS EXECUTE",
         "COURS D'EXÉCUTION", "COURS D'EXECUTION", "COURS",
@@ -474,35 +446,34 @@ enum InvestmentStatementExtractor {
     private static let feeLabels = [
         "FRAIS", "COMMISSION", "COURTAGE", "FEES", "FEE"
     ]
-    /// Libellés du MONTANT de l'opération, du plus spécifique au plus général.
+    /// Labels of the operation's AMOUNT, from the most specific to the most general.
     ///
-    /// ⚠️ Aucun libellé nu (« MONTANT », « TOTAL ») : « Montant total des
-    /// frais » et « TOTALENERGIES » y répondraient. Chaque entrée est une
-    /// locution complète, et le BRUT passe avant le NET — c'est le brut qui
-    /// vaut `quantité × cours`, le net en ayant déjà déduit les frais.
+    /// No bare label ("MONTANT", "TOTAL"): "Montant total des frais" and
+    /// "TOTALENERGIES" would match. Each entry is a complete phrase, and GROSS
+    /// comes before NET — the gross equals `quantity × price`, the net having
+    /// already deducted the fees.
     private static let totalLabels = [
         "MONTANT TRANSACTION BRUT", "MONTANT TOTAL BRUT", "MONTANT BRUT",
         "MONTANT DE L'OPÉRATION", "MONTANT DE L'OPERATION",
         "MONTANT TRANSACTION NET", "MONTANT NET",
         "GROSS AMOUNT", "NET AMOUNT", "TOTAL AMOUNT", "TOTAL COST"
     ]
-    /// Libellés du montant NET spécifiquement — distincts de `totalLabels`
-    /// (qui mélange brut et net dans un seul repli en cascade) : ici on veut
-    /// les DEUX totaux, brut ET net, pour en déduire les frais par différence
-    /// quand le libellé direct des frais est introuvable. Cf. `parseBlock`.
+    /// Labels of the NET amount specifically — distinct from `totalLabels`
+    /// (which mixes gross and net in a single cascading fallback): here BOTH
+    /// totals, gross AND net, are wanted, to deduce the fees by difference when
+    /// the direct fee label can't be found. See `parseBlock`.
     private static let netLabels = [
         "MONTANT NET AU DÉBIT", "MONTANT NET AU DEBIT",
         "MONTANT NET AU CRÉDIT", "MONTANT NET AU CREDIT",
         "MONTANT TRANSACTION NET", "MONTANT NET", "NET AMOUNT"
     ]
 
-    /// Une ligne « plausible » pour être le nom d'un titre : ni une date, ni un
-    /// montant, ni un intitulé de champ, ni un ISIN, ni du bruit ponctuation.
-    /// Partagé par `assetName` (repli d'affichage) et `nameLineIndex`
-    /// (frontière de bloc, cf. `parseBlock`) — les deux posent la MÊME
-    /// question (« est-ce que cette ligne ressemble à un nom de titre ? »),
-    /// diverger les ferait désigner deux frontières différentes pour le même
-    /// bloc.
+    /// A line "plausible" as a security's name: not a date, not an amount, not a
+    /// field heading, not an ISIN, not punctuation noise. Shared by `assetName`
+    /// (display fallback) and `nameLineIndex` (block boundary, see `parseBlock`)
+    /// — both ask the SAME question ("does this line look like a security
+    /// name?"); diverging would make them designate two different boundaries for
+    /// the same block.
     private static func isPlausibleNameLine(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 3, trimmed.count <= 80 else { return false }
@@ -511,54 +482,53 @@ enum InvestmentStatementExtractor {
         if isValidISIN(upper.replacingOccurrences(of: " ", with: "")) { return false }
         if upper.hasPrefix("QUANTIT") || upper.hasPrefix("COURS") || upper.hasPrefix("PRIX")
             || upper.hasPrefix("MONTANT") || upper.hasPrefix("FRAIS") { return false }
-        // Une ligne composée uniquement de chiffres/ponctuation n'est pas un nom.
+        // A line made only of digits/punctuation isn't a name.
         let letters = trimmed.filter { $0.isLetter }
         guard letters.count >= 3 else { return false }
 
-        // ⚠️ Un nom de valeur porte TOUJOURS une part de majuscules — code
-        // court (« AM.PEA EM.ES.T.ACC », « ISHS CO.EURO STOX50 »), raison
-        // sociale (« TOTALENERGIES SE ») ou casse de titre (« Epargne MSCI
-        // World UCITS ETF »). Une phrase française tout en minuscules est un
-        // INTITULÉ DE CHAMP, pas un titre.
+        // A security name ALWAYS carries some uppercase — a short code
+        // ("AM.PEA EM.ES.T.ACC", "ISHS CO.EURO STOX50"), a company name
+        // ("TOTALENERGIES SE") or title case ("Epargne MSCI World UCITS ETF"). An
+        // all-lowercase French sentence is a FIELD HEADING, not a security.
         //
-        // Bug réel : sur un avis d'opéré BoursoBank, la ligne la plus proche
-        // du code ISIN est « Type d'ordre : au marché » — c'est ce libellé qui
-        // s'affichait comme nom de la valeur dans l'écran de revue.
+        // On a BoursoBank confirmation, the line closest to the ISIN code is "Type
+        // d'ordre : au marché" — without this rule, that heading would show as the
+        // security's name in the review screen.
         let uppercase = letters.filter { $0.isUppercase }.count
         return Double(uppercase) / Double(letters.count) >= 0.3
     }
 
-    /// Nom du titre : première ligne « plausible » au-dessus de l'ISIN. On
-    /// remonte car tous les formats observés (avis d'opéré PDF, écran de
-    /// courtier) placent le libellé avant le code.
+    /// Security name: the first "plausible" line above the ISIN. Searching
+    /// upwards, because every observed format (PDF trade confirmation, broker
+    /// screen) puts the label before the code.
     private static func assetName(in nameWindow: [String], fallbackAfter fields: [String]) -> String {
-        // La ligne LA PLUS PROCHE de l'ISIN gagne : au-dessus se trouvent aussi
-        // les en-têtes de l'écran (« Mes mouvements », « Type d'opération »).
+        // The line CLOSEST to the ISIN wins: above it also sit the screen's headers
+        // ("Mes mouvements", "Type d'opération").
         for line in nameWindow.reversed() where isPlausibleNameLine(line) {
             return cleanedName(line)
         }
-        // Certains formats mettent le nom APRÈS le code : on tente en aval.
+        // Some formats put the name AFTER the code: try downstream.
         for line in fields.dropFirst() where isPlausibleNameLine(line) {
             return cleanedName(line)
         }
         return ""
     }
 
-    /// Isole le titre d'une ligne qui porte aussi autre chose.
+    /// Isolates the security's name from a line that also carries something else.
     ///
-    /// Une cellule de tableau aplatie agrège volontiers plusieurs colonnes sur
-    /// la même ligne : `4 ISHS CO.EURO STOX50 UC.ETF EUR Référence : 170145383379`.
-    /// Deux nettoyages, tous deux indépendants du format :
-    ///   • couper à l'entrée du premier CHAMP LIBELLÉ (`Mot :`) — un libellé
-    ///     ouvre une autre donnée, le titre le précède ;
-    ///   • retirer un nombre isolé en tête, qui est la colonne voisine
-    ///     (quantité), jamais le début d'un nom.
+    /// A flattened table cell readily aggregates several columns on the same
+    /// line: `4 ISHS CO.EURO STOX50 UC.ETF EUR Référence : 170145383379`.
+    /// Two cleanups, both format-independent:
+    ///   • cut at the start of the first LABELED FIELD (`Word :`) — a label opens
+    ///     another piece of data, the name comes before it;
+    ///   • remove an isolated number at the start, which is the neighboring
+    ///     column (quantity), never the start of a name.
     ///
-    /// ⚠️ Le libellé recherché est UN SEUL MOT. Autoriser les libellés de
-    /// plusieurs mots rendait la coupure trop gourmande : sur « … UC.ETF EUR
-    /// Référence : 170145383379 », « EUR Référence » passait pour le libellé et
-    /// la devise disparaissait du nom. Un libellé en deux mots ne sera donc pas
-    /// coupé — un nom un peu long est moins grave qu'un nom amputé.
+    /// The label looked for is A SINGLE WORD. Allowing multi-word labels made the
+    /// cut too greedy: on "… UC.ETF EUR Référence : 170145383379", "EUR Référence"
+    /// would pass for the label and the currency would vanish from the name. A
+    /// two-word label is therefore not cut — a slightly long name is less harmful
+    /// than a truncated one.
     private static func cleanedName(_ line: String) -> String {
         var name = line.trimmingCharacters(in: .whitespaces)
         if let regex = try? NSRegularExpression(pattern: "\\s+[\\p{L}][\\p{L}'’\\-]{2,19}\\s*:\\s"),
@@ -573,13 +543,12 @@ enum InvestmentStatementExtractor {
         return name.trimmingCharacters(in: .whitespaces)
     }
 
-    /// Index (dans `nameWindow`) de la ligne de nom la plus proche de l'ISIN —
-    /// c'est la frontière entre CE bloc et le bloc PRÉCÉDENT. Utilisé pour
-    /// borner le repli des champs numériques (cf. `parseBlock`) : sans cette
-    /// frontière, une capture à opérations consécutives laisse les champs du
-    /// bloc d'avant (son propre cours, sa propre quantité) contaminer le
-    /// repli d'un bloc qui n'affiche légitimement pas ce champ (un dividende
-    /// sans cours, par exemple).
+    /// Index (in `nameWindow`) of the name line closest to the ISIN — the
+    /// boundary between THIS block and the PREVIOUS one. Bounds the fallback of
+    /// numeric fields (see `parseBlock`): without it, on a capture with
+    /// consecutive operations, the previous block's fields (its own price, its
+    /// own quantity) would contaminate the fallback of a block that legitimately
+    /// doesn't show that field (a dividend without a price, for instance).
     private static func nameLineIndex(in nameWindow: [String]) -> Int? {
         for index in nameWindow.indices.reversed() where isPlausibleNameLine(nameWindow[index]) {
             return index
@@ -596,7 +565,7 @@ enum InvestmentStatementExtractor {
         (try? NSRegularExpression(pattern: "\\b(\\d{4})[/.-](\\d{1,2})[/.-](\\d{1,2})\\b"), [1, 2, 3])
     ]
 
-    /// Première date trouvée, normalisée en yyyy-MM-dd.
+    /// First date found, normalized as yyyy-MM-dd.
     static func firstDate(in text: String) -> String? {
         for (regex, order) in datePatterns {
             guard let regex else { continue }
@@ -617,26 +586,24 @@ enum InvestmentStatementExtractor {
 
     // MARK: - Nombres
 
-    /// Variante TOLÉRANTE de `firstNumber(in:labels:)` : le libellé et sa
-    /// valeur peuvent être sur des lignes DIFFÉRENTES, pas seulement la même.
+    /// TOLERANT variant of `firstNumber(in:labels:)`: the label and its value may
+    /// be on DIFFERENT lines, not only the same one.
     ///
-    /// ─── Pourquoi elle existe, en plus de la version stricte ───────────────
+    /// ─── Why it exists, alongside the strict version ───────────────────────
     ///
-    /// Un avis d'opéré écrit « Quantité exécutée : 2,000 » — libellé et valeur
-    /// sur une ligne, la version stricte suffit. Un vrai TABLEAU écrit
-    /// l'en-tête de colonne (« Quantité ») sur une ligne et la valeur de la
-    /// cellule (« 4 ») sur la ligne de données suivante — deux lignes
-    /// distinctes, où la version stricte ne trouve rien. Bug réel : sans cette
-    /// variante, la quantité restait introuvable sur ce format.
+    /// A trade confirmation writes "Quantité exécutée : 2,000" — label and value
+    /// on one line, the strict version is enough. A real TABLE writes the column
+    /// header ("Quantité") on one line and the cell's value ("4") on the next
+    /// data line — two distinct lines, where the strict version finds nothing.
     ///
-    /// ⚠️ Les dates sont RETIRÉES avant la recherche du nombre : sur la ligne
-    /// de données d'un tableau, la date de l'opération précède souvent la
-    /// quantité (« 13/01/2025 4 ISHS… ») — sans ce retrait, le jour de la
-    /// date serait pris pour la quantité qui le suit.
+    /// Dates are REMOVED before looking for the number: on a table's data line,
+    /// the operation's date often precedes the quantity ("13/01/2025 4 ISHS…") —
+    /// otherwise the day of the date would be taken for the quantity that
+    /// follows it.
     ///
-    /// `lineSpan` borne la recherche à quelques lignes après le libellé : au
-    /// même titre que le label lui-même, cette proximité limite le risque de
-    /// faux positif sur un nombre sans rapport, plus loin dans le document.
+    /// `lineSpan` bounds the search to a few lines after the label: like the
+    /// label itself, this proximity limits the risk of a false positive on an
+    /// unrelated number further down the document.
     static func firstNumberNearLabel(in text: String, labels: [String], lineSpan: Int = 2) -> Double? {
         let lines = stripDatesAndTimes(from: text).components(separatedBy: "\n")
         let upperLines = lines.map { $0.uppercased() }
@@ -644,14 +611,14 @@ enum InvestmentStatementExtractor {
         for label in labels {
             guard let labelLine = upperLines.firstIndex(where: { $0.contains(label) }) else { continue }
 
-            // D'abord la ligne du libellé elle-même — cas « Quantité : 4 »
-            // niché dans un tableau par ailleurs, sans qu'une variante stricte
-            // n'ait déjà tenté cette ligne précise (labels différents, etc.).
+            // First the label's own line — the "Quantité : 4" case nested in an
+            // otherwise tabular layout, where no strict variant has already tried this
+            // precise line (different labels, etc.).
             if let labelRange = upperLines[labelLine].range(of: label) {
                 let sameLine = String(upperLines[labelLine][labelRange.upperBound...])
                 if let value = firstNumber(in: sameLine) { return value }
             }
-            // Puis les lignes suivantes, dans la limite de `lineSpan`.
+            // Then the following lines, within `lineSpan`.
             var offset = 1
             while offset <= lineSpan, labelLine + offset < lines.count {
                 if let value = firstNumber(in: lines[labelLine + offset]) { return value }
@@ -661,19 +628,18 @@ enum InvestmentStatementExtractor {
         return nil
     }
 
-    /// Variante de `firstNumberNearLabel` qui prend le DERNIER nombre d'une
-    /// ligne de valeurs plutôt que le premier.
+    /// Variant of `firstNumberNearLabel` that takes the LAST number of a value
+    /// line rather than the first.
     ///
-    /// ⚠️ Nécessaire pour un libellé dont la colonne est la DERNIÈRE d'une
-    /// rangée groupée (« Montant net », qui clôt toujours le footer d'un avis
-    /// d'opéré). Sur une ligne de synthèse à plusieurs colonnes aplatie par
-    /// PDFKit (« Montant brut | Commission | Frais | Montant net » en
-    /// en-tête, puis leurs valeurs sur la ligne suivante), `firstNumberNearLabel`
-    /// renvoie TOUJOURS le premier nombre de la ligne de valeurs — correct
-    /// pour le brut (1ʳᵉ colonne), faux pour le net (dernière colonne). Ni
-    /// l'une ni l'autre variante ne sait vraiment se positionner par colonne ;
-    /// celle-ci exploite juste le fait que le montant net est, par
-    /// construction d'un relevé bancaire, toujours le total final.
+    /// Needed for a label whose column is the LAST of a grouped row ("Montant
+    /// net", which always closes a trade confirmation's footer). On a
+    /// multi-column summary line flattened by PDFKit ("Montant brut | Commission
+    /// | Frais | Montant net" as headers, then their values on the next line),
+    /// `firstNumberNearLabel` ALWAYS returns the value line's first number —
+    /// right for the gross (1st column), wrong for the net (last column). Neither
+    /// variant can truly position itself by column; this one just exploits the
+    /// fact that the net amount is, by construction of a bank statement, always
+    /// the final total.
     static func lastNumberNearLabel(in text: String, labels: [String], lineSpan: Int = 2) -> Double? {
         let lines = stripDatesAndTimes(from: text).components(separatedBy: "\n")
         let upperLines = lines.map { $0.uppercased() }
@@ -693,13 +659,13 @@ enum InvestmentStatementExtractor {
         return nil
     }
 
-    /// Retire toute date reconnue (cf. `datePatterns`) d'un texte.
+    /// Removes every recognized date (see `datePatterns`) from a text.
     ///
-    /// ⚠️ Sert UNIQUEMENT à `firstNumberNearLabel` : la recherche stricte
-    /// (`firstNumber(in:labels:)`) doit rester intacte pour ne pas modifier le
-    /// comportement déjà éprouvé sur le format « libellé : valeur » ligne à
-    /// ligne — seule la variante tolérante, plus permissive par construction,
-    /// a besoin de cette protection contre les dates.
+    /// Used ONLY by `firstNumberNearLabel`: the strict search
+    /// (`firstNumber(in:labels:)`) must stay untouched so the proven behavior on
+    /// the line-by-line "label: value" format doesn't change — only the tolerant
+    /// variant, more permissive by construction, needs this protection against
+    /// dates.
     private static func stripDatesAndTimes(from text: String) -> String {
         var result = text
         for (regex, _) in datePatterns {
@@ -707,9 +673,9 @@ enum InvestmentStatementExtractor {
             let range = NSRange(result.startIndex..., in: result)
             result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
         }
-        // ⚠️ Les HEURES aussi. Un avis d'opéré horodate son exécution sur sa
-        // propre ligne (« 12:30:21 ») : sans ce retrait, la recherche d'une
-        // valeur sous un en-tête de colonne y lisait « 12 » comme quantité.
+        // TIMES too. A trade confirmation timestamps its execution on its own line
+        // ("12:30:21"): otherwise the search for a value under a column header would
+        // read "12" as the quantity.
         if let regex = try? NSRegularExpression(pattern: "\\b\\d{1,2}:\\d{2}(?::\\d{2})?\\b") {
             let range = NSRange(result.startIndex..., in: result)
             result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "")
@@ -717,17 +683,17 @@ enum InvestmentStatementExtractor {
         return result
     }
 
-    /// Valeur numérique suivant l'un des libellés donnés (« Quantité: 7 »,
-    /// « Cours 34,53 € », « PRU : 112.76 »).
+    /// Numeric value following one of the given labels ("Quantité: 7",
+    /// "Cours 34,53 €", "PRU : 112.76").
     static func firstNumber(in text: String, labels: [String]) -> Double? {
         let upper = text.uppercased()
         for label in labels {
             var searchStart = upper.startIndex
             while let labelRange = upper.range(of: label, range: searchStart..<upper.endIndex) {
                 let tail = String(upper[labelRange.upperBound...])
-                // On borne la fenêtre à la ligne courante : sans ça, un libellé
-                // sans valeur happerait le nombre de la ligne suivante (par
-                // exemple la quantité d'une AUTRE opération).
+                // The window is bounded to the current line: otherwise a label without a
+                // value would grab the number from the next line (for example ANOTHER
+                // operation's quantity).
                 let window = String(tail.prefix(while: { $0 != "\n" }))
                 if let value = firstNumber(in: window) { return value }
                 searchStart = labelRange.upperBound
@@ -736,15 +702,15 @@ enum InvestmentStatementExtractor {
         return nil
     }
 
-    /// Premier nombre d'une chaîne, en gérant les deux conventions décimales et
-    /// les séparateurs de milliers (espace, espace insécable, apostrophe).
+    /// First number of a string, handling both decimal conventions and thousands
+    /// separators (space, non-breaking space, apostrophe).
     ///
-    /// ⚠️ Le motif doit capturer les DEUX séparateurs d'un coup : découpé après
-    /// le premier, « 1,234.56 » se lisait « 1,234 » → 1.234 au lieu de 1234.56.
+    /// The pattern must capture BOTH separators at once: cut after the first,
+    /// "1,234.56" would read "1,234" → 1.234 instead of 1234.56.
     static func firstNumber(in text: String) -> Double? {
         let cleaned = text
-            .replacingOccurrences(of: "\u{00A0}", with: " ")   // espace insécable
-            .replacingOccurrences(of: "\u{202F}", with: " ")   // espace fine insécable
+            .replacingOccurrences(of: "\u{00A0}", with: " ")   // non-breaking space
+            .replacingOccurrences(of: "\u{202F}", with: " ")   // narrow non-breaking space
             .replacingOccurrences(of: "'", with: "")
         guard let regex = try? NSRegularExpression(pattern: "-?\\d+(?:[ .,]\\d+)*") else { return nil }
         let range = NSRange(cleaned.startIndex..., in: cleaned)
@@ -753,8 +719,8 @@ enum InvestmentStatementExtractor {
         return parseNumber(String(cleaned[r]))
     }
 
-    /// Pendant de `firstNumber(in:labels:)`, même fenêtre (ligne courante),
-    /// mais dernier nombre plutôt que premier — cf. `lastNumber(in:)`.
+    /// Counterpart of `firstNumber(in:labels:)`, same window (current line), but
+    /// the last number rather than the first — see `lastNumber(in:)`.
     static func lastNumber(in text: String, labels: [String]) -> Double? {
         let upper = text.uppercased()
         for label in labels {
@@ -769,10 +735,10 @@ enum InvestmentStatementExtractor {
         return nil
     }
 
-    /// Dernier nombre d'une chaîne — pendant de `firstNumber(in:)` pour un
-    /// montant qui clôt SYSTÉMATIQUEMENT une ligne de synthèse (le montant
-    /// net d'un avis d'opéré est toujours le total final, quel que soit le
-    /// nombre de colonnes qui le précèdent). Cf. `lastNumberNearLabel`.
+    /// Last number of a string — counterpart of `firstNumber(in:)` for an amount
+    /// that ALWAYS closes a summary line (a trade confirmation's net amount is
+    /// always the final total, however many columns precede it). See
+    /// `lastNumberNearLabel`.
     static func lastNumber(in text: String) -> Double? {
         let cleaned = text
             .replacingOccurrences(of: "\u{00A0}", with: " ")
@@ -785,19 +751,18 @@ enum InvestmentStatementExtractor {
         return parseNumber(String(cleaned[r]))
     }
 
-    /// Convertit un nombre écrit à la française ou à l'anglaise.
+    /// Converts a number written the French or the English way.
     ///
-    /// ⚠️ La virgule est ambiguë : séparateur décimal en FR (34,53), séparateur
-    /// de milliers en US (1,234.56).
-    ///   - Les deux présents → le DERNIER rencontré est le séparateur décimal.
-    ///     Couvre « 1,234.56 » (US) comme « 1.234,56 » (DE/FR).
-    ///   - Virgule SEULE → décimale. C'est la convention FR, et l'app est
-    ///     FR-first : « Quantité exécutée : 2,000 » vaut 2 titres, pas 2000.
-    ///     Une seule virgule sans point dans un relevé anglo-saxon (« 1,500
-    ///     shares ») serait mal lue — limitation assumée, très minoritaire
-    ///     devant le cas FR, et les milliers y sont le plus souvent séparés
-    ///     par une espace dans les relevés européens.
-    ///   - Plusieurs virgules sans point → milliers (« 1,234,567 »).
+    /// The comma is ambiguous: a decimal separator in FR (34,53), a thousands
+    /// separator in US (1,234.56).
+    ///   - Both present → the LAST one encountered is the decimal separator.
+    ///     Covers "1,234.56" (US) as well as "1.234,56" (DE/FR).
+    ///   - A comma ALONE → decimal. That's the FR convention, and the app is
+    ///     FR-first: "Quantité exécutée : 2,000" means 2 shares, not 2000. A
+    ///     single comma without a dot in an English statement ("1,500 shares")
+    ///     would be misread — an accepted limitation, far rarer than the FR
+    ///     case, and European statements usually separate thousands with a space.
+    ///   - Several commas without a dot → thousands ("1,234,567").
     static func parseNumber(_ raw: String) -> Double? {
         var s = raw.replacingOccurrences(of: " ", with: "")
         guard !s.isEmpty else { return nil }
@@ -822,28 +787,28 @@ enum InvestmentStatementExtractor {
         return Double(s)
     }
 
-    /// Montant total signé de la ligne (« -242,92 € », « +1,70 »). Sert à
-    /// déduire le prix unitaire quand le cours n'est pas libellé.
+    /// Signed total amount of the line ("-242,92 €", "+1,70"). Used to deduce the
+    /// unit price when the price isn't labeled.
     static func signedAmount(in text: String) -> Double? {
         let cleaned = text
             .replacingOccurrences(of: "\u{00A0}", with: " ")
             .replacingOccurrences(of: "\u{202F}", with: " ")
-        // Un montant porte une PARTIE DÉCIMALE (signée ou non) ou est suivi
-        // d'une devise. Les deux conditions comptent :
+        // An amount carries a DECIMAL PART (signed or not) or is followed by a
+        // currency. Both conditions matter:
         //
-        // ⚠️ Accepter un entier signé nu faisait lire « COUPONS - 02/07/2026 »
-        // comme le montant −2, et le prix unitaire du coupon en était déduit
-        // (−2 / 2 = 1 € au lieu de 0,85 €). Un montant d'opération a toujours
-        // des centimes ou une devise collée ; une date n'a ni l'un ni l'autre.
+        // Accepting a bare signed integer would read "COUPONS - 02/07/2026" as the
+        // amount −2, and the coupon's unit price would be deduced from it (−2 / 2 =
+        // €1 instead of €0.85). An operation amount always has cents or an attached
+        // currency; a date has neither.
         guard let regex = try? NSRegularExpression(
             pattern: "[+-]?\\d[\\d ]*[.,]\\d{1,2}\\b\\s*(?:€|EUR|\\$|USD)?|[+-]?\\d[\\d ]*(?:[.,]\\d+)?\\s*(?:€|EUR|\\$|USD)")
         else { return nil }
         let range = NSRange(cleaned.startIndex..., in: cleaned)
         guard let match = regex.firstMatch(in: cleaned, range: range),
               let r = Range(match.range, in: cleaned) else { return nil }
-        // ⚠️ Le `\s*` de fin de motif avale le saut de ligne : sans le trim,
-        // `Double("+1.70\n")` renvoie nil et le montant est silencieusement
-        // perdu (le prix unitaire déduit retombait alors à 0).
+        // The pattern's trailing `\s*` swallows the line break: without the trim,
+        // `Double("+1.70\n")` returns nil and the amount is silently lost (the
+        // deduced unit price would then fall back to 0).
         let token = String(cleaned[r])
             .replacingOccurrences(of: "€", with: "")
             .replacingOccurrences(of: "EUR", with: "")

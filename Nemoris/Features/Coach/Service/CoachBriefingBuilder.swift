@@ -27,7 +27,7 @@ import Foundation
 
 enum CoachBriefingBuilder {
 
-    // MARK: - Entrée
+    // MARK: - Input
 
     struct Input {
         var transactions: [FinanceTransaction]

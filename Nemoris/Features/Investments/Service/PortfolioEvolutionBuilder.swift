@@ -1,42 +1,43 @@
 import Foundation
 
-// MARK: - Construction robuste des courbes d'évolution agrégées
+// MARK: - Robust construction of aggregated evolution curves
 //
-// Ce moteur remplace l'agrégation "maison" qui vivait dans InvestmentsViewModel
-// (niveau global ET niveau compte). Il est PUR (aucun accès base/cache/réseau),
-// donc déterministe et testable.
+// Shared by the global level AND the account level, so the two can never
+// diverge. PURE engine (no database/cache/network access), therefore
+// deterministic and testable.
 //
-// ─── Les 3 défauts structurels de l'ancienne version ───────────────────────
+// ─── Three traps an aggregation must avoid ─────────────────────────────────
 //
-// 1. GRILLE = UNION DES HORODATAGES BRUTS.
-//    Deux positions synchronisées par des sources différentes n'ont pas les
-//    mêmes heures (09:05Z vs 17:35Z). L'union produisait une grille irrégulière
-//    où, à chaque instant, une seule des séries avait "vraiment" un point.
+// 1. A GRID MADE OF THE UNION OF RAW TIMESTAMPS.
+//    Two positions synced from different sources don't share the same hours
+//    (09:05Z vs 17:35Z). Their union produces an irregular grid where, at
+//    each instant, only one of the series "really" has a point.
 //
-// 2. REPLI SUR LE PRU (`averageBuyPrice`) quand aucun prix n'était connu.
-//    C'est LE défaut critique : le PRU est un COÛT D'ACQUISITION, pas un cours.
-//    Il peut être sur une tout autre échelle que le prix de marché (PRU 250 €
-//    pour un titre qui cote 40 €). Chaque repli faisait donc bondir le total de
-//    plusieurs milliers d'euros → les fameuses "dents de scie", avec des pics
-//    qui valaient exactement le montant investi.
+// 2. FALLING BACK TO THE AVERAGE COST (`averageBuyPrice`) when no price is
+//    known. The average cost is an ACQUISITION COST, not a price. It can sit
+//    on a completely different scale from the market price (average cost
+//    €250 for a security trading at €40). Each fallback makes the total jump
+//    by thousands of euros → a sawtooth curve whose peaks equal exactly the
+//    amount invested.
 //
-// 3. FORWARD-FILL SEUL, pas de back-fill : avant le premier point d'une
-//    position, on retombait sur le PRU (cf. 2) au lieu de son premier cours connu.
+// 3. FORWARD-FILL ONLY, no back-fill: before a position's first point, the
+//    value would fall back to the average cost (see 2) instead of its first
+//    known price.
 //
-// ─── Garanties de la nouvelle version ──────────────────────────────────────
+// ─── Guarantees ────────────────────────────────────────────────────────────
 //
-// • Grille RÉGULIÈRE (pas de bucket vide, pas d'alternance) → un seul point par
-//   pas de temps, condition nécessaire d'un rendu Swift Charts propre.
-// • Le PRU n'entre JAMAIS dans une courbe de valorisation. Une position sans
-//   aucun cours est EXCLUE de la courbe et signalée à l'appelant (diagnostic),
-//   plutôt que d'empoisonner l'agrégat avec une valeur d'une autre échelle.
-// • Back-fill + forward-fill avec les propres cours de la position (premier
-//   cours connu avant son historique, dernier cours connu après).
-// • Nombre de points BORNÉ (~150 max) : les charts restent fluides et les
-//   labels d'axe lisibles quelle que soit la plage.
+// • REGULAR grid (no empty bucket, no alternation) → one point per time step,
+//   a prerequisite for clean Swift Charts rendering.
+// • The average cost NEVER enters a valuation curve. A position with no price
+//   at all is EXCLUDED from the curve and reported to the caller (diagnostic),
+//   rather than poisoning the aggregate with a value on another scale.
+// • Back-fill + forward-fill with the position's own prices (first known price
+//   before its history, last known price after).
+// • BOUNDED number of points (~150 max): charts stay smooth and axis labels
+//   readable whatever the range.
 
-/// Une position prête à être agrégée : sa quantité et son historique de cours
-/// DÉJÀ résolu (ISIN → ticker → symbole de sync) et trié.
+/// A position ready to be aggregated: its quantity and its price history,
+/// ALREADY resolved (ISIN → ticker → sync symbol) and sorted.
 struct PortfolioSeriesInput {
     let positionId: Int
     let quantity: Double
@@ -45,32 +46,32 @@ struct PortfolioSeriesInput {
 
 enum PortfolioEvolutionBuilder {
 
-    /// Nombre de points visé pour une courbe. Borne haute : au-delà, les labels
-    /// d'axe se chevauchent et le rendu se dégrade sans gain d'information.
+    /// Target number of points for a curve. Upper bound: beyond it, axis labels
+    /// overlap and rendering degrades with no information gained.
     private static let targetPointCount = 150
 
     struct Result {
-        /// Courbe agrégée, un point par pas de la grille, triée.
+        /// Aggregated curve, one point per grid step, sorted.
         let points: [PortfolioEvolutionPoint]
-        /// Positions effectivement valorisées avec un vrai cours.
+        /// Positions actually valued with a real price.
         let pricedPositionIds: Set<Int>
-        /// Positions SANS aucun cours sur la plage → exclues de la courbe.
-        /// L'UI doit les signaler (« X positions sans historique »).
+        /// Positions WITHOUT any price over the range → excluded from the curve.
+        /// The UI must report them ("X positions without history").
         let unpricedPositionIds: Set<Int>
     }
 
-    /// Construit la courbe agrégée sur une grille temporelle régulière.
+    /// Builds the aggregated curve over a regular time grid.
     ///
     /// - Parameters:
-    ///   - inputs: positions + historiques résolus.
-    ///   - range: plage sélectionnée (détermine le début et le pas de la grille).
-    ///   - now: injectable pour les tests.
+    ///   - inputs: positions + resolved histories.
+    ///   - range: selected range (sets the grid's start and step).
+    ///   - now: injectable for tests.
     static func build(inputs: [PortfolioSeriesInput],
                       range: InvestmentTimeRange,
                       now: Date = Date()) -> Result {
 
-        // 1. Séparer les positions valorisables de celles sans aucun cours.
-        //    Une position sans cours est EXCLUE (jamais remplacée par son PRU).
+        // 1. Separate positions that can be valued from those without any price.
+        //    A position without a price is EXCLUDED (never replaced by its average cost).
         var priced: [PortfolioSeriesInput] = []
         var unpriced: Set<Int> = []
         for input in inputs {
@@ -89,21 +90,20 @@ enum PortfolioEvolutionBuilder {
             return Result(points: [], pricedPositionIds: [], unpricedPositionIds: unpriced)
         }
 
-        // 2. Bornes de la grille.
-        //    Fin = maintenant (le présent est la référence ; une série qui
-        //    s'arrête hier donne un palier plat jusqu'à maintenant, ce qui est
-        //    honnête et évite un chart qui "s'arrête" sans raison visible).
-        //    Début = début de plage, ou le plus ancien cours connu pour « Max ».
+        // 2. Grid bounds.
+        //    End = now (the present is the reference; a series that stops yesterday
+        //    gives a flat step up to now, which is honest and avoids a chart that
+        //    "stops" for no visible reason).
+        //    Start = start of the range, or the oldest known price for "Max".
         let earliest = priced.compactMap { $0.history.first?.date }.min() ?? now
         let latest = priced.compactMap { $0.history.last?.date }.max() ?? now
 
-        // Cas particulier de la plage 1J : la grille est ancrée sur la dernière
-        // cotation, pas sur `now`. Hors séance (soir, week-end, avant
-        // l'ouverture) la dernière séance est entièrement à plus de 24 h, donc
-        // une grille [now-24h, now] ne contiendrait AUCUN point réel : la
-        // courbe s'aplatissait sur une seule valeur back-fillée. On montre
-        // plutôt les dernières 24 h COTÉES — même règle que le chart de
-        // position (cf. `lastQuotedWindow`).
+        // Special case of the 1D range: the grid is anchored on the last quote,
+        // not on `now`. Outside trading hours (evening, weekend, before the open)
+        // the whole last session is more than 24 h old, so a [now-24h, now] grid
+        // would contain NO real point and the curve would flatten onto a single
+        // back-filled value. Show the last 24 TRADED hours instead — same rule as
+        // the position chart (see `lastQuotedWindow`).
         let oneDayWindow: TimeInterval = 86_400
         let start: Date
         let end: Date
@@ -115,7 +115,7 @@ enum PortfolioEvolutionBuilder {
             end = max(now, latest)
         }
         guard end > start else {
-            // Plage dégénérée (une seule date) : un point unique, pas de grille.
+            // Degenerate range (a single date): a single point, no grid.
             let total = priced.reduce(0.0) { acc, input in
                 acc + input.quantity * (input.history.last?.close ?? 0)
             }
@@ -126,16 +126,16 @@ enum PortfolioEvolutionBuilder {
             )
         }
 
-        // 3. Pas de la grille. Plancher = granularité réelle de la donnée
-        //    (30 min en intraday sur 1J, sinon 1 jour) — descendre plus fin ne
-        //    ferait que dupliquer des valeurs. Plafond = span / targetPointCount.
+        // 3. Grid step. Floor = the data's real granularity (30 min for intraday on
+        //    1D, otherwise 1 day) — going finer would only duplicate values.
+        //    Ceiling = span / targetPointCount.
         let span = end.timeIntervalSince(start)
         let minimumBucket: TimeInterval = (range == .oneDay) ? 1800 : 86_400
         let bucket = max(minimumBucket, span / Double(targetPointCount))
 
-        // 4. Normaliser chaque série sur la grille : pour chaque bucket, le
-        //    DERNIER cours observé dans ce bucket (clôture du pas).
-        //    Puis back-fill (avant le 1er cours) et forward-fill (après).
+        // 4. Normalize each series onto the grid: for each bucket, the LAST price
+        //    observed in that bucket (the step's close).
+        //    Then back-fill (before the 1st price) and forward-fill (after).
         let bucketCount = max(1, Int((span / bucket).rounded(.up)))
         var totals = [Double](repeating: 0, count: bucketCount + 1)
 
@@ -143,26 +143,26 @@ enum PortfolioEvolutionBuilder {
             var bucketPrice = [Double?](repeating: nil, count: bucketCount + 1)
             for point in input.history {
                 let offset = point.date.timeIntervalSince(start)
-                // Les points antérieurs au début de grille servent de valeur
-                // initiale (index 0) : c'est ce qui permet un back-fill correct.
+                // Points before the grid's start serve as the initial value (index 0):
+                // that's what makes a correct back-fill possible.
                 let index = offset <= 0 ? 0 : min(bucketCount, Int(offset / bucket))
-                bucketPrice[index] = point.close   // dernier gagne (série triée)
+                bucketPrice[index] = point.close   // last one wins (sorted series)
             }
 
-            // Back-fill : avant le premier cours connu, on utilise CE cours
-            // (jamais le PRU) → pas de marche artificielle en début de courbe.
+            // Back-fill: before the first known price, use THAT price (never the
+            // average cost) → no artificial step at the start of the curve.
             let firstKnown = bucketPrice.compactMap { $0 }.first ?? 0
             var carried = firstKnown
             for index in 0...bucketCount {
                 if let price = bucketPrice[index] {
-                    carried = price          // nouveau cours observé
+                    carried = price          // newly observed price
                 }
-                // carried = forward-fill du dernier cours connu
+                // carried = forward-fill of the last known price
                 totals[index] += input.quantity * carried
             }
         }
 
-        // 5. Émettre la courbe.
+        // 5. Emit the curve.
         var points: [PortfolioEvolutionPoint] = []
         points.reserveCapacity(bucketCount + 1)
         for index in 0...bucketCount {
@@ -170,7 +170,7 @@ enum PortfolioEvolutionBuilder {
             points.append(PortfolioEvolutionPoint(date: min(date, end), value: totals[index]))
         }
 
-        // Un seul point par date (le dernier bucket peut être clampé à `end`).
+        // A single point per date (the last bucket may be clamped to `end`).
         var seen = Set<Date>()
         let deduped = points.filter { seen.insert($0.date).inserted }
 
