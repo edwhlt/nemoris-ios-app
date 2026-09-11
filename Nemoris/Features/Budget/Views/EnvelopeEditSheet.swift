@@ -12,6 +12,7 @@ struct EnvelopeEditSheet: View {
     @State private var amount = ""
     @State private var period = BudgetPeriod.monthly
     @State private var categoryId: Int? = nil
+    @State private var showCategoryPicker = false
 
     var body: some View {
             Form {
@@ -47,10 +48,15 @@ struct EnvelopeEditSheet: View {
                     }
                 }
                 Section("Catégorie") {
-                    Picker("Catégorie", selection: $categoryId) {
-                        Text("Aucune").tag(nil as Int?)
-                        ForEach(vm.categories.hierarchicallySorted, id: \.category.id) { entry in
-                            Text(entry.indentedName).tag(entry.category.id as Int?)
+                    Button {
+                        showCategoryPicker = true
+                    } label: {
+                        HStack {
+                            Text("Catégorie").foregroundStyle(AppTheme.Colors.textPrimary)
+                            Spacer()
+                            Text(vm.categories.first(where: { $0.id == categoryId })?.name ?? "Aucune")
+                                .foregroundStyle(categoryId == nil ? AppTheme.Colors.textSecondary : AppTheme.Colors.textPrimary)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                         }
                     }
                 }
@@ -69,6 +75,11 @@ struct EnvelopeEditSheet: View {
                         confirmLabel: "Enregistrer", confirmIcon: "checkmark",
                         confirmDisabled: name.isEmpty || amount.isEmpty) {
                 save(); dismiss()
+            }
+            .adaptivePane(isPresented: $showCategoryPicker) {
+                CategoryQuickPickSheet(currentCategoryId: categoryId, allCategories: vm.categories) { newId, _ in
+                    categoryId = newId
+                }
             }
     }
 

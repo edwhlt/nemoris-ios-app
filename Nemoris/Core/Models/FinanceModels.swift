@@ -78,39 +78,6 @@ struct Category: Identifiable, Hashable {
     }
 }
 
-extension Array where Element == Category {
-    /// Flat list sorted hierarchically: each parent is immediately followed
-    /// by its subcategories. Subcategories carry a `↳ ` prefix to convey the
-    /// hierarchy in Pickers (which have no native notion of indentation).
-    ///
-    /// Alphabetical sort within each level, for stability.
-    var hierarchicallySorted: [(category: Category, indentedName: String)] {
-        let parents = self.filter { $0.parentId == nil }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        var result: [(Category, String)] = []
-        for parent in parents {
-            result.append((parent, parent.name))
-            let children = self.filter { $0.parentId == parent.id }
-                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            for child in children {
-                result.append((child, "↳ \(child.name)"))
-            }
-        }
-        // Orphan categories (parent_id non-nil but parent not found): not
-        // dropped — appended at the end without indentation.
-        let knownIds = Set(parents.map(\.id))
-        let orphans = self.filter { c in
-            guard let pid = c.parentId else { return false }
-            return !knownIds.contains(pid)
-        }
-        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        for orphan in orphans {
-            result.append((orphan, orphan.name))
-        }
-        return result
-    }
-}
-
 /// Node of the category tree, built in memory from the flat list.
 struct CategoryNode: Identifiable {
     let category: Category
@@ -627,9 +594,22 @@ enum InvestmentAssetType: String, CaseIterable {
     /// données legacy ou édition manuelle via la Console SQL). À utiliser PARTOUT où `asset_type`
     /// sert de clé de groupement (allocation, couleur) pour que deux variantes du même type
     /// (ex. "stock" vs "STOCK") ne produisent jamais deux entrées distinctes côté UI.
+    ///
+    /// Résout AUSSI contre le `label` français (ex. "Action", "Obligation") : une valeur legacy
+    /// peut avoir été écrite avec le libellé d'affichage plutôt que le rawValue canonique — sans
+    /// ce second essai, "Action" et "STOCK" restent deux clés distinctes qui s'affichent toutes
+    /// les deux "Action" (bug réel constaté : deux tranches "Action" dans le donut d'allocation).
     init?(looselyMatching raw: String) {
         let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        self.init(rawValue: normalized)
+        if let byRawValue = InvestmentAssetType(rawValue: normalized) {
+            self = byRawValue
+            return
+        }
+        if let byLabel = InvestmentAssetType.allCases.first(where: { $0.label.uppercased() == normalized }) {
+            self = byLabel
+            return
+        }
+        return nil
     }
 
     /// Clé de groupement canonique pour un `asset_type` brut : le rawValue de l'enum s'il est

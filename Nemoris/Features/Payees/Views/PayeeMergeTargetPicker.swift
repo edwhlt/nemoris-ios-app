@@ -49,7 +49,11 @@ struct PayeeMergeTargetPicker: View {
                         .buttonStyle(.plain)
                     }
                 } footer: {
-                    Text(verbatim: "L'étape suivante permet de choisir, champ par champ, les informations à garder entre « \(sourceName) » et le tier choisi.")
+                    // Literal interpolation (not `verbatim:`): the static
+                    // prose is translatable, only the embedded payee name is
+                    // raw data — `verbatim:` here permanently pinned this
+                    // footer to French, cf. CLAUDE.md §5.
+                    Text("L'étape suivante permet de choisir, champ par champ, les informations à garder entre « \(sourceName) » et le tier choisi.")
                 }
             }
         }
@@ -61,6 +65,10 @@ struct PayeeMergeTargetPicker: View {
         #endif
         .tint(AppTheme.Colors.accent)
         .paneSearchable(text: $search, prompt: "Rechercher un tiers…")
-        .paneChrome("Fusionner « \(sourceName) »", cancelLabel: "Annuler", onCancel: { dismiss() })
+        // Same remedy as `PayeeGroupManagerView`'s merge picker:
+        // `AppLocalization.string(...)` resolves the STATIC "Fusionner « » "
+        // template via `String.LocalizationValue` interpolation before
+        // `paneChrome` (whose `title:` is a plain `String`) ever sees it.
+        .paneChrome(AppLocalization.string("Fusionner « \(sourceName) »"), cancelLabel: "Annuler", onCancel: { dismiss() })
     }
 }

@@ -23,6 +23,7 @@ struct TransactionFiltersSheet: View {
     // Local copies to avoid re-rendering parent on every keystroke
     @State private var localPayeeSearch: String = ""
     @State private var localLabelSearch: String = ""
+    @State private var showAccountPicker = false
 
     /// Catégories aplaties en pré-ordre (parent puis ses enfants) avec la
     /// profondeur de chacune — un `Picker` ne peut pas rendre un vrai arbre,
@@ -54,24 +55,21 @@ struct TransactionFiltersSheet: View {
                     if accounts.isEmpty {
                         Text("Aucun compte disponible").foregroundStyle(AppTheme.Colors.textSecondary)
                     } else {
-                        Picker("Compte", selection: Binding(
-                            get: { appState.selectedAccountId ?? accounts.first?.id ?? 0 },
-                            set: { newValue in
-                                appState.selectedAccountId = newValue
-                                if newValue == 0 {
-                                    appState.selectedAccountName = "Tous les comptes"
-                                } else {
-                                    appState.selectedAccountName = accounts.first(where: { $0.id == newValue })?.name ?? "Compte"
-                                }
-                            }
-                        )) {
-                            // Sentinel : tag 0 = tous les comptes confondus.
-                            // Aucun account.id ne vaut 0 (AUTOINCREMENT démarre à 1).
-                            Label("Tous les comptes", systemImage: "rectangle.stack.fill").tag(0)
-                            ForEach(accounts.groupedByType, id: \.type) { group in
-                                Section(LocalizedStringKey(group.type.label)) {
-                                    ForEach(group.accounts) { a in Text(a.name).tag(a.id) }
-                                }
+                        // Sentinel : 0/nil = tous les comptes confondus.
+                        // Aucun account.id ne vaut 0 (AUTOINCREMENT démarre à 1).
+                        Button {
+                            showAccountPicker = true
+                        } label: {
+                            HStack {
+                                Text("Compte").foregroundStyle(AppTheme.Colors.textPrimary)
+                                Spacer()
+                                // `String` d'exécution (le nom du compte ne
+                                // l'est jamais, mais le fallback l'est) :
+                                // `Text(String)` reste verbatim sans ce wrap
+                                // — cf. CLAUDE.md §5.
+                                Text(LocalizedStringKey(appState.selectedAccountName.isEmpty ? "Tous les comptes" : appState.selectedAccountName))
+                                    .foregroundStyle(AppTheme.Colors.textSecondary)
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                             }
                         }
                     }
@@ -242,5 +240,22 @@ struct TransactionFiltersSheet: View {
                     paneDismiss()
                 }
             )
+            .adaptivePane(isPresented: $showAccountPicker) {
+                AccountSearchSheet(
+                    accounts: accounts,
+                    selectedId: (appState.selectedAccountId ?? 0) == 0 ? nil : appState.selectedAccountId,
+                    title: "Choisir un compte",
+                    specialLabel: "Tous les comptes",
+                    specialIcon: "rectangle.stack.fill"
+                ) { picked in
+                    if let picked {
+                        appState.selectedAccountId = picked.id
+                        appState.selectedAccountName = picked.name
+                    } else {
+                        appState.selectedAccountId = 0
+                        appState.selectedAccountName = "Tous les comptes"
+                    }
+                }
+            }
     }
 }

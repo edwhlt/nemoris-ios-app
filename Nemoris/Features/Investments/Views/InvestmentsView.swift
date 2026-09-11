@@ -50,6 +50,7 @@ struct InvestmentsView: View {
     // Phase 2 : import devient un sheet dédié, plus un onglet.
     @State private var showImportSheet = false
     @State private var showFilePicker = false
+    @State private var showCSVAccountPicker = false
 
     /// Chantier D — import intelligent pré-rempli par un raccourci Siri.
     @State private var preloadedImport: PreloadedInvestmentImport?
@@ -785,13 +786,18 @@ struct InvestmentsView: View {
 
             if !viewModel.csvHeaders.isEmpty {
                 Section("Mapping colonnes") {
-                    Picker("Compte cible", selection: Binding(
-                        get: { viewModel.selectedAccountId ?? 0 },
-                        set: { viewModel.selectedAccountId = ($0 == 0 ? nil : $0) }
-                    )) {
-                        Text("Sélectionner un compte").tag(0)
-                        ForEach(viewModel.accounts) { account in
-                            Text(account.name).tag(account.id)
+                    Button {
+                        showCSVAccountPicker = true
+                    } label: {
+                        HStack {
+                            Text("Compte cible").foregroundStyle(AppTheme.Colors.textPrimary)
+                            Spacer()
+                            if let a = viewModel.accounts.first(where: { $0.id == viewModel.selectedAccountId }) {
+                                Text("\(a.name) (\(a.broker))").foregroundStyle(AppTheme.Colors.textPrimary)
+                            } else {
+                                Text("Sélectionner…").foregroundStyle(AppTheme.Colors.textSecondary)
+                            }
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                         }
                     }
                     Picker("Source CSV", selection: $csvProfile) {
@@ -905,6 +911,11 @@ struct InvestmentsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(AppTheme.Colors.background)
+        .adaptivePane(isPresented: $showCSVAccountPicker) {
+            InvestmentAccountSearchSheet(accounts: viewModel.accounts, selectedId: viewModel.selectedAccountId, title: "Compte cible") { picked in
+                viewModel.selectedAccountId = picked.id
+            }
+        }
     }
 
     @ViewBuilder

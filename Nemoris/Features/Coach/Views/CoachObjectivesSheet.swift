@@ -32,7 +32,11 @@ struct CoachObjectivesSheet: View {
     /// They are per-domain: offering "invest €200/month in ETFs" on the
     /// spending screen would invite writing a goal that this particular
     /// coach cannot serve.
-    private var placeholder: String {
+    // `LocalizedStringKey` (not `String`): passed to `Text(placeholder)`
+    // below, a `String`-typed property would resolve to the verbatim Text
+    // init and never localize regardless of Localizable.strings content —
+    // cf. CLAUDE.md §5. No interpolation here, so no `%` to escape.
+    private var placeholder: LocalizedStringKey {
         switch domain {
         case .transactions:
             return """

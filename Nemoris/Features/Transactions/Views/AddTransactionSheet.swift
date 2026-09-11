@@ -27,6 +27,7 @@ struct AddTransactionSheet: View {
     @State private var type: TransactionTypePicker = .expense
     @State private var date: Date = Date()
     @State private var showTiersPicker = false
+    @State private var showAccountPicker = false
     @State private var showRemboursementPicker = false
     @State private var showCreateTiersForm = false
     @State private var newTiersPrefillName = ""
@@ -59,11 +60,15 @@ struct AddTransactionSheet: View {
     var body: some View {
             Form {
                 Section("Compte") {
-                    Picker("Compte", selection: $accountId) {
-                        ForEach(accounts.groupedByType, id: \.type) { group in
-                            Section(LocalizedStringKey(group.type.label)) {
-                                ForEach(group.accounts) { a in Text(a.name).tag(a.id) }
-                            }
+                    Button {
+                        showAccountPicker = true
+                    } label: {
+                        HStack {
+                            Text("Compte").foregroundStyle(AppTheme.Colors.textPrimary)
+                            Spacer()
+                            Text(accounts.first(where: { $0.id == accountId })?.name ?? "Compte #\(accountId)")
+                                .foregroundStyle(AppTheme.Colors.textSecondary)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                         }
                     }
                 }
@@ -185,6 +190,11 @@ struct AddTransactionSheet: View {
                         confirmLabel: "Ajouter", confirmIcon: "plus",
                         confirmDisabled: parsedAmount == nil || amountText.isEmpty,
                         onConfirm: { save() })
+            .adaptivePane(isPresented: $showAccountPicker) {
+                AccountSearchSheet(accounts: accounts, selectedId: accountId, title: "Choisir un compte") { picked in
+                    if let picked { accountId = picked.id }
+                }
+            }
     }
 
     private func save() {

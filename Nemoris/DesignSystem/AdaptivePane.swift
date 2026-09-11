@@ -593,7 +593,11 @@ private struct MacInlineSearchField: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(AppTheme.Colors.textSecondary)
-            TextField(prompt, text: $text)
+            // `TextField(prompt, ...)` avec `prompt: String` reste au verbatim
+            // (aucune conversion implicite String → LocalizedStringKey pour
+            // une valeur d'exécution) — cf. CLAUDE.md §5. `LocalizedStringKey`
+            // explicite : la mécanique standard SwiftUI, qui suit `\.locale`.
+            TextField(LocalizedStringKey(prompt), text: $text)
                 .textFieldStyle(.plain)
             if !text.isEmpty {
                 Button { text = "" } label: {
@@ -633,7 +637,13 @@ extension View {
             self
         }
         #else
-        self.searchable(text: text, prompt: prompt)
+        // `prompt: String` (valeur d'exécution, pas un littéral) résout vers
+        // la surcharge `.searchable(prompt: some StringProtocol)` — verbatim,
+        // jamais localisée, quel que soit le contenu de Localizable.strings.
+        // `LocalizedStringKey` explicite bascule sur la surcharge qui suit
+        // `\.locale` — même remède que `paneChrome`/`PaneToggleButton`
+        // (audit 2026-08-21 pass 16).
+        self.searchable(text: text, prompt: LocalizedStringKey(prompt))
         #endif
     }
 }
@@ -1028,6 +1038,15 @@ extension View {
                 .environment(\.paneDismiss, { isPresented.wrappedValue = false })
                 .environment(\.paneHostContext, .modal)
                 .adaptivePaneFrame()
+                // Sans fond explicite, la sheet iOS retombe sur le blanc
+                // système par défaut — identique à `AppTheme.Colors.surface`
+                // en light mode, donc AUCUN contraste entre une carte
+                // `macGroupedRow` et la page qui l'entoure (retour d'usage
+                // 2026-09-10 : démarcation des cartes invisible sur mobile en
+                // light). macOS peint déjà ce fond dans les deux branches de
+                // `AdaptivePaneBoolModifier`/`AdaptivePaneItemModifier` ; iOS
+                // ne l'avait jamais eu.
+                .background(AppTheme.Colors.background.ignoresSafeArea())
         }
         #endif
     }
@@ -1047,6 +1066,9 @@ extension View {
                 .environment(\.paneDismiss, { item.wrappedValue = nil })
                 .environment(\.paneHostContext, .modal)
                 .adaptivePaneFrame()
+                // Cf. le commentaire équivalent du variant `isPresented:` —
+                // même fond manquant, même bug de contraste nul en light.
+                .background(AppTheme.Colors.background.ignoresSafeArea())
         }
         #endif
     }

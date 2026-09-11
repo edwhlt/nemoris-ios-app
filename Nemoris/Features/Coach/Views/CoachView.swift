@@ -123,9 +123,16 @@ struct CoachView: View {
                     Text(domain == .transactions ? "Mes objectifs de dépenses" : "Mes objectifs d'investissement")
                         .font(AppTheme.Typography.bodyMedium)
                         .foregroundStyle(AppTheme.Colors.textPrimary)
-                    Text(store.profile(for: domain).hasObjectives
+                    // Wrap requis : une branche est du texte libre saisi par
+                    // l'utilisateur (`String`, jamais traduit — normal),
+                    // l'autre un placeholder statique traduisible. Le ternaire
+                    // unifie l'expression en `String`, donc `Text(String)`
+                    // resterait verbatim sans ce wrap — cf. CLAUDE.md §5. Le
+                    // texte libre n'a de toute façon aucune clé correspondante
+                    // et s'affiche tel quel (repli normal de LocalizedStringKey).
+                    Text(LocalizedStringKey(store.profile(for: domain).hasObjectives
                          ? store.profile(for: domain).objectives
-                         : "Dis à CE coach ce que tu veux atteindre — il s'y réfère dans chaque recommandation.")
+                         : "Dis à CE coach ce que tu veux atteindre — il s'y réfère dans chaque recommandation."))
                         .font(AppTheme.Typography.labelMedium)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .lineLimit(2)

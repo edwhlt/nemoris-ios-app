@@ -1,28 +1,28 @@
 import SwiftUI
 import NemorisEngine
 
-/// Sheet d'édition complète d'un payee. Remplace l'ancien form
-/// minimal (name + regex + categoryId) de ReferenceDataView.
+/// Full editing sheet for a payee. Replaces the earlier minimal form
+/// (name + regex + categoryId) in ReferenceDataView.
 ///
-/// Sections : Identité | Localisation | Appartenance | Catégorisation | Avancé.
-/// Le champ `engine_merchant_id` est lecture seule, avec un bouton "Rechercher
-/// dans le moteur" qui re-passe le `name` dans le pipeline et propose un nouvel ID.
+/// Sections: Identity | Location | Membership | Categorization | Advanced.
+/// The `engine_merchant_id` field is read-only, with a "search the engine"
+/// button that runs `name` back through the pipeline and offers a new ID.
 struct PayeeDetailView: View {
-    // Rebind sur paneDismiss (inspector macOS / sheet iOS) — les appels dismiss() restent valides.
+    // Rebound onto paneDismiss (macOS inspector / iOS sheet) — dismiss() calls stay valid.
     @Environment(\.paneDismiss) private var dismiss
 
     let initialPayee: Tiers
-    /// `payee` était nil à l'init (création) : `save()` insère d'abord une
-    /// ligne minimale (pour obtenir un id), puis persiste tous les champs
-    /// remplis dans CETTE MÊME session — plutôt que forcer l'utilisateur à
-    /// créer un tiers minimal puis rouvrir cette fiche pour le compléter.
+    /// `payee` was nil at init (creation): `save()` first inserts a minimal
+    /// row (to obtain an id), then persists every field filled in during
+    /// THIS SAME session — rather than forcing the user to create a minimal
+    /// payee and reopen this sheet to complete it.
     let isCreating: Bool
     let allCategories: [Category]
     let allAccounts: [Account]
-    /// Callback appelé après une sauvegarde réussie. Le parent doit recharger sa liste.
+    /// Callback invoked after a successful save. The parent must reload its list.
     let onSave: () -> Void
 
-    // Champs éditables
+    // Editable fields
     @State private var name: String
     @State private var regex: String
     @State private var categoryId: Int?
@@ -41,22 +41,23 @@ struct PayeeDetailView: View {
 
     // UI state
     @State private var showGroupPicker = false
+    @State private var showLinkedAccountPicker = false
     @State private var showResolveResult = false
     @State private var resolveFeedback: ResolveFeedback?
     @State private var isResolving = false
     @State private var showContactPicker = false
     @State private var contactPreviewName: String?
     @State private var contactsPermissionDenied = false
-    /// Tampon pour stocker le contact pick AVANT que le sheet ContactPicker se ferme.
-    /// On applique les changements dans `onDismiss` du sheet pour éviter une race
-    /// condition entre la fermeture UIKit du CNContactPickerViewController et les
-    /// modifications @State, qui faisait dismiss le parent PayeeDetailView entier.
+    /// Buffer holding the picked contact BEFORE the ContactPicker sheet
+    /// closes. The changes are applied in the sheet's `onDismiss` to avoid a
+    /// race between UIKit dismissing CNContactPickerViewController and the
+    /// @State mutations, which dismissed the whole parent PayeeDetailView.
     @State private var pendingPickedContact: ContactPickerSheet.PickedContact?
 
     private let repository = TransactionRepository()
 
-    /// `payee` nil = création (fiche vierge, tous les champs riches
-    /// disponibles dès la création — plus de form minimal séparé).
+    /// `payee` nil = creation (blank sheet, every rich field available from
+    /// the start — no separate minimal form any more).
     init(payee: Tiers? = nil,
          allCategories: [Category],
          allAccounts: [Account],
@@ -102,17 +103,29 @@ struct PayeeDetailView: View {
                     groupDisplayName = group?.displayName ?? ""
                 }
             }
+            .adaptivePane(isPresented: $showLinkedAccountPicker) {
+                AccountSearchSheet(
+                    accounts: allAccounts,
+                    selectedId: linkedAccountId,
+                    title: "Compte interne lié",
+                    specialLabel: "Aucun",
+                    specialIcon: "xmark.circle"
+                ) { picked in
+                    linkedAccountId = picked?.id
+                }
+            }
             .sheet(isPresented: $showContactPicker, onDismiss: applyPickedContact) {
                 ContactPickerSheet { picked in
-                    // CRITIQUE : ne JAMAIS modifier les @State ici ni toucher
-                    // `showContactPicker`. CNContactPickerViewController dismisses
-                    // lui-même son sheet UIKit, et toute mutation @State pendant
-                    // cette dismissal cascade jusqu'au parent PayeeDetailView qui
-                    // se ferme à tort. On ne fait QUE stocker dans le tampon.
+                    // CRITICAL: NEVER mutate @State here, and never touch
+                    // `showContactPicker`. CNContactPickerViewController
+                    // dismisses its own UIKit sheet, and any @State mutation
+                    // during that dismissal cascades up to the parent
+                    // PayeeDetailView, which then closes by mistake. Only
+                    // store into the buffer here.
                     pendingPickedContact = picked
                 }
-                // Cf. CLAUDE.md §5 : ré-injection \.locale obligatoire — sur macOS,
-                // ce sheet montre un placeholder texte ("Bientôt sur Mac").
+                // Re-injecting \.locale is mandatory — on macOS this sheet
+                // shows a text placeholder ("coming soon on Mac").
                 .environment(\.locale, AppLocalization.locale)
             }
             .alert("Résolution moteur", isPresented: $showResolveResult, presenting: resolveFeedback) { _ in
@@ -168,7 +181,7 @@ struct PayeeDetailView: View {
         }
     }
 
-    // MARK: Contact section (visible seulement si tierType == .contact)
+    // MARK: Contact section (visible only when tierType == .contact)
 
     @ViewBuilder
     private var contactSection: some View {
@@ -207,8 +220,8 @@ struct PayeeDetailView: View {
     }
 
     private func openContactPicker() async {
-        // Reset du tampon avant chaque ouverture pour éviter de ré-appliquer
-        // un pick précédent (improbable mais sécuritaire).
+        // Reset the buffer before each opening to avoid re-applying a
+        // previous pick (unlikely, but safe).
         pendingPickedContact = nil
         let granted = await ContactsService.shared.requestAccess()
         if granted {
@@ -218,16 +231,15 @@ struct PayeeDetailView: View {
         }
     }
 
-    /// Exécuté par `.sheet(onDismiss:)` APRÈS la fermeture complète du
-    /// ContactPickerSheet. Sécurise les mutations @State : le parent
-    /// PayeeDetailView est de nouveau stable, donc plus de risque de
-    /// dismiss en cascade.
+    /// Run by `.sheet(onDismiss:)` AFTER ContactPickerSheet has fully
+    /// closed. Makes the @State mutations safe: the parent PayeeDetailView
+    /// is stable again, so there's no more cascading-dismiss risk.
     private func applyPickedContact() {
         guard let picked = pendingPickedContact else { return }
         pendingPickedContact = nil
         contactIdentifier = picked.identifier
         contactPreviewName = picked.name
-        // Auto-fill du nom si vide ou identique au nom initial (placeholder)
+        // Auto-fill the name when empty or identical to the initial one (placeholder)
         if name.trimmingCharacters(in: .whitespaces).isEmpty || name == initialPayee.name {
             name = picked.name
         }
@@ -355,10 +367,18 @@ struct PayeeDetailView: View {
             }
 
             if !allAccounts.isEmpty {
-                Picker("Compte interne lié (virement)", selection: $linkedAccountId) {
-                    Text("Aucun").tag(Int?.none)
-                    ForEach(allAccounts) { a in
-                        Text(a.name).tag(Int?.some(a.id))
+                Button {
+                    showLinkedAccountPicker = true
+                } label: {
+                    HStack {
+                        Text("Compte interne lié (virement)").foregroundStyle(AppTheme.Colors.textPrimary)
+                        Spacer()
+                        // Wrap requis : coalescing avec `.name` rend
+                        // l'expression entière `String` — `Text(String)`
+                        // reste verbatim sans lui, cf. CLAUDE.md §5.
+                        Text(LocalizedStringKey(allAccounts.first(where: { $0.id == linkedAccountId })?.name ?? "Aucun"))
+                            .foregroundStyle(linkedAccountId == nil ? AppTheme.Colors.textSecondary : AppTheme.Colors.accent)
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                     }
                 }
             }
@@ -404,22 +424,23 @@ struct PayeeDetailView: View {
         updated.groupId          = groupId
         updated.custom           = custom
         updated.note             = note.trimmingCharacters(in: .whitespaces).nilIfEmpty
-        // ces 2 champs étaient oubliés du remap → le picker tierType et
-        // le lien contact ne se persistaient jamais (on écrivait les valeurs
-        // initialPayee, pas les @State courants). Bug fix critique.
+        // These 2 fields must be remapped explicitly: writing the
+        // initialPayee values instead of the current @State would mean the
+        // tierType picker and the contact link never persist.
         updated.tierType         = tierType
-        // Si l'utilisateur a explicitement délié, on stocke nil. Sinon on prend la valeur courante
-        // (peut être nil si jamais lié). On ne garde le contact que si tier_type == .contact
-        // pour éviter qu'un tier qu'on re-type en .merchant garde un lien orphelin.
+        // If the user explicitly unlinked, store nil. Otherwise take the
+        // current value (which may be nil if never linked). The contact is
+        // kept only when tier_type == .contact, so a payee re-typed as
+        // .merchant doesn't keep an orphaned link.
         updated.contactIdentifier = (tierType == .contact) ? contactIdentifier : nil
 
         if isCreating {
-            // `updatePayeeFull` fait un UPDATE par id — il faut d'abord une
-            // ligne réelle pour en obtenir un. Le reste des champs riches
-            // (localisation, groupe, type, note…) est ensuite persisté par
-            // le MÊME `updatePayeeFull` que le chemin édition, dans la
-            // foulée : pas de round-trip "créer minimal puis rouvrir".
-            // `id` est un `let` de `Tiers` — on reconstruit plutôt que muter.
+            // `updatePayeeFull` does an UPDATE by id — a real row must
+            // exist first to obtain one. The remaining rich fields
+            // (location, group, type, note…) are then persisted by the SAME
+            // `updatePayeeFull` as the editing path, right away: no
+            // "create minimal then reopen" round trip. `id` is a `let` on
+            // `Tiers` — rebuild rather than mutate.
             guard let newId = repository.addTiersAndGetId(
                 name: cleanName, regex: updated.regex ?? "", categoryId: updated.categoryId
             ) else { return }

@@ -30,6 +30,8 @@ struct PatternEditSheet: View {
 
     // Tiers chargés à l'ouverture pour le picker (lecture seule, pas via VM)
     @State private var allTiers: [Tiers] = []
+    @State private var showCategoryPicker = false
+    @State private var showPayeePicker = false
 
     var body: some View {
             Form {
@@ -88,21 +90,30 @@ struct PatternEditSheet: View {
                     }
                 }
                 Section("Catégorie") {
-                    Picker("Catégorie", selection: $categoryId) {
-                        Text("Aucune").tag(nil as Int?)
-                        ForEach(vm.categories.hierarchicallySorted, id: \.category.id) { entry in
-                            Text(entry.indentedName).tag(entry.category.id as Int?)
+                    Button {
+                        showCategoryPicker = true
+                    } label: {
+                        HStack {
+                            Text("Catégorie").foregroundStyle(AppTheme.Colors.textPrimary)
+                            Spacer()
+                            Text(vm.categories.first(where: { $0.id == categoryId })?.name ?? "Aucune")
+                                .foregroundStyle(categoryId == nil ? AppTheme.Colors.textSecondary : AppTheme.Colors.textPrimary)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                         }
                     }
                 }
                 // Le tier associé pré-remplit le picker quand la transaction matchée arrive,
                 // et permet à l'auto-matching de cibler ce tier en priorité (TransactionMatcher).
-                // Tri alpha + section "Aucun" pour éviter d'imposer un choix.
                 Section {
-                    Picker("Tier", selection: $payeeId) {
-                        Text("Aucun").tag(nil as Int?)
-                        ForEach(allTiers.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) { t in
-                            Text(t.name).tag(t.id as Int?)
+                    Button {
+                        showPayeePicker = true
+                    } label: {
+                        HStack {
+                            Text("Tier").foregroundStyle(AppTheme.Colors.textPrimary)
+                            Spacer()
+                            Text(allTiers.first(where: { $0.id == payeeId })?.name ?? "Aucun")
+                                .foregroundStyle(payeeId == nil ? AppTheme.Colors.textSecondary : AppTheme.Colors.textPrimary)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                         }
                     }
                 } header: {
@@ -124,6 +135,17 @@ struct PatternEditSheet: View {
                         confirmLabel: "Enregistrer", confirmIcon: "checkmark",
                         confirmDisabled: name.isEmpty || amount.isEmpty) {
                 save(); dismiss()
+            }
+            .adaptivePane(isPresented: $showCategoryPicker) {
+                CategoryQuickPickSheet(currentCategoryId: categoryId, allCategories: vm.categories) { newId, _ in
+                    categoryId = newId
+                }
+            }
+            .adaptivePane(isPresented: $showPayeePicker) {
+                TiersSearchSheet(allTiers: allTiers, selectedId: Binding(
+                    get: { payeeId ?? -1 },
+                    set: { payeeId = $0 == -1 ? nil : $0 }
+                ))
             }
     }
 

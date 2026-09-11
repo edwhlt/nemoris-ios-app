@@ -35,6 +35,8 @@ struct AccountLinkPickerSheet: View {
     let excludingAssetId: Int?
     let onSelect: (LinkSelection) -> Void
 
+    @State private var search = ""
+
     /// On ne propose que les comptes pertinents pour le patrimoine (épargne / courant).
     /// Différé et "autre" sont écartés : ils ne représentent pas du patrimoine
     /// au sens net worth (le différé est transitoire, "autre" est ambigu).
@@ -44,12 +46,28 @@ struct AccountLinkPickerSheet: View {
         }
     }
 
+    private var filteredBankAccounts: [Account] {
+        guard !search.isEmpty else { return eligibleBankAccounts }
+        return eligibleBankAccounts.filter { $0.name.localizedCaseInsensitiveContains(search) }
+    }
+
+    private var filteredInvestmentAccounts: [InvestmentAccount] {
+        guard !search.isEmpty else { return viewModel.availableInvestmentAccounts }
+        return viewModel.availableInvestmentAccounts.filter {
+            $0.name.localizedCaseInsensitiveContains(search) || $0.broker.localizedCaseInsensitiveContains(search)
+        }
+    }
+
+    private var hasNoResultsForSearch: Bool {
+        !search.isEmpty && filteredBankAccounts.isEmpty && filteredInvestmentAccounts.isEmpty
+    }
+
     var body: some View {
             List {
                 // ── Comptes & livrets ────────────────────────────────────
-                if !eligibleBankAccounts.isEmpty {
+                if !filteredBankAccounts.isEmpty {
                     Section {
-                        ForEach(eligibleBankAccounts) { acc in
+                        ForEach(filteredBankAccounts) { acc in
                             bankAccountRow(acc)
                         }
                     } header: {
@@ -61,9 +79,9 @@ struct AccountLinkPickerSheet: View {
                 }
 
                 // ── Comptes investissements ──────────────────────────────
-                if !viewModel.availableInvestmentAccounts.isEmpty {
+                if !filteredInvestmentAccounts.isEmpty {
                     Section {
-                        ForEach(viewModel.availableInvestmentAccounts) { acc in
+                        ForEach(filteredInvestmentAccounts) { acc in
                             investmentAccountRow(acc)
                         }
                     } header: {
@@ -72,6 +90,14 @@ struct AccountLinkPickerSheet: View {
                         Text("La valeur du compte = somme des positions valorisées + cash disponible.")
                             .font(AppTheme.Typography.bodySmall)
                     }
+                }
+
+                if hasNoResultsForSearch {
+                    EmptyStateView(
+                        icon: "magnifyingglass",
+                        title: "Aucun résultat",
+                        verbatimMessage: "Aucun résultat pour « \(search) »"
+                    )
                 }
 
                 // ── Mode manuel ───────────────────────────────────────────
@@ -119,6 +145,7 @@ struct AccountLinkPickerSheet: View {
             // l'utilisateur transparaît (retour d'usage 2026-08-19).
             .scrollContentBackground(.hidden)
             #endif
+            .paneSearchable(text: $search, prompt: "Rechercher un compte…")
             // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
             // tentative précédente (`.toolbarBackground(for: .windowToolbar)`)
             // compilait mais n'avait AUCUN effet visuel, confirmé par capture

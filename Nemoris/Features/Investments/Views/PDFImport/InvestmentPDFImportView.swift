@@ -40,6 +40,7 @@ struct InvestmentPDFImportView: View {
 
     // File picker
     @State private var showFilePicker = false
+    @State private var showAccountPicker = false
     @State private var pdfURLs: [URL] = []
 
     // Chantier C — captures depuis la photothèque (screenshots de PEA/CTO).
@@ -272,11 +273,18 @@ struct InvestmentPDFImportView: View {
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .font(.subheadline)
                 } else {
-                    Picker("Compte cible", selection: $selectedAccountId) {
-                        Text("Sélectionner…").tag(nil as Int?)
-                        ForEach(accounts) { account in
-                            Text("\(account.name) (\(account.broker))")
-                                .tag(account.id as Int?)
+                    Button {
+                        showAccountPicker = true
+                    } label: {
+                        HStack {
+                            Text("Compte cible").foregroundStyle(AppTheme.Colors.textPrimary)
+                            Spacer()
+                            if let a = accounts.first(where: { $0.id == selectedAccountId }) {
+                                Text("\(a.name) (\(a.broker))").foregroundStyle(AppTheme.Colors.textPrimary)
+                            } else {
+                                Text("Sélectionner…").foregroundStyle(AppTheme.Colors.textSecondary)
+                            }
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                         }
                     }
                 }
@@ -303,6 +311,11 @@ struct InvestmentPDFImportView: View {
             }
         }
         .nemorisFormStyle()
+        .adaptivePane(isPresented: $showAccountPicker) {
+            InvestmentAccountSearchSheet(accounts: accounts, selectedId: selectedAccountId, title: "Compte cible") { picked in
+                selectedAccountId = picked.id
+            }
+        }
     }
 
     private var fileSelectionLabel: String {

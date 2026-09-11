@@ -1731,5 +1731,138 @@
 "Nouveau récurrent" = "Nouveau récurrent";
 "Nouvelle enveloppe" = "Nouvelle enveloppe";
 
+/* MARK: - Audit 2026-09-10 (account picker — AccountSearchSheet/InvestmentAccountSearchSheet missing keys) */
+"Choisir un compte" = "Choisir un compte";
+"Rechercher un compte…" = "Rechercher un compte…";
+"Créez d'abord un compte depuis Données." = "Créez d'abord un compte depuis Données.";
+"Créez d'abord un compte d'investissement." = "Créez d'abord un compte d'investissement.";
+"Compte interne lié" = "Compte interne lié";
+
+/* MARK: - Audit 2026-09-10 (recurring detection — DetectionResultsSheet/DetectionCandidateDetailPane) */
+"Aucun récurrent détecté" = "Aucun récurrent détecté";
+"Aucune dépense de votre historique ne réunit les 4 critères d'un récurrent : même tiers, fréquence régulière, montant quasi identique et date d'échéance stable (±1-2 jours)." = "Aucune dépense de votre historique ne réunit les 4 critères d'un récurrent : même tiers, fréquence régulière, montant quasi identique et date d'échéance stable (±1-2 jours).";
+"Ces dépenses semblent récurrentes dans votre historique. Touchez une ligne pour voir le détail et l'explication, ou confirmez directement celles que vous souhaitez suivre." = "Ces dépenses semblent récurrentes dans votre historique. Touchez une ligne pour voir le détail et l'explication, ou confirmez directement celles que vous souhaitez suivre.";
+"A changé" = "A changé";
+"Déjà suivi" = "Déjà suivi";
+"était %@" = "était %@";
+"%lld occurrences détectées" = "%lld occurrences détectées";
+"%lld%% confiance" = "%lld%% confiance";
+"Récurrent détecté" = "Récurrent détecté";
+"Ce récurrent a changé depuis sa création" = "Ce récurrent a changé depuis sa création";
+"Un récurrent existe déjà pour ce tiers" = "Un récurrent existe déjà pour ce tiers";
+"Montant suivi" = "Montant suivi";
+"Montant détecté récemment" = "Montant détecté récemment";
+"Le prix ou l'échéance a bougé sans que le motif suivi ne soit mis à jour — utilisez \"Mettre à jour\" pour le corriger avec les valeurs détectées, en conservant sa catégorie et son tier." = "Le prix ou l'échéance a bougé sans que le motif suivi ne soit mis à jour — utilisez \"Mettre à jour\" pour le corriger avec les valeurs détectées, en conservant sa catégorie et son tier.";
+"Ce candidat n'est donc pas proposé à la création — direction \"Gérer les récurrents\" pour corriger le motif existant si ses valeurs sont fausses." = "Ce candidat n'est donc pas proposé à la création — direction \"Gérer les récurrents\" pour corriger le motif existant si ses valeurs sont fausses.";
+"Pourquoi c'est détecté comme récurrent" = "Pourquoi c'est détecté comme récurrent";
+"Tiers identique" = "Tiers identique";
+"%lld transactions attribuées au même tiers." = "%lld transactions attribuées au même tiers.";
+"Fréquence régulière" = "Fréquence régulière";
+"Montant quasi identique" = "Montant quasi identique";
+"Date d'échéance stable" = "Date d'échéance stable";
+"Occurrences détectées (%lld)" = "Occurrences détectées (%lld)";
+"Écarts observés entre les prélèvements : %@ jour(s) — tous dans la fenêtre attendue pour une fréquence %@ (%lld à %lld jours)." = "Écarts observés entre les prélèvements : %@ jour(s) — tous dans la fenêtre attendue pour une fréquence %@ (%lld à %lld jours).";
+"Écart entre les montants observés : %@ %% (tolérance autorisée : %@ %%)." = "Écart entre les montants observés : %@ %% (tolérance autorisée : %@ %%).";
+"Fréquence quotidienne — pas d'ancrage de date à vérifier." = "Fréquence quotidienne — pas d'ancrage de date à vérifier.";
+"Jour du mois observé sur chaque occurrence : %@ — ancré %@ (tolérance ±%lld %@)." = "Jour du mois observé sur chaque occurrence : %@ — ancré %@ (tolérance ±%lld %@).";
+"Jour de la semaine observé sur chaque occurrence : %@ — ancré le %@ (tolérance ±%lld %@)." = "Jour de la semaine observé sur chaque occurrence : %@ — ancré le %@ (tolérance ±%lld %@).";
+"Date observée chaque année : %@ (tolérance ±%lld %@)." = "Date observée chaque année : %@ (tolérance ±%lld %@).";
+
+/* MARK: - Audit 2026-09-10 (financial coach — CoachView/CoachObjectivesSheet) */
+"Aucune analyse pour l'instant" = "Aucune analyse pour l'instant";
+"Lance une analyse : le coach lit tes données, les met en perspective avec tes objectifs et propose des actions chiffrées." = "Lance une analyse : le coach lit tes données, les met en perspective avec tes objectifs et propose des actions chiffrées.";
+"Fait" = "Fait";
+"Tu peux continuer à utiliser l'app, le résultat arrivera tout seul." = "Tu peux continuer à utiliser l'app, le résultat arrivera tout seul.";
+"TON PROFIL" = "TON PROFIL";
+"L'analyse n'a pas abouti" = "L'analyse n'a pas abouti";
+"Masquer la réponse du modèle" = "Masquer la réponse du modèle";
+"Voir la réponse du modèle (%lld caractères)" = "Voir la réponse du modèle (%lld caractères)";
+"Analysé le " = "Analysé le ";
+"Sur quoi le coach s'appuie" = "Sur quoi le coach s'appuie";
+"Estimations du coach" = "Estimations du coach";
+"Impact annuel" = "Impact annuel";
+"C'est fait" = "C'est fait";
+"Une recommandation écartée ne reviendra pas, même si le coach la repropose lors d'une prochaine analyse." = "Une recommandation écartée ne reviendra pas, même si le coach la repropose lors d'une prochaine analyse.";
+"Recommandation" = "Recommandation";
+"Coach dépenses" = "Coach dépenses";
+"Coach investissement" = "Coach investissement";
+"Mes objectifs de dépenses" = "Mes objectifs de dépenses";
+"Mes objectifs d'investissement" = "Mes objectifs d'investissement";
+"Écris-les avec tes mots, et si possible avec des montants et des échéances. Le coach dépenses les traite comme sa priorité n°1 et s'y réfère dans chaque recommandation. Tes objectifs d'investissement se saisissent séparément, dans le coach investissement." = "Écris-les avec tes mots, et si possible avec des montants et des échéances. Le coach dépenses les traite comme sa priorité n°1 et s'y réfère dans chaque recommandation. Tes objectifs d'investissement se saisissent séparément, dans le coach investissement.";
+"Écris-les avec tes mots, et si possible avec des montants et des échéances. Le coach investissement les traite comme sa priorité n°1 et s'y réfère dans chaque recommandation. Tes objectifs de dépenses se saisissent séparément, dans le coach dépenses." = "Écris-les avec tes mots, et si possible avec des montants et des échéances. Le coach investissement les traite comme sa priorité n°1 et s'y réfère dans chaque recommandation. Tes objectifs de dépenses se saisissent séparément, dans le coach dépenses.";
+"À quoi ressemble un objectif exploitable" = "À quoi ressemble un objectif exploitable";
+"Ces objectifs sont synchronisés entre tes appareils via iCloud. Les analyses et les recommandations, elles, restent locales — elles se régénèrent à partir de tes données." = "Ces objectifs sont synchronisés entre tes appareils via iCloud. Les analyses et les recommandations, elles, restent locales — elles se régénèrent à partir de tes données.";
+"Objectifs de dépenses" = "Objectifs de dépenses";
+"Objectifs d'investissement" = "Objectifs d'investissement";
+"Exemples :\n• Mettre 400 € de côté chaque mois pour un apport immobilier d'ici 3 ans.\n• Réduire mon budget courses de 15 % sans changer d'enseigne.\n• Arrêter de payer des abonnements que je n'utilise pas.\n• Ne plus dépasser 150 €/mois de sorties et livraisons." = "Exemples :\n• Mettre 400 € de côté chaque mois pour un apport immobilier d'ici 3 ans.\n• Réduire mon budget courses de 15 % sans changer d'enseigne.\n• Arrêter de payer des abonnements que je n'utilise pas.\n• Ne plus dépasser 150 €/mois de sorties et livraisons.";
+"Exemples :\n• Investir 200 €/mois en ETF, sans toucher au reste.\n• Ne pas dépasser 25 % du portefeuille sur une seule ligne.\n• Faire travailler les liquidités qui dorment sur le compte-titres.\n• Réduire les frais de courtage sur mes ordres récurrents." = "Exemples :\n• Investir 200 €/mois en ETF, sans toucher au reste.\n• Ne pas dépasser 25 % du portefeuille sur une seule ligne.\n• Faire travailler les liquidités qui dorment sur le compte-titres.\n• Réduire les frais de courtage sur mes ordres récurrents.";
+
+/* MARK: - Audit 2026-09-10 (Apple Pay alerts settings + dashboard banner/list) */
+"Apple Pay" = "Apple Pay";
+"Installer le raccourci Apple Pay" = "Installer le raccourci Apple Pay";
+"Ouvre l'app Raccourcis pour ajouter l'automatisation qui dépose une dépense Apple Pay dans Nemoris — à configurer une seule fois (Automatisation personnelle → Apple Pay)." = "Ouvre l'app Raccourcis pour ajouter l'automatisation qui dépose une dépense Apple Pay dans Nemoris — à configurer une seule fois (Automatisation personnelle → Apple Pay).";
+"Alerte Apple Pay" = "Alerte Apple Pay";
+"Une notification est envoyée quand le cumul des dépenses Apple Pay encore en attente dépasse le seuil sur la période choisie." = "Une notification est envoyée quand le cumul des dépenses Apple Pay encore en attente dépasse le seuil sur la période choisie.";
+"Seuil" = "Seuil";
+"€" = "€";
+"Aujourd'hui" = "Aujourd'hui";
+"Cette semaine" = "Cette semaine";
+"Ancienneté" = "Ancienneté";
+"7 jours" = "7 jours";
+"30 jours" = "30 jours";
+"90 jours" = "90 jours";
+"180 jours" = "180 jours";
+"Nettoyer les anciennes dépenses" = "Nettoyer les anciennes dépenses";
+"Nettoyage" = "Nettoyage";
+"Supprime définitivement les dépenses en attente ou écartées déposées avant cette ancienneté, pour éviter d'en accumuler trop. Ne touche pas aux vraies transactions." = "Supprime définitivement les dépenses en attente ou écartées déposées avant cette ancienneté, pour éviter d'en accumuler trop. Ne touche pas aux vraies transactions.";
+"Supprimer les anciennes dépenses ?" = "Supprimer les anciennes dépenses ?";
+"Cette action est irréversible." = "Cette action est irréversible.";
+"%lld dépense%@ supprimée%@." = "%lld dépense%@ supprimée%@.";
+"Aucune dépense à supprimer." = "Aucune dépense à supprimer.";
+"Apple Pay en attente" = "Apple Pay en attente";
+"Aucune dépense en attente" = "Aucune dépense en attente";
+"Les paiements Apple Pay déposés par ton automatisation Raccourcis apparaîtront ici, avant leur catégorisation." = "Les paiements Apple Pay déposés par ton automatisation Raccourcis apparaîtront ici, avant leur catégorisation.";
+"Saisir le montant" = "Saisir le montant";
+"Le montant de \"%@\" n'était pas connu au moment du paiement." = "Le montant de \"%@\" n'était pas connu au moment du paiement.";
+"Semaine dernière" = "Semaine dernière";
+"À saisir" = "À saisir";
+"Écarter" = "Écarter";
+
+/* MARK: - Audit 2026-09-11 (fixes found on-device: missed call sites + specifier interpolation bug) */
+"Alertes Apple Pay" = "Alertes Apple Pay";
+"%lld dépenses pas encore catégorisées" = "%lld dépenses pas encore catégorisées";
+"1 dépense pas encore catégorisée" = "1 dépense pas encore catégorisée";
+"Dis à CE coach ce que tu veux atteindre — il s'y réfère dans chaque recommandation." = "Dis à CE coach ce que tu veux atteindre — il s'y réfère dans chaque recommandation.";
+"Rassemble plusieurs tiers d'une même enseigne (ex. tous les Carrefour Market)." = "Rassemble plusieurs tiers d'une même enseigne (ex. tous les Carrefour Market).";
+
+/* MARK: - Audit 2026-09-10 (payee group management + merge — PayeeGroupManagerView/PayeeMergeResolverView/PayeeMergeTargetPicker) */
+"Regroupe plusieurs tiers d'une même enseigne pour les compter ensemble." = "Regroupe plusieurs tiers d'une même enseigne pour les compter ensemble.";
+"Groupes de tiers" = "Groupes de tiers";
+"Renommer le groupe" = "Renommer le groupe";
+"Aucun tier n'est rattaché à ce groupe." = "Aucun tier n'est rattaché à ce groupe.";
+"1 tier ne sera plus rattaché à aucun groupe." = "1 tier ne sera plus rattaché à aucun groupe.";
+"%lld tiers ne seront plus rattachés à aucun groupe." = "%lld tiers ne seront plus rattachés à aucun groupe.";
+"%lld tier%@" = "%lld tier%@";
+"Fusionner…" = "Fusionner…";
+"Aucun autre groupe" = "Aucun autre groupe";
+"Crée d'abord un second groupe pour pouvoir fusionner." = "Crée d'abord un second groupe pour pouvoir fusionner.";
+"Tous les tiers de « %@ » rejoindront le groupe choisi. « %@ » sera supprimé." = "Tous les tiers de « %@ » rejoindront le groupe choisi. « %@ » sera supprimé.";
+"Fusionner « %@ »" = "Fusionner « %@ »";
+"Aucun autre tier ne correspond." = "Aucun autre tier ne correspond.";
+"L'étape suivante permet de choisir, champ par champ, les informations à garder entre « %@ » et le tier choisi." = "L'étape suivante permet de choisir, champ par champ, les informations à garder entre « %@ » et le tier choisi.";
+"Fiche conservée" = "Fiche conservée";
+"Tiers fusionnés" = "Tiers fusionnés";
+"« %@ » a le plus de transactions (%lld) : c'est elle qui subsiste, avec les valeurs choisies ci-dessous. Les %lld autre%@ seront supprimée%@ après réaffectation des transactions, récurrents et remboursements. Action irréversible." = "« %@ » a le plus de transactions (%lld) : c'est elle qui subsiste, avec les valeurs choisies ci-dessous. Les %lld autre%@ seront supprimée%@ après réaffectation des transactions, récurrents et remboursements. Action irréversible.";
+"Aucun champ ne diverge entre ces tiers." = "Aucun champ ne diverge entre ces tiers.";
+"Fusionner %lld tiers" = "Fusionner %lld tiers";
+"Fusionner" = "Fusionner";
+
+/* MARK: - Audit 2026-09-10 (payee filter — TiersFilterSheet + ReferenceDataView toolbar) */
+"Tous" = "Tous";
+"Ville…" = "Ville…";
+"Pays (code ou nom)…" = "Pays (code ou nom)…";
+"Filtrer" = "Filtrer";
+"Gérer les groupes" = "Gérer les groupes";
+
 /* OTHER */
 "%@ — %@" = "%@ — %@";

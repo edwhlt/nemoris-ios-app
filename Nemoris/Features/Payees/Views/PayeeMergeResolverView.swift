@@ -159,8 +159,12 @@ struct PayeeMergeResolverView: View {
         }
         .nemorisFormStyle()
         .tint(AppTheme.Colors.accent)
+        // `AppLocalization.string(...)`: `paneChrome`'s `title:` is `String`,
+        // and native Swift interpolation here would bake the count in and
+        // permanently skip translation of "Fusionner … tiers" — same remedy
+        // as the two group/payee merge pickers above.
         .paneChrome(
-            "Fusionner \(candidates.count) tiers",
+            AppLocalization.string("Fusionner \(candidates.count) tiers"),
             cancelLabel: "Annuler", onCancel: { dismiss() },
             confirmLabel: "Fusionner", confirmIcon: "arrow.triangle.merge",
             onConfirm: performMerge
@@ -172,8 +176,13 @@ struct PayeeMergeResolverView: View {
     /// `Picker`: sometimes neither original value is the right one (e.g.
     /// merging "Carrefour Mkt" and "CARREFOUR MARKET" into "Carrefour
     /// Market").
+    // `title: LocalizedStringKey`, not `String`: every call site passes a
+    // literal ("Nom", "Ville"…), which converts fine either way, but INSIDE
+    // this function `title` was a plain runtime `String` — `Section(title)`/
+    // `TextField(title, ...)` would resolve to their verbatim overloads and
+    // never localize, cf. CLAUDE.md §5.
     @ViewBuilder
-    private func conflictField(_ title: String, value: Binding<String>, options: [String]) -> some View {
+    private func conflictField(_ title: LocalizedStringKey, value: Binding<String>, options: [String]) -> some View {
         Section(title) {
             TextField(title, text: value)
             ScrollView(.horizontal, showsIndicators: false) {

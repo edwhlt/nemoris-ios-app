@@ -43,7 +43,10 @@ struct ApplePayPendingBanner: View {
         .buttonStyle(.plain)
     }
 
-    private var subtitle: String {
+    // `LocalizedStringKey`, not `String`: `Text(subtitle)` below would stay
+    // verbatim (never localized) with a `String`-typed property — cf.
+    // CLAUDE.md §5.
+    private var subtitle: LocalizedStringKey {
         count > 1 ? "\(count) dépenses pas encore catégorisées" : "1 dépense pas encore catégorisée"
     }
 }

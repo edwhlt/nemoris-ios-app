@@ -117,7 +117,7 @@ struct DetectionCandidateDetailPane: View {
     }
 
     @ViewBuilder
-    private func explanationRow(icon: String, title: LocalizedStringKey, detail: String) -> some View {
+    private func explanationRow(icon: String, title: LocalizedStringKey, detail: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(AppTheme.Colors.success)
@@ -133,19 +133,38 @@ struct DetectionCandidateDetailPane: View {
         .padding(.vertical, 2)
     }
 
-    private var frequencyExplanation: String {
+    // `LocalizedStringKey` (pas `String`) : construite par interpolation
+    // LITTÉRALE (comme `Text("était \(...)")` ailleurs dans l'app), la partie
+    // structurelle française devient une clé traduisible et les valeurs
+    // interpolées (listes de jours, libellés d'enum déjà en français) passent
+    // en argument — cf. CLAUDE.md §5. Les mots intégrés (noms de jours de la
+    // semaine, "fin de mois", "jour"/"jours") restent en français quel que
+    // soit le réglage de langue : les traduire recursivement dépasserait le
+    // périmètre de ce correctif.
+    private var frequencyExplanation: LocalizedStringKey {
         let window = RecurringDetector.gapWindow(for: candidate.frequency)
         let gapList = gaps.map(String.init).joined(separator: ", ")
         return "Écarts observés entre les prélèvements : \(gapList) jour(s) — tous dans la fenêtre attendue pour une fréquence \(candidate.frequency.label.lowercased()) (\(window.lowerBound) à \(window.upperBound) jours)."
     }
 
-    private var amountExplanation: String {
-        let pct = relativeAmountDeviation * 100
-        let tolerancePct = RecurringDetector.amountTolerance * 100
-        return String(format: "Écart entre les montants observés : %.1f %% (tolérance autorisée : %.0f %%).", pct, tolerancePct)
+    // `\(value, specifier:)` interpolation does NOT localize the same way as
+    // a plain `String`/`Int` interpolation: verified on device (2026-09-11)
+    // that its generated lookup key does not match a hand-written
+    // `Localizable.strings` entry — the text stayed French AND the doubled
+    // "%%" was shown literally (no `String(format:)` collapsing at all),
+    // meaning the key lookup silently failed and this fell back to the raw
+    // Swift literal. Pre-formatting to a `String` first and interpolating
+    // THAT (matching `gapList`/`toleranceSuffix` just above, confirmed
+    // working) sidesteps the issue entirely. Source keeps a SINGLE "%" —
+    // same convention as the working "%lld% confiance" case elsewhere in
+    // this file, whose `Localizable.strings` key doubles it to "%%".
+    private var amountExplanation: LocalizedStringKey {
+        let pctText = String(format: "%.1f", relativeAmountDeviation * 100)
+        let toleranceText = String(format: "%.0f", RecurringDetector.amountTolerance * 100)
+        return "Écart entre les montants observés : \(pctText) % (tolérance autorisée : \(toleranceText) %)."
     }
 
-    private var dateExplanation: String {
+    private var dateExplanation: LocalizedStringKey {
         let tolerance = RecurringDetector.dateTolerance(for: candidate.frequency)
         let toleranceSuffix = tolerance > 1 ? "jours" : "jour"
         guard let anchor = candidate.anchorDay else {

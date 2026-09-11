@@ -1773,5 +1773,138 @@
 "Nouveau récurrent" = "New recurring item";
 "Nouvelle enveloppe" = "New envelope";
 
+/* MARK: - Audit 2026-09-10 (account picker — AccountSearchSheet/InvestmentAccountSearchSheet missing keys) */
+"Choisir un compte" = "Choose Account";
+"Rechercher un compte…" = "Search for an Account…";
+"Créez d'abord un compte depuis Données." = "First create an account from Data.";
+"Créez d'abord un compte d'investissement." = "First create an investment account.";
+"Compte interne lié" = "Linked Internal Account";
+
+/* MARK: - Audit 2026-09-10 (recurring detection — DetectionResultsSheet/DetectionCandidateDetailPane) */
+"Aucun récurrent détecté" = "No Recurring Item Detected";
+"Aucune dépense de votre historique ne réunit les 4 critères d'un récurrent : même tiers, fréquence régulière, montant quasi identique et date d'échéance stable (±1-2 jours)." = "No expense in your history meets the 4 criteria for a recurring item: same payee, regular frequency, near-identical amount, and a stable due date (±1-2 days).";
+"Ces dépenses semblent récurrentes dans votre historique. Touchez une ligne pour voir le détail et l'explication, ou confirmez directement celles que vous souhaitez suivre." = "These expenses look recurring in your history. Tap a row to see the detail and explanation, or confirm directly the ones you want to track.";
+"A changé" = "Changed";
+"Déjà suivi" = "Already Tracked";
+"était %@" = "was %@";
+"%lld occurrences détectées" = "%lld occurrences detected";
+"%lld%% confiance" = "%lld%% confidence";
+"Récurrent détecté" = "Recurring Item Detected";
+"Ce récurrent a changé depuis sa création" = "This recurring item has changed since it was created";
+"Un récurrent existe déjà pour ce tiers" = "A recurring item already exists for this payee";
+"Montant suivi" = "Tracked Amount";
+"Montant détecté récemment" = "Recently Detected Amount";
+"Le prix ou l'échéance a bougé sans que le motif suivi ne soit mis à jour — utilisez \"Mettre à jour\" pour le corriger avec les valeurs détectées, en conservant sa catégorie et son tier." = "The price or due date has shifted without the tracked pattern being updated — use \"Update\" to correct it with the detected values, keeping its category and payee.";
+"Ce candidat n'est donc pas proposé à la création — direction \"Gérer les récurrents\" pour corriger le motif existant si ses valeurs sont fausses." = "This candidate isn't offered for creation — go to \"Manage Recurring Items\" to fix the existing pattern if its values are wrong.";
+"Pourquoi c'est détecté comme récurrent" = "Why This Is Detected As Recurring";
+"Tiers identique" = "Same Payee";
+"%lld transactions attribuées au même tiers." = "%lld transactions attributed to the same payee.";
+"Fréquence régulière" = "Regular Frequency";
+"Montant quasi identique" = "Near-Identical Amount";
+"Date d'échéance stable" = "Stable Due Date";
+"Occurrences détectées (%lld)" = "Detected Occurrences (%lld)";
+"Écarts observés entre les prélèvements : %@ jour(s) — tous dans la fenêtre attendue pour une fréquence %@ (%lld à %lld jours)." = "Observed gaps between charges: %@ day(s) — all within the expected window for a %@ frequency (%lld to %lld days).";
+"Écart entre les montants observés : %@ %% (tolérance autorisée : %@ %%)." = "Difference between observed amounts: %@ %% (allowed tolerance: %@ %%).";
+"Fréquence quotidienne — pas d'ancrage de date à vérifier." = "Daily frequency — no date anchor to check.";
+"Jour du mois observé sur chaque occurrence : %@ — ancré %@ (tolérance ±%lld %@)." = "Day of month observed on each occurrence: %@ — anchored %@ (tolerance ±%lld %@).";
+"Jour de la semaine observé sur chaque occurrence : %@ — ancré le %@ (tolérance ±%lld %@)." = "Day of week observed on each occurrence: %@ — anchored on %@ (tolerance ±%lld %@).";
+"Date observée chaque année : %@ (tolérance ±%lld %@)." = "Date observed each year: %@ (tolerance ±%lld %@).";
+
+/* MARK: - Audit 2026-09-10 (financial coach — CoachView/CoachObjectivesSheet) */
+"Aucune analyse pour l'instant" = "No Analysis Yet";
+"Lance une analyse : le coach lit tes données, les met en perspective avec tes objectifs et propose des actions chiffrées." = "Run an analysis: the coach reads your data, weighs it against your goals, and suggests quantified actions.";
+"Fait" = "Done";
+"Tu peux continuer à utiliser l'app, le résultat arrivera tout seul." = "You can keep using the app — the result will arrive on its own.";
+"TON PROFIL" = "YOUR PROFILE";
+"L'analyse n'a pas abouti" = "The Analysis Didn't Complete";
+"Masquer la réponse du modèle" = "Hide the Model's Response";
+"Voir la réponse du modèle (%lld caractères)" = "View the Model's Response (%lld characters)";
+"Analysé le " = "Analyzed on ";
+"Sur quoi le coach s'appuie" = "What the Coach Relies On";
+"Estimations du coach" = "Coach's Estimates";
+"Impact annuel" = "Annual Impact";
+"C'est fait" = "Done";
+"Une recommandation écartée ne reviendra pas, même si le coach la repropose lors d'une prochaine analyse." = "A dismissed recommendation won't come back, even if the coach proposes it again in a future analysis.";
+"Recommandation" = "Recommendation";
+"Coach dépenses" = "Spending Coach";
+"Coach investissement" = "Investment Coach";
+"Mes objectifs de dépenses" = "My Spending Goals";
+"Mes objectifs d'investissement" = "My Investment Goals";
+"Écris-les avec tes mots, et si possible avec des montants et des échéances. Le coach dépenses les traite comme sa priorité n°1 et s'y réfère dans chaque recommandation. Tes objectifs d'investissement se saisissent séparément, dans le coach investissement." = "Write them in your own words, ideally with amounts and deadlines. The spending coach treats them as its #1 priority and refers to them in every recommendation. Your investment goals are entered separately, in the investment coach.";
+"Écris-les avec tes mots, et si possible avec des montants et des échéances. Le coach investissement les traite comme sa priorité n°1 et s'y réfère dans chaque recommandation. Tes objectifs de dépenses se saisissent séparément, dans le coach dépenses." = "Write them in your own words, ideally with amounts and deadlines. The investment coach treats them as its #1 priority and refers to them in every recommendation. Your spending goals are entered separately, in the spending coach.";
+"À quoi ressemble un objectif exploitable" = "What An Actionable Goal Looks Like";
+"Ces objectifs sont synchronisés entre tes appareils via iCloud. Les analyses et les recommandations, elles, restent locales — elles se régénèrent à partir de tes données." = "These goals are synced across your devices via iCloud. The analyses and recommendations, though, stay local — they regenerate from your data.";
+"Objectifs de dépenses" = "Spending Goals";
+"Objectifs d'investissement" = "Investment Goals";
+"Exemples :\n• Mettre 400 € de côté chaque mois pour un apport immobilier d'ici 3 ans.\n• Réduire mon budget courses de 15 % sans changer d'enseigne.\n• Arrêter de payer des abonnements que je n'utilise pas.\n• Ne plus dépasser 150 €/mois de sorties et livraisons." = "Examples:\n• Set aside €400 every month for a down payment within 3 years.\n• Cut my grocery budget by 15% without switching stores.\n• Stop paying for subscriptions I don't use.\n• Never exceed €150/month on eating out and delivery.";
+"Exemples :\n• Investir 200 €/mois en ETF, sans toucher au reste.\n• Ne pas dépasser 25 % du portefeuille sur une seule ligne.\n• Faire travailler les liquidités qui dorment sur le compte-titres.\n• Réduire les frais de courtage sur mes ordres récurrents." = "Examples:\n• Invest €200/month in ETFs, without touching the rest.\n• Never exceed 25% of the portfolio on a single line.\n• Put idle cash sitting in the brokerage account to work.\n• Reduce brokerage fees on my recurring orders.";
+
+/* MARK: - Audit 2026-09-10 (Apple Pay alerts settings + dashboard banner/list) */
+"Apple Pay" = "Apple Pay";
+"Installer le raccourci Apple Pay" = "Install the Apple Pay Shortcut";
+"Ouvre l'app Raccourcis pour ajouter l'automatisation qui dépose une dépense Apple Pay dans Nemoris — à configurer une seule fois (Automatisation personnelle → Apple Pay)." = "Opens the Shortcuts app to add the automation that drops an Apple Pay expense into Nemoris — set up once (Personal Automation → Apple Pay).";
+"Alerte Apple Pay" = "Apple Pay Alert";
+"Une notification est envoyée quand le cumul des dépenses Apple Pay encore en attente dépasse le seuil sur la période choisie." = "A notification is sent when the total of still-pending Apple Pay expenses exceeds the threshold over the chosen period.";
+"Seuil" = "Threshold";
+"€" = "€";
+"Aujourd'hui" = "Today";
+"Cette semaine" = "This Week";
+"Ancienneté" = "Age";
+"7 jours" = "7 Days";
+"30 jours" = "30 Days";
+"90 jours" = "90 Days";
+"180 jours" = "180 Days";
+"Nettoyer les anciennes dépenses" = "Clean Up Old Expenses";
+"Nettoyage" = "Cleanup";
+"Supprime définitivement les dépenses en attente ou écartées déposées avant cette ancienneté, pour éviter d'en accumuler trop. Ne touche pas aux vraies transactions." = "Permanently deletes pending or dismissed expenses dropped off before this age, to avoid accumulating too many. Doesn't touch real transactions.";
+"Supprimer les anciennes dépenses ?" = "Delete Old Expenses?";
+"Cette action est irréversible." = "This action is irreversible.";
+"%lld dépense%@ supprimée%@." = "%lld expense%@ deleted%@.";
+"Aucune dépense à supprimer." = "No expenses to delete.";
+"Apple Pay en attente" = "Apple Pay Pending";
+"Aucune dépense en attente" = "No Pending Expenses";
+"Les paiements Apple Pay déposés par ton automatisation Raccourcis apparaîtront ici, avant leur catégorisation." = "Apple Pay payments dropped off by your Shortcuts automation will show up here, before they're categorized.";
+"Saisir le montant" = "Enter the Amount";
+"Le montant de \"%@\" n'était pas connu au moment du paiement." = "The amount for \"%@\" wasn't known at the time of payment.";
+"Semaine dernière" = "Last Week";
+"À saisir" = "To Enter";
+"Écarter" = "Dismiss";
+
+/* MARK: - Audit 2026-09-11 (fixes found on-device: missed call sites + specifier interpolation bug) */
+"Alertes Apple Pay" = "Apple Pay Alerts";
+"%lld dépenses pas encore catégorisées" = "%lld expenses not yet categorized";
+"1 dépense pas encore catégorisée" = "1 expense not yet categorized";
+"Dis à CE coach ce que tu veux atteindre — il s'y réfère dans chaque recommandation." = "Tell THIS coach what you want to achieve — it refers back to it in every recommendation.";
+"Rassemble plusieurs tiers d'une même enseigne (ex. tous les Carrefour Market)." = "Groups multiple payees of the same brand (e.g. all Carrefour Market stores).";
+
+/* MARK: - Audit 2026-09-10 (payee group management + merge — PayeeGroupManagerView/PayeeMergeResolverView/PayeeMergeTargetPicker) */
+"Regroupe plusieurs tiers d'une même enseigne pour les compter ensemble." = "Group several payees from the same brand to count them together.";
+"Groupes de tiers" = "Payee Groups";
+"Renommer le groupe" = "Rename Group";
+"Aucun tier n'est rattaché à ce groupe." = "No payee is attached to this group.";
+"1 tier ne sera plus rattaché à aucun groupe." = "1 payee will no longer be attached to any group.";
+"%lld tiers ne seront plus rattachés à aucun groupe." = "%lld payees will no longer be attached to any group.";
+"%lld tier%@" = "%lld payee%@";
+"Fusionner…" = "Merge…";
+"Aucun autre groupe" = "No Other Group";
+"Crée d'abord un second groupe pour pouvoir fusionner." = "Create a second group first to be able to merge.";
+"Tous les tiers de « %@ » rejoindront le groupe choisi. « %@ » sera supprimé." = "All payees from “%@” will join the chosen group. “%@” will be deleted.";
+"Fusionner « %@ »" = "Merge “%@”";
+"Aucun autre tier ne correspond." = "No other payee matches.";
+"L'étape suivante permet de choisir, champ par champ, les informations à garder entre « %@ » et le tier choisi." = "The next step lets you choose, field by field, which information to keep between “%@” and the chosen payee.";
+"Fiche conservée" = "Kept Record";
+"Tiers fusionnés" = "Payees Merged";
+"« %@ » a le plus de transactions (%lld) : c'est elle qui subsiste, avec les valeurs choisies ci-dessous. Les %lld autre%@ seront supprimée%@ après réaffectation des transactions, récurrents et remboursements. Action irréversible." = "“%@” has the most transactions (%lld): it's the one that survives, with the values chosen below. The %lld other%@ will be deleted%@ after transactions, recurring items and reimbursements are reassigned. This action is irreversible.";
+"Aucun champ ne diverge entre ces tiers." = "No field differs between these payees.";
+"Fusionner %lld tiers" = "Merge %lld Payees";
+"Fusionner" = "Merge";
+
+/* MARK: - Audit 2026-09-10 (payee filter — TiersFilterSheet + ReferenceDataView toolbar) */
+"Tous" = "All";
+"Ville…" = "City…";
+"Pays (code ou nom)…" = "Country (code or name)…";
+"Filtrer" = "Filter";
+"Gérer les groupes" = "Manage Groups";
+
 /* OTHER */
 "%@ — %@" = "%@ — %@";

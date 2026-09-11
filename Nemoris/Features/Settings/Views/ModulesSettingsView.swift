@@ -348,6 +348,7 @@ struct ModulesSettingsView: View {
 struct TransactionsModuleSettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var accounts: [Account] = []
+    @State private var showAccountPicker = false
     private let repository = TransactionRepository()
 
     var body: some View {
@@ -355,14 +356,19 @@ struct TransactionsModuleSettingsView: View {
         Form {
             if !accounts.isEmpty {
                 Section {
-                    Picker("Compte par défaut", selection: $appState.defaultAccountId) {
-                        Text("Premier disponible").tag(0)
-                        ForEach(accounts.groupedByType, id: \.type) { group in
-                            Section(LocalizedStringKey(group.type.label)) {
-                                ForEach(group.accounts) { a in
-                                    Text(a.name).tag(a.id)
-                                }
-                            }
+                    Button {
+                        showAccountPicker = true
+                    } label: {
+                        HStack {
+                            Text("Compte par défaut").foregroundStyle(AppTheme.Colors.textPrimary)
+                            Spacer()
+                            // Wrap requis : le fallback est un littéral mais
+                            // l'expression entière est de type `String`
+                            // (coalescing avec `.name`) — `Text(String)`
+                            // reste verbatim sans ce wrap, cf. CLAUDE.md §5.
+                            Text(LocalizedStringKey(accounts.first(where: { $0.id == appState.defaultAccountId })?.name ?? "Premier disponible"))
+                                .foregroundStyle(AppTheme.Colors.textSecondary)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                         }
                     }
                 } footer: {
@@ -380,6 +386,17 @@ struct TransactionsModuleSettingsView: View {
         .onAppear {
             if DatabaseManager.shared.hasDatabase() {
                 accounts = repository.fetchAccounts()
+            }
+        }
+        .adaptivePane(isPresented: $showAccountPicker) {
+            AccountSearchSheet(
+                accounts: accounts,
+                selectedId: appState.defaultAccountId == 0 ? nil : appState.defaultAccountId,
+                title: "Compte par défaut",
+                specialLabel: "Premier disponible",
+                specialIcon: "sparkles"
+            ) { picked in
+                appState.defaultAccountId = picked?.id ?? 0
             }
         }
     }

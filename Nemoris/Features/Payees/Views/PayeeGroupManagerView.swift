@@ -97,7 +97,7 @@ struct PayeeGroupManagerView: View {
             }
         }
         .confirmationDialog(
-            deleteTarget.map { "Supprimer « \($0.displayName) » ?" } ?? "",
+            deleteConfirmationTitle,
             isPresented: Binding(
                 get: { deleteTarget != nil },
                 set: { if !$0 { deleteTarget = nil } }
@@ -119,11 +119,35 @@ struct PayeeGroupManagerView: View {
         .task { reload() }
     }
 
-    private var deleteMessage: String {
+    // `LocalizedStringKey`, not `String`: built via literal interpolation so
+    // the STATIC "Supprimer « » ?" wrapper stays translatable while the
+    // embedded group name (raw data) is passed as an argument — cf.
+    // CLAUDE.md §5. The previous `.map { ... } ?? ""` produced a plain
+    // `String`, which `confirmationDialog` would show verbatim.
+    private var deleteConfirmationTitle: LocalizedStringKey {
+        guard let target = deleteTarget else { return "" }
+        return "Supprimer « \(target.displayName) » ?"
+    }
+
+    // `LocalizedStringKey`, not `String`: `Text(deleteMessage)` would stay
+    // verbatim with a `String`-typed property — cf. CLAUDE.md §5.
+    //
+    // Three full branches rather than one skeleton with an interpolated verb
+    // conjugation ("seront"/"sera"): that fragment is a raw FRENCH WORD
+    // computed at the call site, not a re-translatable lookup — substituting
+    // it as a %@ argument into an English template would paste French verb
+    // forms into English prose. Fully separate literals keep each branch's
+    // grammar self-contained and translatable on its own.
+    private var deleteMessage: LocalizedStringKey {
         guard let target = deleteTarget else { return "" }
         let count = tierCounts[target.id] ?? 0
-        guard count > 0 else { return "Aucun tier n'est rattaché à ce groupe." }
-        return "\(count) tier\(count > 1 ? "s" : "") ne \(count > 1 ? "seront" : "sera") plus rattaché\(count > 1 ? "s" : "") à aucun groupe."
+        if count == 0 {
+            return "Aucun tier n'est rattaché à ce groupe."
+        } else if count == 1 {
+            return "1 tier ne sera plus rattaché à aucun groupe."
+        } else {
+            return "\(count) tiers ne seront plus rattachés à aucun groupe."
+        }
     }
 
     @ViewBuilder
@@ -259,7 +283,12 @@ private struct PayeeGroupMergeTargetPicker: View {
                         .buttonStyle(.plain)
                     }
                 } footer: {
-                    Text(verbatim: "Tous les tiers de « \(source.displayName) » rejoindront le groupe choisi. « \(source.displayName) » sera supprimé.")
+                    // Literal interpolation (not `verbatim:`): the static
+                    // wrapper prose is genuinely translatable, only the
+                    // embedded group name is raw data — `verbatim:` here was
+                    // an oversight that permanently pinned this footer to
+                    // French, cf. CLAUDE.md §5.
+                    Text("Tous les tiers de « \(source.displayName) » rejoindront le groupe choisi. « \(source.displayName) » sera supprimé.")
                 }
             }
         }
@@ -272,6 +301,13 @@ private struct PayeeGroupMergeTargetPicker: View {
         #endif
         .tint(AppTheme.Colors.accent)
         .paneSearchable(text: $search, prompt: "Rechercher un groupe…")
-        .paneChrome("Fusionner « \(source.displayName) »", cancelLabel: "Annuler", onCancel: { dismiss() })
+        // `paneChrome`'s `title:` param is `String` — native Swift
+        // interpolation here would bake the name in and permanently skip
+        // translation of "Fusionner « » ". `AppLocalization.string(...)`
+        // resolves the STATIC template via `String.LocalizationValue`
+        // interpolation (which preserves the %@ placeholder) BEFORE handing
+        // an already-resolved string to `paneChrome` — the "chrome native"
+        // remedy documented in `AppLocalization.swift`, not the plain-Text one.
+        .paneChrome(AppLocalization.string("Fusionner « \(source.displayName) »"), cancelLabel: "Annuler", onCancel: { dismiss() })
     }
 }

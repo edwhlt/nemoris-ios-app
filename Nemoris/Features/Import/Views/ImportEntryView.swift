@@ -73,6 +73,8 @@ struct ImportEntryView: View {
     @State private var investmentAccounts: [InvestmentAccount] = []
     @State private var selectedAccountId: Int? = nil
     @State private var selectedInvestmentAccountId: Int? = nil
+    @State private var showAccountPicker = false
+    @State private var showInvestmentAccountPicker = false
     @State private var showFilePicker = false
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var parseError: String?
@@ -286,10 +288,19 @@ struct ImportEntryView: View {
                             Text("Aucun compte disponible — créez-en un d'abord.")
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
                         } else {
-                            Picker("Compte", selection: $selectedAccountId) {
-                                Text("Choisir…").tag(Int?.none)
-                                ForEach(accounts) { a in
-                                    Text(a.name).tag(Int?.some(a.id))
+                            Button {
+                                showAccountPicker = true
+                            } label: {
+                                HStack {
+                                    Text("Compte").foregroundStyle(AppTheme.Colors.textPrimary)
+                                    Spacer()
+                                    // Wrap requis : coalescing avec `.name`
+                                    // rend l'expression entière `String` —
+                                    // `Text(String)` reste verbatim sans lui,
+                                    // cf. CLAUDE.md §5.
+                                    Text(LocalizedStringKey(accounts.first(where: { $0.id == selectedAccountId })?.name ?? "Choisir…"))
+                                        .foregroundStyle(selectedAccountId == nil ? AppTheme.Colors.textSecondary : AppTheme.Colors.textPrimary)
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                                 }
                             }
                         }
@@ -298,10 +309,18 @@ struct ImportEntryView: View {
                             Text("Aucun compte d'investissement — créez-en un d'abord.")
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
                         } else {
-                            Picker("Compte", selection: $selectedInvestmentAccountId) {
-                                Text("Choisir…").tag(Int?.none)
-                                ForEach(investmentAccounts) { a in
-                                    Text("\(a.name) (\(a.broker))").tag(Int?.some(a.id))
+                            Button {
+                                showInvestmentAccountPicker = true
+                            } label: {
+                                HStack {
+                                    Text("Compte").foregroundStyle(AppTheme.Colors.textPrimary)
+                                    Spacer()
+                                    if let a = investmentAccounts.first(where: { $0.id == selectedInvestmentAccountId }) {
+                                        Text("\(a.name) (\(a.broker))").foregroundStyle(AppTheme.Colors.textPrimary)
+                                    } else {
+                                        Text("Choisir…").foregroundStyle(AppTheme.Colors.textSecondary)
+                                    }
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
                                 }
                             }
                         }
@@ -471,6 +490,16 @@ struct ImportEntryView: View {
                 Text("Vous devez d'abord la terminer ou l'annuler avant d'en démarrer une nouvelle.")
             }
             .task { loadInitialState() }
+            .adaptivePane(isPresented: $showAccountPicker) {
+                AccountSearchSheet(accounts: accounts, selectedId: selectedAccountId, title: "Choisir un compte") { picked in
+                    selectedAccountId = picked?.id
+                }
+            }
+            .adaptivePane(isPresented: $showInvestmentAccountPicker) {
+                InvestmentAccountSearchSheet(accounts: investmentAccounts, selectedId: selectedInvestmentAccountId, title: "Choisir un compte") { picked in
+                    selectedInvestmentAccountId = picked.id
+                }
+            }
     }
 
     // MARK: - Logic

@@ -35,7 +35,11 @@ struct ApplePayAlertSettingsView: View {
 
     @State private var purgeOlderThanDays = 30
     @State private var showPurgeConfirmation = false
-    @State private var purgeResultMessage: String?
+    // `LocalizedStringResource`, not `String`: built once in `performPurge`
+    // and re-read later by `body` — a plain `String` would freeze whatever
+    // language was active at construction time (cf. CLAUDE.md §5, "texte
+    // persisté = LocalizedStringResource").
+    @State private var purgeResultMessage: LocalizedStringResource?
 
     var body: some View {
         if isPane {
@@ -105,7 +109,10 @@ struct ApplePayAlertSettingsView: View {
                 Section("Période") {
                     Picker("Période", selection: $period) {
                         ForEach(ApplePayAlertPeriod.allCases, id: \.self) { p in
-                            Text(p.label).tag(p)
+                            // `p.label` is a runtime `String`, not a literal —
+                            // `Text(String)` would stay verbatim without this
+                            // wrap, cf. CLAUDE.md §5.
+                            Text(LocalizedStringKey(p.label)).tag(p)
                         }
                     }
                     .pickerStyle(.inline)
