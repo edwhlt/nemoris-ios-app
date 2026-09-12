@@ -1,66 +1,66 @@
 import Foundation
 
-// MARK: - Extraction déterministe d'opérations depuis un relevé bancaire
+// MARK: - Deterministic extraction of operations from a bank statement
 //
-// Moteur PUR (aucun accès réseau, disque, IA ni SwiftUI) — même doctrine que
-// `InvestmentStatementExtractor`, `PortfolioEvolutionBuilder` et
-// `MerchantQueryPlanner` : testable hors Xcode via `run_bank_statement_tests.sh`.
+// PURE engine (no network, disk, AI or SwiftUI access) — same doctrine as
+// `InvestmentStatementExtractor`, `PortfolioEvolutionBuilder` and
+// `MerchantQueryPlanner`: testable outside Xcode via `run_bank_statement_tests.sh`.
 //
-// ─── Pourquoi ce moteur existe ─────────────────────────────────────────────
+// ─── Why this engine exists ────────────────────────────────────────────────
 //
-// L'import de transactions ne connaissait que le CSV. Un relevé PDF ou une
-// capture d'écran d'appli bancaire n'avait aucun chemin d'entrée, alors que
-// c'est un format tabulaire très régulier. Le confier à 100 % à l'IA aurait
-// reproduit les trois défauts déjà payés côté investissements : rien du tout
-// sans Apple Intelligence, échec indiscernable d'un document vide, et aucun
-// garde-fou face à une extraction probabiliste.
+// Transaction import only knew CSV. A PDF statement or a screenshot
+// of a banking app had no entry path at all, even though it's a very
+// regular tabular format. Handing it 100% to AI would have reproduced the
+// three flaws already paid for on the investments side: nothing at all
+// without Apple Intelligence, a failure indistinguishable from an empty
+// document, and no safety net against a probabilistic extraction.
 //
-// ─── Ancrage sur la DATE, pas sur un identifiant ───────────────────────────
+// ─── Anchoring on the DATE, not an identifier ──────────────────────────────
 //
-// Un relevé bancaire n'a pas d'équivalent de l'ISIN. L'invariant exploitable
-// est qu'une opération porte TOUJOURS une date complète et un montant. On
-// ancre donc sur la date (jour/mois/année, jamais une forme courte) et on
-// cherche le montant sur la même ligne — ou juste en dessous quand le texte
-// arrive en colonne, ce que produit l'OCR d'une capture d'écran.
+// A bank statement has no equivalent of an ISIN. The invariant we can
+// exploit is that an operation ALWAYS carries a full date and an amount. So
+// we anchor on the date (day/month/year, never a short form) and
+// look for the amount on the same line — or just below when the text
+// arrives in a column, which is what screenshot OCR produces.
 //
-// Ce moteur ne cherche pas à battre l'IA sur les mises en page exotiques : il
-// couvre le cas dominant et sert de filet systématique. La réconciliation
-// (`TransactionDocumentParser.reconcile`) lui laisse l'autorité sur la date et
-// le montant — là où un petit modèle recopie ou dérive — et prend le libellé
-// de l'IA, qui reconstitue mieux un texte OCR éclaté en colonnes.
+// This engine doesn't try to beat AI on exotic layouts: it
+// covers the dominant case and serves as a systematic safety net. Reconciliation
+// (`TransactionDocumentParser.reconcile`) leaves it in charge of the date and
+// the amount — where a small model copies or derives them — and takes the
+// AI's label, which reconstructs OCR text broken across columns better.
 
-/// Une opération bancaire reconnue sans IA. Volontairement distincte
-/// d'`ImportSessionRow` (qui porte l'état de résolution et d'UI) : ce moteur
-/// reste pur et ne connaît ni la base ni le moteur d'identification.
+/// A bank operation recognized without AI. Deliberately distinct from
+/// `ImportSessionRow` (which carries resolution and UI state): this engine
+/// stays pure and knows neither the database nor the identification engine.
 struct ExtractedBankTransaction: Equatable, Codable, Hashable, Sendable {
-    /// Date au format yyyy-MM-dd (chaîne : le moteur ne dépend pas de Calendar).
+    /// Date in yyyy-MM-dd format (a string: the engine doesn't depend on Calendar).
     var date: String
-    /// Montant SIGNÉ, convention de l'app : négatif = dépense.
+    /// SIGNED amount, app convention: negative = expense.
     var amount: Double
     var label: String
     /// "CB" | "VIREMENT" | "PRELEVEMENT" | "RETRAIT" | "CHEQUE", si reconnaissable.
     var paymentTypeHint: String?
-    /// Vrai quand le signe vient d'un marqueur explicite (+ ou − collé au
-    /// montant). Faux quand il a été déduit d'un mot-clé du libellé ou du
-    /// défaut « dépense » — c'est l'information dont la réconciliation a
-    /// besoin pour savoir si elle peut faire confiance au signe de l'IA.
+    /// True when the sign comes from an explicit marker (+ or − attached to
+    /// the amount). False when it was inferred from a label keyword or the
+    /// "expense" default — that's the information reconciliation
+    /// needs to know whether it can trust the AI's sign.
     var isSignExplicit: Bool
-    /// Confiance : dégradée quand un champ a dû être déduit plutôt que lu.
+    /// Confidence: downgraded when a field had to be inferred rather than read.
     var confidence: Double
 }
 
 enum BankStatementExtractor {
 
-    // MARK: - Point d'entrée
+    // MARK: - Entry point
 
-    /// Extrait toutes les opérations reconnaissables d'un texte brut.
-    /// Renvoie un tableau vide plutôt que d'inventer : un document sans date
-    /// ni montant ne produit rien, jamais une ligne « au cas où ».
+    /// Extracts every recognizable operation from plain text.
+    /// Returns an empty array rather than inventing anything: a document with no
+    /// date or amount produces nothing, never a "just in case" line.
     ///
-    /// `referenceDate` sert à résoudre les dates SANS année (« 2 juil. »,
-    /// « Hier »), omniprésentes dans les captures d'applis bancaires. Paramètre
-    /// explicite plutôt que `Date()` en dur : le moteur reste déterministe et
-    /// testable.
+    /// `referenceDate` resolves dates WITHOUT a year ("Jul 2",
+    /// "Yesterday"), ubiquitous in banking app screenshots. An explicit
+    /// parameter rather than a hardcoded `Date()`: the engine stays
+    /// deterministic and testable.
     static func extractTransactions(from text: String,
                                     referenceDate: Date = Date()) -> [ExtractedBankTransaction] {
         let lines = text
@@ -70,24 +70,24 @@ enum BankStatementExtractor {
 
         let infos = lines.map(LineInfo.init(raw:))
         var results: [ExtractedBankTransaction] = []
-        /// Dernière ligne déjà rattachée à une opération — borne les fenêtres
-        /// de libellé pour qu'un bloc n'aille jamais piocher dans le précédent.
+        /// Last line already attached to an operation — bounds the label
+        /// windows so a block never reaches back into the previous one.
         var lastConsumed = -1
 
         for index in infos.indices {
             let info = infos[index]
             guard let date = resolvedDate(info, reference: referenceDate), !info.isSummary else { continue }
-            // Une ligne déjà absorbée comme montant ou continuation d'un bloc
-            // précédent n'ouvre pas un nouveau bloc.
+            // A line already consumed as an amount or as a continuation of a
+            // previous block doesn't open a new block.
             guard index > lastConsumed else { continue }
 
-            // ─── Mise en page à EN-TÊTES DE DATE ────────────────────────────
-            // Les applis bancaires regroupent la journée sous un seul en-tête,
-            // puis enchaînent les opérations : « 22 juillet » / marchand /
-            // catégorie / montant / marchand / catégorie / montant…
-            // Le modèle « une date = une opération » n'en retenait donc qu'une
-            // par journée, et prenait pour libellé la ligne de texte la plus
-            // proche — c'est-à-dire la CATÉGORIE de l'opération précédente.
+            // ─── DATE-HEADER layout ──────────────────────────────────────────
+            // Banking apps group the day under a single header,
+            // then list the operations in a row: "July 22" / merchant /
+            // category / amount / merchant / category / amount…
+            // The "one date = one operation" model therefore only kept one
+            // per day, and picked as the label the closest line of text —
+            // i.e. the CATEGORY of the previous operation.
             if info.isDateOnlyLine, info.amounts.isEmpty {
                 let consumedBefore = lastConsumed
                 let emitted = collectUnderDateHeader(infos: infos, headerIndex: index,
@@ -96,7 +96,7 @@ enum BankStatementExtractor {
                     results.append(contentsOf: emitted)
                     continue
                 }
-                // Rien sous l'en-tête : on rejoue le chemin classique.
+                // Nothing under the header: fall back to the classic path.
                 lastConsumed = consumedBefore
             }
 
@@ -105,10 +105,10 @@ enum BankStatementExtractor {
             var fromColumnLayout = false
 
             if amounts.isEmpty {
-                // Mise en page en colonne (OCR de capture d'écran) : le montant
-                // est sur une ligne suivante, séparé du libellé et de la date.
-                // On ne franchit jamais une ligne portant une autre date : ce
-                // serait déjà l'opération suivante.
+                // Column layout (screenshot OCR): the amount
+                // is on a following line, separated from the label and the
+                // date. We never cross a line carrying another date: it
+                // would already be the next operation.
                 var cursor = index + 1
                 while cursor < infos.count, cursor <= index + 3 {
                     let next = infos[cursor]
@@ -125,31 +125,31 @@ enum BankStatementExtractor {
             guard let first = amounts.first else { continue }
 
             var confidence = 0.9
-            // ⚠️ Plusieurs montants sur la ligne = mise en page à colonnes
-            // (DÉBIT | CRÉDIT | SOLDE). Le PREMIER est le montant de
-            // l'opération dans toutes les dispositions observées : sur une
-            // ligne de débit la colonne crédit est vide, et réciproquement,
-            // tandis que le solde courant est toujours en dernier. Prendre le
-            // dernier ferait importer le solde du compte à la place.
+            // ⚠️ Several amounts on the line = column layout
+            // (DEBIT | CREDIT | BALANCE). The FIRST is the operation's
+            // amount in every layout observed: on a debit line the
+            // credit column is empty, and vice versa, while the running
+            // balance always comes last. Taking the last one would
+            // import the account balance instead.
             if amounts.count > 1 { confidence -= 0.15 }
 
-            // Une ligne de date pure n'a pas de libellé, même si le mot de la
-            // date y survit en résidu (« Hier », « 2 juil. ») — sinon le
-            // libellé de l'opération devient « Hier ».
+            // A pure date line has no label, even when a fragment of the
+            // date word survives ("Yesterday", "Jul 2") — otherwise the
+            // operation's label becomes "Yesterday".
             var label = info.isDateOnlyLine ? "" : info.residual
             var labelFromBackward = false
             if fromColumnLayout {
-                // La ligne d'ancrage ne portait qu'une date : le libellé est
-                // au-dessus (toutes les captures d'app observées l'y placent).
+                // The anchor line only carried a date: the label is
+                // above it (every observed app screenshot places it there).
                 if label.isEmpty {
                     label = backwardLabel(infos: infos, before: index, notBefore: lastConsumed)
                     labelFromBackward = !label.isEmpty
                 }
             } else {
-                // Mise en page tabulaire : un libellé long peut déborder sur
-                // les lignes suivantes, qui ne portent alors ni date ni
-                // montant. Sans date sur ces lignes, aucun risque de voler le
-                // libellé de l'opération suivante.
+                // Tabular layout: a long label can overflow onto the
+                // following lines, which then carry neither date nor
+                // amount. With no date on those lines, there's no risk of
+                // stealing the next operation's label.
                 var cursor = amountLine + 1
                 var appended = 0
                 while cursor < infos.count, appended < 2 {
@@ -168,8 +168,8 @@ enum BankStatementExtractor {
             }
 
             label = cleanLabel(label)
-            // Pas de libellé = ligne de synthèse déguisée (report, total
-            // intermédiaire non nommé). On préfère ne rien importer.
+            // No label = a disguised summary line (carried-over balance,
+            // unnamed subtotal). Better to import nothing.
             guard !label.isEmpty else { continue }
 
             let hint = detectPaymentType(in: label)
@@ -192,13 +192,13 @@ enum BankStatementExtractor {
         return results
     }
 
-    /// Extrait TOUTES les opérations regroupées sous un en-tête de date, jusqu'à
-    /// l'en-tête suivant.
+    /// Extracts EVERY operation grouped under a date header, up to
+    /// the next header.
     ///
-    /// ⚠️ Le libellé d'un bloc est sa PREMIÈRE ligne de texte (le marchand) : les
-    /// suivantes sont la catégorie ou un sous-titre de l'appli (« Grande
-    /// surface », « Café / jeux / tabac »). Prendre la plus proche du montant
-    /// donnait systématiquement la catégorie à la place du marchand.
+    /// ⚠️ A block's label is its FIRST line of text (the merchant): the
+    /// following ones are the app's category or subtitle ("Grocery
+    /// store", "Café / games / tobacco"). Taking the one closest to the
+    /// amount would always give the category instead of the merchant.
     private static func collectUnderDateHeader(infos: [LineInfo],
                                                headerIndex: Int,
                                                date: String,
@@ -206,16 +206,17 @@ enum BankStatementExtractor {
         var results: [ExtractedBankTransaction] = []
         var pendingLabel = ""
         var cursor = headerIndex + 1
-        // ⚠️ On ne consomme QUE jusqu'au dernier montant émis. Les lignes de
-        // texte qui suivent appartiennent déjà au bloc suivant : les marquer
-        // consommées privait celui-ci de son libellé (fenêtre arrière bornée
-        // par `lastConsumed`) dans la mise en page où chaque opération porte sa
-        // propre date, et l'opération était alors perdue.
+        // ⚠️ We consume ONLY up to the last amount emitted. The
+        // text lines that follow already belong to the next block:
+        // marking them consumed would rob it of its label
+        // (a backward window bounded by `lastConsumed`) in the layout
+        // where each operation carries its own date, and the
+        // operation would then be lost.
         var consumedUpTo = headerIndex
 
         while cursor < infos.count {
             let line = infos[cursor]
-            // Une autre date ouvre la journée suivante.
+            // Another date opens the next day.
             if line.hasDate { break }
             if line.isSummary { cursor += 1; continue }
 
@@ -223,8 +224,8 @@ enum BankStatementExtractor {
                 var label = pendingLabel
                 var fromBackward = false
                 if label.isEmpty {
-                    // Mise en page inverse (marchand AU-DESSUS de la date) :
-                    // c'est le cas des applis qui datent chaque opération.
+                    // Reverse layout (merchant ABOVE the date):
+                    // this is the case for apps that date each operation.
                     label = backwardLabel(infos: infos, before: headerIndex, notBefore: lastConsumed)
                     fromBackward = !label.isEmpty
                 }
@@ -244,15 +245,15 @@ enum BankStatementExtractor {
         return results
     }
 
-    /// Fabrique commune aux deux mises en page (en-tête de date et tabulaire).
+    /// Factory shared by both layouts (date header and tabular).
     private static func makeTransaction(date: String,
                                         token: AmountToken,
                                         multipleAmounts: Bool,
                                         label: String,
                                         labelFromBackward: Bool) -> ExtractedBankTransaction? {
         let cleaned = cleanLabel(label)
-        // Pas de libellé = ligne de synthèse déguisée : on préfère ne rien
-        // importer plutôt qu'une opération anonyme.
+        // No label = a disguised summary line: better to import
+        // nothing than an anonymous operation.
         guard !cleaned.isEmpty else { return nil }
         var confidence = 0.9
         if multipleAmounts { confidence -= 0.15 }
@@ -269,12 +270,12 @@ enum BankStatementExtractor {
         )
     }
 
-    // MARK: - Libellé
+    // MARK: - Label
 
-    /// Libellé cherché AU-DESSUS de l'ancre, sans jamais franchir le bloc
-    /// précédent. Prend la ligne textuelle la plus proche (celle qui ne porte
-    /// ni date ni montant), ce qui correspond à l'ordre observé dans les
-    /// captures : nom du marchand, puis date, puis montant.
+    /// Label looked for ABOVE the anchor, never crossing the
+    /// previous block. Takes the closest text line (the one carrying
+    /// neither date nor amount), matching the order seen
+    /// in screenshots: merchant name, then date, then amount.
     private static func backwardLabel(infos: [LineInfo], before index: Int, notBefore: Int) -> String {
         let lower = max(notBefore + 1, index - 3)
         guard lower < index else { return "" }
@@ -286,7 +287,7 @@ enum BankStatementExtractor {
         return ""
     }
 
-    /// Collapse les espaces et retire la ponctuation de colonne résiduelle.
+    /// Collapses spaces and strips leftover column punctuation.
     private static func cleanLabel(_ raw: String) -> String {
         let collapsed = raw
             .replacingOccurrences(of: "\u{00A0}", with: " ")
@@ -299,18 +300,18 @@ enum BankStatementExtractor {
 
     // MARK: - Signe
 
-    /// Mots-clés de CRÉDIT. Sur une mise en page à colonnes, le nombre n'a
-    /// aucun signe : seule la sémantique du libellé permet de trancher.
+    /// CREDIT keywords. On a column layout, the number carries
+    /// no sign at all: only the label's meaning lets us decide.
     private static let creditMarkers = [
         "VIR RECU", "VIREMENT RECU", "VIR DE ", "VIR INST DE", "VIR SEPA RECU",
         "SALAIRE", "REMISE", "REMBOURSEMENT", "RBT ", "VERSEMENT", "DEPOT",
         "INTERETS", "CREDIT ", "AVOIR", "ANNULATION", "ALLOCATION", "PENSION"
     ]
 
-    /// Signe final. Priorité au marqueur explicite (+/− collé au montant),
-    /// sinon aux mots-clés, sinon dépense — l'immense majorité des lignes d'un
-    /// relevé personnel. La réconciliation avec l'IA n'écrase ce choix que
-    /// lorsqu'il n'était PAS explicite (cf. `isSignExplicit`).
+    /// Final sign. Priority to an explicit marker (+/− attached to the
+    /// amount), then to keywords, then expense — the vast majority of
+    /// lines on a personal statement. AI reconciliation only overrides this
+    /// choice when it was NOT explicit (see `isSignExplicit`).
     private static func resolveSign(magnitude: Double, explicit: Bool, label: String) -> Double {
         if explicit { return magnitude }
         let upper = label.uppercased()
@@ -320,9 +321,9 @@ enum BankStatementExtractor {
 
     // MARK: - Type de paiement
 
-    /// Type de paiement déduit du libellé, `nil` si aucun marqueur reconnu.
-    /// L'ordre compte : « PAIEMENT PSC » est une opération carte, il doit être
-    /// testé avant le générique « PAIEMENT ».
+    /// Payment type inferred from the label, `nil` if no marker
+    /// recognized. Order matters: "PSC PAYMENT" is a card operation, it
+    /// must be tested before the generic "PAYMENT".
     static func detectPaymentType(in label: String) -> String? {
         let upper = " " + label.uppercased() + " "
         let table: [(markers: [String], type: String)] = [
@@ -338,19 +339,19 @@ enum BankStatementExtractor {
         return nil
     }
 
-    // MARK: - Analyse d'une ligne
+    // MARK: - Analyzing a line
 
     private struct LineInfo {
         let dateHit: DateHit?
         let amounts: [AmountToken]
-        /// Ligne débarrassée de la date d'ancrage et des montants : la base
-        /// du libellé.
+        /// Line stripped of the anchor date and of amounts: the base
+        /// of the label.
         let residual: String
         let isSummary: Bool
-        /// La ligne ne porte QUE la date (aux caractères de ponctuation près).
-        /// C'est la condition pour accepter une date sans année comme ancre :
-        /// dans « CARTE 01/07 CARREFOUR », « 01/07 » est la date de l'opération
-        /// carte, pas celle du relevé — la vraie date est ailleurs.
+        /// The line carries ONLY the date (down to punctuation).
+        /// That's the condition for accepting a yearless date as an anchor:
+        /// in "CARD 01/07 CARREFOUR", "01/07" is the card operation's
+        /// date, not the statement's — the real date is elsewhere.
         let isDateOnlyLine: Bool
 
         var hasDate: Bool { dateHit != nil }
@@ -359,10 +360,10 @@ enum BankStatementExtractor {
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
             let hit = BankStatementExtractor.detectDate(in: trimmed)
             self.dateHit = hit
-            // ⚠️ Les montants sont cherchés sur un texte SANS dates. Sinon
-            // « 02.07.2026 » est lu comme le montant 2,07 : le motif de montant
-            // accepte le point décimal, et une date à points en est une
-            // sous-chaîne parfaite.
+            // ⚠️ Amounts are looked for in text WITHOUT dates. Otherwise
+            // "07.02.2026" is read as the amount 7.02: the amount pattern
+            // accepts a decimal point, and a dotted date is a perfect
+            // substring of it.
             let dateless = BankStatementExtractor.strippingDates(
                 BankStatementExtractor.normalizingSpaces(trimmed)
             )
@@ -380,21 +381,21 @@ enum BankStatementExtractor {
 
     // MARK: - Dates : formes reconnues
 
-    /// Une date repérée sur une ligne.
+    /// A date found on a line.
     enum DateHit {
-        /// Date complète (jour, mois ET année) : ancrable n'importe où dans la
-        /// ligne, y compris au milieu d'un libellé tabulaire.
+        /// Full date (day, month AND year): can be anchored anywhere in the
+        /// line, including in the middle of a tabular label.
         case complete(String)             // yyyy-MM-dd
-        /// Jour + mois sans année (« 2 juil. », « 02/07 ») : l'année est
-        /// déduite, et la ligne doit être une ligne de date pure.
+        /// Day + month without year ("Jul 2", "07/02"): the year is
+        /// inferred, and the line must be a pure date line.
         case dayMonth(day: Int, month: Int)
-        /// « Aujourd'hui » / « Hier » — omniprésents en tête de liste dans les
-        /// applis bancaires.
+        /// "Today" / "Yesterday" — ubiquitous at the top of banking app
+        /// lists.
         case relative(daysAgo: Int)
     }
 
-    /// Résout la date d'une ligne en `yyyy-MM-dd`, ou `nil` si la ligne n'en
-    /// porte pas d'exploitable.
+    /// Resolves a line's date to `yyyy-MM-dd`, or `nil` if the line
+    /// carries none usable.
     private static func resolvedDate(_ info: LineInfo, reference: Date) -> String? {
         switch info.dateHit {
         case .complete(let iso):
@@ -419,9 +420,10 @@ enum BankStatementExtractor {
         return cal
     }()
 
-    /// Année déduite pour un jour+mois nu : celle de la référence, sauf si la
-    /// date obtenue serait DANS LE FUTUR — un relevé est toujours historique,
-    /// donc « 28 décembre » lu un 3 janvier désigne l'année précédente.
+    /// Year inferred for a bare day+month: the reference's year, unless the
+    /// resulting date would be IN THE FUTURE — a statement is always
+    /// historical, so "December 28" read on January 3rd means the
+    /// previous year.
     private static func isoDate(day: Int, month: Int, reference: Date) -> String? {
         let c = gregorian.dateComponents([.year, .month, .day], from: reference)
         guard let refYear = c.year, let refMonth = c.month, let refDay = c.day else { return nil }
@@ -429,38 +431,38 @@ enum BankStatementExtractor {
         return String(format: "%04d-%02d-%02d", year, month, day)
     }
 
-    /// Détecte la date d'une ligne, de la forme la plus fiable à la moins
-    /// contrainte.
+    /// Detects a line's date, from the most reliable form to the least
+    /// constrained one.
     static func detectDate(in line: String) -> DateHit? {
-        // 1) Date numérique complète (dd/MM/yyyy, yyyy-MM-dd…) — la plus sûre.
+        // 1) Full numeric date (dd/MM/yyyy, yyyy-MM-dd…) — the safest.
         if let iso = InvestmentStatementExtractor.firstDate(in: line) {
             return .complete(iso)
         }
-        // 2) Date en toutes lettres, avec ou sans année (« 12 juin 2026 »,
-        //    « 2 juil. », « Jul 2 »).
+        // 2) Spelled-out date, with or without a year ("June 12 2026",
+        //    "Jul 2", "2 July").
         if let named = monthNameDate(in: line) {
             if let year = named.year {
                 return .complete(String(format: "%04d-%02d-%02d", year, named.month, named.day))
             }
             return .dayMonth(day: named.day, month: named.month)
         }
-        // 3) Mots-clés relatifs des applis bancaires.
+        // 3) Banking-app relative keywords.
         //
-        // ⚠️ Comparaison par MOT ENTIER, jamais par sous-chaîne : « hier » est
-        // contenu dans « fichier », « cahier », « trésorier »…
+        // ⚠️ WHOLE-WORD comparison only, never a substring: "yesterday" is
+        // contained inside "vesterday"-like false positives in other locales…
         let words = Set(tokens(of: line))
         if !words.isDisjoint(with: ["aujourd", "today"]) { return .relative(daysAgo: 0) }
         if !words.isDisjoint(with: ["hier", "yesterday"]) { return .relative(daysAgo: 1) }
-        // 4) Jour/mois numérique sans année (« 02/07 »).
+        // 4) Numeric day/month without a year ("07/02").
         if let dm = numericDayMonth(in: line) {
             return .dayMonth(day: dm.day, month: dm.month)
         }
         return nil
     }
 
-    /// Noms de mois FR et EN, formes longues et abrégées. Les clés sont
-    /// « pliées » (sans accent, minuscules) : un OCR rend souvent « aout » ou
-    /// « fevrier ».
+    /// FR and EN month names, long and abbreviated forms. Keys are
+    /// "folded" (no accents, lowercase): OCR often renders "aout" or
+    /// "fevrier" (French, missing accents).
     private static let monthsByName: [String: Int] = {
         let table: [(Int, [String])] = [
             (1,  ["janvier", "janv", "jan", "january"]),
@@ -483,33 +485,33 @@ enum BankStatementExtractor {
         return out
     }()
 
-    /// « 2 juil. », « 12 juin 2026 », « Jul 2 », « July 2, 2026 ».
+    /// "2 juil.", "12 juin 2026", "Jul 2", "July 2, 2026".
     static func monthNameDate(in line: String) -> (day: Int, month: Int, year: Int?)? {
         let folded = line
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
-        // Les mots sont isolés sur la ponctuation ET les espaces : « 2 juil. »
-        // comme « July 2, 2026 ».
+        // Words are split on punctuation AND spaces: "2 juil."
+        // as well as "July 2, 2026".
         let words = folded.components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
         guard words.count >= 2 else { return nil }
 
         for (index, word) in words.enumerated() {
             guard let month = monthsByName[word] else { continue }
-            // Jour AVANT (FR : « 2 juil. ») ou APRÈS (EN : « Jul 2 »).
+            // Day BEFORE (FR: "2 juil.") or AFTER (EN: "Jul 2").
             var day: Int?
             if index > 0, let d = Int(words[index - 1]), (1...31).contains(d) { day = d }
             if day == nil, index + 1 < words.count,
                let d = Int(words[index + 1]), (1...31).contains(d) { day = d }
             guard let day else { continue }
 
-            // Année : un nombre à 4 chiffres plausible n'importe où sur la ligne.
+            // Year: a plausible 4-digit number anywhere on the line.
             let year = words.compactMap(Int.init).first { (1900...2200).contains($0) }
             return (day, month, year)
         }
         return nil
     }
 
-    /// « 02/07 » ou « 02-07 » — jour/mois nu, convention FR (jour d'abord).
+    /// "02/07" or "02-07" — bare day/month, FR convention (day first).
     private static let numericDayMonthRegex = try? NSRegularExpression(
         pattern: "\\b(\\d{1,2})[/-](\\d{1,2})\\b")
 
@@ -525,24 +527,24 @@ enum BankStatementExtractor {
         return (day, month)
     }
 
-    /// Normalise une date PRODUITE PAR UN MODÈLE en `yyyy-MM-dd`.
+    /// Normalizes a date PRODUCED BY A MODEL to `yyyy-MM-dd`.
     ///
-    /// ⚠️ Un modèle à qui l'on demande `yyyy-MM-dd` ne l'honore pas toujours :
-    /// sur une capture d'appli bancaire, l'année n'est écrite NULLE PART, et il
-    /// rend alors des formes comme « 22-07-00 » ou « 22/07 ». Rejeter ces
-    /// lignes revenait à jeter TOUTE l'extraction alors que le jour et le mois
-    /// étaient corrects — symptôme : « aucune opération reconnue » avec un JSON
-    /// pourtant juste sous les yeux.
+    /// ⚠️ A model asked for `yyyy-MM-dd` doesn't always honor it:
+    /// on a banking-app screenshot, the year is written NOWHERE, and it
+    /// then produces forms like "22-07-00" or "22/07". Rejecting these
+    /// lines used to throw away the WHOLE extraction even though the day and
+    /// month were correct — symptom: "no operations recognized" with a JSON
+    /// right there under our eyes.
     ///
-    /// Convention FR (comme le reste du moteur) : jour d'abord quand l'ordre
-    /// est ambigu. L'année manquante ou implausible est déduite de
-    /// `referenceDate`, avec la même règle qu'ailleurs — une date qui tomberait
-    /// dans le futur appartient à l'année précédente.
+    /// FR convention (like the rest of the engine): day first when the
+    /// order is ambiguous. A missing or implausible year is inferred from
+    /// `referenceDate`, with the same rule as elsewhere — a date that would
+    /// fall in the future belongs to the previous year.
     static func normalizeDate(_ raw: String, referenceDate: Date = Date()) -> String? {
         let parts = raw.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
         guard parts.count >= 2 else { return nil }
 
-        // Année explicite : le composant à 4 chiffres, où qu'il soit.
+        // Explicit year: the 4-digit component, wherever it is.
         let explicitYear = parts.first { (1900...2200).contains($0) }
         let rest = parts.filter { !(1900...2200).contains($0) }
         guard rest.count >= 2 else { return nil }
@@ -563,7 +565,7 @@ enum BankStatementExtractor {
         return isoDate(day: day, month: month, reference: referenceDate)
     }
 
-    /// Mots d'une ligne, sans accents ni casse, ponctuation retirée.
+    /// Words of a line, without accents or case, punctuation stripped.
     static func tokens(of line: String) -> [String] {
         line.folding(options: [.diacriticInsensitive, .caseInsensitive],
                      locale: Locale(identifier: "fr_FR"))
@@ -575,30 +577,30 @@ enum BankStatementExtractor {
         "aujourd", "hui", "hier", "today", "yesterday"
     ]
 
-    /// Vrai si la ligne ne porte QU'UNE date, aux mots de date et à la
-    /// ponctuation près : « 2 juil. », « Hier », « 02/07 », « 12 juin 2026 ».
+    /// True if the line carries ONLY a date, down to the date words and
+    /// punctuation: "2 juil.", "Yesterday", "02/07", "12 juin 2026".
     ///
-    /// C'est la condition qui autorise une date SANS année à servir d'ancre.
-    /// Sans elle, le « 01/07 » de « CARTE 01/07 CARREFOUR » (la date de
-    /// l'opération carte, pas celle du relevé) ouvrirait une fausse opération.
+    /// This is the condition that allows a yearless date to serve as an
+    /// anchor. Without it, the "01/07" in "CARD 01/07 CARREFOUR" (the
+    /// card operation's date, not the statement's) would open a fake operation.
     static func isDateOnly(_ line: String) -> Bool {
-        // Les dates numériques complètes ont déjà été retirées par `strippingDates`.
+        // Full numeric dates have already been stripped by `strippingDates`.
         let remaining = tokens(of: strippingDates(line)).filter { token in
             if monthsByName[token] != nil { return false }
             if relativeKeywords.contains(token) { return false }
-            // Nombres appartenant à une date : le jour, ou l'année.
+            // Numbers belonging to a date: the day, or the year.
             if let n = Int(token), (1...31).contains(n) || (1900...2200).contains(n) { return false }
             return true
         }
         return remaining.isEmpty
     }
 
-    /// Lignes de synthèse d'un relevé : elles portent une date ET un montant
-    /// sans être des opérations.
+    /// Statement summary lines: they carry a date AND an amount
+    /// without being operations.
     ///
-    /// ⚠️ Aucun marqueur ne peut être un simple « TOTAL » : TOTALENERGIES est
-    /// un marchand courant sur un relevé français. Chaque marqueur est donc
-    /// une locution complète.
+    /// ⚠️ No marker can be a bare "TOTAL": TOTALENERGIES is a
+    /// common French merchant on a bank statement. Every marker is
+    /// therefore a full phrase.
     private static let summaryMarkers = [
         "ANCIEN SOLDE", "NOUVEAU SOLDE", "SOLDE PRECEDENT", "SOLDE PRÉCÉDENT",
         "SOLDE CREDITEUR", "SOLDE CRÉDITEUR", "SOLDE DEBITEUR", "SOLDE DÉBITEUR",
@@ -613,11 +615,11 @@ enum BankStatementExtractor {
 
     // MARK: - Dates
 
-    /// Formes longues d'abord (elles consomment le token entier), puis formes
-    /// courtes à SLASH ou TIRET uniquement.
+    /// Long forms first (they consume the whole token), then short
+    /// forms with a SLASH or DASH only.
     ///
-    /// ⚠️ Ne jamais ajouter le point aux formes courtes : « 12.50 » y répondrait
-    /// et tous les montants à point décimal disparaîtraient du texte analysé.
+    /// ⚠️ Never add a dot to the short forms: "12.50" would match
+    /// it and every decimal-point amount would vanish from the analyzed text.
     private static let datePatternsToStrip: [NSRegularExpression?] = [
         try? NSRegularExpression(pattern: "\\b\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}\\b"),
         try? NSRegularExpression(pattern: "\\b\\d{4}[/.-]\\d{1,2}[/.-]\\d{1,2}\\b"),
@@ -638,36 +640,36 @@ enum BankStatementExtractor {
 
     struct AmountToken {
         let value: Double
-        /// Le token portait un « + » ou un « − » collé.
+        /// The token had a "+" or a "−" attached.
         let isSignExplicit: Bool
         let range: Range<String.Index>
     }
 
-    /// Même discipline que `InvestmentStatementExtractor.signedAmount` : un
-    /// montant porte des centimes OU une devise. Un entier nu ne peut pas être
-    /// un montant, sinon un numéro de téléphone ou un IBAN en deviendrait un.
-    /// Différence : on renvoie TOUS les tokens de la ligne, pour distinguer la
-    /// colonne d'opération de la colonne de solde.
+    /// Same discipline as `InvestmentStatementExtractor.signedAmount`: an
+    /// amount carries cents OR a currency. A bare integer cannot be
+    /// an amount, otherwise a phone number or an IBAN would become one.
+    /// Difference: we return ALL tokens on the line, to tell apart the
+    /// operation column from the balance column.
     ///
-    /// Deux branches, et la distinction est la garantie de non-invention :
-    ///   • partie décimale présente → devise facultative ;
-    ///   • entier seul → devise OBLIGATOIRE.
+    /// Two branches, and the split is what guarantees non-invention:
+    ///   • a decimal part is present → currency is optional;
+    ///   • a bare integer → currency is REQUIRED.
     ///
-    /// ⚠️ Le groupe des milliers doit être décrit explicitement
-    /// (`\d{1,3}(?:[ .,]\d{3})+`). Un `[\d ]*` permissif ne couvre que
-    /// l'espace : « 1,234.56 » y était lu « 234.56 », soit un montant amputé
-    /// de son millier — silencieusement, puisque la ligne restait valide.
+    /// ⚠️ The thousands group must be spelled out explicitly
+    /// (`\d{1,3}(?:[ .,]\d{3})+`). A permissive `[\d ]*` only covers
+    /// the space: "1,234.56" would be read as "234.56", an amount
+    /// short its thousand — silently, since the line stayed valid.
     private static let amountRegex = try? NSRegularExpression(pattern:
         "[+-]?(?:\\d{1,3}(?:[ .,]\\d{3})+|\\d+)[.,]\\d{1,2}(?![\\d])\\s*(?:€|EUR|\\$|USD)?"
         + "|"
         + "[+-]?(?:\\d{1,3}(?:[ .,]\\d{3})+|\\d+)(?![\\d.,])\\s*(?:€|EUR|\\$|USD)")
 
-    /// Remplace les espaces insécables par des espaces simples.
+    /// Replaces non-breaking spaces with plain spaces.
     ///
-    /// ⚠️ À appliquer AVANT `amountTokens`, jamais dedans : les `Range` rendus
-    /// indexent la chaîne exactement telle qu'elle a été passée. Normaliser à
-    /// l'intérieur produirait des index pointant vers une autre instance de
-    /// `String` que celle de l'appelant — indices invalides au découpage.
+    /// ⚠️ Apply BEFORE `amountTokens`, never inside it: the `Range`s it
+    /// returns index into the exact string that was passed in. Normalizing
+    /// inside would produce indices pointing into a different `String`
+    /// instance than the caller's — invalid indices at slicing time.
     static func normalizingSpaces(_ text: String) -> String {
         text
             .replacingOccurrences(of: "\u{00A0}", with: " ")
@@ -686,9 +688,9 @@ enum BankStatementExtractor {
                 .replacingOccurrences(of: "EUR", with: "")
                 .replacingOccurrences(of: "$", with: "")
                 .replacingOccurrences(of: "USD", with: "")
-                // ⚠️ Le `\s*` final du motif avale le saut de ligne : sans ce
-                // trim, `Double("+1.70\n")` renvoie nil et le montant est
-                // silencieusement perdu.
+                // ⚠️ The pattern's trailing `\s*` swallows the newline: without
+                // this trim, `Double("+1.70\n")` returns nil and the amount is
+                // silently lost.
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard let value = InvestmentStatementExtractor.parseNumber(
                 stripped.replacingOccurrences(of: " ", with: "")

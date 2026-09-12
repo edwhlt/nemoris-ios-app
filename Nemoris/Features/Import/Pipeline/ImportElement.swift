@@ -1,47 +1,48 @@
 import Foundation
 
-// MARK: - Modèle d'échange du pipeline d'import unifié
+// MARK: - Exchange model for the unified import pipeline
 //
-// Moteur PUR (`import Foundation` UNIQUEMENT — ni PDFKit, ni Vision, ni
-// FoundationModels, ni SwiftUI), même doctrine que `PortfolioEvolutionBuilder`,
-// `BankStatementExtractor` et `MerchantQueryPlanner` : testable hors Xcode via
-// `run_import_pipeline_tests.sh`. Le garde-fou de pureté EST le harnais — un
-// import interdit le casse à la compilation.
+// PURE engine (`import Foundation` ONLY — no PDFKit, no Vision, no
+// FoundationModels, no SwiftUI), same doctrine as `PortfolioEvolutionBuilder`,
+// `BankStatementExtractor` and `MerchantQueryPlanner`: testable outside Xcode via
+// `run_import_pipeline_tests.sh`. The purity safety net IS the harness — a
+// forbidden import breaks it at compile time.
 //
-// ─── Pourquoi un modèle d'échange ──────────────────────────────────────────
+// ─── Why an exchange model ──────────────────────────────────────────────────
 //
-// Cinq sous-pipelines d'entrée (image, PDF, CSV, XLSX, XML) alimentent deux
-// résolutions métier (transactions, investissements). Sans point de passage
-// obligé, chaque combinaison finit par avoir son propre chemin : c'est ce qui
-// s'était produit (deux parseurs avec deux réconciliations, deux décodeurs
-// JSON, et un TROISIÈME import CSV enfoui dans le module Investissements).
+// Five input sub-pipelines (image, PDF, CSV, XLSX, XML) feed two
+// business resolutions (transactions, investments). Without a mandatory
+// crossing point, every combination ends up with its own path: that's
+// exactly what happened (two parsers with two reconciliations, two
+// JSON decoders, and a THIRD CSV import buried inside the
+// Investments module).
 //
-// `ImportElement` est ce point de passage. Tout ce qui entre en ressort sous
-// cette forme, et tout ce qui consomme un import part de là.
+// `ImportElement` is that crossing point. Everything that comes in comes
+// back out in this shape, and everything that consumes an import starts here.
 //
-// ─── Pas d'étape de classification métier ──────────────────────────────────
+// ─── No business-classification step ───────────────────────────────────────
 //
-// Le diagramme de cadrage prévoyait un nœud CLASSIFY (Transaction /
-// Investissement / Ambigu) APRÈS extraction. Il n'existe pas ici, et c'est
-// délibéré : la destination est choisie par l'utilisateur AVANT l'analyse, et
-// c'est elle qui calibre les instructions données au modèle (le même PDF peut
-// être un relevé bancaire ou un avis d'opéré). Reclassifier après coup
-// introduirait une seconde source de vérité sur une question déjà tranchée,
-// qui pourrait la contredire.
+// The scoping diagram called for a CLASSIFY node (Transaction /
+// Investment / Ambiguous) AFTER extraction. It doesn't exist here, and
+// that's deliberate: the destination is chosen by the user BEFORE
+// analysis, and it's what calibrates the instructions given to the model
+// (the same PDF can be a bank statement or a trade confirmation). Reclassifying
+// afterward would introduce a second source of truth on a question already
+// settled, one that could contradict it.
 //
-// Ce que CLASSIFY apportait d'utile — détecter qu'un fichier ne ressemble à
-// rien d'exploitable — est obtenu gratuitement : c'est un `ImportUnitReport`
-// dont le diagnostic vaut `.nothingRecognized`, et l'UI le montre déjà.
-// La sous-classification achat/vente/dividende, elle, reste où elle a toujours
-// été : dans le payload investissements.
+// What CLASSIFY was useful for — detecting that a file doesn't look
+// like anything usable — comes for free: it's an `ImportUnitReport`
+// whose diagnosis is `.nothingRecognized`, and the UI already shows it.
+// The buy/sell/dividend sub-classification, meanwhile, stays where it's always
+// been: in the investments payload.
 
 // MARK: - Destination
 
-/// Où atterrissent les données lues. Le choix est fait EN AMONT de l'analyse,
-/// et c'est ce qui permet de calibrer les instructions données à l'IA : le même
-/// PDF peut être un relevé bancaire ou un avis d'opéré, et deviner le type à
-/// partir du contenu est exactement ce que le petit modèle embarqué rate le
-/// plus souvent.
+/// Where the read data lands. The choice is made UPSTREAM of analysis,
+/// and that's what lets AI instructions be calibrated: the same
+/// PDF can be a bank statement or a trade confirmation, and guessing the type
+/// from the content is exactly what the small embedded model gets
+/// wrong most often.
 enum ImportDestination: String, CaseIterable, Identifiable, Codable, Sendable {
     case transactions
     case investments
@@ -62,7 +63,7 @@ enum ImportDestination: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    /// Ce que l'utilisateur est censé fournir, affiché sous le sélecteur.
+    /// What the user is expected to supply, shown under the picker.
     var hint: String {
         switch self {
         case .transactions:
@@ -73,33 +74,33 @@ enum ImportDestination: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 }
 
-// MARK: - Nature de la source
+// MARK: - Source nature
 
-/// Nature réelle d'un document, déterminée par SNIFFING de ses octets d'en-tête
-/// et jamais par son extension.
+/// A document's real nature, determined by SNIFFING its header
+/// bytes and never by its extension.
 ///
-/// ⚠️ Se fier à l'extension est un bug déjà payé en production : une capture
-/// partagée par la share sheet arrive nommée `<uuid>.dat` (le type abstrait
-/// `public.image` n'a pas de `preferredFilenameExtension`), tombait dans la
-/// branche « texte brut », et `String(contentsOf:encoding:.isoLatin1)` — qui
-/// n'échoue JAMAIS, toute suite d'octets étant du Latin-1 valide — produisait
-/// 670 000 caractères de binaire envoyés au modèle comme s'il s'agissait d'un
-/// relevé.
+/// ⚠️ Trusting the extension is a bug already paid for in production: a
+/// screenshot shared via the share sheet arrives named `<uuid>.dat` (the
+/// abstract `public.image` type has no `preferredFilenameExtension`), fell
+/// into the "plain text" branch, and
+/// `String(contentsOf:encoding:.isoLatin1)` — which NEVER fails, any
+/// byte sequence being valid Latin-1 — produced 670,000 characters
+/// of binary sent to the model as if it were a statement.
 ///
-/// Sert aussi au vocabulaire de l'UI : parler de « page » pour une capture
-/// d'écran ou un tableur n'a pas de sens depuis que l'import est multi-format.
+/// Also feeds the UI's wording: talking about a "page" for a screenshot
+/// or a spreadsheet makes no sense now that import is multi-format.
 enum ImportSourceKind: String, Codable, Hashable, Sendable {
     case pdf
     case image
-    /// Texte brut : CSV, TSV, relevé exporté en .txt.
+    /// Plain text: CSV, TSV, a statement exported as .txt.
     case text
     /// Classeur XLSX (ZIP + XML).
     case spreadsheet
-    /// Relevé structuré : CAMT.053 (ISO 20022) ou OFX/QFX.
+    /// Structured statement: CAMT.053 (ISO 20022) or OFX/QFX.
     case xml
     case unknown
 
-    /// Nom de l'unité analysée. L'UI compose « 3 captures analysées ».
+    /// Name of the analyzed unit. The UI composes "3 screenshots analyzed".
     func unitLabel(count: Int) -> String {
         let plural = count > 1
         switch self {
@@ -112,13 +113,13 @@ enum ImportSourceKind: String, Codable, Hashable, Sendable {
         }
     }
 
-    /// Vrai pour les formats dont la STRUCTURE est déjà explicite et n'a donc
-    /// besoin d'aucune interprétation par un modèle : les champs sont nommés
-    /// (colonnes CSV, balises CAMT/OFX, cellules de tableur).
+    /// True for formats whose STRUCTURE is already explicit and therefore
+    /// needs no interpretation by a model: fields are named
+    /// (CSV columns, CAMT/OFX tags, spreadsheet cells).
     ///
-    /// C'est ce qui décide si une unité passe par l'étage IA ou pas — pas le
-    /// fait qu'un modèle soit disponible. Envoyer un CAMT.053 à un LLM serait
-    /// à la fois plus lent et moins fiable que de lire ses balises.
+    /// This decides whether a unit goes through the AI stage or not — not
+    /// whether a model happens to be available. Sending a CAMT.053 to an LLM
+    /// would be both slower and less reliable than reading its tags.
     var isStructured: Bool {
         switch self {
         case .text, .spreadsheet, .xml: return true
@@ -129,32 +130,32 @@ enum ImportSourceKind: String, Codable, Hashable, Sendable {
 
 // MARK: - Diagnostic
 
-/// Pourquoi une unité n'a rien donné.
+/// Why a unit produced nothing.
 ///
-/// Sans ça, l'UI ne peut afficher qu'un « Rien à importer » indifférencié :
-/// impossible pour l'utilisateur (ou pour nous en support) de distinguer un OCR
-/// muet, une IA indisponible, une IA qui a échoué, et un document réellement
-/// sans opérations.
+/// Without this, the UI could only show an undifferentiated "Nothing to
+/// import": impossible for the user (or for us in support) to tell apart a
+/// silent OCR, an unavailable AI, a failed AI, and a document that
+/// really has no operations.
 enum ImportUnitDiagnostic: Equatable, Hashable, Codable, Sendable {
-    /// Extraction OK, opérations trouvées.
+    /// Extraction OK, operations found.
     case extracted
-    /// Aucun texte n'a pu être extrait (image illisible, PDF scanné vide…).
+    /// No text could be extracted (unreadable image, empty scanned PDF…).
     case noTextExtracted
-    /// Le contenu n'est pas du texte exploitable (binaire pris pour du texte).
+    /// The content isn't usable text (binary mistaken for text).
     case notTextContent
-    /// Le moteur IA n'est pas disponible sur cet appareil.
+    /// The AI engine isn't available on this device.
     case aiUnavailable
-    /// Le moteur IA a échoué (contexte dépassé, garde-fou, erreur interne…).
+    /// The AI engine failed (context exceeded, safety net, internal error…).
     case aiFailed(String)
-    /// Le format structuré a été lu, mais son contenu n'était pas exploitable
-    /// (classeur vide, XML d'un dialecte inconnu…).
+    /// The structured format was read, but its content wasn't usable
+    /// (empty workbook, unknown XML dialect…).
     case malformedStructure(String)
-    /// Document lu et moteur OK, mais aucune opération reconnaissable dedans.
+    /// Document read and engine OK, but no recognizable operation in it.
     case nothingRecognized
 
     var isFailure: Bool { self != .extracted }
 
-    /// Message court affiché à l'utilisateur.
+    /// Short message shown to the user.
     var userMessage: String {
         switch self {
         case .extracted:        return "Opérations extraites."
@@ -163,10 +164,10 @@ enum ImportUnitDiagnostic: Equatable, Hashable, Codable, Sendable {
         case .aiUnavailable:    return "L'analyse intelligente n'est pas disponible sur cet appareil (Apple Intelligence requis). L'extraction automatique a été utilisée à la place."
         case .aiFailed(let r):  return "L'analyse intelligente a échoué : \(r)"
         case .malformedStructure(let r): return "Le fichier a été ouvert mais son contenu n'a pas pu être exploité : \(r)"
-        // ⚠️ Message PARTAGÉ par les deux imports : il ne doit citer ni
-        // « achat / vente / dividende » (vocabulaire investissements), ni
-        // « le texte » — sur le chemin image, aucun texte n'est extrait, c'est
-        // le modèle qui lit la capture.
+        // ⚠️ Message SHARED by both imports: it must mention neither
+        // "buy / sell / dividend" (investments vocabulary), nor
+        // "the text" — on the image path, no text is extracted at all, it's
+        // the model that reads the screenshot.
         case .nothingRecognized: return "Le document a bien été lu, mais aucune opération n'y a été reconnue."
         }
     }
@@ -174,22 +175,22 @@ enum ImportUnitDiagnostic: Equatable, Hashable, Codable, Sendable {
 
 // MARK: - Origine
 
-/// D'où vient un élément. Conservé jusqu'à la revue pour que l'utilisateur
-/// puisse vérifier qu'AUCUNE source n'a été perdue en route sur un import
-/// multi-fichiers — le détail par source du bandeau de fin d'analyse est
-/// construit là-dessus.
+/// Where an item comes from. Kept until review so the user
+/// can check that NO source got lost along the way on a multi-file
+/// import — the end-of-analysis banner's per-source detail is
+/// built on top of this.
 struct ImportElementOrigin: Codable, Hashable, Sendable {
-    /// Nom lisible du fichier d'origine.
+    /// Readable name of the source file.
     var sourceName: String
-    /// Rang du fichier dans le batch (0-indexé), pour un tri stable quand deux
-    /// fichiers portent le même nom.
+    /// The file's rank in the batch (0-indexed), for a stable sort when two
+    /// files share the same name.
     var sourceIndex: Int
-    /// Numéro d'unité GLOBAL dans le batch (1-indexé). Global et non par
-    /// fichier : deux fichiers repartant à 1 produisent des numéros en
-    /// collision, et les rapports d'échec désignent alors une unité ambiguë.
+    /// GLOBAL unit number in the batch (1-indexed). Global, not per
+    /// file: two files each restarting at 1 would produce colliding
+    /// numbers, and failure reports would then point at an ambiguous unit.
     var unitNumber: Int
-    /// Rang de l'unité DANS son fichier (1-indexé) — le n° de page d'un PDF,
-    /// le rang d'une feuille de classeur.
+    /// Unit's rank WITHIN its file (1-indexed) — a PDF's page number,
+    /// a workbook sheet's rank.
     var unitIndexInSource: Int
     var kind: ImportSourceKind
 
@@ -204,20 +205,20 @@ struct ImportElementOrigin: Codable, Hashable, Sendable {
     }
 }
 
-// MARK: - Position détenue (pendant pur de `PDFExtractedPosition`)
+// MARK: - Held position (pure counterpart of `PDFExtractedPosition`)
 
-/// Une ligne détenue extraite d'une capture de portefeuille.
+/// A held position row extracted from a portfolio screenshot.
 ///
-/// Volontairement distincte de `PDFExtractedPosition`, qui porte de l'état d'UI
-/// (`id`, `isSelected`) : le pipeline reste pur, l'état d'écran est ajouté à la
-/// frontière de la revue.
+/// Deliberately distinct from `PDFExtractedPosition`, which carries UI
+/// state (`id`, `isSelected`): the pipeline stays pure, screen state is
+/// added at the review boundary.
 struct ExtractedStatementPosition: Equatable, Codable, Hashable, Sendable {
     var assetName: String
     var ticker: String
     var isin: String
     var quantity: Double
     var averageBuyPrice: Double
-    /// Valeur de marché si la capture l'affiche.
+    /// Market value if the screenshot shows it.
     var currentValue: Double?
     var currency: String
     var confidence: Double
@@ -239,17 +240,17 @@ struct ExtractedStatementPosition: Equatable, Codable, Hashable, Sendable {
 
 // MARK: - Payload
 
-/// Ce qu'un élément transporte réellement.
+/// What an item actually carries.
 ///
-/// Le type est FIXÉ par la destination choisie en amont, il n'est jamais
-/// deviné : un pipeline lancé vers les transactions ne produit que des
+/// The type is FIXED by the destination chosen upstream, it's never
+/// guessed: a pipeline run toward transactions only produces
 /// `.transaction`.
 enum ImportPayload: Equatable, Codable, Hashable, Sendable {
     case transaction(ExtractedBankTransaction)
     case investmentOrder(ExtractedStatementOrder)
     case investmentPosition(ExtractedStatementPosition)
 
-    /// Destination à laquelle ce payload appartient.
+    /// Destination this payload belongs to.
     var destinationKind: ImportPayloadKind {
         switch self {
         case .transaction:        return .transaction
@@ -259,23 +260,23 @@ enum ImportPayload: Equatable, Codable, Hashable, Sendable {
     }
 }
 
-/// Discriminant léger, utile pour compter/filtrer sans déballer le payload.
+/// Lightweight discriminant, useful for counting/filtering without unpacking the payload.
 enum ImportPayloadKind: String, Codable, Hashable, Sendable {
     case transaction
     case investmentOrder
     case investmentPosition
 }
 
-// MARK: - Élément
+// MARK: - Element
 
-/// L'unité de sortie du pipeline, quel que soit le format d'entrée.
+/// The pipeline's output unit, whatever the input format.
 struct ImportElement: Identifiable, Equatable, Codable, Hashable, Sendable {
     var id: UUID
     var origin: ImportElementOrigin
     var payload: ImportPayload
-    /// 0…1. Reprise du payload à la construction, mais gardée à ce niveau : la
-    /// réconciliation de deux sources (IA + déterministe) la relève, et l'UI
-    /// trie dessus sans avoir à connaître le type de payload.
+    /// 0…1. Copied from the payload at construction, but kept at this
+    /// level: reconciling two sources (AI + deterministic) adjusts it,
+    /// and the UI sorts on it without needing to know the payload's type.
     var confidence: Double
 
     init(id: UUID = UUID(), origin: ImportElementOrigin,
@@ -297,21 +298,23 @@ struct ImportElement: Identifiable, Equatable, Codable, Hashable, Sendable {
     var kind: ImportPayloadKind { payload.destinationKind }
 }
 
-// MARK: - Rapport par unité
+// MARK: - Per-unit report
 
-/// Ce qui s'est passé sur UNE unité analysée (page PDF, capture, feuille,
-/// bloc de texte). Porté séparément des éléments parce qu'une unité qui ne
-/// produit RIEN est justement celle dont il faut parler.
+/// What happened for ONE analyzed unit (a PDF page, a
+/// screenshot, a sheet, a block of text). Carried separately from the
+/// elements because a unit that produces NOTHING is exactly the one worth
+/// talking about.
 struct ImportUnitReport: Identifiable, Equatable, Codable, Hashable, Sendable {
     var id: UUID
     var origin: ImportElementOrigin
-    /// Ce que l'app a réellement lu — c'est LUI qui permet de distinguer un OCR
-    /// muet d'une interprétation ratée. Sur le chemin image (modèle multimodal),
-    /// c'est la réponse brute du modèle, puisqu'aucun texte n'est extrait.
+    /// What the app actually read — this is what lets us tell a
+    /// silent OCR apart from a botched interpretation. On the image path
+    /// (multimodal model), this is the model's raw response, since no
+    /// text is extracted at all.
     var rawText: String
     var recognizedCount: Int
     var diagnostic: ImportUnitDiagnostic
-    /// Vrai quand le résultat vient de l'extraction déterministe, sans IA.
+    /// True when the result comes from deterministic extraction, no AI.
     var usedDeterministicFallback: Bool
 
     init(id: UUID = UUID(), origin: ImportElementOrigin, rawText: String = "",
@@ -326,10 +329,10 @@ struct ImportUnitReport: Identifiable, Equatable, Codable, Hashable, Sendable {
     }
 }
 
-// MARK: - Résultat de batch
+// MARK: - Batch result
 
-/// La sortie complète d'un import : les éléments, et le journal de ce qui s'est
-/// passé unité par unité.
+/// The full output of an import: the elements, and the log of what
+/// happened unit by unit.
 struct ImportBatchResult: Equatable, Codable, Sendable {
     var elements: [ImportElement]
     var units: [ImportUnitReport]
@@ -341,11 +344,11 @@ struct ImportBatchResult: Equatable, Codable, Sendable {
 
     var isEmpty: Bool { elements.isEmpty }
 
-    /// Répartition par fichier source, dans l'ordre du batch.
+    /// Breakdown per source file, in batch order.
     ///
-    /// C'est ce qui rend la fusion VÉRIFIABLE d'un coup d'œil : sur un import
-    /// mêlant CSV et documents analysés, l'absence d'une source ne se voyait
-    /// pas dans un total agrégé.
+    /// This is what makes the merge VERIFIABLE at a glance: on an import
+    /// mixing CSV and analyzed documents, a missing source didn't
+    /// show up in an aggregate total.
     func perSource() -> [ImportSourceSummary] {
         var order: [Int] = []
         var byIndex: [Int: ImportSourceSummary] = [:]
@@ -372,12 +375,12 @@ struct ImportBatchResult: Equatable, Codable, Sendable {
         return order.compactMap { byIndex[$0] }
     }
 
-    /// JSON indenté des éléments d'une source — l'inspection de debug de la fin
-    /// d'analyse.
+    /// Indented JSON of one source's elements — the debug inspection at
+    /// the end of analysis.
     ///
-    /// ⚠️ Sur la structure NORMALISÉE, pas sur le texte OCR brut : c'est le
-    /// seul format qui couvre aussi les sources sans OCR (CSV, tableur, XML),
-    /// pour lesquelles « voir le texte lu » n'a aucun sens.
+    /// ⚠️ On the NORMALIZED structure, not the raw OCR text: it's the
+    /// only format that also covers sources with no OCR (CSV, spreadsheet, XML),
+    /// for which "view the text read" makes no sense.
     func debugJSON(sourceIndex: Int? = nil) -> String {
         let subset = sourceIndex.map { index in
             elements.filter { $0.origin.sourceIndex == index }
@@ -392,9 +395,9 @@ struct ImportBatchResult: Equatable, Codable, Sendable {
         return text
     }
 
-    /// Fusionne deux résultats en conservant l'ordre et en renumérotant les
-    /// unités à la suite — utilisé quand une même session agrège plusieurs
-    /// passes (des CSV déjà mappés, puis des documents analysés).
+    /// Merges two results while keeping order and renumbering the
+    /// units in sequence — used when the same session aggregates several
+    /// passes (already-mapped CSVs, then analyzed documents).
     static func merge(_ first: ImportBatchResult, _ second: ImportBatchResult) -> ImportBatchResult {
         let unitOffset = first.units.count
         let sourceOffset = (first.units.map(\.origin.sourceIndex)
@@ -422,7 +425,7 @@ struct ImportBatchResult: Equatable, Codable, Sendable {
     }
 }
 
-/// Ce qu'une source a produit. Alimente le détail dépliable du bandeau.
+/// What a source produced. Feeds the banner's expandable detail.
 struct ImportSourceSummary: Identifiable, Equatable, Codable, Hashable, Sendable {
     var sourceIndex: Int
     var sourceName: String
@@ -433,10 +436,10 @@ struct ImportSourceSummary: Identifiable, Equatable, Codable, Hashable, Sendable
 
     var id: Int { sourceIndex }
 
-    /// Vrai quand la source n'a RIEN produit — le cas qu'il faut voir.
+    /// True when the source produced NOTHING — the case worth seeing.
     var isEmptyResult: Bool { elementCount == 0 }
 
-    /// « 42 opérations » / « aucune opération ».
+    /// "42 operations" / "no operations".
     func summaryLabel(noun: String) -> String {
         switch elementCount {
         case 0:  return "aucune \(noun)"

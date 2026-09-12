@@ -2,24 +2,24 @@ import Foundation
 
 // MARK: - ImportSession
 
-/// Statut d'une session d'import. Une seule session 'active' à la fois en DB.
+/// Status of an import session. Only one 'active' session at a time in the DB.
 enum ImportSessionStatus: String, Codable {
     case active, completed, cancelled
 }
 
-/// Action utilisateur sur une ligne d'import.
+/// User action on an import row.
 enum ImportUserAction: String, Codable {
-    case pending        // pas encore décidé
-    case confirmed      // accepte la suggestion engine
-    case manuallySet    // payee assigné manuellement
-    case skipped        // ne sera pas importé
-    case committed      // déjà insérée en base
+    case pending        // not yet decided
+    case confirmed      // accepts the engine suggestion
+    case manuallySet    // payee assigned manually
+    case skipped        // won't be imported
+    case committed      // already inserted into the database
 }
 
-/// Snapshot Codable d'une résolution moteur, pour persister dans rows_json.
-/// On ne stocke pas directement `TierResolution` (enum à associated types non Codable).
+/// Codable snapshot of an engine resolution, for persisting into rows_json.
+/// We don't store `TierResolution` directly (an enum with associated types isn't Codable).
 enum TierResolutionSnapshot: Codable, Hashable {
-    case pending                                          // engine pas encore appelé
+    case pending                                          // engine not called yet
     case matched(payeeId: Int?, engineMerchantId: String?,
                  displayName: String, city: String?, score: Double)
     case suggestCreate(engineMerchantId: String, displayName: String,
@@ -30,10 +30,10 @@ enum TierResolutionSnapshot: Codable, Hashable {
                          topName: String?, topScore: Double?)
 }
 
-/// Une ligne d'un import en cours. Tout est Codable pour la persistance JSON.
+/// A row of an import in progress. Everything is Codable for JSON persistence.
 struct ImportSessionRow: Identifiable, Codable, Hashable {
     let id: UUID
-    /// Numéro de ligne dans le CSV source (1-indexed, sans le header).
+    /// Row number in the source CSV (1-indexed, excluding the header).
     let sourceRowNumber: Int
     let rawLabel: String
     let date: Date
@@ -46,19 +46,19 @@ struct ImportSessionRow: Identifiable, Codable, Hashable {
     var assignedCategoryId: Int?
     var assignedPaymentTypeId: Int?
     var userAction: ImportUserAction
-    /// Identifiant de cluster (pour grouper les libellés similaires). Optionnel.
+    /// Cluster identifier (to group similar labels). Optional.
     var clusterId: String?
-    /// Id d'un tier CRÉÉ par cette ligne pendant la session (via « Créer un nouveau tier »).
-    /// Permet de proposer sa suppression si la session est annulée (nettoyage des tiers fantômes).
-    /// nil = aucun tier créé par cette ligne (lien vers un tier existant, ou pas encore décidé).
+    /// Id of a payee CREATED by this row during the session (via "Create a new payee").
+    /// Lets us offer to delete it if the session is canceled (cleanup of ghost payees).
+    /// nil = no payee created by this row (link to an existing payee, or not yet decided).
     var createdPayeeId: Int? = nil
-    /// Fichier d'origine, quand une session agrège PLUSIEURS fichiers.
-    /// `nil` pour une session mono-fichier (l'info est alors dans
+    /// Source file, when a session aggregates SEVERAL files.
+    /// `nil` for a single-file session (the info is then in
     /// `ImportSession.sourceFile`).
     ///
-    /// Propriété optionnelle avec valeur par défaut : le `Codable` synthétisé la
-    /// décode en `decodeIfPresent`, donc les `rows_json` déjà persistés (sessions
-    /// actives d'une version précédente) se relisent sans migration.
+    /// Optional property with a default value: the synthesized `Codable`
+    /// decodes it as `decodeIfPresent`, so already-persisted `rows_json` (active
+    /// sessions from a previous version) reload without a migration.
     var sourceFile: String? = nil
 
     init(id: UUID = UUID(),
@@ -81,16 +81,16 @@ struct ImportSessionRow: Identifiable, Codable, Hashable {
     }
 }
 
-/// Représentation lourde d'une session : tout son contenu. Pour l'édition.
+/// Heavyweight representation of a session: all of its content. For editing.
 ///
-/// ⚠️ Le contenu dépend de la DESTINATION (colonne `destination`, migration v45) :
-///   • `.transactions` → `rows`, qui portent l'état de résolution de chaque
-///     ligne (tier assigné, action utilisateur) ;
-///   • `.investments`  → `batch`, la sortie brute du pipeline.
+/// ⚠️ The content depends on the DESTINATION (`destination` column, migration v45):
+///   • `.transactions` → `rows`, which carry each row's resolution state
+///     (assigned payee, user action);
+///   • `.investments`  → `batch`, the pipeline's raw output.
 ///
-/// Les deux ne fusionnent pas : une ligne de transaction traîne des décisions
-/// utilisateur qu'un `ImportElement` n'a pas vocation à porter — c'est la
-/// frontière entre l'ingestion (refondue) et la résolution (inchangée).
+/// The two don't merge: a transaction row carries user decisions
+/// that an `ImportElement` has no business carrying — that's the
+/// boundary between ingestion (redesigned) and resolution (unchanged).
 struct ImportSession: Identifiable, Codable {
     let id: UUID
     let createdAt: Date
@@ -100,7 +100,7 @@ struct ImportSession: Identifiable, Codable {
     var accountId: Int?
     var destination: ImportDestination
     var rows: [ImportSessionRow]
-    /// Sortie du pipeline, pour une session d'investissements.
+    /// Pipeline output, for an investments session.
     var batch: ImportBatchResult?
 
     init(id: UUID, createdAt: Date, updatedAt: Date, status: ImportSessionStatus,
@@ -126,8 +126,8 @@ struct ImportSession: Identifiable, Codable {
     var skippedRows: Int { rows.filter { $0.userAction == .skipped }.count }
 }
 
-/// Représentation légère utilisée pour le bandeau / l'index global.
-/// Évite de charger tout le JSON quand on a juste besoin d'afficher "N lignes restantes".
+/// Lightweight representation used for the banner / the global index.
+/// Avoids loading the whole JSON when all that's needed is showing "N rows remaining".
 struct ImportSessionSummary: Identifiable, Hashable {
     let id: UUID
     let createdAt: Date
@@ -137,24 +137,24 @@ struct ImportSessionSummary: Identifiable, Hashable {
     let accountId: Int?
     let totalRows: Int
     let pendingRows: Int
-    /// Où va cette session — c'est ce qui décide quel écran de revue rouvrir.
+    /// Where this session is headed — this decides which review screen to reopen.
     var destination: ImportDestination = .transactions
 }
 
 // MARK: - ColumnMapping
 
-/// Mapping des colonnes d'un CSV. Indexé par signature (concat des headers).
+/// A CSV's column mapping. Indexed by signature (concatenation of the headers).
 struct ColumnMapping: Codable, Hashable {
     let headerSignature: String
     var dateColumnIndex: Int
     var amountColumnIndex: Int
     var labelColumnIndex: Int
     var separator: String        // ";", ",", "\t"
-    var dateFormat: String?      // "dd/MM/yyyy", "yyyy-MM-dd", etc. (nil = autodétection)
+    var dateFormat: String?      // "dd/MM/yyyy", "yyyy-MM-dd", etc. (nil = auto-detection)
     var amountDecimal: String    // "," ou "."
 }
 
-/// Signature stable d'un header CSV : tous les noms en minuscules sans accents, joints par "|".
+/// Stable signature of a CSV header: every name lowercased with accents stripped, joined with "|".
 enum ColumnMappingSignature {
     static func compute(headers: [String]) -> String {
         headers

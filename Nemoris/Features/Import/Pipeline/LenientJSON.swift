@@ -1,39 +1,39 @@
 import Foundation
 
-/// Réparation des JSON produits par un modèle de langage.
+/// Repairing JSON produced by a language model.
 ///
-/// Moteur PUR — couvert par `run_import_pipeline_tests.sh`.
+/// PURE engine — covered by `run_import_pipeline_tests.sh`.
 ///
-/// ─── Pourquoi ça existe ────────────────────────────────────────────────────
+/// ─── Why this exists ────────────────────────────────────────────────────────
 ///
-/// Un modèle qui génère du JSON en texte libre le met en forme, et sa mise en
-/// forme peut couper une chaîne au milieu :
+/// A model generating free-form JSON formats it, and its formatting
+/// can break a string in the middle:
 ///
 /// ```
 ///     "payment_
 ///         type": "CB"
 /// ```
 ///
-/// C'est du JSON **invalide** — la norme interdit un caractère de contrôle brut
-/// à l'intérieur d'une chaîne. `JSONDecoder` lève, et **tout le document est
-/// perdu** : cas réel où huit opérations parfaitement extraites ont produit
-/// « aucune transaction à importer ».
+/// This is **invalid** JSON — the spec forbids a raw control character
+/// inside a string. `JSONDecoder` throws, and **the whole document is
+/// lost**: a real case where eight perfectly extracted operations produced
+/// "no transaction to import".
 ///
-/// ⚠️ Réparation de MISE EN FORME uniquement. On ne devine aucune valeur, on ne
-/// referme aucune accolade : si le modèle a inventé ou omis des données, elles
-/// restent inventées ou omises. Recoller une chaîne coupée par un retour à la
-/// ligne ne change pas le sens, c'est la seule chose qu'on s'autorise.
+/// ⚠️ FORMATTING repair only. We never guess a value, we never
+/// close a brace: if the model invented or omitted data, it
+/// stays invented or omitted. Stitching a string broken by a line
+/// break back together doesn't change its meaning, that's the only thing we allow ourselves.
 enum LenientJSON {
 
-    /// Recolle les chaînes coupées par un retour à la ligne.
+    /// Stitches strings broken by a line break back together.
     ///
-    /// ⚠️ La façon de recoller DÉPEND du rôle de la chaîne :
-    ///   • une CLÉ se recolle sans rien (`"payment_\n  type"` → `"payment_type"`),
-    ///     puisque la coupure est purement typographique ;
-    ///   • une VALEUR se recolle avec une espace (`"CARREFOUR\n  CITY"` →
-    ///     `"CARREFOUR CITY"`), parce que c'est un libellé dont les mots ont été
-    ///     séparés par le retour à la ligne.
-    /// Traiter les deux pareil casse l'un ou l'autre.
+    /// ⚠️ How they're stitched DEPENDS on the string's role:
+    ///   • a KEY is stitched with nothing in between (`"payment_\n  type"` →
+    ///     `"payment_type"`), since the break is purely typographical;
+    ///   • a VALUE is stitched with a space (`"CARREFOUR\n  CITY"` →
+    ///     `"CARREFOUR CITY"`), because it's a label whose words were
+    ///     split by the line break.
+    /// Treating both the same breaks one or the other.
     static func repaired(_ raw: String) -> String {
         var output = ""
         output.reserveCapacity(raw.count)
@@ -47,14 +47,14 @@ enum LenientJSON {
                 continue
             }
 
-            // Début de chaîne : on la capture entièrement pour décider ensuite.
+            // Start of a string: capture it whole to decide later.
             var literal = ""
             var cursor = raw.index(after: index)
             var closed = false
             while cursor < raw.endIndex {
                 let inner = raw[cursor]
                 if inner == "\\" {
-                    // Échappement : les deux caractères passent tels quels.
+                    // Escape sequence: both characters pass through as-is.
                     literal.append(inner)
                     cursor = raw.index(after: cursor)
                     if cursor < raw.endIndex {
@@ -69,14 +69,14 @@ enum LenientJSON {
             }
 
             guard closed else {
-                // Chaîne jamais refermée : on rend le reste tel quel, le
-                // décodeur signalera l'erreur — mieux qu'une réparation qui
-                // inventerait une fin.
+                // String never closed: return the rest as-is, the
+                // decoder will report the error — better than a repair that
+                // would invent an ending.
                 output.append(contentsOf: raw[index...])
                 break
             }
 
-            // Rôle de la chaîne : suivie de `:` (après d'éventuels blancs) = clé.
+            // The string's role: followed by `:` (after optional whitespace) = a key.
             var lookahead = raw.index(after: cursor)
             while lookahead < raw.endIndex, raw[lookahead].isWhitespace {
                 lookahead = raw.index(after: lookahead)
@@ -91,9 +91,9 @@ enum LenientJSON {
         return output
     }
 
-    /// Remplace chaque saut de ligne (et l'indentation qui le suit) par
-    /// `joiner`. Les autres caractères de contrôle sont retirés : eux aussi
-    /// sont interdits dans une chaîne JSON.
+    /// Replaces every line break (and the indentation following it) with
+    /// `joiner`. Other control characters are stripped: they too
+    /// are forbidden inside a JSON string.
     private static func collapseBreaks(in literal: String, joiner: String) -> String {
         guard literal.contains(where: { $0.isNewline || $0 == "\t" }) else { return literal }
         var result = ""
@@ -101,14 +101,14 @@ enum LenientJSON {
         while index < literal.endIndex {
             let character = literal[index]
             if character.isNewline || character == "\t" {
-                // Absorbe le saut ET l'indentation qui suit, sinon on
-                // recollerait « payment_        type ».
+                // Absorbs the break AND the indentation that follows, otherwise
+                // we'd stitch "payment_        type".
                 while index < literal.endIndex,
                       literal[index].isNewline || literal[index] == "\t" || literal[index] == " " {
                     index = literal.index(after: index)
                 }
-                // Pas de joiner en fin de chaîne : « CARREFOUR\n » ne doit pas
-                // rendre « CARREFOUR ».
+                // No joiner at the end of a string: "CARREFOUR\n" must not
+                // become "CARREFOUR".
                 if index < literal.endIndex, !result.isEmpty { result += joiner }
                 continue
             }
@@ -118,8 +118,8 @@ enum LenientJSON {
         return result
     }
 
-    /// Isole l'objet JSON d'une réponse (les modèles l'entourent volontiers de
-    /// texte ou de balises de code) puis le répare.
+    /// Isolates the JSON object in a response (models are happy to
+    /// surround it with text or code fences) then repairs it.
     static func extractObject(from raw: String) -> String {
         var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if let start = cleaned.firstIndex(of: "{"), let end = cleaned.lastIndex(of: "}") {
@@ -128,66 +128,66 @@ enum LenientJSON {
         return repaired(repairSyntax(cleaned))
     }
 
-    // MARK: - Réparations lexicales
+    // MARK: - Lexical repairs
 
-    /// Corrige les fautes de PONCTUATION les plus fréquentes des modèles.
+    /// Fixes the most common PUNCTUATION mistakes made by models.
     ///
-    /// Chacune vient d'un cas réel :
-    ///   • `"amount": -6.98,\n}` — virgule finale, interdite en JSON ;
-    ///   • `, amount": -6.00` — guillemet ouvrant de clé oublié ;
-    ///   • `,,` — virgule dupliquée.
+    /// Each one comes from a real case:
+    ///   • `"amount": -6.98,\n}` — trailing comma, forbidden in JSON;
+    ///   • `, amount": -6.00` — missing opening quote on a key;
+    ///   • `,,` — duplicated comma.
     ///
-    /// ⚠️ Ponctuation UNIQUEMENT. On ne complète aucune valeur, on ne referme
-    /// aucune structure : une réponse tronquée doit rester une erreur visible.
+    /// ⚠️ PUNCTUATION ONLY. We never fill in a value, we never close
+    /// a structure: a truncated response must remain a visible error.
     static func repairSyntax(_ raw: String) -> String {
         var text = raw
 
-        // Guillemet ouvrant manquant sur une clé : `, amount":` → `, "amount":`.
-        // Motif volontairement étroit (un identifiant nu suivi de `":`), pour ne
-        // pas toucher au contenu des chaînes.
+        // Missing opening quote on a key: `, amount":` → `, "amount":`.
+        // Deliberately narrow pattern (a bare identifier followed by `":`), so as
+        // not to touch string contents.
         text = replacing(text,
                          pattern: #"([,{])(\s*)([A-Za-z_][A-Za-z0-9_]*)"(\s*):"#,
                          template: "$1$2\"$3\"$4:")
 
-        // Virgule FR comme séparateur décimal dans un nombre : `"amount":-19,50`
-        // n'est pas du JSON valide (`,` y sépare deux champs, jamais deux
-        // moitiés d'un nombre) — un modèle habitué à écrire en français
-        // l'échappe malgré la consigne « point décimal ». Motif ancré
-        // JUSTE APRÈS `:` (jamais après une apostrophe/guillemet), ce qui
-        // exclut par construction tout ce qui est à l'intérieur d'une chaîne
-        // — une valeur texte commence toujours par `"`, jamais par un
-        // chiffre. Le lookahead sur `,`/`}`/`]` garantit qu'on s'arrête au
-        // VRAI séparateur de champ suivant plutôt que de le consommer.
+        // FR comma as a decimal separator in a number: `"amount":-19,50`
+        // isn't valid JSON (`,` there separates two fields, never two
+        // halves of a number) — a model used to writing in French
+        // slips into this despite the "decimal point" instruction. Pattern anchored
+        // RIGHT AFTER `:` (never after a quote/apostrophe), which
+        // excludes by construction anything inside a string
+        // — a text value always starts with `"`, never with a
+        // digit. The lookahead on `,`/`}`/`]` guarantees we stop at the
+        // REAL next field separator instead of consuming it.
         text = replacing(text,
                          pattern: #"(\s*-?\d+),(\d+)(?=\s*[,}\]])"#,
                          template: "$1.$2")
 
-        // Virgules dupliquées, puis virgule finale avant une fermeture.
+        // Duplicated commas, then a trailing comma before a closing bracket.
         text = replacing(text, pattern: #",(\s*),"#, template: ",$1")
         text = replacing(text, pattern: #",(\s*)([}\]])"#, template: "$1$2")
 
-        // Clés SANS aucun guillemet : `, effort:2` → `, "effort":2`.
+        // Keys with NO quotes at all: `, effort:2` → `, "effort":2`.
         //
-        // ⚠️ Distinct du motif d'entrée de cette fonction, qui ne rattrape que
-        // le guillemet OUVRANT manquant (`, amount":`). Un modèle rend
-        // couramment un objet dont une partie des clés est correctement
-        // citée et l'autre pas du tout — vu en production : `"annual_impact":0,
-        // effort:2, confidence:0.92`. Traité par un scanner plutôt qu'une
-        // regex, parce qu'un `mot:` dans une phrase française (« Bilan: … »)
-        // est fréquent dans les valeurs texte et ne doit surtout pas être
-        // réécrit.
+        // ⚠️ Distinct from this function's entry pattern, which only catches
+        // a missing OPENING quote (`, amount":`). A model commonly
+        // produces an object where some keys are correctly
+        // quoted and some aren't at all — seen in production: `"annual_impact":0,
+        // effort:2, confidence:0.92`. Handled by a scanner rather than a
+        // regex, because a `word:` inside a French sentence ("Bilan: …")
+        // is common in text values and must never be
+        // rewritten.
         return quotingBareKeys(text)
     }
 
-    /// Ajoute les guillemets manquants autour des clés d'objet nues, en
-    /// ignorant tout ce qui se trouve à l'intérieur d'une chaîne.
+    /// Adds missing quotes around bare object keys, while
+    /// ignoring anything inside a string.
     static func quotingBareKeys(_ raw: String) -> String {
         var output = ""
         output.reserveCapacity(raw.count)
         var inString = false
         var escaped = false
-        /// Vrai quand la position courante peut accueillir une CLÉ : juste
-        /// après `{` ou `,`. C'est ce qui évite de toucher à une valeur.
+        /// True when the current position can hold a KEY: right
+        /// after `{` or `,`. That's what keeps a value from being touched.
         var expectingKey = false
 
         var index = raw.startIndex
@@ -224,7 +224,7 @@ enum LenientJSON {
                 continue
             }
 
-            // Un identifiant nu à un emplacement de clé, suivi de `:`.
+            // A bare identifier in a key position, followed by `:`.
             if expectingKey, character.isLetter || character == "_" {
                 var cursor = index
                 var identifier = ""
@@ -242,7 +242,7 @@ enum LenientJSON {
                     expectingKey = false
                     continue
                 }
-                // Pas une clé (`true`, `null`, un nombre…) : on recopie tel quel.
+                // Not a key (`true`, `null`, a number…): copy it as-is.
                 output.append(identifier)
                 index = cursor
                 expectingKey = false
@@ -262,27 +262,27 @@ enum LenientJSON {
         return regex.stringByReplacingMatches(in: text, range: range, withTemplate: template)
     }
 
-    // MARK: - Découpage objet par objet
+    // MARK: - Splitting object by object
 
-    /// Les objets JSON les plus INTERNES d'une réponse, chacun réparé
-    /// séparément.
+    /// The most DEEPLY NESTED (innermost) JSON objects in a response, each
+    /// repaired separately.
     ///
-    /// ─── Pourquoi décoder objet par objet ──────────────────────────────────
+    /// ─── Why decode object by object ────────────────────────────────────────
     ///
-    /// Exiger que TOUT le document soit valide, c'est perdre huit opérations
-    /// parfaitement extraites parce que le modèle a laissé une virgule en trop
-    /// sur la troisième. Constaté deux fois de suite, avec deux fautes
-    /// différentes : réparer chaque nouvelle faute au cas par cas est une course
-    /// perdue d'avance.
+    /// Requiring the WHOLE document to be valid means losing eight
+    /// perfectly extracted operations because the model left an extra comma
+    /// on the third one. Observed twice in a row, with two
+    /// different mistakes: patching each new mistake case by case is a race
+    /// already lost.
     ///
-    /// En décodant chaque objet indépendamment, une faute de syntaxe coûte UNE
-    /// ligne au lieu de la capture entière. C'est le comportement qu'on veut :
-    /// dégradation progressive, pas tout ou rien.
+    /// By decoding each object independently, one syntax mistake costs ONE
+    /// line instead of the whole batch. That's the behavior we want:
+    /// graceful degradation, not all-or-nothing.
     ///
-    /// « Les plus internes » = sans accolade imbriquée. Nos schémas d'opérations
-    /// et d'ordres sont plats, donc ce sont exactement les objets à décoder ; le
-    /// conteneur (`{"transactions": [...]}`) est ignoré, ce qui rend l'extraction
-    /// insensible à sa forme.
+    /// "Innermost" = with no nested brace. Our operation and order
+    /// schemas are flat, so these are exactly the objects to decode; the
+    /// container (`{"transactions": [...]}`) is ignored, which makes
+    /// extraction indifferent to its shape.
     static func innermostObjects(in raw: String) -> [String] {
         let text = repairSyntax(raw)
         var objects: [String] = []
@@ -302,8 +302,8 @@ enum LenientJSON {
             guard !inString else { continue }
 
             if character == "{" {
-                // Une nouvelle ouverture pendant qu'on capture : le bloc courant
-                // n'est pas le plus interne, on repart de celle-ci.
+                // A new opening while we're capturing: the current block
+                // isn't the innermost, start over from this one.
                 if start != nil { containsNested = true }
                 start = index
                 containsNested = false

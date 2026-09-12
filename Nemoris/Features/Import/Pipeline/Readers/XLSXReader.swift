@@ -1,19 +1,19 @@
 import Foundation
 
-// MARK: - Lecture d'un classeur XLSX
+// MARK: - Reading an XLSX workbook
 //
-// Moteur PUR — testable via `run_import_pipeline_tests.sh`.
+// PURE engine — testable via `run_import_pipeline_tests.sh`.
 //
-// Un XLSX est une archive ZIP de fichiers XML (norme OOXML) :
-//   • `xl/workbook.xml`        → la liste des feuilles et leur ordre d'affichage
-//   • `xl/_rels/workbook.xml.rels` → où chaque feuille est réellement rangée
-//   • `xl/sharedStrings.xml`   → TOUTES les chaînes du classeur, déduplifiées
-//   • `xl/worksheets/sheetN.xml` → les cellules, qui référencent l'index ci-dessus
+// An XLSX is a ZIP archive of XML files (the OOXML standard):
+//   • `xl/workbook.xml`        → the list of sheets and their display order
+//   • `xl/_rels/workbook.xml.rels` → where each sheet is actually stored
+//   • `xl/sharedStrings.xml`   → ALL of the workbook's strings, deduplicated
+//   • `xl/worksheets/sheetN.xml` → the cells, which reference the index above
 //
-// La sortie est une `ImportGrid` par feuille, c'est-à-dire EXACTEMENT ce que
-// produit le lecteur CSV : les deux formats posent la même question à
-// l'utilisateur (quelle colonne est la date, le montant, le libellé) et
-// partagent donc le même écran de mapping.
+// The output is one `ImportGrid` per sheet, i.e. EXACTLY what the CSV
+// reader produces: both formats ask the user the same
+// question (which column is the date, the amount, the label) and
+// therefore share the same mapping screen.
 
 struct XLSXReaderError: Error, Equatable {
     let reason: String
@@ -21,13 +21,13 @@ struct XLSXReaderError: Error, Equatable {
 
 enum XLSXReader {
 
-    /// Une table par feuille non vide, dans l'ordre du classeur.
+    /// One table per non-empty sheet, in workbook order.
     static func grids(from data: Data) -> Result<[ImportGrid], XLSXReaderError> {
         let shared: [String]
         switch ZIPArchiveReader.extract(named: "xl/sharedStrings.xml", from: data) {
         case .success(let xml): shared = SharedStringsParser.parse(xml)
-        // Un classeur peut n'avoir aucune chaîne partagée (que des nombres) :
-        // l'absence du fichier est légitime, pas une erreur.
+        // A workbook can have no shared strings at all (numbers only):
+        // the file being absent is legitimate, not an error.
         case .failure:          shared = []
         }
 
@@ -39,9 +39,9 @@ enum XLSXReader {
 
         let sheetNames = workbookSheetNames(data: data)
 
-        // Tri NUMÉRIQUE sur l'index du fichier : un tri lexicographique classe
-        // `sheet10.xml` avant `sheet2.xml`, et les feuilles ressortent dans le
-        // désordre — donc associées aux mauvais noms.
+        // NUMERIC sort on the file's index: a lexicographic sort ranks
+        // `sheet10.xml` before `sheet2.xml`, and the sheets end up out of
+        // order — so matched to the wrong names.
         let sheetEntries = entries
             .filter { $0.name.hasPrefix("xl/worksheets/sheet") && $0.name.hasSuffix(".xml") }
             .sorted { sheetIndex($0.name) < sheetIndex($1.name) }
@@ -64,19 +64,19 @@ enum XLSXReader {
 
     // MARK: - Matrice → table
 
-    /// Transforme une matrice de cellules en table exploitable.
+    /// Turns a matrix of cells into a usable table.
     ///
-    /// ⚠️ Les lignes vides de TÊTE sont sautées : un export bancaire commence
-    /// très souvent par un bloc d'identité (nom du titulaire, IBAN, période),
-    /// et prendre la première ligne non vide comme en-tête donnerait une table
-    /// à une colonne. On cherche la première ligne qui a la largeur dominante
-    /// du document.
+    /// ⚠️ Blank LEADING rows are skipped: a bank export very often
+    /// starts with an identity block (holder's name, IBAN, period),
+    /// and taking the first non-blank row as the header would give a
+    /// one-column table. We look for the first row that has the document's
+    /// dominant width.
     static func grid(from matrix: [[String]], sheetName: String?) -> ImportGrid? {
         let rows = matrix.filter { row in row.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty } }
         guard !rows.isEmpty else { return nil }
 
-        // Largeur dominante = celle des lignes de données, pas celle d'un
-        // en-tête décoratif isolé.
+        // Dominant width = that of the data rows, not that of a
+        // decorative, isolated header.
         var widthCount: [Int: Int] = [:]
         for row in rows {
             let width = row.reduce(into: 0) { result, cell in
@@ -106,8 +106,8 @@ enum XLSXReader {
                           sheetName: sheetName)
     }
 
-    /// `xl/worksheets/sheet12.xml` → 12. Renvoie `Int.max` si l'index n'est pas
-    /// lisible, pour que ces feuilles finissent en queue sans casser le tri.
+    /// `xl/worksheets/sheet12.xml` → 12. Returns `Int.max` if the index isn't
+    /// readable, so those sheets end up last without breaking the sort.
     static func sheetIndex(_ path: String) -> Int {
         let digits = path
             .replacingOccurrences(of: "xl/worksheets/sheet", with: "")
@@ -115,7 +115,7 @@ enum XLSXReader {
         return Int(digits) ?? Int.max
     }
 
-    /// Noms d'onglets déclarés par le classeur, dans l'ordre d'affichage.
+    /// Tab names declared by the workbook, in display order.
     static func workbookSheetNames(data: Data) -> [String] {
         guard case .success(let xml) = ZIPArchiveReader.extract(named: "xl/workbook.xml", from: data) else {
             return []
@@ -126,7 +126,7 @@ enum XLSXReader {
 
 // MARK: - sharedStrings.xml
 
-/// Les chaînes du classeur, déduplifiées et référencées par index.
+/// The workbook's strings, deduplicated and referenced by index.
 enum SharedStringsParser {
 
     static func parse(_ xml: Data) -> [String] {
@@ -148,10 +148,10 @@ enum SharedStringsParser {
                     attributes: [String: String] = [:]) {
             switch localName(name) {
             case "si": insideItem = true; current = ""
-            // ⚠️ Une entrée peut être découpée en PLUSIEURS `<t>` par des runs
-            // de mise en forme (`<r>`) : « Virement » + « SEPA » sont deux
-            // fragments d'une seule chaîne. Il faut les concaténer, sinon le
-            // libellé arrive tronqué à son premier changement de style.
+            // ⚠️ An entry can be split across SEVERAL `<t>`s by formatting
+            // runs (`<r>`): "Transfer" + "SEPA" are two
+            // fragments of a single string. They must be concatenated, otherwise the
+            // label arrives truncated at its first style change.
             case "t":  insideText = true
             default:   break
             }
@@ -197,7 +197,7 @@ enum WorkbookParser {
 
 // MARK: - worksheet.xml
 
-/// Extrait la matrice de cellules d'une feuille.
+/// Extracts the cell matrix of a sheet.
 enum WorksheetParser {
 
     static func parse(_ xml: Data, sharedStrings: [String]) -> [[String]] {
@@ -218,8 +218,8 @@ enum WorksheetParser {
         private var cellStyle: Int?
         private var columnIndex = 0
         private var capturing = false
-        /// `<is><t>` : chaîne écrite en clair DANS la cellule plutôt que dans
-        /// la table partagée (ce que produisent plusieurs exporteurs).
+        /// `<is><t>`: a string written in plain sight INSIDE the cell rather than in
+        /// the shared table (what several exporters produce).
         private var insideInlineString = false
 
         init(sharedStrings: [String]) {
@@ -237,11 +237,10 @@ enum WorksheetParser {
                 cellType = attributes["t"] ?? ""
                 cellStyle = attributes["s"].flatMap(Int.init)
                 value = ""
-                // ⚠️ Une cellule VIDE n'est tout simplement pas écrite dans le
-                // XML : sans la référence `r` (« C7 »), les colonnes se
-                // décalent vers la gauche dès qu'un trou apparaît, et le
-                // mapping désigne alors la mauvaise colonne pour toute la
-                // suite du fichier.
+                // ⚠️ An EMPTY cell simply isn't written in the
+                // XML: without the `r` reference ("C7"), columns shift
+                // left as soon as a gap appears, and mapping then
+                // points at the wrong column for the rest of the file.
                 if let reference = attributes["r"] {
                     let target = XLSXCellReference.columnIndex(from: reference)
                     while columnIndex < target {
@@ -280,7 +279,7 @@ enum WorksheetParser {
             }
         }
 
-        /// Rend la valeur d'affichage d'une cellule.
+        /// Renders a cell's display value.
         private func resolve() -> String {
             let raw = value.trimmingCharacters(in: .whitespacesAndNewlines)
             if insideInlineString || cellType == "inlineStr" { return raw }
@@ -288,11 +287,11 @@ enum WorksheetParser {
                 return sharedStrings[index]
             }
             if cellType == "b" { return raw == "1" ? "VRAI" : "FAUX" }
-            // ⚠️ Excel ne stocke PAS les dates comme du texte : c'est un nombre
-            // de jours depuis le 1900-01-01, et seul le STYLE de la cellule dit
-            // qu'il s'agit d'une date. Sans cette conversion, la colonne date
-            // d'un classeur arrive en « 45865 » et aucun format de date ne la
-            // reconnaît.
+            // ⚠️ Excel does NOT store dates as text: it's a number
+            // of days since 1900-01-01, and only the cell's STYLE says
+            // it's a date. Without this conversion, a workbook's date
+            // column arrives as "45865" and no date format
+            // recognizes it.
             if let style = cellStyle, XLSXCellReference.isDateStyle(style),
                let serial = Double(raw), let date = XLSXCellReference.date(fromSerial: serial) {
                 return XLSXCellReference.isoFormatter.string(from: date)
@@ -302,11 +301,11 @@ enum WorksheetParser {
     }
 }
 
-// MARK: - Utilitaires OOXML
+// MARK: - OOXML utilities
 
 enum XLSXCellReference {
 
-    /// « BC12 » → 54 (index de colonne 0-indexé).
+    /// "BC12" → 54 (0-indexed column index).
     static func columnIndex(from reference: String) -> Int {
         var index = 0
         for character in reference.uppercased() {
@@ -316,26 +315,26 @@ enum XLSXCellReference {
         return max(0, index - 1)
     }
 
-    /// Styles de date des formats INTÉGRÉS d'Excel (14-22 pour les dates et
-    /// heures, 45-47 pour les durées).
+    /// Date styles among Excel's BUILT-IN formats (14-22 for dates and
+    /// times, 45-47 for durations).
     ///
-    /// ⚠️ Approximation assumée : un classeur qui définit un format de date
-    /// PERSONNALISÉ le déclare dans `xl/styles.xml`, que ce lecteur n'ouvre pas.
-    /// Une telle colonne ressortira comme un nombre brut — l'utilisateur la
-    /// verra dans l'aperçu du mapping et pourra corriger, ce qu'une conversion
-    /// silencieusement fausse ne permettrait pas.
+    /// ⚠️ Accepted approximation: a workbook that defines a CUSTOM date
+    /// format declares it in `xl/styles.xml`, which this reader doesn't open.
+    /// Such a column will come out as a raw number — the user will
+    /// see it in the mapping preview and can correct it, which a silently
+    /// wrong conversion would not allow.
     static func isDateStyle(_ style: Int) -> Bool {
         (14...22).contains(style) || (45...47).contains(style)
     }
 
-    /// Numéro de série Excel → date.
+    /// Excel serial number → date.
     ///
-    /// ⚠️ Le décalage est de 25 569 jours entre l'époque Excel (1900-01-01 = 1)
-    /// et l'époque Unix (1970-01-01), et non 25 567 : Excel considère 1900
-    /// comme bissextile — un bug de Lotus 1-2-3 délibérément conservé pour la
-    /// compatibilité. Le jour fantôme (« 29 février 1900 ») décale toutes les
-    /// dates postérieures d'exactement un jour, et c'est ce décalage qu'intègre
-    /// la constante. Toute date d'un relevé bancaire y est postérieure.
+    /// ⚠️ The offset is 25,569 days between the Excel epoch (1900-01-01 = 1)
+    /// and the Unix epoch (1970-01-01), not 25,567: Excel treats 1900
+    /// as a leap year — a Lotus 1-2-3 bug deliberately kept for
+    /// compatibility. The phantom day ("February 29, 1900") shifts every
+    /// later date by exactly one day, and that shift is baked into
+    /// the constant. Any date on a bank statement falls after it.
     static func date(fromSerial serial: Double) -> Date? {
         guard serial > 1, serial < 2_958_466 else { return nil }   // 1900 … 9999
         let seconds = (serial - 25_569) * 86_400
@@ -351,12 +350,12 @@ enum XLSXCellReference {
     }()
 }
 
-/// Nom d'élément sans son préfixe de namespace.
+/// Element name without its namespace prefix.
 ///
-/// ⚠️ `XMLParser` n'est PAS configuré en mode namespace ici : les documents
-/// OOXML et ISO 20022 utilisent des préfixes variables selon le producteur
-/// (`x:row`, `ns2:Ntry`…), et comparer le nom qualifié complet ferait échouer
-/// le parsing sur la moitié des fichiers réels.
+/// ⚠️ `XMLParser` is NOT configured in namespace mode here: OOXML
+/// and ISO 20022 documents use prefixes that vary by
+/// producer (`x:row`, `ns2:Ntry`…), and comparing the full qualified name
+/// would fail parsing on half of real-world files.
 func localName(_ qualified: String) -> String {
     guard let colon = qualified.lastIndex(of: ":") else { return qualified }
     return String(qualified[qualified.index(after: colon)...])

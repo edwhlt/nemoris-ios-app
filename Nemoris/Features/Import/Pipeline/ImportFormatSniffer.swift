@@ -208,8 +208,8 @@ enum ImportFormatSniffer {
             if index.isMultiple(of: 2) { evenZeros += 1 } else { oddZeros += 1 }
         }
         let total = Double(sample.count)
-        // Nuls en position PAIRE ⇒ big-endian (l'octet de poids fort vient en
-        // premier) ; en position impaire ⇒ little-endian.
+        // NULs in EVEN position ⇒ big-endian (the high-order byte comes
+        // first); in odd position ⇒ little-endian.
         if Double(evenZeros) / total > 0.3, oddZeros == 0 {
             return String(data: data, encoding: .utf16BigEndian)
         }

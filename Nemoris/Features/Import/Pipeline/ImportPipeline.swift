@@ -1,63 +1,63 @@
 import Foundation
 
-/// Le chemin d'ingestion UNIQUE : N fichiers de N formats en entrée, des
-/// `ImportElement` en sortie.
+/// The SINGLE ingestion path: N files of N formats in, `ImportElement`s
+/// out.
 ///
-/// ─── Deux phases, et c'est structurel ──────────────────────────────────────
+/// ─── Two phases, and it's structural ───────────────────────────────────────
 ///
-///   1. `read`    — ouvrir, sniffer, découper en unités. Parallélisable, et
-///                  c'est la phase qui découvre COMBIEN il y a à faire (le
-///                  nombre de pages d'un PDF n'est connu qu'une fois ouvert).
-///   2. `analyze` — interpréter chaque unité. C'est là que passe le temps
-///                  quand un modèle est impliqué.
+///   1. `read`    — open, sniff, split into units. Parallelizable, and
+///                  this is the phase that discovers HOW MUCH there is to do (the
+///                  number of pages in a PDF is only known once it's opened).
+///   2. `analyze` — interpret each unit. This is where time goes
+///                  when a model is involved.
 ///
-/// ⚠️ Fusionner les deux ferait perdre la progression exacte : une boucle par
-/// fichier ne peut annoncer qu'un total approximatif, réévalué à la hausse en
-/// cours de route — et l'ancienne version rapportait `done / done`, soit 100 %
-/// en permanence, donc une barre qui ne voulait rien dire.
+/// ⚠️ Merging the two would lose exact progress reporting: a loop per
+/// file can only announce an approximate total, revised upward as it
+/// goes — and the old version reported `done / done`, i.e. 100%
+/// all the time, so a bar that meant nothing.
 ///
-/// La séparation sert aussi l'UX : `read` rend les TABLES à mapper (CSV,
-/// feuilles de classeur) avant que quoi que ce soit de long ne démarre, donc
-/// l'utilisateur fait ses mappings pendant qu'il est là, puis l'analyse part en
-/// arrière-plan.
+/// The split also serves the UX: `read` renders the TABLES to map (CSV,
+/// workbook sheets) before anything long starts, so
+/// the user does their mapping while they're there, and analysis then
+/// runs in the background.
 @MainActor
 enum ImportPipeline {
 
-    // MARK: - Résultat de lecture
+    // MARK: - Read result
 
-    /// Une table qui attend l'utilisateur : la structure est là, la sémantique
-    /// des colonnes non.
+    /// A table awaiting the user: the structure is there, column
+    /// semantics aren't.
     struct PendingGrid: Identifiable {
         let id = UUID()
         var grid: ImportGrid
         var origin: ImportElementOrigin
-        /// Texte d'origine, conservé pour permettre un RE-PARSING si
-        /// l'utilisateur corrige le séparateur depuis l'écran de mapping.
-        /// `nil` pour un classeur, dont les cellules ne dépendent d'aucun
-        /// séparateur.
+        /// Source text, kept to allow RE-PARSING if
+        /// the user corrects the separator from the mapping screen.
+        /// `nil` for a workbook, whose cells don't depend on any
+        /// separator.
         var rawText: String?
-        /// Les AUTRES feuilles du même classeur.
+        /// The OTHER sheets of the same workbook.
         ///
-        /// ⚠️ Un classeur produit UNE étape de mapping, pas une par feuille.
-        /// La version initiale en faisait une chacune : l'utilisateur devait
-        /// mapper « Notes », « Récapitulatif » et tout onglet annexe avant
-        /// d'atteindre celui qui l'intéressait, sans jamais pouvoir en choisir
-        /// un. Ici il choisit, et une seule feuille est importée.
+        /// ⚠️ A workbook produces ONE mapping step, not one per sheet.
+        /// The initial version made one for each: the user had to
+        /// map "Notes", "Summary" and every side tab before
+        /// reaching the one they cared about, with no way to pick
+        /// one. Here they pick, and only one sheet is imported.
         var siblingSheets: [ImportGrid] = []
 
-        /// Nom affiché dans l'écran de mapping : le fichier, plus l'onglet
-        /// quand un classeur en compte plusieurs.
+        /// Name shown on the mapping screen: the file, plus the sheet
+        /// name when a workbook has several.
         var displayName: String {
             guard let sheet = grid.sheetName, !sheet.isEmpty else { return origin.sourceName }
             return "\(origin.sourceName) · \(sheet)"
         }
     }
 
-    /// Ce que la lecture a produit, avant toute interprétation.
+    /// What reading produced, before any interpretation.
     struct Readout {
-        /// Unités à analyser, dans l'ordre du batch et déjà numérotées.
+        /// Units to analyze, in batch order and already numbered.
         var units: [NumberedUnit] = []
-        /// Tables en attente de mapping — elles ne passent PAS par `analyze`.
+        /// Tables awaiting mapping — they do NOT go through `analyze`.
         var pendingGrids: [PendingGrid] = []
 
         var isEmpty: Bool { units.isEmpty && pendingGrids.isEmpty }
@@ -68,37 +68,37 @@ enum ImportPipeline {
         var origin: ImportElementOrigin
     }
 
-    /// Nombre de fichiers lus de front.
+    /// Number of files read concurrently.
     ///
-    /// ⚠️ Borné, et pas seulement pour la forme : chaque lecture charge une
-    /// page PDF rendue ou une image décodée en mémoire. Sur un lot de gros
-    /// documents, un `TaskGroup` sans limite les matérialise TOUS en même
-    /// temps — c'est ainsi qu'on se fait tuer par le watchdog mémoire d'iOS,
-    /// pas en étant lent.
+    /// ⚠️ Bounded, and not just for form's sake: every read loads a
+    /// rendered PDF page or a decoded image into memory. On a batch of large
+    /// documents, an unbounded `TaskGroup` materializes ALL of them at
+    /// once — that's how you get killed by iOS's memory watchdog,
+    /// not by being slow.
     static let readConcurrency = 4
 
-    // MARK: - Phase 1 — lecture
+    // MARK: - Phase 1 — reading
 
-    /// Ouvre et découpe les sources, EN PARALLÈLE.
+    /// Opens and splits the sources, IN PARALLEL.
     ///
-    /// ⚠️ L'échec d'un fichier n'annule jamais les autres : chaque source rend
-    /// au pire une unité vide porteuse de son diagnostic. Un lot de dix
-    /// relevés ne doit pas être perdu parce que le troisième est illisible.
+    /// ⚠️ One file's failure never cancels the others: each source at worst
+    /// produces one empty unit carrying its diagnosis. A batch of ten
+    /// statements must not be lost because the third one is unreadable.
     static func read(sources: [ImportDocumentSource],
                      destination: ImportDestination,
                      allowsImagePassthrough: Bool = true) async -> Readout {
-        // La fonctionnalité IA au nom de laquelle on lit : c'est elle qui
-        // décide si une capture part telle quelle au modèle ou passe par l'OCR,
-        // puisque le backend se choisit par fonctionnalité.
+        // The AI feature on whose behalf we're reading: it
+        // decides whether a screenshot goes to the model as-is or through OCR,
+        // since the backend is chosen per feature.
         let feature: AIFeature = destination == .transactions
             ? .transactionImport : .investmentImport
         guard !sources.isEmpty else { return Readout() }
 
-        // Indexé pour recoller dans l'ordre : un `TaskGroup` rend les résultats
-        // dans l'ordre d'ACHÈVEMENT, qui dépend de la taille des fichiers. Sans
-        // ça, l'ordre des lignes importées dépendrait du hasard des durées de
-        // lecture — la classe de bug déjà rencontrée ici (`results.first` sur
-        // une concaténation de `withTaskGroup`).
+        // Indexed to reassemble in order: a `TaskGroup` returns results
+        // in COMPLETION order, which depends on file size. Without
+        // this, the order of imported rows would depend on the luck of
+        // read durations — the bug class already encountered here
+        // (`results.first` on a `withTaskGroup` concatenation).
         var readUnits: [Int: [ImportDocumentReader.Unit]] = [:]
 
         await withTaskGroup(of: (Int, [ImportDocumentReader.Unit]).self) { group in
@@ -126,9 +126,9 @@ enum ImportPipeline {
             }
         }
 
-        // Numérotation GLOBALE : deux fichiers repartant à 1 produiraient des
-        // numéros d'unité en collision, et un rapport d'échec désignerait alors
-        // une unité ambiguë.
+        // GLOBAL numbering: two files each restarting at 1 would produce
+        // colliding unit numbers, and a failure report would then point at
+        // an ambiguous unit.
         var readout = Readout()
         var unitNumber = 1
 
@@ -144,9 +144,9 @@ enum ImportPipeline {
                 unitNumber += 1
 
                 if case .grid(let grid) = unit.content {
-                    // Feuilles suivantes d'un même classeur : elles rejoignent
-                    // l'étape déjà ouverte pour ce fichier au lieu d'en créer
-                    // une nouvelle (cf. `siblingSheets`).
+                    // Following sheets of the same workbook: they join the step
+                    // already opened for that file instead of creating
+                    // a new one (see `siblingSheets`).
                     if let existing = readout.pendingGrids.lastIndex(where: {
                         $0.origin.sourceIndex == index
                     }) {
@@ -155,12 +155,12 @@ enum ImportPipeline {
                         readout.pendingGrids.append(PendingGrid(
                             grid: grid,
                             origin: origin,
-                            // ⚠️ Repris de l'unité, PAS redécodé ici : cette
-                            // boucle tourne sur le main actor, et redécoder un
-                            // gros CSV en String y provoquait un gel visible —
-                            // pour un travail déjà fait hors du main actor
-                            // pendant la lecture. `nil` pour un classeur, dont
-                            // les cellules ne dépendent d'aucun séparateur.
+                            // ⚠️ Reused from the unit, NOT re-decoded here: this
+                            // loop runs on the main actor, and re-decoding a
+                            // large CSV to a String there caused a visible freeze —
+                            // for work already done off the main actor
+                            // during reading. `nil` for a workbook, whose
+                            // cells don't depend on any separator.
                             rawText: unit.sourceText))
                     }
                 } else {
@@ -171,18 +171,19 @@ enum ImportPipeline {
         return readout
     }
 
-    // MARK: - Phase 2 — analyse
+    // MARK: - Phase 2 — analysis
 
-    /// Interprète les unités lues, selon la destination choisie.
+    /// Interprets the units read, based on the chosen destination.
     ///
-    /// ⚠️ SÉQUENTIEL, et c'est délibéré. La contrainte n'est pas le code mais
-    /// le modèle : plusieurs `LanguageModelSession` de front sur le petit
-    /// modèle embarqué se disputent la même mémoire et la même unité de calcul,
-    /// pour un gain nul et un risque d'éviction. Tout ce qui gagne réellement à
-    /// être parallélisé (ouverture PDF, OCR, inflate) l'est déjà en phase 1.
+    /// ⚠️ SEQUENTIAL, and it's deliberate. The constraint isn't the code but
+    /// the model: several `LanguageModelSession`s running at once on the small
+    /// embedded model fight over the same memory and the same compute
+    /// unit, for zero gain and a risk of eviction. Everything that genuinely
+    /// benefits from parallelization (PDF opening, OCR, inflate) already is,
+    /// in phase 1.
     ///
-    /// La progression reste exacte parce que le total est connu AVANT d'entrer
-    /// dans la boucle.
+    /// Progress stays exact because the total is known BEFORE entering
+    /// the loop.
     static func analyze(_ readout: Readout,
                         destination: ImportDestination,
                         onProgress: @escaping (Int, Int) -> Void) async -> ImportBatchResult {
@@ -200,13 +201,13 @@ enum ImportPipeline {
         return result
     }
 
-    /// Analyse d'UNE unité, aiguillée par la destination.
+    /// Analyzes ONE unit, routed by the destination.
     ///
-    /// C'est ici que se matérialise la décision de ne PAS avoir d'étape de
-    /// classification métier : la destination a été choisie par l'utilisateur
-    /// avant l'analyse, et c'est elle qui calibre les instructions du modèle.
-    /// Reclassifier après coup introduirait une seconde source de vérité, qui
-    /// pourrait contredire la première.
+    /// This is where the decision to NOT have a business-classification
+    /// step materializes: the destination was chosen by the user
+    /// before analysis, and it's what calibrates the model's instructions.
+    /// Reclassifying afterward would introduce a second source of truth, which
+    /// could contradict the first.
     private static func extract(_ numbered: NumberedUnit,
                                 destination: ImportDestination)
     async -> (elements: [ImportElement], report: ImportUnitReport) {
@@ -242,7 +243,7 @@ enum ImportPipeline {
         }
     }
 
-    // MARK: - Modèles d'UI → modèles purs
+    // MARK: - UI models → pure models
 
     private static let isoDay: DateFormatter = {
         let formatter = DateFormatter()
@@ -268,16 +269,16 @@ enum ImportPipeline {
     }
 }
 
-// MARK: - Éléments → modèles consommés en aval
+// MARK: - Elements → models consumed downstream
 
 extension ImportBatchResult {
 
-    /// Lignes de session d'import.
+    /// Import-session rows.
     ///
-    /// `startingAt` continue une numérotation GLOBALE : deux sources repartant
-    /// chacune à 1 produiraient des `sourceRowNumber` en collision dans une
-    /// session agrégée, et les rapports d'échec au commit désigneraient une
-    /// ligne ambiguë.
+    /// `startingAt` continues a GLOBAL numbering: two sources each
+    /// restarting at 1 would produce colliding `sourceRowNumber`s in an
+    /// aggregated session, and failure reports at commit would point at
+    /// an ambiguous row.
     func sessionRows(startingAt startNumber: Int = 1) -> [ImportSessionRow] {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -300,9 +301,9 @@ extension ImportBatchResult {
         return rows
     }
 
-    /// Vue par unité pour l'écran de revue des investissements, qui raisonne
-    /// encore en « pages ». Reconstruite depuis les éléments plutôt que portée
-    /// en double : le pipeline reste la seule source.
+    /// Per-unit view for the investments review screen, which still
+    /// reasons in terms of "pages". Rebuilt from the elements rather than
+    /// carried twice: the pipeline stays the single source.
     func investmentPages() -> [PDFPageResult] {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -355,7 +356,7 @@ extension ImportBatchResult {
         }
     }
 
-    /// Vue neutre par unité, pour les blocs de diagnostic partagés.
+    /// Neutral per-unit view, for the shared diagnostic blocks.
     func analysisUnits() -> [AnalysisUnit] {
         units.map { report in
             AnalysisUnit(id: report.id, unitNumber: report.origin.unitNumber,

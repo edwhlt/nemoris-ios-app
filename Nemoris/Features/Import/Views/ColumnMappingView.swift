@@ -1,33 +1,33 @@
 import SwiftUI
 
-/// Étape 2 du nouveau parcours d'import : mapping des colonnes.
-/// Affiche les en-têtes détectés + 3 pickers (date / montant / libellé) + preview.
-/// Si un mapping existe déjà pour la signature du header, il est préchargé et
-/// l'utilisateur peut juste valider.
+/// Step 2 of the import flow: column mapping.
+/// Shows the detected headers + 3 pickers (date / amount / label) + a preview.
+/// If a mapping already exists for the header signature, it's preloaded and
+/// the user can just confirm.
 struct ColumnMappingView: View {
     @Environment(\.dismiss) private var dismiss
 
-    /// Résultat du parsing INITIAL (séparateur autodétecté).
+    /// Result of the INITIAL parse (auto-detected separator).
     let parsed: CSVParser.Parsed
-    /// Autres feuilles du même classeur, s'il y en a.
+    /// Other sheets of the same workbook, if any.
     ///
-    /// ⚠️ Un classeur ne doit PAS produire une étape de mapping par feuille :
-    /// l'utilisateur devrait alors mapper « Notes » et tout onglet annexe avant
-    /// d'atteindre celui qui l'intéresse, sans jamais pouvoir en choisir un.
-    /// Ici il choisit, et seule la feuille retenue est importée.
+    /// ⚠️ A workbook must NOT produce one mapping step per sheet:
+    /// the user would then have to map "Notes" and every side tab before
+    /// reaching the one they care about, with no way to pick one.
+    /// Here they pick, and only the chosen sheet is imported.
     var siblingSheets: [ImportGrid] = []
-    /// Texte brut, pour re-parser si l'utilisateur corrige le séparateur.
-    /// `nil` = séparateur non modifiable (appelant qui n'a pas le contenu).
+    /// Raw text, to re-parse if the user corrects the separator.
+    /// `nil` = separator not editable (a caller that doesn't have the content).
     var rawContent: String? = nil
     let accountId: Int
     let sourceFile: String?
-    /// Chemin mono-fichier : cette vue crée la session elle-même.
+    /// Single-file path: this view creates the session itself.
     var onSessionCreated: ((ImportSessionSummary) -> Void)? = nil
-    /// Chemin multi-fichiers : cette vue ne fait que RENDRE les lignes, c'est
-    /// l'écran d'entrée qui les agrège avec celles des autres fichiers avant de
-    /// créer UNE session unique.
+    /// Multi-file path: this view only RENDERS the rows, it's the
+    /// entry screen that aggregates them with those of other files before
+    /// creating ONE single session.
     var onRowsReady: (([ImportSessionRow]) -> Void)? = nil
-    /// Numéro de départ pour la numérotation globale des lignes (multi-fichiers).
+    /// Starting number for global row numbering (multi-file).
     var startingRowNumber: Int = 1
 
     @State private var dateColumn: Int? = nil
@@ -40,19 +40,19 @@ struct ColumnMappingView: View {
 
     private let sessionRepo = ImportSessionRepository()
 
-    /// Re-parsing après changement de séparateur. `nil` tant que l'utilisateur
-    /// n'y a pas touché : on affiche alors le parsing initial.
+    /// Re-parse after changing the separator. `nil` until the user
+    /// has touched it: we then show the initial parse.
     @State private var reparsed: CSVParser.Parsed?
     @State private var separator: String = ""
 
-    /// Feuille retenue quand la source est un classeur (`nil` = la première).
+    /// Chosen sheet when the source is a workbook (`nil` = the first one).
     @State private var selectedSheet: ImportGrid?
 
-    /// Toutes les feuilles du classeur, dans l'ordre du fichier.
+    /// All the workbook's sheets, in file order.
     private var allSheets: [ImportGrid] { [parsed] + siblingSheets }
 
-    /// Source de vérité de l'écran : le re-parsing d'un CSV s'il existe, sinon
-    /// la feuille choisie, sinon la première.
+    /// Source of truth for the screen: a CSV's re-parse if there is one, else
+    /// the chosen sheet, else the first one.
     private var effective: CSVParser.Parsed { reparsed ?? selectedSheet ?? parsed }
 
     private var headers: [String] { effective.headers }
@@ -94,8 +94,8 @@ struct ColumnMappingView: View {
                 }
 
                 if rawContent != nil {
-                    // Modifiable : l'autodétection se trompe sur certains
-                    // fichiers, et les colonnes deviennent alors inexploitables.
+                    // Editable: auto-detection gets it wrong on some
+                    // files, and the columns then become unusable.
                     Picker("Séparateur", selection: $separator) {
                         Text("Point-virgule ( ; )").tag(";")
                         Text("Virgule ( , )").tag(",")
@@ -110,9 +110,9 @@ struct ColumnMappingView: View {
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
                 }
-                // Un classeur n'a pas de séparateur : ses cellules sont
-                // délimitées par le format lui-même. Afficher un champ vide
-                // laisserait croire à une détection ratée.
+                // A workbook has no separator: its cells are
+                // delimited by the format itself. Showing an empty field
+                // would suggest a failed detection.
                 if allSheets.count > 1 {
                     Picker("Feuille", selection: Binding(
                         get: { effective.sheetName ?? "" },
@@ -141,8 +141,8 @@ struct ColumnMappingView: View {
             }
         }
         .nemorisFormStyle()
-        // Le titre suit la source : « Mapping CSV » sur une feuille de classeur
-        // ferait douter l'utilisateur d'avoir choisi le bon fichier.
+        // The title follows the source: "CSV Mapping" on a workbook
+        // sheet would make the user doubt they picked the right file.
         .localizedNavigationTitle(effective.sheetName == nil ? "Mapping CSV" : "Mapping du tableau")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -220,9 +220,9 @@ struct ColumnMappingView: View {
 
     // MARK: Logic
 
-    /// Re-parse le fichier avec le séparateur imposé par l'utilisateur, puis
-    /// ré-applique la détection : changer de séparateur change les en-têtes,
-    /// donc les index de colonnes précédents n'ont plus aucun sens.
+    /// Re-parses the file with the separator the user set, then
+    /// re-runs detection: changing the separator changes the headers,
+    /// so the previous column indices no longer mean anything.
     private func reparse(with newSeparator: String) {
         guard let rawContent, newSeparator != effective.separator else { return }
         guard let result = CSVParser.parse(content: rawContent, forcedSeparator: newSeparator) else { return }
@@ -234,8 +234,8 @@ struct ColumnMappingView: View {
         loadOrAutoDetect()
     }
 
-    /// Bascule de feuille : les colonnes changent, donc la sélection précédente
-    /// n'a plus de sens — même raison que pour un changement de séparateur.
+    /// Sheet switch: the columns change, so the previous selection
+    /// no longer makes sense — same reason as changing the separator.
     private func selectSheet(named name: String) {
         guard let sheet = allSheets.first(where: { ($0.sheetName ?? "") == name }) else { return }
         selectedSheet = sheet
@@ -258,13 +258,13 @@ struct ColumnMappingView: View {
             mappingFound = true
             return
         }
-        // Heuristique simple sur les noms d'en-têtes.
+        // Simple heuristic on header names.
         let lower = headers.map { $0.lowercased().folding(options: .diacriticInsensitive, locale: .current) }
         dateColumn = lower.firstIndex(where: { $0.contains("date") })
         amountColumn = lower.firstIndex(where: { $0.contains("montant") || $0.contains("amount") || $0.contains("debit") || $0.contains("credit") })
         labelColumn = lower.firstIndex(where: { $0.contains("libelle") || $0.contains("label") || $0.contains("description") || $0.contains("wording") || $0.contains("operation") })
 
-        // Détection du format de date sur 5 premières lignes
+        // Date-format detection on the first 5 lines
         if let dCol = dateColumn {
             let samples = effective.rows.prefix(5).compactMap { row -> String? in
                 guard dCol < row.count else { return nil }
@@ -277,7 +277,7 @@ struct ColumnMappingView: View {
     private func createSession() {
         guard let dCol = dateColumn, let aCol = amountColumn, let lCol = labelColumn else { return }
 
-        // 1. Persiste le mapping pour la prochaine fois
+        // 1. Persists the mapping for next time
         let mapping = ColumnMapping(
             headerSignature: signature,
             dateColumnIndex: dCol,
@@ -289,8 +289,8 @@ struct ColumnMappingView: View {
         )
         sessionRepo.saveMapping(mapping)
 
-        // 2. Construit les rows (logique partagée avec le chemin « format déjà
-        //    connu », qui n'affiche jamais cet écran).
+        // 2. Builds the rows (logic shared with the "format already
+        //    known" path, which never shows this screen).
         let (rows, _) = CSVParser.buildRows(parsed: effective,
                                               mapping: mapping,
                                               startingAt: startingRowNumber,
@@ -300,14 +300,14 @@ struct ColumnMappingView: View {
             return
         }
 
-        // 3a. Multi-fichiers : on rend la main, l'agrégation et la création de
-        //     session se font en amont.
+        // 3a. Multi-file: hand off, aggregation and session creation
+        //     happen upstream.
         if let onRowsReady {
             onRowsReady(rows)
             return
         }
 
-        // 3b. Mono-fichier : création directe.
+        // 3b. Single file: create directly.
         guard let summary = sessionRepo.createSession(rows: rows,
                                                       accountId: accountId,
                                                       sourceFile: sourceFile) else {

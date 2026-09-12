@@ -1,22 +1,21 @@
 import Foundation
 import Observation
 
-/// Porte l'analyse d'un import de documents EN DEHORS de l'écran qui l'a
-/// lancée, pour que l'utilisateur puisse continuer à se servir de l'app pendant
-/// que ça travaille.
+/// Carries document-import analysis OUTSIDE the screen that launched it,
+/// so the user can keep using the app while it works.
 ///
-/// **Pourquoi ce coordinateur existe :** l'analyse vivait dans la vue poussée.
-/// Fermer l'écran perdait le travail, et tant qu'elle tournait l'utilisateur
-/// était captif d'un écran de progression — sur un PDF de plusieurs pages avec
-/// une génération IA par page, ça se compte en dizaines de secondes.
+/// **Why this coordinator exists:** analysis used to live in the pushed
+/// view. Closing the screen lost the work, and while it ran the user
+/// was stuck on a progress screen — on a multi-page PDF with an AI
+/// generation per page, that adds up to tens of seconds.
 ///
-/// Le travail est démarré ici, la progression est publiée, et le bandeau
-/// d'import (`MainTabView`) sert de point de retour : il affiche l'avancement
-/// puis « Continuer » quand le résultat est prêt à être relu.
+/// The work is started here, progress is published, and the import
+/// banner (`MainTabView`) serves as the return point: it shows progress
+/// then "Continue" once the result is ready to review.
 ///
-/// ⚠️ Ce coordinateur ne fait AUCUN travail lourd sur le main actor : il
-/// orchestre des parseurs qui déportent eux-mêmes l'OCR, la lecture PDF et
-/// l'extraction déterministe dans des tâches détachées.
+/// ⚠️ This coordinator does NO heavy work on the main actor: it
+/// orchestrates parsers that themselves offload OCR, PDF reading and
+/// deterministic extraction into detached tasks.
 @MainActor
 @Observable
 final class DocumentImportCoordinator {
@@ -25,10 +24,10 @@ final class DocumentImportCoordinator {
 
     enum Phase: Equatable {
         case idle
-        /// `total == 0` tant que le nombre d'unités n'est pas connu (il ne
-        /// l'est qu'après ouverture des PDF et OCR des images).
+        /// `total == 0` until the number of units is known (it only
+        /// is once PDFs are opened and images are OCR'd).
         case analyzing(done: Int, total: Int)
-        /// Analyse terminée : `count` éléments reconnus, en attente de relecture.
+        /// Analysis done: `count` items recognized, awaiting review.
         case ready(count: Int)
         case failed(String)
     }
@@ -36,59 +35,59 @@ final class DocumentImportCoordinator {
     private(set) var phase: Phase = .idle
     private(set) var destination: ImportDestination = .transactions
     private(set) var accountId: Int = 0
-    /// Libellé de la source, repris comme `source_file` de la session.
+    /// Source label, reused as the session's `source_file`.
     private(set) var sourceLabel: String?
-    /// Session persistée pour une analyse d'investissements — c'est elle qui
-    /// permet de retrouver le résultat après un redémarrage de l'app.
+    /// Session persisted for an investments analysis — this is what
+    /// lets the result be recovered after an app restart.
     private(set) var persistedSessionId: UUID?
 
-    /// Sortie du pipeline — un seul modèle, quelle que soit la destination.
+    /// Pipeline output — a single model regardless of destination.
     private(set) var batch = ImportBatchResult()
-    /// Lignes déjà produites par les tables mappées du même import (CSV,
-    /// feuilles de classeur), à fusionner avec celles extraites des documents.
+    /// Rows already produced by this import's mapped tables (CSV,
+    /// spreadsheet sheets), to be merged with the ones extracted from documents.
     private(set) var seedRows: [ImportSessionRow] = []
 
-    /// Vrai tant que l'utilisateur a encore des tables à mapper dans l'entonnoir.
+    /// True as long as the user still has tables to map in the funnel.
     ///
-    /// ⚠️ L'analyse des documents démarre MAINTENANT, pendant que l'utilisateur
-    /// mappe ses colonnes — c'est tout l'intérêt : sur un lot de 2 CSV et 3 PDF,
-    /// les PDF n'attendent plus la fin des mappings. Mais le résultat ne doit
-    /// pas être proposé à la relecture pour autant :
-    ///   • l'import serait INCOMPLET (les lignes des tables non encore mappées
-    ///     n'y sont pas) ;
-    ///   • et présenter la revue par-dessus l'écran de mapping, c'est présenter
-    ///     une seconde feuille alors que la première est à l'écran — le motif
-    ///     de crash/perte de présentation documenté en §N.1 et
+    /// ⚠️ Document analysis starts NOW, while the user
+    /// maps their columns — that's the whole point: on a batch of 2 CSVs and 3 PDFs,
+    /// the PDFs no longer wait for mapping to finish. But the result must
+    /// not be offered for review just yet:
+    ///   • the import would be INCOMPLETE (rows from tables not yet
+    ///     mapped aren't in it);
+    ///   • and presenting the review on top of the mapping screen means
+    ///     presenting a second sheet while the first is on screen — the
+    ///     crash/lost-presentation pattern documented in §N.1 and
     private(set) var awaitingUserMapping = false
 
     private var job: Task<Void, Never>?
 
     var isRunning: Bool { if case .analyzing = phase { return true }; return false }
-    /// Prêt à être relu — donc terminé ET plus rien à attendre de l'utilisateur.
+    /// Ready to review — so finished AND nothing left to wait on from the user.
     var isReady: Bool {
         if case .ready = phase { return !awaitingUserMapping }
         return false
     }
     var isActive: Bool { phase != .idle }
 
-    /// L'entonnoir signale qu'il détient (ou libère) des tables à mapper.
+    /// The funnel reports that it holds (or has released) tables to map.
     func setAwaitingUserMapping(_ value: Bool) {
         awaitingUserMapping = value
     }
 
-    /// Toutes les lignes de transactions prêtes à devenir une session.
+    /// Every transaction row ready to become a session.
     var transactionRows: [ImportSessionRow] {
         seedRows + batch.sessionRows(startingAt: seedRows.count + 1)
     }
 
-    /// Détail par source, pour le bandeau de fin d'analyse. Les tables déjà
-    /// mappées y figurent aussi : c'est tout l'intérêt du bloc, vérifier
-    /// qu'AUCUNE source n'a été perdue sur un import mêlant plusieurs formats.
+    /// Per-source detail, for the end-of-analysis banner. Already-mapped
+    /// tables show up here too: that's the whole point of this block, checking
+    /// that NO source got lost on an import mixing several formats.
     var sourceBreakdown: [ImportSourceSummary] {
         var summaries = batch.perSource()
         let mappedSources = Dictionary(grouping: seedRows.compactMap(\.sourceFile), by: { $0 })
-        // Décalage des index pour que les tables mappées et les documents
-        // analysés ne se recouvrent pas dans la liste.
+        // Index shift so mapped tables and analyzed documents don't
+        // overlap in the list.
         let offset = (summaries.map(\.sourceIndex).max() ?? -1) + 1
         for (index, entry) in mappedSources.sorted(by: { $0.key < $1.key }).enumerated() {
             summaries.append(ImportSourceSummary(
@@ -98,16 +97,16 @@ final class DocumentImportCoordinator {
         return summaries
     }
 
-    // MARK: - Accumulation des sources
+    // MARK: - Accumulating sources
 
-    /// Ouvre un job d'import et remet le compteur de lignes à zéro.
+    /// Opens an import job and resets the row counter to zero.
     ///
-    /// ⚠️ C'est le coordinateur — et non l'écran d'import — qui détient les
-    /// lignes accumulées. L'entonnoir traverse plusieurs étapes (un mapping par
-    /// CSV, puis l'analyse des documents) et se ferme avant la fin : faire
-    /// vivre l'accumulation dans son `@State` la rendait dépendante de la survie
-    /// d'une vue, et les sources ne se retrouvaient pas toutes dans l'import
-    /// final. Un seul propriétaire, du début à la fin du job.
+    /// ⚠️ It's the coordinator — not the import screen — that owns the
+    /// accumulated rows. The funnel goes through several steps (one mapping per
+    /// CSV, then document analysis) and closes before the end: keeping the
+    /// accumulation in its `@State` made it depend on a view
+    /// surviving, and not every source ended up in the final import.
+    /// One owner, from the start to the end of the job.
     func beginJob(destination: ImportDestination, accountId: Int, sourceLabel: String?) {
         job?.cancel()
         job = nil
@@ -121,20 +120,20 @@ final class DocumentImportCoordinator {
         phase = .idle
     }
 
-    /// Ajoute les lignes d'une source déterministe (un CSV mappé). Cumulatif :
-    /// appelé une fois par fichier, dans l'ordre de traitement.
+    /// Adds rows from a deterministic source (one mapped CSV). Cumulative:
+    /// called once per file, in processing order.
     func addRows(_ rows: [ImportSessionRow]) {
         seedRows.append(contentsOf: rows)
     }
 
     // MARK: - Cycle de vie
 
-    /// Démarre l'analyse des documents du job courant.
+    /// Starts analyzing the current job's documents.
     ///
-    /// ⚠️ Ne touche PAS à `seedRows` : les lignes des sources déterministes
-    /// (CSV déjà mappés) ont été accumulées par `addRows` et doivent survivre à
-    /// l'analyse — c'est ce qui garantit que TOUTES les sources se retrouvent
-    /// dans l'import final, quel que soit leur type et leur nombre.
+    /// ⚠️ Does NOT touch `seedRows`: rows from deterministic sources
+    /// (already-mapped CSVs) were accumulated by `addRows` and must survive
+    /// analysis — that's what guarantees every source ends up in the final
+    /// import, regardless of its type or count.
     func startAnalysis(readout: ImportPipeline.Readout) {
         job?.cancel()
         batch = ImportBatchResult()
@@ -144,54 +143,54 @@ final class DocumentImportCoordinator {
         job = Task { [weak self] in
             guard let self else { return }
             let result = await ImportPipeline.analyze(readout, destination: destination) { done, total in
-                // ⚠️ La progression d'une unité déjà EN VOL au moment du
-                // `cancel()` continue d'arriver — l'annulation Swift est
-                // coopérative, elle ne stoppe rien en cours de route.
-                // `ImportPipeline.analyze` s'arrête bien entre deux unités,
-                // mais celle DÉJÀ lancée finit son tour et appelle CE
-                // callback une dernière fois. Sans ce garde, il réarmait
-                // `.analyzing(...)` juste après que `cancel()` avait remis
-                // `phase` à `.idle` — et comme le `guard !Task.isCancelled`
-                // plus bas se contente de sortir SANS jamais repasser par
-                // `.idle`, le bandeau restait bloqué en « Analyse… » pour de
-                // bon. D'où le symptôme *parfois* : ça ne se produit que si
-                // le cancel tombe pile pendant qu'une unité est en vol.
+                // ⚠️ Progress from a unit already IN FLIGHT when `cancel()` fires
+                // keeps arriving — Swift cancellation is cooperative, it
+                // doesn't stop anything already running. `ImportPipeline.analyze`
+                // does check between two units, but the one ALREADY launched
+                // finishes its turn and calls THIS callback one more
+                // time. Without this guard, it re-armed
+                // `.analyzing(...)` right after `cancel()` had reset
+                // `phase` to `.idle` — and since the `guard !Task.isCancelled`
+                // below just returns WITHOUT ever going back to
+                // `.idle`, the banner stayed stuck on "Analyzing…" for good.
+                // Hence the *sometimes* symptom: it only happens if
+                // the cancel lands exactly while a unit is in flight.
                 guard !Task.isCancelled else { return }
                 self.phase = .analyzing(done: done, total: total)
             }
             guard !Task.isCancelled else { return }
             self.batch = result
             self.persistIfInvestments(result)
-            // Les lignes des tables déjà mappées comptent dans le total : c'est
-            // le nombre d'éléments de TOUT l'import qui est annoncé, pas celui
-            // de la seule passe d'analyse.
+            // Rows from already-mapped tables count toward the total: it's
+            // the number of items across the WHOLE import that's announced, not just
+            // this one analysis pass.
             self.phase = .ready(count: result.elements.count + self.seedRows.count)
         }
     }
 
-    /// Persiste le résultat d'une analyse d'INVESTISSEMENTS en session.
+    /// Persists the result of an INVESTMENTS analysis into a session.
     ///
-    /// ⚠️ Sans ça, ce résultat ne vivait qu'en mémoire : quitter l'app le
-    /// perdait, alors qu'une analyse de relevé se compte en dizaines de
-    /// secondes. Les transactions, elles, ont toujours eu ce filet — la session
-    /// y est créée par l'écran de relecture, après confirmation, parce qu'elle
-    /// porte en plus l'état de résolution de chaque ligne.
+    /// ⚠️ Without this, the result only lived in memory: quitting the app
+    /// lost it, even though a statement analysis can take tens of
+    /// seconds. Transactions have always had this safety net — their
+    /// session is created by the review screen, after confirmation, because
+    /// it also carries each row's resolution state.
     private func persistIfInvestments(_ result: ImportBatchResult) {
         guard destination == .investments, !result.elements.isEmpty,
               accountId > 0, persistedSessionId == nil else { return }
         persistedSessionId = ImportSessionRepository()
             .createSession(batch: result, accountId: accountId, sourceFile: sourceLabel)?.id
-        // Symétrique de `clear()` : le miroir en mémoire doit refléter la base
-        // aussi bien à la création qu'à la suppression.
+        // Mirrors `clear()`: the in-memory mirror must reflect the database
+        // both on creation and on deletion.
         NotificationCenter.default.post(name: .nemorisImportSessionsDidChange, object: nil)
     }
 
-    /// Recharge une analyse d'investissements depuis sa session persistée.
+    /// Reloads an investments analysis from its persisted session.
     ///
-    /// C'est le pendant lecture de `persistIfInvestments` : l'app a redémarré,
-    /// le coordinateur est vide, mais la session existe toujours en base. Sans
-    /// ce chemin, la persistance ne servirait à rien — le bandeau afficherait
-    /// une session que rien ne saurait rouvrir.
+    /// This is the read counterpart of `persistIfInvestments`: the app has
+    /// restarted, the coordinator is empty, but the session still exists in the
+    /// database. Without this path, persistence would be pointless — the
+    /// banner would show a session that nothing could reopen.
     @discardableResult
     func restore(sessionId: UUID) -> Bool {
         guard let session = ImportSessionRepository().fetchSession(id: sessionId),
@@ -209,8 +208,8 @@ final class DocumentImportCoordinator {
         return true
     }
 
-    /// Variante qui lit puis analyse — pour les appelants qui n'ont pas déjà
-    /// fait passer les sources par la phase de lecture.
+    /// Variant that reads then analyzes — for callers who haven't already
+    /// pushed their sources through the read phase.
     func startAnalysis(sources: [ImportDocumentSource]) {
         job?.cancel()
         batch = ImportBatchResult()
@@ -222,10 +221,10 @@ final class DocumentImportCoordinator {
             let readout = await ImportPipeline.read(sources: sources, destination: destination)
             guard !Task.isCancelled else { return }
             let result = await ImportPipeline.analyze(readout, destination: destination) { done, total in
-                // Même garde qu'au-dessus, même raison : une unité déjà en
-                // vol au moment du cancel appelle encore ce callback une
-                // fois — sans le garde, ça réarme le bandeau juste après
-                // que `cancel()` l'a éteint.
+                // Same guard as above, same reason: a unit already in
+                // flight when cancel fires still calls this callback one
+                // more time — without the guard, that re-arms the banner right
+                // after `cancel()` turned it off.
                 guard !Task.isCancelled else { return }
                 self.phase = .analyzing(done: done, total: total)
             }
@@ -236,51 +235,51 @@ final class DocumentImportCoordinator {
         }
     }
 
-    /// Abandonne le travail en cours et remet le coordinateur à zéro.
+    /// Abandons the work in progress and resets the coordinator.
     func cancel() {
         job?.cancel()
         job = nil
         clear()
     }
 
-    /// Efface l'état une fois le résultat consommé (session créée, ou revue
-    /// d'investissement terminée).
+    /// Clears the state once the result has been consumed (session created, or
+    /// investment review finished).
     func clear() {
         phase = .idle
         batch = ImportBatchResult()
         seedRows = []
         sourceLabel = nil
         accountId = 0
-        // La session persistée a rempli son rôle (résultat consommé ou
-        // abandonné) : la laisser derrière ferait réapparaître un import
-        // fantôme au prochain lancement.
+        // The persisted session has served its purpose (result consumed or
+        // abandoned): leaving it behind would resurrect a ghost import
+        // on the next launch.
         if let id = persistedSessionId {
             ImportSessionRepository().deleteSession(id: id)
             ImportNotificationService.cancelReminder(forSessionId: id)
         }
         persistedSessionId = nil
         awaitingUserMapping = false
-        // ⚠️ Prévenir le MIROIR en mémoire (`AppState.activeImportSession`).
+        // ⚠️ Notify the in-memory MIRROR (`AppState.activeImportSession`).
         //
-        // Bug réel : ce miroir pilote le bandeau de SESSION, affiché dès que le
-        // bandeau d'ANALYSE s'efface — les deux sont les branches d'un même
-        // `if/else` (`MainTabView.importBanner`). Supprimer la ligne en base
-        // sans invalider le miroir faisait donc RÉAPPARAÎTRE le bandeau juste
-        // après l'abandon, avec cette fois la boîte de dialogue de la session,
-        // différente de celle qu'on venait de valider. Il fallait annuler DEUX
-        // fois, et la seconde portait sur une session déjà supprimée.
+        // Real bug: this mirror drives the SESSION banner, shown as soon as
+        // the ANALYSIS banner clears — the two are branches of the same
+        // `if/else` (`MainTabView.importBanner`). Deleting the row in the
+        // database without invalidating the mirror made the banner REAPPEAR
+        // right after cancellation, this time with the session's dialog,
+        // different from the one just confirmed. It had to be canceled
+        // TWICE, and the second time targeted an already-deleted session.
         //
-        // Notifié ICI et pas chez l'appelant : `clear()` est le seul endroit
-        // qui supprime cette session, et trois sites l'appellent (abandon
-        // depuis le bandeau, fin de revue d'analyse, fin de revue de session).
-        // Laisser chacun s'en souvenir, c'est laisser l'un d'eux l'oublier —
-        // ce qui était le cas de deux des trois.
+        // Notified HERE, not by the caller: `clear()` is the only place
+        // that deletes this session, and three sites call it (cancel from
+        // the banner, end of analysis review, end of session review).
+        // Leaving each of them to remember it means leaving one of them
+        // forgetting it — which was the case for two of the three.
         NotificationCenter.default.post(name: .nemorisImportSessionsDidChange, object: nil)
     }
 
-    // MARK: - Présentation
+    // MARK: - Presentation
 
-    /// Titre du bandeau selon l'état.
+    /// Banner title based on state.
     var bannerTitle: String {
         switch phase {
         case .analyzing:
@@ -298,12 +297,12 @@ final class DocumentImportCoordinator {
     var bannerSubtitle: String {
         switch phase {
         case .analyzing(let done, let total):
-            // Un compteur « 0 / 1 » puis « 1 / 1 » n'apprend rien : on ne
-            // l'affiche que quand il y a réellement plusieurs unités.
+            // A "0 / 1" then "1 / 1" counter says nothing useful: only
+            // show it once there really are several units.
             return total > 1 ? "\(done) / \(total)" : "Lecture en cours…"
         case .ready where awaitingUserMapping:
-            // L'analyse a fini avant l'utilisateur : le dire, plutôt que
-            // d'afficher un « prêt » sur lequel il ne peut rien faire.
+            // Analysis finished before the user could see it: say so, rather
+            // than showing a "ready" the user can't act on.
             return "Terminée — finis le mapping des colonnes"
         case .ready:
             return "Toucher pour relire et importer"
@@ -314,10 +313,10 @@ final class DocumentImportCoordinator {
         }
     }
 
-    /// Fraction pour la barre de progression, `nil` quand une barre déterminée
-    /// n'aurait rien à raconter : total encore inconnu, ou une seule unité (la
-    /// barre sauterait de 0 % à 100 % alors que toute l'attente se passe DANS
-    /// cette unique unité). Une barre indéterminée est alors plus honnête.
+    /// Fraction for the progress bar, `nil` when a determinate
+    /// bar wouldn't say anything useful: total still unknown, or a single unit (the
+    /// bar would jump from 0% to 100% while all the waiting happens INSIDE
+    /// that one unit). An indeterminate bar is then more honest.
     var progressFraction: Double? {
         guard case .analyzing(let done, let total) = phase, total > 1 else { return nil }
         return Double(done) / Double(total)
@@ -325,8 +324,8 @@ final class DocumentImportCoordinator {
 }
 
 extension Notification.Name {
-    /// Les sessions d'import en base ont changé (création ou suppression par le
-    /// coordinateur) — `AppState.activeImportSession`, qui les mirroite en
-    /// mémoire pour piloter le bandeau, doit être rechargé.
+    /// The import sessions in the database have changed (created or deleted by
+    /// the coordinator) — `AppState.activeImportSession`, which mirrors them
+    /// in memory to drive the banner, needs reloading.
     static let nemorisImportSessionsDidChange = Notification.Name("nemorisImportSessionsDidChange")
 }

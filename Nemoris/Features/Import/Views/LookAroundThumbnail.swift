@@ -37,7 +37,7 @@ struct LookAroundThumbnail: View {
                 }
                 .frame(width: size, height: size)
             }
-            // Si didLoad == true et scene == nil → on n'affiche rien (Look Around indisponible ici)
+            // If didLoad == true and scene == nil → show nothing (Look Around unavailable here)
         }
         .task(id: coordinateKey) {
             await loadScene()

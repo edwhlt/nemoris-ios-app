@@ -2,8 +2,8 @@ import Foundation
 import PDFKit
 import CoreGraphics
 
-/// Un document à analyser, déjà chargé en mémoire. Le nom sert à tracer
-/// l'origine de chaque ligne quand un import agrège plusieurs fichiers.
+/// A document to analyze, already loaded into memory. The name is used to
+/// trace each row's origin when an import aggregates several files.
 struct ImportDocumentSource: Sendable {
     let data: Data
     let displayName: String
@@ -16,91 +16,91 @@ struct ImportDocumentSource: Sendable {
     var fileExtension: String { (displayName as NSString).pathExtension }
 }
 
-/// Découpage d'un document en UNITÉS analysables, partagé par les deux imports.
+/// Splitting a document into analyzable UNITS, shared by both imports.
 ///
-/// Le type réel est sniffé sur les octets (jamais l'extension), puis :
-///   • un PDF donne une unité par page,
-///   • une image donne une unité — l'image elle-même si un modèle sait la lire,
-///     son OCR sinon,
-///   • un texte long est découpé en blocs qui tiennent dans la fenêtre de
-///     contexte du modèle,
-///   • un classeur donne une table par feuille,
-///   • un relevé CAMT/OFX donne directement des enregistrements structurés.
+/// The actual type is sniffed from the bytes (never the extension), then:
+///   • a PDF yields one unit per page,
+///   • an image yields one unit — the image itself if a model can read it,
+///     its OCR otherwise,
+///   • long text is chunked into blocks that fit the model's
+///     context window,
+///   • a workbook yields one table per sheet,
+///   • a CAMT/OFX statement directly yields structured records.
 ///
-/// Mutualisé parce que strictement identique des deux côtés — seule
-/// l'interprétation diffère ensuite (opérations bancaires contre ordres de
-/// bourse).
+/// Shared because it's strictly identical on both sides — only
+/// interpretation differs afterward (bank operations versus stock
+/// market orders).
 enum ImportDocumentReader {
 
-    /// Contenu d'une unité.
+    /// A unit's content.
     ///
-    /// ⚠️ Une énumération et non un agrégat de champs optionnels : les quatre
-    /// formes sont mutuellement exclusives, et un `struct` à quatre optionnels
-    /// laisse le compilateur indifférent à un appelant qui oublie d'en traiter
-    /// une. Ici, ajouter un format CASSE tous les `switch` — ce qu'on veut.
+    /// ⚠️ An enum, not a bag of optional fields: the four
+    /// shapes are mutually exclusive, and a struct with four optionals
+    /// leaves the compiler indifferent to a caller who forgets to handle
+    /// one. Here, adding a format BREAKS every `switch` — which is what we want.
     enum Content {
-        /// Texte à interpréter (page PDF, OCR, bloc).
+        /// Text to interpret (PDF page, OCR, block).
         case text(String)
-        /// L'image elle-même, pour un modèle multimodal.
+        /// The image itself, for a multimodal model.
         ///
-        /// ⚠️ Passer l'image plutôt que son OCR est un changement de nature,
-        /// pas une optimisation : la mise en page (colonnes, en-têtes de
-        /// journée, sous-titres de catégorie) porte du sens que
-        /// l'aplatissement en texte détruit — et qu'aucune heuristique d'ordre
-        /// de lignes ne reconstitue de façon générale, puisqu'elle diffère
-        /// d'une appli bancaire à l'autre.
+        /// ⚠️ Passing the image rather than its OCR is a change of nature,
+        /// not an optimization: the layout (columns, day
+        /// headers, category subtitles) carries meaning that
+        /// flattening to text destroys — and that no line-ordering heuristic
+        /// reconstructs in a general way, since it differs
+        /// from one banking app to another.
         case image(CGImage)
-        /// Table à mapper (CSV, feuille de classeur) : la structure est là,
-        /// mais la SÉMANTIQUE des colonnes demande l'utilisateur.
+        /// A table to map (CSV, workbook sheet): the structure is there,
+        /// but column SEMANTICS need the user.
         case grid(ImportGrid)
-        /// Enregistrements déjà structurés ET nommés (CAMT.053, OFX) : ni
-        /// modèle, ni mapping — les champs sont désignés par le format.
+        /// Records already structured AND named (CAMT.053, OFX): neither
+        /// model nor mapping — fields are designated by the format.
         case records([ImportPayload])
-        /// Rien d'exploitable, avec la raison.
+        /// Nothing usable, with the reason.
         case empty(ImportUnitDiagnostic)
     }
 
     struct Unit {
         var content: Content
         var kind: ImportSourceKind
-        /// Rang de l'unité dans son fichier (1-indexé) : n° de page, rang de
-        /// feuille, index de bloc.
+        /// The unit's rank within its file (1-indexed): page number, sheet
+        /// rank, block index.
         var indexInSource: Int = 1
-        /// Texte source d'une table, conservé pour un éventuel re-parsing avec
-        /// un autre séparateur.
+        /// A table's source text, kept for a possible re-parse with
+        /// another separator.
         ///
-        /// ⚠️ Porté PAR L'UNITÉ parce qu'il est décodé ici, hors du main actor.
-        /// Le redécoder plus tard depuis `source.data` — ce que faisait
-        /// `ImportPipeline.read` — refaisait le travail une seconde fois, ET
-        /// sur le thread principal : sur un gros CSV, un gel visible.
+        /// ⚠️ Carried BY THE UNIT because it's decoded here, off the main actor.
+        /// Re-decoding it later from `source.data` — what
+        /// `ImportPipeline.read` used to do — redid the work a second time, AND
+        /// on the main thread: a visible freeze on a large CSV.
         var sourceText: String?
 
-        /// PDF source + index de PAGE ORIGINAL (0-based, avant filtrage des
-        /// pages vides) — porté UNIQUEMENT par les unités PDF, pour un rendu
-        /// image À LA DEMANDE (cf. `InvestmentPDFParser.renderPageImage`) si
-        /// le texte aplati par PDFKit s'avère insuffisant sur un tableau mal
-        /// linéarisé. Ne PAS rendre l'image ICI : la plupart des pages n'en
-        /// ont jamais besoin (le déterministe suffit), et rendre à l'aveugle
-        /// coûterait du temps CPU pour rien sur un relevé de plusieurs
-        /// dizaines de pages. `Data` est copy-on-write : la porter sur chaque
-        /// unité d'un même PDF ne duplique pas les octets.
+        /// Source PDF + ORIGINAL PAGE index (0-based, before filtering out
+        /// blank pages) — carried ONLY by PDF units, for image rendering
+        /// ON DEMAND (see `InvestmentPDFParser.renderPageImage`) if
+        /// the text PDFKit flattened turns out insufficient on a poorly
+        /// linearized table. Do NOT render the image HERE: most pages never
+        /// need it (the deterministic engine is enough), and rendering blindly
+        /// would cost CPU time for nothing on a statement with several
+        /// dozen pages. `Data` is copy-on-write: carrying it on every
+        /// unit of the same PDF doesn't duplicate the bytes.
         var pdfSourceData: Data?
         var pdfPageIndex: Int?
 
-        /// Octets d'origine d'une unité IMAGE, conservés pour un repli OCR si
-        /// le modèle multimodal ne rend rien d'exploitable.
+        /// Original bytes of an IMAGE unit, kept for an OCR fallback if
+        /// the multimodal model returns nothing usable.
         ///
-        /// ⚠️ Le chemin image n'avait AUCUN filet : le modèle y est la seule
-        /// source, donc une réponse tronquée ou un JSON irréparable rendait
-        /// « aucune opération » — et comme une génération n'est pas
-        /// déterministe, la MÊME capture donnait tantôt N opérations, tantôt
-        /// zéro. L'OCR de repli ramène du texte, donc l'extraction
-        /// déterministe ET une seconde chance au modèle. Pas d'OCR À L'AVANCE
-        /// pour autant : Vision coûte 1 à 5 s par capture, inutile de le payer
-        /// quand la lecture d'image suffit.
+        /// ⚠️ The image path had NO safety net at all: the model is the only
+        /// source there, so a truncated response or unrepairable JSON produced
+        /// "no operations" — and since generation isn't
+        /// deterministic, the SAME screenshot sometimes gave N operations, sometimes
+        /// zero. The fallback OCR brings back text, so both deterministic
+        /// extraction AND a second chance for the model. Not OCR UP FRONT
+        /// though: Vision costs 1 to 5 seconds per screenshot, no point paying for it
+        /// when reading the image is enough.
         var imageSourceData: Data?
 
-        /// Raccourci de lecture — vide pour les formes non textuelles.
+        /// Read shortcut — empty for non-text shapes.
         var text: String {
             if case .text(let value) = content { return value }
             return ""
@@ -112,24 +112,24 @@ enum ImportDocumentReader {
         }
     }
 
-    // MARK: - Point d'entrée
+    // MARK: - Entry point
 
-    /// ⚠️ Tout le travail lourd (ouverture PDF, OCR Vision, inflate ZIP) tourne
-    /// en `Task.detached` : ces appels sont SYNCHRONES et coûteux, les laisser
-    /// sur le main actor fige l'app et la barre de progression ne se peint
-    /// jamais.
+    /// ⚠️ All heavy work (opening a PDF, Vision OCR, ZIP inflate) runs
+    /// in `Task.detached`: these calls are SYNCHRONOUS and costly, leaving
+    /// them on the main actor freezes the app and the progress bar never
+    /// draws.
     ///
-    /// `feature` : la fonctionnalité au nom de laquelle on lit.
+    /// `feature`: the feature on whose behalf we're reading.
     ///
-    /// ⚠️ Elle décide si une capture est passée TELLE QUELLE au modèle ou
-    /// océrisée : le backend est choisi par fonctionnalité, donc l'import de
-    /// relevés peut lire les images (serveur local multimodal) pendant que
-    /// l'import de portefeuille en est réduit à l'OCR, ou l'inverse. Poser la
-    /// question globalement donnerait la mauvaise réponse à l'un des deux.
+    /// ⚠️ It decides whether a screenshot is passed AS-IS to the model or
+    /// OCR'd: the backend is chosen per feature, so statement import
+    /// can read images (multimodal local server) while
+    /// portfolio import is reduced to OCR, or vice versa. Asking the
+    /// question globally would give the wrong answer to one of the two.
     ///
-    /// `allowsImagePassthrough` : à `false`, une capture est toujours océrisée
-    /// même si un modèle multimodal existe. Utile pour les formats dont on veut
-    /// l'extraction déterministe (le moteur d'ancrage a besoin de texte).
+    /// `allowsImagePassthrough`: at `false`, a screenshot is always OCR'd
+    /// even if a multimodal model exists. Useful for formats where
+    /// deterministic extraction is wanted (the anchoring engine needs text).
     static func units(for source: ImportDocumentSource,
                       feature: AIFeature,
                       allowsImagePassthrough: Bool = true) async -> [Unit] {
@@ -150,10 +150,10 @@ enum ImportDocumentReader {
     // MARK: - PDF
 
     private static func pdfUnits(_ data: Data) async -> [Unit] {
-        // ⚠️ L'index de PAGE ORIGINAL (0-based, avant filtrage) est conservé à
-        // côté du texte — le filtrage des pages vides qui suit décale les
-        // positions dans le tableau résultat, mais `renderPageImage` a besoin
-        // de l'index RÉEL dans le PDF, pas du rang parmi les pages non vides.
+        // ⚠️ The ORIGINAL PAGE index (0-based, before filtering) is kept
+        // alongside the text — the blank-page filtering that follows shifts
+        // positions in the resulting array, but `renderPageImage` needs
+        // the REAL index in the PDF, not the rank among non-blank pages.
         let pages: [(index: Int, text: String)] = await Task.detached(priority: .userInitiated) {
             guard let document = PDFDocument(data: data) else { return [] }
             return (0..<document.pageCount).compactMap { index in
@@ -197,13 +197,13 @@ enum ImportDocumentReader {
         guard let text = decodeText(data), !text.isEmpty else {
             return [Unit(content: .empty(.noTextExtracted), kind: .text)]
         }
-        // Un texte réellement tabulaire part au mapping de colonnes ; le reste
-        // (relevé en prose, export sans structure) part au parseur de documents.
+        // Genuinely tabular text goes to column mapping; the rest
+        // (prose statement, unstructured export) goes to the document parser.
         if let grid = CSVParser.parse(content: text), grid.isTabular {
             return [Unit(content: .grid(grid), kind: .text, sourceText: text)]
         }
-        // La fenêtre de contexte du modèle embarqué est étroite : un relevé
-        // entier envoyé d'un bloc la fait déborder et l'unité est perdue.
+        // The embedded model's context window is narrow: sending a whole
+        // statement in one block overflows it and the unit is lost.
         let chunks = InvestmentPDFParser.splitTextIntoChunks(text, maxChars: 4000)
         return chunks.enumerated().map { index, chunk in
             Unit(content: .text(chunk), kind: .text, indexInSource: index + 1)
@@ -229,7 +229,7 @@ enum ImportDocumentReader {
         }
     }
 
-    // MARK: - Relevé structuré (CAMT.053 / OFX)
+    // MARK: - Structured statement (CAMT.053 / OFX)
 
     private static func structuredUnits(_ data: Data) async -> [Unit] {
         let parsed = await Task.detached(priority: .userInitiated) {
@@ -245,10 +245,10 @@ enum ImportDocumentReader {
         }
     }
 
-    // MARK: - Décodage texte
+    // MARK: - Text decoding
 
-    /// Façade vers le décodage du sniffer — qui est PUR, donc couvert par le
-    /// harnais, alors que ce lecteur dépend de PDFKit et de Vision.
+    /// Facade over the sniffer's decoding — which is PURE, so covered by the
+    /// harness, whereas this reader depends on PDFKit and Vision.
     static func decodeText(_ data: Data) -> String? {
         ImportFormatSniffer.decodeText(data)
     }

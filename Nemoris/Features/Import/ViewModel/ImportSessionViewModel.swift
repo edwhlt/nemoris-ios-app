@@ -9,9 +9,9 @@ enum ImportSortMode: String, CaseIterable {
     case byAmountAbs = "Montant"
 }
 
-/// Orchestrateur de la vue d'import. Charge la session depuis la DB,
-/// lance la résolution moteur en arrière-plan, persiste à chaque action user,
-/// et déclenche le commit final dans la table `transactions`.
+/// Orchestrator for the import view. Loads the session from the DB,
+/// runs engine resolution in the background, saves on every user action,
+/// and triggers the final commit into the `transactions` table.
 @MainActor
 @Observable
 final class ImportSessionViewModel {
@@ -25,7 +25,7 @@ final class ImportSessionViewModel {
     private(set) var allCategories: [Category] = []
     private(set) var lastError: String?
     private(set) var commitSummary: ImportCommitSummary?
-    /// Info éphémère sur la dernière action cascadée — l'UI peut afficher un toast.
+    /// Ephemeral info about the last cascaded action — the UI can show a toast.
     var lastBulkApply: BulkApplyInfo? = nil
 
     var sortMode: ImportSortMode = .byStatus
@@ -34,8 +34,8 @@ final class ImportSessionViewModel {
     private let txRepo: TransactionRepository
     private var saveTask: Task<Void, Never>? = nil
 
-    /// `store` a une valeur par défaut visant la base de l'application :
-    /// aucun site d'appel ne change. Les tests injectent une base temporaire.
+    /// `store` defaults to the app's database: no call site
+    /// needs to change. Tests inject a temporary database.
     init(session: ImportSession, store: SQLiteStore = SQLiteStore()) {
         self.session = session
         self.sessionRepo = ImportSessionRepository(store: store)
@@ -49,7 +49,7 @@ final class ImportSessionViewModel {
         allCategories = txRepo.fetchCategories()
     }
 
-    /// Trie + filtre les rows pour l'affichage.
+    /// Sorts + filters the rows for display.
     var displayedRows: [ImportSessionRow] {
         switch sortMode {
         case .byStatus:
@@ -65,11 +65,11 @@ final class ImportSessionViewModel {
         }
     }
 
-    // MARK: - Clustering par libellé similaire
+    // MARK: - Clustering by similar label
 
-    /// Clé de cluster stable : on regroupe les rows qui partagent le MÊME libellé brut
-    /// (insensible à la casse + sans accents + trim). Tous les "GRAB HEADQUARTERS SG"
-    /// d'un import vont avoir le même clusterKey → décider sur 1 → s'applique aux N.
+    /// Stable cluster key: groups rows that share the SAME raw label
+    /// (case-insensitive + accent-insensitive + trimmed). Every "GRAB HEADQUARTERS SG"
+    /// in an import shares a clusterKey → deciding on 1 → applies to N.
     static func clusterKey(_ rawLabel: String) -> String {
         rawLabel
             .folding(options: .diacriticInsensitive, locale: .current)
@@ -77,14 +77,14 @@ final class ImportSessionViewModel {
             .trimmingCharacters(in: .whitespaces)
     }
 
-    /// Nombre de rows partageant le même clusterKey (incluant la row passée).
+    /// Number of rows sharing the same clusterKey (including the passed row).
     func clusterSize(for row: ImportSessionRow) -> Int {
         let key = Self.clusterKey(row.rawLabel)
         return session.rows.filter { Self.clusterKey($0.rawLabel) == key }.count
     }
 
-    /// Indices des autres rows en cluster avec `row` qui sont encore en pending.
-    /// Les rows déjà décidées (.confirmed/.manuallySet/.skipped/.committed) ne sont jamais cascadées.
+    /// Indices of other rows clustered with `row` that are still pending.
+    /// Rows already decided (.confirmed/.manuallySet/.skipped/.committed) are never cascaded.
     private func pendingSimilarIndices(to row: ImportSessionRow) -> [Int] {
         let key = Self.clusterKey(row.rawLabel)
         return session.rows.enumerated().compactMap { idx, r in
@@ -107,9 +107,9 @@ final class ImportSessionViewModel {
 
     // MARK: - Engine resolve
 
-    /// Résout TOUTES les rows .pending via le moteur. Streaming par batches de 20 :
-    /// l'UI voit la progress bar et les rows se mettre à jour au fur et à mesure
-    /// (au lieu d'attendre que TOUT soit résolu pour voir bouger l'écran).
+    /// Resolves ALL .pending rows through the engine. Streamed in batches of 20:
+    /// the UI sees the progress bar and rows update as it goes
+    /// (instead of waiting for EVERYTHING to resolve before the screen moves).
     func resolveAllPending() async {
         guard let engine = EngineBootstrap.shared.engine else {
             lastError = "Moteur pas encore prêt."
@@ -131,29 +131,29 @@ final class ImportSessionViewModel {
             Array(pendingIndices[$0..<min($0 + batchSize, pendingIndices.count)])
         }
 
-        // Capture allTiers AVANT le Task.detached pour que le lookup app-side soit
-        // disponible offline (sans hop main actor par row).
+        // Capture allTiers BEFORE the Task.detached so the app-side lookup is
+        // available offline (no main-actor hop per row).
         let tiersForLookup = allTiers
 
-        // AutoDiscovery : observe chaque résolution .unknown / .picker faible pendant
-        // l'import (le principal pourvoyeur de volume) pour promouvoir un marchand
-        // "learned" après N occurrences récurrentes (cf. NemorisEngine/Learning/AutoDiscovery).
-        // Réutilise engine.db/engine.store — aucune donnée n'est dupliquée, la config
-        // par défaut (3 occurrences / 60 jours) est celle du moteur.
+        // AutoDiscovery: watches every .unknown / weak-.picker resolution during
+        // the import (the main source of volume) to promote a merchant to
+        // "learned" after N recurring occurrences (see NemorisEngine/Learning/AutoDiscovery).
+        // Reuses engine.db/engine.store — no data is duplicated, the default config
+        // (3 occurrences / 60 days) is the engine's own.
         let discovery = AutoDiscovery(db: engine.db, store: engine.store)
 
         for chunk in chunks {
             let labels = chunk.map { session.rows[$0].rawLabel }
-            // Résolution du batch en background (CPU-bound).
+            // Batch resolution in the background (CPU-bound).
             let (snapshots, promotedInBatch): ([TierResolutionSnapshot], Bool) = await Task.detached(priority: .userInitiated) {
                 var promoted = false
                 let snaps = labels.map { label -> TierResolutionSnapshot in
                     guard let resolved = try? engine.resolve(label) else {
                         return .needsManualPick(reason: "error", topMerchantId: nil, topName: nil, topScore: nil)
                     }
-                    // Silencieux par design (comme le `try?` de la résolution ci-dessus) :
-                    // une erreur d'écriture dans engine.sqlite ne doit jamais faire échouer
-                    // l'import, l'apprentissage est un bonus, pas une dépendance critique.
+                    // Silent by design (like the `try?` on the resolution above):
+                    // a write failure into engine.sqlite must never fail
+                    // the import — learning is a bonus, not a hard dependency.
                     if (try? discovery.observe(resolved)) != nil {
                         promoted = true
                     }
@@ -162,14 +162,14 @@ final class ImportSessionViewModel {
                 return (snaps, promoted)
             }.value
 
-            // Un marchand a été promu "learned" pendant ce batch → recharge le snapshot
-            // du moteur pour que les labels similaires des batches SUIVANTS (même import,
-            // ou un import futur) soient reconnus dès maintenant.
+            // A merchant was promoted to "learned" during this batch → reload the
+            // engine's snapshot so similar labels in LATER batches (same import,
+            // or a future import) get recognized starting now.
             if promotedInBatch {
                 try? engine.reloadMerchantSnapshot()
             }
 
-            // Apply sur MainActor + update progress après chaque batch.
+            // Apply on MainActor + update progress after every batch.
             for (i, rowIdx) in chunk.enumerated() {
                 let snap = snapshots[i]
                 session.rows[rowIdx].resolution = snap
@@ -184,29 +184,29 @@ final class ImportSessionViewModel {
             }
             processed += chunk.count
             resolveProgress = Double(processed) / Double(pendingIndices.count)
-            // Yield pour laisser l'UI redessiner entre les batches.
+            // Yield to let the UI redraw between batches.
             await Task.yield()
         }
         scheduleSave()
     }
 
-    /// Convertit une `ResolvedTransaction` engine en snapshot Codable.
+    /// Converts a `ResolvedTransaction` from the engine into a Codable snapshot.
     ///
-    /// **Ordre de priorité (du plus sûr au moins sûr)** :
-    ///   0. **REGEX MATCH** : si l'utilisateur a un tier dont la regex match le rawLabel
-    ///      → c'est lui. Source la plus sûre car définie EXPLICITEMENT par l'utilisateur.
-    ///   1. ENGINE + lookup engine_merchant_id dans allTiers → .matched
-    ///   2. ENGINE + fallback name match dans allTiers → .matched (+ backfill engine_id au commit)
-    ///   3. ENGINE seul → .suggestCreate (sera créé au commit)
+    /// **Priority order (safest to least safe)**:
+    ///   0. **REGEX MATCH**: if the user has a payee whose regex matches the rawLabel
+    ///      → that's the one. Safest source, since it's EXPLICITLY set by the user.
+    ///   1. ENGINE + engine_merchant_id lookup in allTiers → .matched
+    ///   2. ENGINE + fallback name match in allTiers → .matched (+ backfill engine_id on commit)
+    ///   3. ENGINE alone → .suggestCreate (will be created on commit)
     ///   4. .needsManualPick / .suggestContact / .systemOperation
     ///
-    /// L'étape 0 (regex) court-circuite tout le reste — pas d'appel engine, pas de risque
-    /// de faux positif du moteur. C'est ce qui permet à l'utilisateur d'écraser une
-    /// mauvaise détection engine en collant simplement une regex sur son tier.
+    /// Step 0 (regex) short-circuits everything else — no engine call, no risk
+    /// of a false positive from the engine. This lets the user override a
+    /// bad engine detection just by pasting a regex onto their payee.
     ///
     private nonisolated static func snapshot(from r: ResolvedTransaction, allTiers: [Tiers]) -> TierResolutionSnapshot {
-        // === ÉTAPE 0 : REGEX-FIRST ===
-        // L'utilisateur a explicitement défini un pattern → on lui fait confiance.
+        // === STEP 0: REGEX-FIRST ===
+        // The user explicitly defined a pattern → trust it.
         if let regexHit = regexMatch(rawLabel: r.parsed.rawLabel, allTiers: allTiers) {
             return .matched(
                 payeeId: regexHit.id,
@@ -244,8 +244,8 @@ final class ImportSessionViewModel {
                     score: top.score
                 )
             }
-            // 2) Fallback name match (folded + lowercased) — utile pour les tiers
-            //    legacy créés à la main sans engineMerchantId.
+            // 2) Fallback name match (folded + lowercased) — useful for
+            //    legacy payees created by hand without an engineMerchantId.
             let needle = top.canonicalName
                 .folding(options: .diacriticInsensitive, locale: .current)
                 .lowercased()
@@ -260,7 +260,7 @@ final class ImportSessionViewModel {
                     score: top.score
                 )
             }
-            // 3) Vraie suggestion de création
+            // 3) A real suggestion to create one
             return .suggestCreate(
                 engineMerchantId: top.merchantId,
                 displayName: canonicalDisplay,
@@ -278,16 +278,16 @@ final class ImportSessionViewModel {
         }
     }
 
-    /// Cherche un tier dont la regex match le libellé brut.
+    /// Looks for a payee whose regex matches the raw label.
     ///
-    /// - Compile chaque `payees.regex` en NSRegularExpression case-insensitive.
-    /// - Si EXACTEMENT 1 tier match → renvoie ce tier (signal sûr).
-    /// - Si 0 ou 2+ matches → renvoie nil (ambigu : on laisse le moteur trancher).
-    /// - Les regex invalides sont silencieusement ignorées (`try?`).
+    /// - Compiles every `payees.regex` as a case-insensitive NSRegularExpression.
+    /// - If EXACTLY 1 payee matches → returns that payee (a reliable signal).
+    /// - If 0 or 2+ match → returns nil (ambiguous: let the engine decide).
+    /// - Invalid regexes are silently ignored (`try?`).
     ///
-    /// Cas typique : l'utilisateur a un tier "Payoo" avec regex `(?i)PAYOO` → tous les
-    /// libellés "PAYOO …" matchent et sont assignés à ce tier directement, sans passer
-    /// par le moteur (qui pourrait halluciner).
+    /// Typical case: the user has a payee "Payoo" with regex `(?i)PAYOO` → every
+    /// "PAYOO …" label matches and is assigned to that payee directly, without
+    /// going through the engine (which could hallucinate).
     private nonisolated static func regexMatch(rawLabel: String, allTiers: [Tiers]) -> Tiers? {
         var hits: [Tiers] = []
         let range = NSRange(rawLabel.startIndex..., in: rawLabel)
@@ -304,10 +304,10 @@ final class ImportSessionViewModel {
         return hits.count == 1 ? hits.first : nil
     }
 
-    // MARK: - User actions (toutes cascadent par défaut sur les rows en cluster pending)
+    // MARK: - User actions (all cascade to clustered pending rows by default)
 
-    /// Confirme la suggestion engine pour cette row. Cascade aux similaires pending si
-    /// `cascade=true`. Garde la resolution intacte (la suggestion reste).
+    /// Confirms the engine's suggestion for this row. Cascades to similar pending
+    /// rows if `cascade=true`. Keeps the resolution as-is (the suggestion stands).
     @discardableResult
     func confirm(rowId: UUID, cascade: Bool = true) -> Int {
         guard let idx = session.rows.firstIndex(where: { $0.id == rowId }) else { return 0 }
@@ -317,8 +317,8 @@ final class ImportSessionViewModel {
             let source = session.rows[idx]
             for sidx in pendingSimilarIndices(to: source) {
                 session.rows[sidx].userAction = .confirmed
-                // Copie la resolution si la cible était .pending — pour qu'au commit
-                // on sache quoi créer/lier.
+                // Copy the resolution if the target was .pending — so we know at
+                // commit time what to create/link.
                 if case .pending = session.rows[sidx].resolution {
                     session.rows[sidx].resolution = source.resolution
                     session.rows[sidx].assignedPayeeId = source.assignedPayeeId
@@ -350,14 +350,14 @@ final class ImportSessionViewModel {
         return cascaded
     }
 
-    /// Reset n'utilise jamais le cascade (volontairement : on veut pouvoir réviser 1 row).
+    /// Reset never uses cascade (deliberately: we want to be able to revise 1 row).
     func resetAction(rowId: UUID) {
         guard let idx = session.rows.firstIndex(where: { $0.id == rowId }) else { return }
         session.rows[idx].userAction = .pending
         scheduleSave()
     }
 
-    /// Assigne un payee existant à la row (et aux similaires pending si cascade).
+    /// Assigns an existing payee to the row (and to similar pending rows if cascade).
     @discardableResult
     func assign(rowId: UUID, payee: Tiers, cascade: Bool = true) -> Int {
         guard let idx = session.rows.firstIndex(where: { $0.id == rowId }) else { return 0 }
@@ -387,17 +387,17 @@ final class ImportSessionViewModel {
 
     // MARK: - Enrichissement multi-sources
 
-    /// Pour chaque row .needsManualPick : tente Sirene + LLM + MapKit, et si on récupère
-    /// un signal exploitable, "upgrade" la résolution vers .suggestCreate avec les infos
-    /// enrichies. Dedupe par libellé brut pour ne pas spammer les API.
-    /// Délai inter-appels 150ms (Sirene est limitée ~7 req/s).
+    /// For every .needsManualPick row: tries Sirene + LLM + MapKit, and if we get
+    /// a usable signal, "upgrades" the resolution to .suggestCreate with the
+    /// enriched info. Deduplicated by raw label to avoid spamming the APIs.
+    /// 150ms delay between calls (Sirene is rate-limited to ~7 req/s).
     func enrichUnresolvedRows() async {
         guard !isEnriching else { return }
         isEnriching = true
         enrichProgress = 0
         defer { isEnriching = false }
 
-        // Indices des rows à enrichir, dédupliqués par raw label.
+        // Indices of the rows to enrich, deduplicated by raw label.
         var seen: Set<String> = []
         var indices: [Int] = []
         for (i, row) in session.rows.enumerated() {
@@ -431,12 +431,12 @@ final class ImportSessionViewModel {
         scheduleSave()
     }
 
-    /// Applique le résultat d'enrichissement à toutes les rows partageant le même rawLabel
-    /// (dedupe → 1 appel API par libellé unique).
+    /// Applies an enrichment result to every row sharing the same rawLabel
+    /// (deduplicated → 1 API call per unique label).
     private func applyEnrichment(_ result: MerchantEnrichment, toRowsMatching rawLabel: String) {
         let key = rawLabel.lowercased()
         for i in session.rows.indices where session.rows[i].rawLabel.lowercased() == key {
-            // Upgrade needsManualPick → suggestCreate si on a un name + (siret ou domain ou coords)
+            // Upgrade needsManualPick → suggestCreate if we got a name + (siret or domain or coords)
             guard case .needsManualPick = session.rows[i].resolution else { continue }
             guard let name = result.displayName, !name.isEmpty else { continue }
             session.rows[i].resolution = .suggestCreate(
@@ -450,9 +450,9 @@ final class ImportSessionViewModel {
         }
     }
 
-    /// Applique un résultat d'enrichissement choisi via `EnrichmentSheetView` à une row.
-    /// Marque la row `.manuallySet` (l'utilisateur a pris une décision explicite).
-    /// Cascade aux rows similaires pending.
+    /// Applies an enrichment result chosen via `EnrichmentSheetView` to a row.
+    /// Marks the row `.manuallySet` (the user made an explicit choice).
+    /// Cascades to similar pending rows.
     @discardableResult
     func apply(enrichment: MerchantEnrichment, toRowId rowId: UUID, cascade: Bool = true) -> Int {
         guard let idx = session.rows.firstIndex(where: { $0.id == rowId }) else { return 0 }
@@ -486,12 +486,12 @@ final class ImportSessionViewModel {
         return cascaded
     }
 
-    /// Crée un nouveau payee depuis une fiche de création (PayeeCreationFormSheet) et l'assigne à la row.
-    /// `newPayee` est un Tiers avec id=0 — l'insertion en DB lui donne son vrai id.
-    /// Cascade aux rows similaires pending.
+    /// Creates a new payee from a creation form (PayeeCreationFormSheet) and assigns it to the row.
+    /// `newPayee` is a Tiers with id=0 — inserting it into the DB gives it its real id.
+    /// Cascades to similar pending rows.
     @discardableResult
     func createPayeeAndAssign(rowId: UUID, newPayee: Tiers, cascade: Bool = true) -> Int {
-        // 1. Insert basique (name + regex + categoryId), récupère l'id
+        // 1. Basic insert (name + regex + categoryId), grab the id
         let regex = newPayee.regex ?? ""
         guard let newId = txRepo.addTiersAndGetId(
             name: newPayee.name,
@@ -501,7 +501,7 @@ final class ImportSessionViewModel {
             lastError = "Échec de la création du tier."
             return 0
         }
-        // 2. Met à jour les champs étendus (domain, city, country, address, engine_merchant_id, group_id, custom, note)
+        // 2. Update the extended fields (domain, city, country, address, engine_merchant_id, group_id, custom, note)
         var withId = newPayee
         withId = Tiers(
             id: newId,
@@ -522,9 +522,9 @@ final class ImportSessionViewModel {
         // 3. Reload allTiers
         allTiers = txRepo.fetchTiers()
         let final = allTiers.first(where: { $0.id == newId }) ?? withId
-        // 4. Assign la row + cascade
+        // 4. Assign the row + cascade
         let cascaded = assign(rowId: rowId, payee: final, cascade: cascade)
-        // 5. Trace le tier créé sur la row source → nettoyage possible si annulation.
+        // 5. Track the created payee against the source row → can be cleaned up on cancel.
         if let idx = session.rows.firstIndex(where: { $0.id == rowId }) {
             session.rows[idx].createdPayeeId = newId
             scheduleSave()
@@ -532,24 +532,24 @@ final class ImportSessionViewModel {
         return cascaded
     }
 
-    /// Ids uniques des tiers CRÉÉS pendant cette session (via « Créer un nouveau tier »).
-    /// Sert au nettoyage optionnel à l'annulation.
+    /// Unique ids of the payees CREATED during this session (via "Create a new payee").
+    /// Used for optional cleanup on cancel.
     var createdPayeeIds: [Int] {
         Array(Set(session.rows.compactMap { $0.createdPayeeId }))
     }
 
     var createdPayeeCount: Int { createdPayeeIds.count }
 
-    /// Variante de `assign` qui pousse aussi des champs supplémentaires sur le payee existant
-    /// (mise à jour via TierUpdateSheet). Cascade aux rows similaires.
+    /// Variant of `assign` that also pushes extra fields onto the existing payee
+    /// (update via TierUpdateSheet). Cascades to similar rows.
     @discardableResult
     func assignAndUpdatePayee(rowId: UUID, payee: Tiers, updatedPayee: Tiers, cascade: Bool = true) -> Int {
-        // 1. Persiste le payee mis à jour
+        // 1. Persist the updated payee
         _ = txRepo.updatePayeeFull(updatedPayee)
-        // 2. Recharge allTiers pour que la suite voie la nouvelle version
+        // 2. Reload allTiers so the rest of the flow sees the new version
         allTiers = txRepo.fetchTiers()
         let resolved = allTiers.first(where: { $0.id == payee.id }) ?? updatedPayee
-        // 3. Délègue à assign avec le payee à jour
+        // 3. Delegate to assign with the up-to-date payee
         return assign(rowId: rowId, payee: resolved, cascade: cascade)
     }
 
@@ -567,7 +567,7 @@ final class ImportSessionViewModel {
 
     // MARK: - Persistance
 
-    /// Debounced save : si plusieurs actions arrivent en rafale, on n'écrit qu'une fois après 500ms.
+    /// Debounced save: if several actions arrive in a burst, write only once after 500ms.
     private func scheduleSave() {
         saveTask?.cancel()
         let s = session
@@ -583,7 +583,7 @@ final class ImportSessionViewModel {
         }
     }
 
-    /// Force la sauvegarde immédiate (à appeler avant un commit ou un dismiss critique).
+    /// Forces an immediate save (call before a commit or a critical dismiss).
     func saveNow() {
         saveTask?.cancel()
         session.updatedAt = Date()
@@ -592,17 +592,17 @@ final class ImportSessionViewModel {
 
     // MARK: - Commit
 
-    /// Insère toutes les rows ready (confirmed / manuallySet) dans la table `transactions`.
-    /// Crée les payees pour les suggestions confirmées. Annule la session à la fin (status=completed).
+    /// Inserts every ready row (confirmed / manuallySet) into the `transactions` table.
+    /// Creates payees for confirmed suggestions. Cancels the session at the end (status=completed).
     func commit() async {
         guard let accountId = session.accountId else {
             lastError = "Session sans compte cible."
             return
         }
         let resolver: TierResolver? = {
-            // Gate historique : on n'écrit un payee suggéré que si le moteur est prêt
-            // (TierResolver lui-même n'a plus besoin de l'engine depuis le cleanup
-            // du chemin resolve() mort — cf. TierResolver.swift).
+            // Legacy gate: we only write a suggested payee if the engine is ready
+            // (TierResolver itself no longer needs the engine since the cleanup
+            // of the dead resolve() path — see TierResolver.swift).
             guard EngineBootstrap.shared.engine != nil else { return nil }
             return TierResolver(dbPath: DatabaseManager.shared.sqliteURL().path)
         }()
@@ -610,18 +610,18 @@ final class ImportSessionViewModel {
         var summary = ImportCommitSummary()
         var pendingInserts: [PendingTransaction] = []
         var rowToInsertIndex: [UUID: Int] = [:]
-        /// Cache intra-batch des payees créés/résolus par engine_merchant_id.
-        /// Évite de recréer N payees Apple/Grab quand N lignes partagent le même canonical.
+        /// Intra-batch cache of payees created/resolved by engine_merchant_id.
+        /// Avoids recreating N Apple/Grab payees when N lines share the same canonical.
         var resolvedByEngineId: [String: Int] = [:]
-        /// Cache intra-batch par nom normalisé (fallback quand engine_id n'est pas connu).
+        // Intra-batch cache by normalized name (fallback when engine_id isn't known).
         var resolvedByNameKey: [String: Int] = [:]
 
-        // Helper local : cherche un payee existant côté app par engine_id ou par nom.
-        // Backfill engine_merchant_id si on match par nom (pour les futurs imports).
+        // Local helper: looks up an existing payee on the app side by engine_id or by name.
+        // Backfills engine_merchant_id when matched by name (so future imports find it directly).
         func findOrLink(engineMerchantId eid: String, canonicalName: String) -> Int? {
             // 1) Cache intra-batch
             if let pid = resolvedByEngineId[eid] { return pid }
-            // 2) Match par engine_merchant_id dans allTiers
+            // 2) Match by engine_merchant_id in allTiers
             if let existing = allTiers.first(where: { $0.engineMerchantId == eid }) {
                 resolvedByEngineId[eid] = existing.id
                 return existing.id
@@ -632,8 +632,8 @@ final class ImportSessionViewModel {
             if let existing = allTiers.first(where: {
                 $0.name.folding(options: .diacriticInsensitive, locale: .current).lowercased() == needle
             }) {
-                // Backfill : on enregistre l'engine_id sur ce tier existant pour
-                // que les prochains imports le retrouvent directement (étape 2).
+                // Backfill: record the engine_id on this existing payee so
+                // future imports find it directly (step 2).
                 var updated = existing
                 updated.engineMerchantId = eid
                 _ = txRepo.updatePayeeFull(updated)
@@ -644,13 +644,13 @@ final class ImportSessionViewModel {
             return nil
         }
 
-        // Helper local : même principe que findOrLink mais pour les contacts P2P,
-        // qui n'ont pas d'engine_merchant_id (le moteur détecte QUE c'est un virement
-        // nominatif, jamais QUI). Sans ce lookup, "Papa" recevait un nouveau tier à
-        // chaque import. Restreint à tierType == .contact pour ne jamais accrocher
-        // un homonyme marchand (ex. une boutique qui porterait le même nom).
-        // Préfixe "contact:" pour ne pas partager le namespace de resolvedByNameKey
-        // avec les noms de marchands (needle identique possible entre les deux).
+        // Local helper: same principle as findOrLink but for P2P contacts,
+        // who have no engine_merchant_id (the engine only detects THAT it's a
+        // named transfer, never WHO). Without this lookup, "Dad" got a new payee on
+        // every import. Restricted to tierType == .contact so it never latches onto
+        // a merchant homonym (e.g. a shop sharing the same name).
+        // "contact:" prefix so it doesn't share the namespace of resolvedByNameKey
+        // with merchant names (an identical needle is possible between the two).
         func findContactByName(_ name: String) -> Int? {
             let needle = name.folding(options: .diacriticInsensitive, locale: .current).lowercased()
             let cacheKey = "contact:" + needle
@@ -668,20 +668,20 @@ final class ImportSessionViewModel {
         for row in session.rows where row.userAction == .confirmed || row.userAction == .manuallySet {
             var payeeId: Int? = row.assignedPayeeId
 
-            // Si .confirmed sur une suggestion, créer le payee à la volée
+            // If .confirmed on a suggestion, create the payee on the fly
             if payeeId == nil, row.userAction == .confirmed {
                 switch row.resolution {
                 case .matched(let pid, let eid, _, _, _):
-                    // Le snapshot disait .matched : on REUTILISE le payee_id capturé.
-                    // Plus la safety net via findOrLink (cache intra-batch).
+                    // The snapshot said .matched: REUSE the captured payee_id.
+                    // Plus the safety net via findOrLink (intra-batch cache).
                     if let pid {
                         payeeId = pid
                     } else if let eid {
                         payeeId = findOrLink(engineMerchantId: eid, canonicalName: "")
                     }
                 case .suggestCreate(let eid, let displayName, let city, let country, _):
-                    // Re-vérifie d'abord côté app + cache batch (rows similaires
-                    // précédentes ont peut-être déjà créé le payee dans CE commit).
+                    // Re-check first on the app side + the batch cache (similar
+                    // previous rows may already have created the payee in THIS commit).
                     if let pid = findOrLink(engineMerchantId: eid, canonicalName: displayName) {
                         payeeId = pid
                     } else if let resolver {
@@ -703,15 +703,15 @@ final class ImportSessionViewModel {
                         }
                     }
                 case .suggestContact(let name, _):
-                    // Lie d'abord à un contact déjà créé (même personne détectée sur un
-                    // import précédent, ou sur une row précédente de CE commit) avant
-                    // d'en créer un nouveau — sinon "Papa" se dupliquait à chaque import.
+                    // Link first to an already-created contact (same person detected on a
+                    // previous import, or on a previous row of THIS commit) before
+                    // creating a new one — otherwise "Dad" got duplicated on every import.
                     if let existingId = findContactByName(name) {
                         payeeId = existingId
                     } else if let newId = txRepo.addTiersAndGetId(name: name, regex: "", categoryId: nil) {
-                        // Marquer comme custom (personne) sans re-fetcher toute la table.
-                        // tierType: .contact — sans quoi le payee gardait le défaut .merchant
-                        // (mauvaise icône de repli, mauvais tri dans Données).
+                        // Mark it as custom (a person) without re-fetching the whole table.
+                        // tierType: .contact — otherwise the payee kept the .merchant default
+                        // (wrong fallback icon, wrong sort order in Data).
                         let contactTiers = Tiers(
                             id: newId, name: name, regex: nil,
                             categoryId: nil, linkedCompteId: nil,
@@ -727,7 +727,7 @@ final class ImportSessionViewModel {
                         resolvedByNameKey["contact:" + needle] = newId
                     }
                 case .systemOperation, .needsManualPick, .pending:
-                    // payee_id reste nil — la transaction sera insérée sans tier
+                    // payee_id stays nil — the transaction is inserted without a payee
                     break
                 }
             }
@@ -750,15 +750,15 @@ final class ImportSessionViewModel {
         let result = txRepo.insertTransactionsDetailed(pendingInserts)
         summary.rowsConfirmed = result.insertedCount
 
-        // ⚠️ L'indice de moyen de paiement déduit du libellé (CB, VIREMENT…)
-        // n'alimente plus `payment_type_id` mais la métadonnée qui porte le rôle
-        // correspondant — et SEULEMENT si l'utilisateur en a créé une.
+        // ⚠️ The payment-method hint inferred from the label (CB, TRANSFER…)
+        // no longer feeds `payment_type_id` but the metadata that carries the
+        // matching role — and ONLY if the user created one.
         //
-        // Sans clé portant ce rôle, l'indice est simplement ignoré : on ne crée
-        // pas une métadonnée dans le dos de l'utilisateur. C'est ce qui permet à
-        // une base neuve de n'avoir aucune métadonnée tant qu'il n'en veut pas,
-        // tout en préservant le comportement des bases migrées (où la clé
-        // « Mode de paiement » a été recréée à partir des données existantes).
+        // With no key carrying this role, the hint is simply ignored: we don't
+        // create a metadata entry behind the user's back. This is what lets
+        // a fresh database have no metadata at all until the user wants one,
+        // while preserving the behavior of migrated databases (where the
+        // "Payment method" key was recreated from existing data).
         let metadataRepo = TransactionMetadataRepository()
         if let paymentKeyId = metadataRepo.key(withRole: .paymentMethod)?.id {
             for row in session.rows {
@@ -768,7 +768,7 @@ final class ImportSessionViewModel {
             }
         }
 
-        // Compte les skipped
+        // Count the skipped ones
         summary.rowsSkipped = session.rows.filter { $0.userAction == .skipped }.count
 
         // Marque session completed + annule notif
@@ -781,10 +781,10 @@ final class ImportSessionViewModel {
         commitSummary = summary
     }
 
-    /// Annule la session (status = cancelled, supprime de la DB).
-    /// - Parameter deletingCreatedPayees: si true, supprime aussi les tiers créés pendant
-    ///   la session (nettoyage des tiers fantômes). Les transactions éventuellement liées
-    ///   sont désassignées (SET NULL), jamais perdues.
+    /// Cancels the session (status = cancelled, removed from the DB).
+    /// - Parameter deletingCreatedPayees: if true, also deletes the payees created
+    ///   during the session (cleanup of ghost payees). Any linked transactions
+    ///   are unassigned (SET NULL), never lost.
     func cancel(deletingCreatedPayees: Bool = false) {
         if deletingCreatedPayees {
             let ids = Set(createdPayeeIds)
@@ -802,7 +802,7 @@ struct ImportCommitSummary: Equatable {
     var rowsSkipped: Int = 0
 }
 
-/// Info éphémère sur la dernière action cascadée — affichée comme toast dans l'UI.
+/// Ephemeral info about the last cascaded action — shown as a toast in the UI.
 struct BulkApplyInfo: Equatable, Identifiable {
     var id: Date { timestamp }
     let action: ImportUserAction

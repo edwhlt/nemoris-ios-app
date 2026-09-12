@@ -1,23 +1,23 @@
 import Foundation
 
-// MARK: - Relevés structurés : CAMT.053 (ISO 20022) et OFX / QFX
+// MARK: - Structured statements: CAMT.053 (ISO 20022) and OFX / QFX
 //
-// Moteur PUR — testable via `run_import_pipeline_tests.sh`.
+// PURE engine — testable via `run_import_pipeline_tests.sh`.
 //
-// ─── Pourquoi ces formats ne passent JAMAIS par l'IA ────────────────────────
+// ─── Why these formats NEVER go through AI ──────────────────────────────────
 //
-// Contrairement à un PDF ou à une capture, ces fichiers NOMMENT leurs champs :
-// le montant est dans `<Amt>`, le sens dans `<CdtDbtInd>`, la date dans
-// `<BookgDt>`. Il n'y a rien à interpréter. Les envoyer à un modèle serait à la
-// fois plus lent, plus coûteux et MOINS fiable que de lire les balises — et
-// introduirait une extraction probabiliste là où la donnée est exacte.
+// Unlike a PDF or a screenshot, these files NAME their fields:
+// the amount is in `<Amt>`, the direction in `<CdtDbtInd>`, the date in
+// `<BookgDt>`. There's nothing to interpret. Sending them to a model would be
+// both slower, costlier and LESS reliable than reading the tags — and
+// would introduce a probabilistic extraction where the data is exact.
 //
-// ─── Deux formats, un seul lecteur ─────────────────────────────────────────
+// ─── Two formats, one reader ────────────────────────────────────────────────
 //
-// CAMT.053 est du XML strict. OFX 1.x est du SGML à balises non fermées, OFX
-// 2.0 du XML. Ils partagent le même rôle (un relevé d'opérations exporté par la
-// banque) et la même sortie, donc un seul point d'entrée qui reconnaît le
-// dialecte plutôt que deux chemins que rien ne relierait.
+// CAMT.053 is strict XML. OFX 1.x is SGML with unclosed tags, OFX
+// 2.0 is XML. They share the same role (a statement of operations exported by
+// the bank) and the same output, so a single entry point that recognizes
+// the dialect rather than two paths nothing would tie together.
 
 struct LedgerXMLError: Error, Equatable {
     let reason: String
@@ -31,7 +31,7 @@ enum LedgerXMLReader {
         case ofx
     }
 
-    // MARK: - Point d'entrée
+    // MARK: - Entry point
 
     static func parse(data: Data) -> Result<[ImportPayload], LedgerXMLError> {
         guard let text = ImportFormatSniffer.decodeText(data) else {
@@ -50,15 +50,15 @@ enum LedgerXMLReader {
         }
     }
 
-    /// Reconnaissance par le contenu, jamais par l'extension : une banque
-    /// exporte volontiers un OFX nommé `.xml` et un CAMT nommé `.txt`.
+    /// Recognition by content, never by extension: a bank happily
+    /// exports an OFX named `.xml` and a CAMT named `.txt`.
     static func detectDialect(_ text: String) -> Dialect? {
         let head = String(text.prefix(4096)).uppercased()
         if head.contains("OFXHEADER") || head.contains("<OFX>") || head.contains("<OFX ") {
             return .ofx
         }
-        // `BkToCstmrStmt` est la racine propre au relevé (camt.053) ; le second
-        // marqueur couvre les fichiers dont l'espace de noms porte la version.
+        // `BkToCstmrStmt` is the root specific to a statement (camt.053); the second
+        // marker covers files whose namespace carries the version.
         if head.contains("BKTOCSTMRSTMT") || head.contains("CAMT.053") { return .camt053 }
         return nil
     }
@@ -66,14 +66,14 @@ enum LedgerXMLReader {
 
 // MARK: - CAMT.053 (ISO 20022)
 
-/// Structure exploitée :
-/// `Document / BkToCstmrStmt / Stmt / Ntry` — une écriture par `Ntry`.
+/// Structure used:
+/// `Document / BkToCstmrStmt / Stmt / Ntry` — one entry per `Ntry`.
 ///
-/// Champs retenus par écriture :
-///   • `Amt`         → montant, TOUJOURS positif (attribut `Ccy` pour la devise)
-///   • `CdtDbtInd`   → `CRDT` (crédit) ou `DBIT` (débit) — c'est LUI qui porte le signe
-///   • `BookgDt/Dt`  → date comptable, sinon `ValDt/Dt` (date de valeur)
-///   • libellé       → `RmtInf/Ustrd`, sinon `AddtlNtryInf`, sinon le nom de la contrepartie
+/// Fields kept per entry:
+///   • `Amt`         → amount, ALWAYS positive (`Ccy` attribute for the currency)
+///   • `CdtDbtInd`   → `CRDT` (credit) or `DBIT` (debit) — THIS carries the sign
+///   • `BookgDt/Dt`  → booking date, else `ValDt/Dt` (value date)
+///   • label         → `RmtInf/Ustrd`, else `AddtlNtryInf`, else the counterparty's name
 enum CAMT053Parser {
 
     static func parse(_ text: String) -> Result<[ImportPayload], LedgerXMLError> {
@@ -93,10 +93,10 @@ enum CAMT053Parser {
     private final class Delegate: NSObject, XMLParserDelegate {
         var payloads: [ImportPayload] = []
 
-        /// Pile des éléments ouverts : c'est elle qui permet de distinguer un
-        /// `<Nm>` de contrepartie d'un `<Nm>` de titulaire de compte, ou une
-        /// date d'écriture d'une date d'en-tête de relevé — les mêmes noms de
-        /// balise servent à plusieurs endroits de l'arbre.
+        /// Stack of open elements: this is what lets us tell apart a
+        /// counterparty's `<Nm>` from an account holder's `<Nm>`, or an
+        /// entry date from a statement header date — the same tag names
+        /// are used in several places in the tree.
         private var path: [String] = []
         private var text = ""
 
@@ -122,7 +122,7 @@ enum CAMT053Parser {
             path.append(element)
             text = ""
             if element == "Ntry" { entry = Entry() }
-            // La devise est un ATTRIBUT du montant, pas un élément.
+            // The currency is an ATTRIBUTE of the amount, not an element.
             if element == "Amt", insideEntry, let ccy = attributes["Ccy"] {
                 entry.currency = ccy
             }
@@ -145,15 +145,15 @@ enum CAMT053Parser {
 
             switch element {
             case "Amt":
-                // ⚠️ Uniquement le montant de l'écriture elle-même. Une
-                // écriture porte souvent des `<Amt>` imbriqués dans ses détails
-                // (montant d'origine avant change, frais) : les prendre
-                // remplacerait le montant réel par le dernier vu.
+                // ⚠️ Only the entry's OWN amount. An entry often carries
+                // `<Amt>`s nested inside its details (original amount before FX,
+                // fees): taking them would replace the real amount with the
+                // last one seen.
                 if path.suffix(2).first == "Ntry" { entry.amount = Double(value) }
             case "CdtDbtInd":
                 if path.suffix(2).first == "Ntry" { entry.isCredit = (value.uppercased() == "CRDT") }
             case "Dt", "DtTm":
-                // ISO 8601 : on ne garde que la partie date.
+                // ISO 8601: keep only the date part.
                 let day = String(value.prefix(10))
                 if path.contains("BookgDt") { entry.bookingDate = day }
                 else if path.contains("ValDt") { entry.valueDate = day }
@@ -162,8 +162,8 @@ enum CAMT053Parser {
             case "AddtlNtryInf":
                 if !value.isEmpty { entry.additionalInfo = value }
             case "Nm":
-                // Nom de la contrepartie : celui du créancier sur un débit,
-                // celui du débiteur sur un crédit.
+                // Counterparty name: the creditor's on a debit,
+                // the debtor's on a credit.
                 if path.contains("RltdPties"), entry.counterparty == nil, !value.isEmpty {
                     entry.counterparty = value
                 }
@@ -182,9 +182,9 @@ enum CAMT053Parser {
                   let amount = entry.amount,
                   let date = entry.bookingDate ?? entry.valueDate else { return }
 
-            // Le signe vient de `CdtDbtInd`, jamais du nombre : CAMT écrit
-            // TOUJOURS un montant positif. Sans indicateur, on retient la
-            // convention par défaut de l'app (dépense) plutôt que d'inventer.
+            // The sign comes from `CdtDbtInd`, never from the number: CAMT ALWAYS
+            // writes a positive amount. With no indicator, fall back to the
+            // app's default convention (expense) rather than inventing one.
             let isCredit = entry.isCredit ?? false
             let label = [entry.remittance.joined(separator: " "),
                          entry.additionalInfo,
@@ -198,8 +198,8 @@ enum CAMT053Parser {
                 amount: isCredit ? abs(amount) : -abs(amount),
                 label: label.trimmingCharacters(in: .whitespacesAndNewlines),
                 paymentTypeHint: nil,
-                // Le sens est DÉCLARÉ par le format, pas déduit d'un libellé :
-                // c'est l'information la plus sûre qu'on puisse avoir.
+                // The direction is DECLARED by the format, not inferred from a label:
+                // it's the most reliable information we can have.
                 isSignExplicit: true,
                 confidence: 1.0
             )))
@@ -209,10 +209,10 @@ enum CAMT053Parser {
 
 // MARK: - OFX / QFX
 
-/// OFX 1.x n'est pas du XML : ses balises ne sont pas fermées
-/// (`<TRNAMT>-42.50` suivi d'une nouvelle ligne). OFX 2.0 l'est. Un tokenizer
-/// tolérant absorbe les deux — et rien d'autre ne le ferait, `XMLParser`
-/// rejetant en bloc le dialecte 1.x, qui reste le plus répandu.
+/// OFX 1.x isn't XML: its tags aren't closed
+/// (`<TRNAMT>-42.50` followed by a newline). OFX 2.0 is. A tolerant
+/// tokenizer absorbs both — and nothing else would, `XMLParser`
+/// rejecting the 1.x dialect outright, which remains the most common.
 enum OFXParser {
 
     static func parse(_ text: String) -> Result<[ImportPayload], LedgerXMLError> {
@@ -233,7 +233,7 @@ enum OFXParser {
     enum Token: Equatable {
         case open(String)
         case close(String)
-        /// Balise portant une valeur sur la même ligne : `<TRNAMT>-42.50`.
+        /// A tag carrying a value on the same line: `<TRNAMT>-42.50`.
         case value(tag: String, text: String)
     }
 
@@ -246,8 +246,8 @@ enum OFXParser {
             let rawTag = String(text[text.index(after: open)..<close])
             index = text.index(after: close)
 
-            // En-têtes SGML et déclarations XML — ni l'un ni l'autre n'est une
-            // balise de données.
+            // SGML headers and XML declarations — neither is a
+            // data tag.
             if rawTag.hasPrefix("?") || rawTag.hasPrefix("!") { continue }
 
             if rawTag.hasPrefix("/") {
@@ -257,8 +257,8 @@ enum OFXParser {
             let tag = rawTag
                 .split(separator: " ").first.map(String.init)?.uppercased() ?? rawTag.uppercased()
 
-            // Texte jusqu'à la balise suivante : c'est la valeur en OFX 1.x, et
-            // c'est aussi la valeur en OFX 2.0, simplement suivie de `</TAG>`.
+            // Text up to the next tag: that's the value in OFX 1.x, and
+            // it's also the value in OFX 2.0, simply followed by `</TAG>`.
             let nextOpen = text[index...].firstIndex(of: "<") ?? text.endIndex
             let value = text[index..<nextOpen].trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -270,13 +270,13 @@ enum OFXParser {
             tokens.append(.value(tag: tag, text: value))
             index = nextOpen
 
-            // ⚠️ En OFX 2.0 (XML bien formé), la valeur est suivie de sa balise
-            // fermante. Il FAUT la consommer ici : émise telle quelle, elle
-            // arriverait à `blocks` comme la fermeture d'un bloc jamais ouvert
-            // — le compteur de profondeur passait à -1 et le bloc courant était
-            // soldé au premier champ. Symptômes mesurés : un relevé OFX 2.0 ne
-            // rendait AUCUNE opération, et un OFX de courtier perdait tous les
-            // ordres dont la date est dans un `<INVTRAN>` imbriqué.
+            // ⚠️ In OFX 2.0 (well-formed XML), the value is followed by its
+            // closing tag. It MUST be consumed here: passed through as-is, it
+            // would reach `blocks` as the close of a block never opened
+            // — the depth counter would go to -1 and the current block would be
+            // settled at the first field. Symptoms measured: an OFX 2.0 statement
+            // returned NO operations at all, and a broker's OFX lost every
+            // order whose date is inside a nested `<INVTRAN>`.
             if let closeOpen = text[index...].firstIndex(of: "<"),
                let closeEnd = text[closeOpen...].firstIndex(of: ">") {
                 let closing = String(text[text.index(after: closeOpen)..<closeEnd])
@@ -289,7 +289,7 @@ enum OFXParser {
         return tokens
     }
 
-    // MARK: Opérations bancaires
+    // MARK: Bank operations
 
     /// `<STMTTRN>` : TRNTYPE, DTPOSTED, TRNAMT, NAME / MEMO, FITID.
     static func bankTransactions(_ tokens: [Token]) -> [ImportPayload] {
@@ -300,9 +300,9 @@ enum OFXParser {
                   let rawDate = fields["DTPOSTED"],
                   let date = normalizedDate(rawDate) else { return nil }
 
-            // NAME est la contrepartie, MEMO le détail libre. Le premier est
-            // plus proche du libellé attendu ; on complète avec le second quand
-            // il apporte autre chose.
+            // NAME is the counterparty, MEMO the free-text detail. The first is
+            // closer to the expected label; we append the second when
+            // it adds something else.
             let name = fields["NAME"] ?? ""
             let memo = fields["MEMO"] ?? ""
             let label: String
@@ -313,9 +313,9 @@ enum OFXParser {
 
             return .transaction(ExtractedBankTransaction(
                 date: date,
-                // ⚠️ En OFX le signe est PORTÉ PAR LE NOMBRE (contrairement à
-                // CAMT) : un débit est déjà négatif. Le forcer d'après TRNTYPE
-                // inverserait les remboursements, qui sont des `DEBIT` positifs.
+                // ⚠️ In OFX the sign is CARRIED BY THE NUMBER (unlike
+                // CAMT): a debit is already negative. Forcing it based on TRNTYPE
+                // would flip refunds, which are positive `DEBIT`s.
                 amount: amount,
                 label: label,
                 paymentTypeHint: paymentHint(fields["TRNTYPE"]),
@@ -325,7 +325,7 @@ enum OFXParser {
         }
     }
 
-    /// Ordres de bourse — un OFX de courtier porte un `INVSTMTMSGSRSV1`.
+    /// Stock market orders — a broker's OFX carries an `INVSTMTMSGSRSV1`.
     static func investmentOrders(_ tokens: [Token]) -> [ImportPayload] {
         var results: [ImportPayload] = []
 
@@ -335,9 +335,9 @@ enum OFXParser {
                       let date = normalizedDate(rawDate) else { continue }
                 let quantity = fields["UNITS"].flatMap(Double.init).map(abs) ?? 0
                 let price = fields["UNITPRICE"].flatMap(Double.init) ?? 0
-                // Un dividende n'a ni quantité ni cours : c'est le TOTAL qui
-                // porte l'information, et l'exiger comme les autres ferait
-                // disparaître toutes les lignes de revenu.
+                // A dividend has neither quantity nor price: it's the TOTAL that
+                // carries the information, and requiring it like the others would
+                // make every income line disappear.
                 let total = fields["TOTAL"].flatMap(Double.init).map(abs) ?? 0
                 guard quantity > 0 || total > 0 else { continue }
 
@@ -371,14 +371,14 @@ enum OFXParser {
         return results
     }
 
-    // MARK: Utilitaires
+    // MARK: Utilities
 
-    /// Champs à plat d'un bloc nommé, imbrications comprises.
+    /// Flat fields of a named block, nesting included.
     ///
-    /// ⚠️ Les blocs OFX sont emboîtés (`<BUYSTOCK><INVBUY><SECID><UNIQUEID>`),
-    /// et les niveaux intermédiaires varient d'un producteur à l'autre. On
-    /// aplatit donc tout le sous-arbre jusqu'à la fermeture du bloc plutôt que
-    /// de coder un chemin exact qui casserait au premier export atypique.
+    /// ⚠️ OFX blocks are nested (`<BUYSTOCK><INVBUY><SECID><UNIQUEID>`),
+    /// and intermediate levels vary from one producer to another. So we
+    /// flatten the whole subtree until the block closes rather than
+    /// hardcode an exact path that would break on the first atypical export.
     static func blocks(named target: String, in tokens: [Token]) -> [[String: String]] {
         var results: [[String: String]] = []
         var current: [String: String]?
@@ -399,8 +399,8 @@ enum OFXParser {
                     current = nil
                 } else if current != nil {
                     depth -= 1
-                    // Fermeture non appariée d'un bloc frère en SGML : on solde
-                    // le bloc courant plutôt que d'absorber la suite du fichier.
+                    // Unmatched close of a sibling block in SGML: settle
+                    // the current block rather than absorb the rest of the file.
                     if depth < 0 {
                         if let fields = current, !fields.isEmpty { results.append(fields) }
                         current = nil
@@ -408,8 +408,8 @@ enum OFXParser {
                     }
                 }
             case .value(let tag, let text):
-                // Première valeur gagnante : sur un bloc imbriqué, le champ du
-                // niveau extérieur est le plus spécifique.
+                // First value wins: on a nested block, the outer
+                // level's field is the more specific one.
                 if current != nil, current?[tag] == nil { current?[tag] = text }
             }
         }

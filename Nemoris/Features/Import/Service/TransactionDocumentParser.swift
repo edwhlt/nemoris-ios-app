@@ -4,35 +4,35 @@ import PDFKit
 import FoundationModels
 #endif
 
-/// Extraction d'opérations bancaires depuis un PDF, une capture d'écran ou un
-/// texte — le pendant de `InvestmentPDFParser` pour le module Transactions.
+/// Extracts bank operations from a PDF, a screenshot, or
+/// text — the counterpart of `InvestmentPDFParser` for the Transactions module.
 ///
-/// **Pourquoi une classe distincte du parseur d'investissements :** ce qu'on
-/// cherche n'a rien à voir (date + montant + libellé contre ISIN + quantité +
-/// cours), le schéma guidé et le prompt diffèrent entièrement, et l'aval est
-/// une `ImportSession` et non des ordres. En revanche tout ce qui est
-/// GÉNÉRIQUE — sniffing du format par les octets, OCR Vision, extraction PDF,
-/// découpage en blocs — est réutilisé tel quel depuis `InvestmentPDFParser`
-/// plutôt que dupliqué.
+/// **Why a class separate from the investments parser:** what we're
+/// looking for has nothing in common (date + amount + label versus ISIN +
+/// quantity + price), the guided schema and the prompt differ entirely, and
+/// the output is an `ImportSession` rather than orders. On the other hand,
+/// everything that is GENERIC — byte-based format sniffing, Vision OCR, PDF
+/// extraction, chunking into blocks — is reused as-is from
+/// `InvestmentPDFParser` rather than duplicated.
 ///
-/// **Trois étages par unité**, chacun rattrapant l'échec du précédent :
-///   1. génération guidée `@Generable` (Foundation Models, iOS/macOS 26+) ;
-///   2. génération JSON via `AIEnrichmentBackend.completeText` — donc aussi
-///      un serveur local configuré, pas seulement Apple ;
-///   3. `BankStatementExtractor`, déterministe, exécuté SYSTÉMATIQUEMENT.
+/// **Three stages per unit**, each catching the previous one's failure:
+///   1. `@Generable` guided generation (Foundation Models, iOS/macOS 26+);
+///   2. JSON generation via `AIEnrichmentBackend.completeText` — so also
+///      a configured local server, not just Apple's;
+///   3. `BankStatementExtractor`, deterministic, run SYSTEMATICALLY.
 ///
-/// L'étage 3 n'est pas qu'un repli : il fait autorité sur la date et le
-/// montant. Un petit modèle recopie facilement une ligne sur l'autre dans un
-/// OCR en colonnes, là où l'ancrage déterministe lit les champs à leur place.
+/// Stage 3 isn't just a fallback: it's the authority on date and
+/// amount. A small model can easily copy one line's data onto another in a
+/// column-based OCR, where deterministic anchoring reads fields in their place.
 @MainActor
 final class TransactionDocumentParser {
 
     static let shared = TransactionDocumentParser()
 
-    /// Type de source partagé avec l'import d'investissements.
+    /// Source type shared with the investments import.
     typealias DocumentSource = ImportDocumentSource
 
-    /// Résultat de l'analyse d'une unité (page PDF, capture, bloc de texte).
+    /// Result of analyzing one unit (PDF page, screenshot, text block).
     struct UnitResult: Identifiable {
         let id = UUID()
         let unitNumber: Int
@@ -40,41 +40,41 @@ final class TransactionDocumentParser {
         let rawText: String
         var transactions: [ExtractedBankTransaction]
         var diagnostic: ImportUnitDiagnostic
-        /// Type réel du document — l'enum est partagée avec le module
-        /// Investissements (son préfixe est historique) : elle porte le
-        /// vocabulaire d'affichage « pages / captures / blocs analysés ».
+        /// The document's actual type — the enum is shared with the
+        /// Investments module (its prefix is historical): it carries the
+        /// display vocabulary "pages / screenshots / blocks analyzed".
         var kind: ImportSourceKind
         var usedDeterministicFallback: Bool
     }
 
-    /// Vrai si un backend IA est utilisable. L'extraction fonctionne SANS —
-    /// contrairement à l'import d'investissements, aucun bouton ne doit être
-    /// grisé sur cette base : le moteur déterministe suffit à produire des
-    /// lignes exploitables.
+    /// True if an AI backend is usable. Extraction works WITHOUT it —
+    /// unlike the investments import, no button should be
+    /// grayed out here: the deterministic engine is enough to produce
+    /// usable rows.
     var isAIAvailable: Bool { AIEnrichmentBackend.isAvailable(for: .transactionImport) }
 
-    // MARK: - Analyse d'une unité
+    // MARK: - Analyzing a unit
 
-    /// Interprète UNE unité déjà lue.
+    /// Interprets ONE already-read unit.
     ///
-    /// ⚠️ Ce parseur n'ouvre plus de fichiers et n'orchestre plus de batch :
-    /// la lecture (sniffing, pages PDF, OCR, découpage) appartient à
-    /// `ImportPipeline`, qui la mène en parallèle et la partage avec l'import
-    /// d'investissements. Ne rester QUE l'interprétation est ce qui empêche les
-    /// deux modules de redévelopper chacun leur découpage — ce qu'ils avaient
-    /// fait, avec deux détections de format divergentes.
+    /// ⚠️ This parser no longer opens files or orchestrates a batch:
+    /// reading (sniffing, PDF pages, OCR, chunking) belongs to
+    /// `ImportPipeline`, which runs it in parallel and shares it with the
+    /// investments import. Keeping ONLY the interpretation is what keeps the
+    /// two modules from each redeveloping their own chunking — which they
+    /// used to do, with two diverging format detections.
     func analyze(_ unit: ImportDocumentReader.Unit,
                  unitNumber: Int, sourceName: String) async -> UnitResult {
         let kind = unit.kind
         let text: String
 
         switch unit.content {
-        // ─── L'unité EST une image et un modèle sait la lire ────────────────
-        // On la lui passe telle quelle : la mise en page (colonnes, en-têtes de
-        // journée, sous-titres de catégorie) porte du sens que l'OCR aplatit et
-        // qu'aucune heuristique d'ordre de lignes ne reconstitue de façon
-        // générale — elle diffère d'une appli bancaire à l'autre, et on n'a
-        // aucune visibilité sur ce que les utilisateurs importeront.
+        // ─── The unit IS an image and a model can read it ──────────────
+        // We pass it as-is: the layout (columns, day headers,
+        // category subtitles) carries meaning that OCR flattens and
+        // that no line-ordering heuristic reconstructs in a
+        // general way — it differs from one banking app to another, and we have
+        // no visibility into what users will import.
         case .image(let image):
             let raw = await AIEnrichmentBackend.completeText(
                 feature: .transactionImport,
@@ -90,17 +90,17 @@ final class TransactionDocumentParser {
             let lines = Self.parseJSON(raw)
             return UnitResult(
                 unitNumber: unitNumber, sourceName: sourceName,
-                // Le « texte lu » du diagnostic devient la réponse du modèle :
-                // c'est ce qui permet de comprendre une extraction ratée.
+                // The diagnosis's "text read" becomes the model's response:
+                // that's what lets us understand a failed extraction.
                 rawText: raw,
                 transactions: lines,
                 diagnostic: lines.isEmpty ? .nothingRecognized : .extracted,
                 kind: kind, usedDeterministicFallback: false
             )
 
-        // ─── Format structuré : les champs sont NOMMÉS ──────────────────────
-        // Ni modèle, ni extraction déterministe — la donnée est exacte, la
-        // réinterpréter ne pourrait que la dégrader.
+        // ─── Structured format: fields are NAMED ──────────────────────────
+        // Neither model nor deterministic extraction — the data is exact,
+        // reinterpreting it could only degrade it.
         case .records(let payloads):
             let lines: [ExtractedBankTransaction] = payloads.compactMap { payload in
                 if case .transaction(let tx) = payload { return tx }
@@ -113,9 +113,9 @@ final class TransactionDocumentParser {
                 kind: kind, usedDeterministicFallback: true
             )
 
-        // ─── Table à mapper ─────────────────────────────────────────────────
-        // Ne devrait pas arriver ici : les tables passent par l'écran de
-        // mapping des colonnes, en amont. Signalé plutôt qu'ignoré en silence.
+        // ─── A table to map ─────────────────────────────────────────────────
+        // Shouldn't reach here: tables go through the column-mapping
+        // screen upstream. Flagged rather than silently ignored.
         case .grid:
             return UnitResult(unitNumber: unitNumber, sourceName: sourceName, rawText: "",
                               transactions: [],
@@ -139,8 +139,8 @@ final class TransactionDocumentParser {
         }
 
         let (aiLines, aiDiagnostic) = await extractWithAI(text: text)
-        // Moteur pur mais gourmand en regex sur un relevé dense : hors du main
-        // actor, comme l'OCR, pour que l'UI reste vivante pendant l'analyse.
+        // Pure engine but heavy on regex over a dense statement: off the main
+        // actor, like OCR, so the UI stays responsive during analysis.
         let deterministic = await Task.detached(priority: .userInitiated) {
             BankStatementExtractor.extractTransactions(from: text)
         }.value
@@ -151,8 +151,8 @@ final class TransactionDocumentParser {
             return UnitResult(
                 unitNumber: unitNumber, sourceName: sourceName, rawText: text,
                 transactions: merged,
-                // On garde la trace d'un échec IA même quand le déterministe a
-                // sauvé la mise : c'est l'information utile en support.
+                // We keep the trace of an AI failure even when the deterministic
+                // engine saved the day: that's useful information for support.
                 diagnostic: aiDiagnostic.isFailure ? aiDiagnostic : .extracted,
                 kind: kind, usedDeterministicFallback: usedFallback
             )
@@ -165,36 +165,35 @@ final class TransactionDocumentParser {
         )
     }
 
-    // MARK: - Réconciliation
+    // MARK: - Reconciliation
 
-    /// Clé de rapprochement : date + montant au centime, en valeur absolue.
+    /// Matching key: date + amount to the cent, absolute value.
     ///
-    /// Le signe est volontairement HORS de la clé : c'est justement le champ
-    /// que les deux sources peuvent lire différemment (une colonne DÉBIT n'a
-    /// aucun signe, seule la sémantique du libellé ou la mise en page le
-    /// donne). L'inclure ferait échouer le rapprochement au moment précis où
-    /// il sert le plus.
+    /// The sign is deliberately OUTSIDE the key: that's precisely the field
+    /// the two sources can read differently (a DEBIT column carries no
+    /// sign at all, only the label's meaning or the layout gives it). Including
+    /// it would make the matching fail exactly when it matters most.
     private static func matchKey(_ tx: ExtractedBankTransaction) -> String {
         "\(tx.date)|\(Int((abs(tx.amount) * 100).rounded()))"
     }
 
-    /// Fusionne extraction IA et extraction déterministe.
+    /// Merges AI extraction and deterministic extraction.
     ///
-    /// Répartition des autorités :
-    ///   • date et montant → DÉTERMINISTE (il lit les chiffres à leur place) ;
-    ///   • libellé → IA quand elle a vu la même opération (elle recompose
-    ///     mieux un texte OCR éclaté en colonnes) ;
-    ///   • signe → déterministe s'il était EXPLICITE (« - » collé au montant),
-    ///     sinon celui de l'IA, qui voit la mise en page débit/crédit ;
-    ///   • opérations que seule l'IA a vues → ajoutées (formats en prose que
-    ///     l'ancrage date+montant ne peut pas voir).
+    /// Division of authority:
+    ///   • date and amount → DETERMINISTIC (it reads the digits in their place);
+    ///   • label → AI when it saw the same operation (it reconstructs a
+    ///     column-broken OCR text better);
+    ///   • sign → deterministic when it was EXPLICIT ("-" attached to the
+    ///     amount), otherwise the AI's, which sees the debit/credit layout;
+    ///   • operations only AI saw → added (prose formats that
+    ///     date+amount anchoring can't see).
     static func reconcile(ai: [ExtractedBankTransaction],
                           deterministic: [ExtractedBankTransaction]) -> [ExtractedBankTransaction] {
         guard !deterministic.isEmpty else { return ai }
         guard !ai.isEmpty else { return deterministic }
 
-        // Plusieurs opérations peuvent partager la même clé (deux achats du
-        // même montant le même jour) : on consomme dans l'ordre d'apparition.
+        // Several operations can share the same key (two purchases of the
+        // same amount the same day): consume them in order of appearance.
         var pending: [String: [ExtractedBankTransaction]] = [:]
         for line in ai { pending[matchKey(line), default: []].append(line) }
 
@@ -210,7 +209,7 @@ final class TransactionDocumentParser {
                     tx.amount = abs(tx.amount) * (match.amount < 0 ? -1 : 1)
                     tx.isSignExplicit = true
                 }
-                tx.confidence = min(1, tx.confidence + 0.1)   // corroboré par deux sources
+                tx.confidence = min(1, tx.confidence + 0.1)   // corroborated by two sources
             }
             merged.append(tx)
         }
@@ -218,19 +217,19 @@ final class TransactionDocumentParser {
         return merged.sorted { $0.date < $1.date }
     }
 
-    // MARK: - Étages IA
+    // MARK: - AI stages
 
     private func extractWithAI(text: String) async -> ([ExtractedBankTransaction], ImportUnitDiagnostic) {
-        // La fenêtre de contexte du modèle embarqué est étroite : un dépassement
-        // fait échouer l'unité ENTIÈRE, pas seulement la ligne fautive.
+        // The embedded model's context window is narrow: an overflow
+        // fails the WHOLE unit, not just the offending line.
         let payload = String(text.prefix(4000))
 
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *),
-           // ⚠️ Gate par le point de dispatch, PAS par un test direct de
-           // disponibilité : appeler Foundation Models sans cela ferait ignorer
-           // un « serveur local », un « cloud » ou un « désactivée » choisis
-           // pour CETTE fonctionnalité dans les Réglages.
+           // ⚠️ Gated by the dispatch point, NOT by a direct availability
+           // check: calling Foundation Models without this would ignore
+           // a "local server", "cloud" or "disabled" choice made
+           // for THIS feature in Settings.
            AIEnrichmentBackend.usesGuidedGeneration(for: .transactionImport),
            SystemLanguageModel.default.isAvailable {
             let session = LanguageModelSession(instructions: Self.guidedInstructions)
@@ -247,8 +246,8 @@ final class TransactionDocumentParser {
         }
         #endif
 
-        // 2e étage : JSON via le point de dispatch — couvre Foundation Models
-        // en génération libre ET un serveur local compatible OpenAI.
+        // 2nd stage: JSON via the dispatch point — covers Foundation Models
+        // in free-form generation AND an OpenAI-compatible local server.
         guard AIEnrichmentBackend.isAvailable(for: .transactionImport) else {
             return ([], .aiUnavailable)
         }
@@ -263,11 +262,11 @@ final class TransactionDocumentParser {
         return (lines, lines.isEmpty ? .nothingRecognized : .extracted)
     }
 
-    // MARK: - Schéma de génération guidée
+    // MARK: - Guided-generation schema
 
     #if canImport(FoundationModels)
-    /// Schéma imposé au modèle : plus de JSON à réparer, le décodage est
-    /// contraint côté génération.
+    /// Schema imposed on the model: no more JSON to repair, decoding is
+    /// constrained at generation time.
     @available(iOS 26.0, macOS 26.0, *)
     @Generable
     struct AITransactionExtraction {
@@ -302,8 +301,8 @@ final class TransactionDocumentParser {
                 amount: line.isDebit ? -abs(line.amount) : abs(line.amount),
                 label: label,
                 paymentTypeHint: type.isEmpty ? nil : type,
-                // Le modèle a tranché débit/crédit explicitement : c'est une
-                // décision, pas un défaut.
+                // The model decided debit/credit explicitly: that's a
+                // decision, not a defect.
                 isSignExplicit: true,
                 confidence: 0.7
             )
@@ -313,9 +312,9 @@ final class TransactionDocumentParser {
 
     // MARK: - Prompts
 
-    /// Instructions de la génération guidée — volontairement COURTES : le
-    /// schéma porte déjà la structure, et chaque token d'instruction est pris
-    /// sur la fenêtre de contexte disponible pour le document lui-même.
+    /// Guided-generation instructions — deliberately SHORT: the
+    /// schema already carries the structure, and every instruction token is
+    /// taken from the context window available to the document itself.
     static let guidedInstructions = """
     Tu extrais les opérations d'un relevé de compte bancaire, d'une capture d'écran d'application bancaire ou d'un export de transactions (le texte peut venir d'un OCR, donc être en colonne et mal aligné).
 
@@ -325,16 +324,16 @@ final class TransactionDocumentParser {
     N'invente jamais une opération : n'extrais que ce qui est écrit.
     """
 
-    /// Variante JSON pour le 2e étage (génération libre / serveur local).
-    /// Ici le sens est porté par le SIGNE du montant : un booléen mal typé par
-    /// un petit modèle (« "true" » en chaîne) est une source d'échec de plus,
-    /// alors qu'un nombre négatif est sans ambiguïté.
-    /// ⚠️ La date du jour est INJECTÉE dans les instructions. Une capture
-    /// d'appli bancaire n'affiche presque jamais l'année : sans repère, le
-    /// modèle rend des formes comme « 22-07-00 » et toutes les lignes étaient
-    /// rejetées — « aucune opération reconnue » avec pourtant un JSON correct
-    /// sous les yeux. `BankStatementExtractor.normalizeDate` rattrape ce qui
-    /// passe malgré tout, mais autant donner au modèle de quoi bien répondre.
+    /// JSON variant for the 2nd stage (free-form generation / local server).
+    /// Here the meaning is carried by the amount's SIGN: a boolean mistyped by
+    /// a small model ("\"true\"" as a string) is one more failure source,
+    /// whereas a negative number is unambiguous.
+    /// ⚠️ Today's date is INJECTED into the instructions. A banking app
+    /// screenshot almost never shows the year: without a reference, the
+    /// model produces forms like "22-07-00" and every line got
+    /// rejected — "no operations recognized" with a correct JSON right
+    /// there. `BankStatementExtractor.normalizeDate` catches what still
+    /// gets through, but it's still better to give the model what it needs to answer well.
     static var jsonInstructions: String {
         let today = isoDateOnly.string(from: Date())
         return baseJSONInstructions + """
@@ -363,7 +362,7 @@ final class TransactionDocumentParser {
     Règles : le montant est NÉGATIF quand l'argent sort du compte (achat, prélèvement, retrait) et POSITIF quand il entre (salaire, virement reçu, remboursement). Le séparateur décimal est le point. payment_type vaut CB, VIREMENT, PRELEVEMENT, RETRAIT, CHEQUE ou une chaîne vide.
     """
 
-    /// Formateur de date locale (yyyy-MM-dd) pour l'injection dans le prompt.
+    /// Local date formatter (yyyy-MM-dd) for injection into the prompt.
     private static let isoDateOnly: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -379,27 +378,27 @@ final class TransactionDocumentParser {
         """
     }
 
-    // MARK: - Décodage JSON (2e étage)
+    // MARK: - JSON decoding (2nd stage)
 
     private struct AILine: Decodable {
         let date: String?
         let label: String?
-        /// Tolérant : un petit modèle écrit souvent `"amount": "-42,50"`.
+        /// Tolerant: a small model often writes `"amount": "-42,50"`.
         let amount: InvestmentPDFParser.LenientDouble?
         let payment_type: String?
     }
 
-    /// Décode les opérations d'une réponse de modèle, OBJET PAR OBJET.
+    /// Decodes a model response's operations, OBJECT BY OBJECT.
     ///
-    /// ⚠️ Volontairement PAS un décodage du document entier. Une seule faute de
-    /// syntaxe — virgule finale, guillemet de clé oublié — faisait lever
-    /// `JSONDecoder` et perdre TOUTES les opérations, y compris les sept
-    /// parfaitement formées. Constaté deux fois de suite avec deux fautes
-    /// différentes : réparer chaque nouvelle faute au cas par cas ne converge
-    /// pas.
+    /// ⚠️ Deliberately NOT a decode of the whole document. A single syntax
+    /// mistake — a trailing comma, a missing key quote — used to throw
+    /// `JSONDecoder` and lose ALL the operations, including the seven
+    /// perfectly well-formed ones. Observed twice in a row with two
+    /// different mistakes: patching each new mistake case by case doesn't
+    /// converge.
     ///
-    /// Ici une ligne cassée coûte une ligne. Le conteneur (`{"transactions":
-    /// [...]}`) n'a même plus besoin d'être valide, ni d'exister.
+    /// Here a broken line costs one line. The container (`{"transactions":
+    /// [...]}`) doesn't even need to be valid, or to exist.
     static func parseJSON(_ raw: String) -> [ExtractedBankTransaction] {
         let decoder = JSONDecoder()
         return LenientJSON.innermostObjects(in: raw).compactMap { object in
@@ -409,10 +408,10 @@ final class TransactionDocumentParser {
         }
     }
 
-    /// Une ligne décodée devient une opération, ou rien.
+    /// A decoded line becomes an operation, or nothing.
     ///
-    /// Les garde-fous restent les mêmes : sans date exploitable, sans montant ou
-    /// sans libellé, on n'invente pas — on écarte.
+    /// The same safety nets apply: with no usable date, no amount, or
+    /// no label, we don't invent anything — we discard it.
     private static func convert(_ line: AILine) -> ExtractedBankTransaction? {
         guard let raw = line.date,
               let date = BankStatementExtractor.normalizeDate(raw),
@@ -430,8 +429,8 @@ final class TransactionDocumentParser {
         )
     }
 
-    /// Une date inventée par le modèle (« 2026-13-45 ») doit disqualifier la
-    /// ligne, pas produire une transaction datée n'importe quand.
+    /// A date invented by the model ("2026-13-45") must disqualify the
+    /// line, not produce a transaction dated whenever.
     static func isValidDate(_ raw: String) -> Bool {
         let parts = raw.split(separator: "-")
         guard parts.count == 3,

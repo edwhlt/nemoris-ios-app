@@ -2,15 +2,15 @@ import SwiftUI
 import MapKit
 import NemorisEngine
 
-/// Sheet d'enrichissement par ligne.
+/// Per-row enrichment sheet.
 ///
-/// Pour une `ImportSessionRow` non résolue, l'utilisateur peut :
-///   - personnaliser la requête de recherche (le rawLabel est rarement parfait)
-///   - choisir quelles sources interroger (Sirene / Apple Maps / IA Foundation Models)
-///   - voir TOUS les candidats côte à côte (avec badge source) et en choisir un
+/// For an unresolved `ImportSessionRow`, the user can:
+///   - customize the search query (the rawLabel is rarely perfect)
+///   - choose which sources to query (Sirene / Apple Maps / Foundation Models AI)
+///   - see ALL candidates side by side (with a source badge) and pick one
 ///
-/// Le résultat choisi est passé via `onApply` qui le pose dans la row du ViewModel
-/// (`assignedPayeeName`, `assignedCategoryId`, etc.) et marque la row `.manuallySet`.
+/// The chosen result is passed via `onApply`, which sets it on the ViewModel's row
+/// (`assignedPayeeName`, `assignedCategoryId`, etc.) and marks the row `.manuallySet`.
 struct EnrichmentSheetView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -21,25 +21,25 @@ struct EnrichmentSheetView: View {
     @State private var postalCode: String = ""
     @State private var useSirene: Bool = true
     @State private var useMapKit: Bool = true
-    @State private var useLLM: Bool = false   // off par défaut : génère parfois du bruit
+    @State private var useLLM: Bool = false   // off by default: sometimes generates noise
     @State private var isSearching: Bool = false
     @State private var hasSearched: Bool = false
     @State private var candidates: [SearchCandidate] = []
     @State private var selectedCandidateId: UUID? = nil
     @State private var cameraPosition: MapCameraPosition = .automatic
-    /// résultat structuré du registre : plan, tentatives réellement exécutées,
-    /// entreprises classées avec leurs établissements. Séparé de `candidates`, qui reste
-    /// la liste plate des sources cartographiques et IA.
+    /// Structured registry result: the plan, the attempts actually run, and
+    /// ranked companies with their establishments. Kept separate from `candidates`, which
+    /// stays the flat list of map and AI sources.
     @State private var searchResult: MerchantSearchResult? = nil
-    /// Pins de carte dérivés des établissements géolocalisés du registre
-    /// (cf. `MerchantSearchResult.establishmentPins`, chemin partagé des 3 écrans).
+    /// Map pins derived from the registry's geolocated establishments
+    /// (see `MerchantSearchResult.establishmentPins`, the path shared by all 3 screens).
     @State private var sireneGeoCandidates: [SearchCandidate] = []
 
     init(row: ImportSessionRow, onApply: @escaping (MerchantEnrichment) -> Void) {
         self.row = row
         self.onApply = onApply
-        // Priorité au RAW LABEL — le canonical du moteur perd souvent les indices
-        // géographiques (ex. "VNPAY HUNG RES PSC VN P HA GIANG" → "vnpay" sans VN ni HA GIANG).
+        // Priority to the RAW LABEL — the engine's canonical form often loses the
+        // geographic clues (e.g. "VNPAY HUNG RES PSC VN P HA GIANG" → "vnpay" with no VN or HA GIANG).
         _query = State(initialValue: row.rawLabel)
         _useLLM = State(initialValue: AIEnrichmentBackend.isAvailable(for: .merchantEnrichment))
     }
@@ -59,21 +59,21 @@ struct EnrichmentSheetView: View {
                 }
             }
             .nemorisFormStyle()
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
-            // barre d'outils native laisse le bureau de l'utilisateur
-            // transparaître (retour d'usage 2026-08-21). Cf. le commentaire
-            // de `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on macOS-sheet — the
+            // native toolbar lets the user's desktop show
+            // through. See the `macSheetChrome` comment
+            // in AdaptivePane.swift.
             .paneChrome("Enrichir cette ligne", cancelLabel: "Fermer", onCancel: { dismiss() })
     }
 
-    /// Candidats ayant des coordonnées GPS (utilisable sur la map).
+    /// Candidates with GPS coordinates (usable on the map).
     private var geoCandidates: [SearchCandidate] {
         candidates.filter { $0.result.latitude != nil && $0.result.longitude != nil }
             + sireneGeoCandidates
     }
 
-    /// Pin établissement actuellement sélectionné sur la carte (nil si la
-    /// sélection est un candidat MapKit/IA, déjà couvert par la liste).
+    /// Establishment pin currently selected on the map (nil if the
+    /// selection is a MapKit/AI candidate, already covered by the list).
     private var selectedEstablishmentPin: SearchCandidate? {
         guard let selectedCandidateId else { return nil }
         return sireneGeoCandidates.first { $0.id == selectedCandidateId }
@@ -147,26 +147,26 @@ struct EnrichmentSheetView: View {
         }
     }
 
-    /// Explique pourquoi le toggle IA est grisé. `nil` quand elle est
-    /// disponible (rien à expliquer).
+    /// Explains why the AI toggle is grayed out. `nil` when it's
+    /// available (nothing to explain).
     ///
-    /// Le motif vient du point de dispatch, qui est le seul à connaître le
-    /// backend effectif de cette fonctionnalité — le dupliquer ici le ferait
-    /// diverger dès l'ajout d'un backend (ce qui vient d'arriver avec le cloud).
+    /// The reason comes from the dispatch point, the only place that knows
+    /// this feature's effective backend — duplicating it here would make it
+    /// diverge as soon as a new backend is added (which just happened with cloud).
     private static var aiUnavailableFooter: String? {
         AIEnrichmentBackend.unavailabilityReason(for: .merchantEnrichment)
     }
 
-    // MARK: Plan de recherche et résultats du registre
+    // MARK: Search plan and registry results
 
-    /// Ce que le planificateur a retiré du nom, et ce qu'il a réellement tenté.
+    /// What the planner stripped from the name, and what it actually tried.
     @ViewBuilder
     private var planSection: some View {
         if let searchResult, !isSearching {
             Section {
                 DroppedTokenChips(extraction: searchResult.plan.extraction) { token in
-                    // Réinjecte le jeton dans la requête et relance : c'est la boucle de
-                    // correction visible, préférable à une étape IA opaque.
+                    // Re-injects the token into the query and re-runs: this is the
+                    // visible correction loop, preferable to an opaque AI step.
                     let base = query.trimmingCharacters(in: .whitespacesAndNewlines)
                     query = base.isEmpty ? token : "\(base) \(token)"
                     Task { await runSearch() }
@@ -178,7 +178,7 @@ struct EnrichmentSheetView: View {
         }
     }
 
-    /// Entreprises trouvées, dépliables vers leurs établissements.
+    /// Companies found, expandable into their establishments.
     @ViewBuilder
     private var companiesSection: some View {
         if let searchResult, !searchResult.companies.isEmpty, !isSearching {
@@ -198,8 +198,8 @@ struct EnrichmentSheetView: View {
             } header: {
                 Text("Entreprises (\(searchResult.companies.count))")
             } footer: {
-                // `matching_etablissements` ne renvoie que les branches dont le nom matche
-                // la requête. Le dire évite de laisser croire à une liste exhaustive.
+                // `matching_etablissements` only returns branches whose name matches
+                // the query. Saying so avoids implying an exhaustive list.
                 Text("Déplie une entreprise pour voir les établissements correspondant au nom recherché. C'est l'adresse qui distingue la bonne boutique.")
             }
         }
@@ -207,9 +207,9 @@ struct EnrichmentSheetView: View {
 
     private func apply(_ enrichment: MerchantEnrichment) {
         var result = enrichment
-        // Cette vue n'a pas le référentiel de catégories sous la main : on transmet le NOM
-        // de catégorie déduit du code NAF, et l'orchestrateur le résout en `category_id`
-        // (même mécanisme `categoryHint` que pour la catégorie proposée par l'IA).
+        // This view doesn't have the category reference data at hand: we pass the
+        // category NAME inferred from the NAF code, and the orchestrator resolves it into a
+        // `category_id` (same `categoryHint` mechanism as for the AI-proposed category).
         if result.categoryId == nil, let naf = result.nafCode,
            let category = NAFCategoryMapper.shared.lookup(naf) {
             result.categoryHint = category.category
@@ -218,8 +218,8 @@ struct EnrichmentSheetView: View {
         dismiss()
     }
 
-    /// Map interactive : pins pour chaque candidat geo-localisable, tap = sélection.
-    /// La sélection scrolle la liste vers le candidat correspondant.
+    /// Interactive map: pins for each geolocatable candidate, tap = select.
+    /// Selecting scrolls the list to the matching candidate.
     private var mapSection: some View {
         Section {
             Map(position: $cameraPosition, selection: $selectedCandidateId) {
@@ -239,9 +239,9 @@ struct EnrichmentSheetView: View {
             .frame(height: 220)
             .cornerRadius(8)
 
-            // Un pin ÉTABLISSEMENT n'a pas de row dans la liste (les entreprises
-            // vivent dans companiesSection) — et `apply` ferme la sheet, donc pas
-            // d'auto-apply au tap : le choix passe par ce bouton explicite.
+            // An ESTABLISHMENT pin has no row in the list (companies
+            // live in companiesSection) — and `apply` closes the sheet, so no
+            // auto-apply on tap: the choice goes through this explicit button.
             if let pin = selectedEstablishmentPin {
                 Button {
                     apply(pin.result)
@@ -342,15 +342,15 @@ struct EnrichmentSheetView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AppTheme.Colors.textPrimary)
                     .lineLimit(1)
-                // Adresse complète : c'est le distinguisher principal quand 2 résultats
-                // partagent le même displayName (ex. 2 Boulangerie X à des endroits différents).
+                // Full address: this is the main distinguisher when 2 results
+                // share the same displayName (e.g. 2 different "Bakery X" locations).
                 if let addr = c.result.address, !addr.isEmpty {
                     Text(addr)
                         .font(.caption)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .lineLimit(2)
                 }
-                // Ville/pays uniquement si pas déjà dans l'adresse, pour éviter la redondance.
+                // City/country only if not already in the address, to avoid redundancy.
                 if let locality = locationSummary(for: c.result) {
                     Text(locality)
                         .font(.caption2)
@@ -386,7 +386,7 @@ struct EnrichmentSheetView: View {
 
     // MARK: Helpers
 
-    /// Ligne tertiaire "Ville · FR" si non déjà présente dans l'adresse principale.
+    /// Tertiary line "City · FR" if not already present in the main address.
     private func locationSummary(for r: MerchantEnrichment) -> String? {
         var parts: [String] = []
         let addr = (r.address ?? "").lowercased()
@@ -449,16 +449,16 @@ struct EnrichmentSheetView: View {
         var collected: [SearchCandidate] = []
 
         if useSirene {
-            // passe par le planificateur + l'exécuteur de cascade.
+            // goes through the planner + the cascade executor.
             //
-            // Avant, la requête entière (donc le libellé brut avec sa ville et ses codes)
-            // partait dans le `q=` du registre. Or l'API matche `q` contre la raison
-            // sociale et les enseignes, JAMAIS contre l'adresse : y mettre la ville ne
-            // restreint pas la recherche, elle la fait échouer.
+            // Previously, the whole query (so the raw label with its city and its
+            // codes) went into the registry's `q=`. But the API matches `q` against
+            // the company name and trade names, NEVER against the address: putting the
+            // city in doesn't restrict the search, it makes it fail.
             //
-            // `userQueryOverride` n'est renseigné que si l'utilisateur a RÉELLEMENT édité
-            // le champ. Sinon on laisse le planificateur découper le libellé brut, ce
-            // qu'il fait bien mieux qu'une chaîne recopiée telle quelle.
+            // `userQueryOverride` is only set if the user REALLY edited
+            // the field. Otherwise we let the planner split the raw label, which it
+            // does far better than a string copied as-is.
             let userEdited = trimmedQuery != row.rawLabel
             let input = MerchantQueryPlanner.Input(
                 rawLabel: row.rawLabel,
@@ -471,14 +471,14 @@ struct EnrichmentSheetView: View {
                 knownNafPrefixes: NAFCategoryMapper.shared.knownPrefixes
             )
             searchResult = result
-            // Pas de resolveCategory ici : cette vue n'a pas le référentiel de
-            // catégories — `apply()` transmet le NAF en `categoryHint`.
+            // No resolveCategory here: this view doesn't have the category
+            // reference data — `apply()` passes the NAF as `categoryHint`.
             sireneGeoCandidates = result.establishmentPins()
         }
 
         if useMapKit {
-            // MapKit : pas de region constraint, l'utilisateur peut chercher partout dans le monde.
-            // Si la query contient "HA GIANG", il trouvera les POI là-bas.
+            // MapKit: no region constraint, the user can search anywhere in the world.
+            // If the query contains "HA GIANG", it will find POIs there.
             let mapResults = await MapKitSearchService.searchAll(
                 query: trimmedQuery, near: nil, limit: 8
             )
@@ -490,16 +490,16 @@ struct EnrichmentSheetView: View {
         }
 
         if useLLM {
-            // IMPORTANT : on donne au LLM le LIBELLÉ BRUT ORIGINAL (row.rawLabel) comme
-            // source de vérité — il contient les indices géographiques (codes pays, villes)
-            // que la query custom ou le canonical du moteur ont pu perdre.
-            // La query custom (si modifiée) est passée comme "canonicalName" = hypothèse.
+            // IMPORTANT: we give the LLM the ORIGINAL RAW LABEL (row.rawLabel) as
+            // the source of truth — it carries the geographic clues (country codes, cities)
+            // that the custom query or the engine's canonical form may have lost.
+            // The custom query (if changed) is passed as "canonicalName" = a hypothesis.
             let userHasEdited = trimmedQuery != row.rawLabel
             let context = MerchantEnrichmentContext(
                 rawLabel: row.rawLabel,
                 canonicalName: userHasEdited ? trimmedQuery : nil,
                 amount: row.amount,
-                city: nil,    // surtout pas de bias : on veut que le LLM trouve depuis le libellé
+                city: nil,    // definitely no bias: we want the LLM to find it from the label
                 country: nil,
                 engineMerchantId: nil
             )
@@ -510,7 +510,7 @@ struct EnrichmentSheetView: View {
             }
         }
 
-        // Tri par confidence décroissante, puis par source (Sirene en premier en cas d'égalité).
+        // Sorted by decreasing confidence, then by source (Sirene first on a tie).
         collected.sort { lhs, rhs in
             if lhs.result.confidence != rhs.result.confidence {
                 return lhs.result.confidence > rhs.result.confidence
@@ -518,7 +518,7 @@ struct EnrichmentSheetView: View {
             return Self.sourceRank(lhs.source) < Self.sourceRank(rhs.source)
         }
         candidates = collected
-        // Recadre la map sur les nouveaux pins (si on a des coords).
+        // Recenters the map on the new pins (if we have coordinates).
         if !geoCandidates.isEmpty {
             cameraPosition = .automatic
         }

@@ -2,70 +2,70 @@ import SwiftUI
 import UniformTypeIdentifiers
 import PhotosUI
 
-/// Point d'entrée du parcours d'import de transactions.
+/// Entry point of the transaction import flow.
 ///
-/// Flux :
-///   1. Sélection du compte cible + sélection d'UN OU PLUSIEURS fichiers.
-///   2. Chaque fichier est routé selon son type RÉEL (sniffé sur les octets) :
-///      • CSV / texte tabulaire → mapping des colonnes, réutilisé sans écran
-///        quand la signature du header est déjà connue ;
-///      • PDF / capture d'écran / texte non tabulaire → extraction par
-///        `TransactionDocumentParser` (déterministe + IA).
-///   3. Les lignes de TOUS les fichiers sont agrégées en UNE session d'import.
+/// Flow:
+///   1. Pick the target account + pick ONE OR SEVERAL files.
+///   2. Each file is routed by its ACTUAL type (sniffed from bytes):
+///      • CSV / tabular text → column mapping, reused without a screen
+///        when the header signature is already known;
+///      • PDF / screenshot / non-tabular text → extraction via
+///        `TransactionDocumentParser` (deterministic + AI).
+///   3. The rows from ALL files are aggregated into ONE import session.
 ///
-/// ⚠️ Le type ne se déduit JAMAIS de l'extension : un fichier partagé arrive
-/// nommé `<uuid>.dat`, et un décodage Latin-1 d'un PNG « réussit » toujours en
-/// produisant des centaines de milliers de caractères de binaire (classe de bug
-/// documentée dans `InvestmentPDFParser.detectKind`).
+/// ⚠️ The type is NEVER inferred from the extension: a shared file arrives
+/// named `<uuid>.dat`, and a Latin-1 decode of a PNG always "succeeds",
+/// producing hundreds of thousands of binary characters (a bug class
+/// documented in `InvestmentPDFParser.detectKind`).
 struct ImportEntryView: View {
-    // Vue présentée dans des contextes MIXTES : pushée (sidebar macOS, MoreView,
-    // Settings) OU pane adaptatif (Dashboard, import préchargé). La
-    // fermeture appelle les DEUX mécanismes — chacun est no-op hors de son
-    // contexte (paneDismiss par défaut = {}, DismissAction sans présentation = rien).
+    // View presented in MIXED contexts: pushed (macOS sidebar, MoreView,
+    // Settings) OR as an adaptive pane (Dashboard, preloaded import). Closing
+    // calls BOTH mechanisms — each is a no-op outside its own context
+    // (paneDismiss defaults to {}, DismissAction with nothing presented does nothing).
     @Environment(\.dismiss) private var navDismiss
     @Environment(\.paneDismiss) private var paneDismiss
     @Environment(AppState.self) private var appState
     @Environment(\.paneHostContext) private var paneHostContext
 
-    /// Fermeture : EXACTEMENT un mécanisme, jamais les deux.
+    /// Closing: EXACTLY one mechanism, never both.
     ///
-    /// ⚠️ Appeler `paneDismiss()` PUIS `navDismiss()` — ce que faisait la
-    /// version « universelle » — ferme d'abord le panneau, après quoi le
-    /// `DismissAction` n'a plus rien à fermer. Sur macOS il remonte alors à la
-    /// fenêtre et **la ferme** : l'app disparaissait dans le Dock alors que le
-    /// process (et l'analyse en cours) continuaient de tourner. Le commentaire
-    /// d'origine supposait un no-op « hors de son contexte » ; c'est vrai du
-    /// `paneDismiss` (défaut `{}`), pas du `DismissAction`.
+    /// ⚠️ Calling `paneDismiss()` THEN `navDismiss()` — what the "universal"
+    /// version used to do — closes the pane first, after which `DismissAction`
+    /// has nothing left to close. On macOS it then bubbles up to the window and
+    /// **closes it**: the app vanished into the Dock while the process (and the
+    /// in-flight analysis) kept running. The original comment assumed a no-op
+    /// "outside its context"; that's true of `paneDismiss` (default `{}`), not
+    /// of `DismissAction`.
     private func dismiss() {
         if !isEmbedded, paneHostContext != .root {
-            paneDismiss()   // hébergée par `.adaptivePane` (sheet iOS / inspecteur macOS)
+            paneDismiss()   // hosted by `.adaptivePane` (iOS sheet / macOS inspector)
             return
         }
         #if os(macOS)
-        // Embarquée dans la sidebar ou les Réglages : sur Mac ces deux hôtes
-        // affichent le contenu par bascule d'ÉTAT, sans rien empiler — il n'y a
-        // donc AUCUNE présentation à fermer, et un `DismissAction` qui n'en
-        // trouve pas ferme la fenêtre (l'app repartait dans le Dock).
+        // Embedded in the sidebar or Settings: on Mac both hosts display
+        // content via a state switch, without pushing anything — so there is
+        // NO presentation to close, and a `DismissAction` that finds none
+        // closes the window instead (the app used to jump back to the Dock).
         if isEmbedded { return }
         #endif
-        navDismiss()        // poussée dans le `NavigationStack` d'un parent
+        navDismiss()        // pushed onto a parent `NavigationStack`
     }
 
-    /// fichiers déjà déposés dans `PendingImportInbox` (raccourci Siri
-    /// ou share extension). Affichés comme "Fichier(s) reçu(s)" : l'utilisateur
-    /// confirme le compte cible puis continue — pas de picker à rouvrir.
+    /// files already dropped into `PendingImportInbox` (Siri shortcut
+    /// or share extension). Shown as "File(s) received": the user
+    /// confirms the target account then continues — no picker to reopen.
     var preloadedFileURLs: [URL] = []
 
-    /// Destination PRÉ-REMPLIE par le point d'entrée (Dashboard/Réglages →
-    /// transactions, module Investissements → investissements). Modifiable dans
-    /// l'écran : c'est un seul entonnoir pour les deux cas d'usage.
+    /// Destination PRE-FILLED by the entry point (Dashboard/Settings →
+    /// transactions, Investments module → investments). Editable on
+    /// screen: this is a single funnel for both use cases.
     var initialDestination: ImportDestination = .transactions
 
-    /// `true` quand la vue est POUSSÉE dans un `NavigationStack` parent (MoreView,
-    /// Réglages, recherche, sidebar macOS) → on NE ré-enveloppe PAS dans un stack.
-    /// `false` (défaut) = présentée en sheet (Dashboard / import préchargé) → elle
-    /// fournit son propre `NavigationStack`. Un stack imbriqué faisait "sauter" la
-    /// vue au 1er affichage (elle se refermait, puis OK au 2ᵉ tap).
+    /// `true` when the view is PUSHED onto a parent `NavigationStack` (MoreView,
+    /// Settings, search, macOS sidebar) → do NOT wrap it in another stack again.
+    /// `false` (default) = presented as a sheet (Dashboard / preloaded import) → it
+    /// provides its own `NavigationStack`. A nested stack made the view "skip" on
+    /// first display (it dismissed itself, then worked on the 2nd tap).
     var isEmbedded: Bool = false
 
     @State private var destination: ImportDestination?
@@ -78,50 +78,50 @@ struct ImportEntryView: View {
     @State private var showFilePicker = false
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var parseError: String?
-    /// Documents choisis mais PAS encore traités : la sélection s'accumule
-    /// (fichiers et captures, en plusieurs fois) et rien ne démarre avant que
-    /// l'utilisateur ne valide.
+    /// Documents picked but NOT yet processed: the selection accumulates
+    /// (files and screenshots, over several picks) and nothing starts until
+    /// the user confirms.
     @State private var stagedFiles: [(data: Data, name: String)] = []
 
     @State private var existingActiveSession: ImportSessionSummary?
     @State private var showResumeAlert = false
     @State private var isParsing = false
 
-    /// ⚠️ Les lignes accumulées ne vivent PLUS ici : elles appartiennent à
-    /// `DocumentImportCoordinator`. Cet écran traverse plusieurs étapes (un
-    /// mapping par table, puis l'analyse des documents) et se ferme avant la fin
-    /// du job — un `@State` local rendait la fusion dépendante de sa survie, et
-    /// toutes les sources ne se retrouvaient pas dans l'import final.
+    /// ⚠️ Accumulated rows no longer live HERE: they belong to
+    /// `DocumentImportCoordinator`. This screen goes through several steps (one
+    /// mapping per table, then document analysis) and closes before the job
+    /// finishes — a local `@State` made merging depend on the screen surviving,
+    /// and not every source ended up in the final import.
     private var coordinator: DocumentImportCoordinator { .shared }
-    /// Tables en attente de mapping, rendues par la phase de LECTURE du
-    /// pipeline. CSV et feuilles de classeur y arrivent indifféremment : les
-    /// deux posent la même question (quelle colonne est quoi).
+    /// Tables awaiting mapping, produced by the pipeline's READ phase.
+    /// CSV and spreadsheet sheets arrive here interchangeably: both ask the
+    /// same question (which column is what).
     @State private var pendingMappings: [ImportPipeline.PendingGrid] = []
-    /// Index du mapping affiché. On AVANCE un curseur, on ne retire jamais
-    /// d'élément de `pendingMappings` pendant le parcours :
+    /// Index of the mapping being shown. We ADVANCE a cursor, never remove
+    /// an element from `pendingMappings` mid-flow:
     ///
-    /// ⚠️ Retirer l'élément courant depuis le callback de l'écran poussé (ce
-    /// que faisait `removeFirst()`) vide le contenu de la `navigationDestination`
-    /// PENDANT qu'elle est encore à l'écran — la destination s'évalue alors à
-    /// `EmptyView` dans le même cycle de rendu que la dépile, la fermeture de
-    /// la feuille et la présentation de la feuille de session. C'est la cause
-    /// du crash constaté à l'import d'un CSV.
+    /// ⚠️ Removing the current element from the pushed screen's callback (what
+    /// `removeFirst()` used to do) empties the `navigationDestination`'s content
+    /// WHILE it is still on screen — the destination then evaluates to
+    /// `EmptyView` in the same render cycle as the pop, the sheet dismiss, and
+    /// the session sheet presentation. That's the cause of the crash seen on
+    /// a CSV import.
     @State private var mappingIndex: Int = 0
-    /// Unités NON tabulaires (pages PDF, captures, relevés structurés) : elles
-    /// partent à l'analyse de fond, sans interaction.
+    /// Non-tabular units (PDF pages, screenshots, structured statements): they
+    /// go straight to background analysis, no interaction needed.
     @State private var pendingReadout = ImportPipeline.Readout()
-    /// Noms de tous les fichiers retenus, pour le libellé de la session.
+    /// Names of all the retained files, for the session label.
     @State private var handledFileNames: [String] = []
-    /// Étape poussée courante. UNE seule `navigationDestination` pilotée par
-    /// cette valeur : deux destinations concurrentes qu'on bascule dans le même
-    /// cycle de rendu produisent des transitions incohérentes. L'index du
-    /// mapping est porté PAR l'étape, pour que le contenu poussé reste toujours
-    /// valide (cf. `mappingIndex`).
+    /// Current pushed step. ONE `navigationDestination` driven by
+    /// this value: two concurrent destinations toggled in the same render
+    /// cycle produce inconsistent transitions. The mapping index is carried
+    /// BY the step, so the pushed content always stays valid (see
+    /// `mappingIndex`).
     @State private var step: Step? = nil
 
-    /// Seule étape POUSSÉE restante : le mapping de colonnes, qui a besoin de
-    /// l'utilisateur. L'analyse des documents, elle, part en arrière-plan — ce
-    /// qui supprime au passage un écran poussé de plus sur macOS.
+    /// The only step still PUSHED: column mapping, which needs the
+    /// user. Document analysis, meanwhile, runs in the background — which
+    /// removes one more pushed screen on macOS as a side effect.
     private enum Step: Hashable {
         case mapping(index: Int)
     }
@@ -137,23 +137,23 @@ struct ImportEntryView: View {
         }
     }
 
-    /// ⚠️ macOS : ZÉRO PUSH. Cette vue est hébergée dans l'inspecteur, et y
-    /// empiler un écran est le motif à risque documenté (§N.1 : panneau peint
-    /// sous le contenu poussé, gels et crashs AutoLayout). Depuis que l'étape
-    /// de mapping est TOUJOURS affichée — et non plus sautée quand le format
-    /// était connu — ce push se produisait à chaque import CSV et gelait la
-    /// fenêtre. Le mapping remplace donc le contenu DANS la même vue, et la
-    /// `NavigationStack` du module reste à sa racine.
-    /// iOS garde le push, qui y est natif et sans danger.
+    /// ⚠️ macOS: ZERO PUSH. This view is hosted in the inspector, and pushing a
+    /// screen there is the documented risky pattern (§N.1: pane painted under
+    /// pushed content, AutoLayout freezes and crashes). Since the mapping step
+    /// is now ALWAYS shown — no longer skipped when the format was known — this
+    /// push used to fire on every CSV import and freeze the window. Mapping
+    /// therefore replaces the content WITHIN the same view, and the module's
+    /// `NavigationStack` stays at its root.
+    /// iOS keeps the push, which is native and safe there.
     @ViewBuilder private var stepContent: some View {
         #if os(macOS)
         if case .mapping(let index) = step,
            index < pendingMappings.count,
            let accountId = selectedAccountId {
-            // Cf. `formContent` : seul le cas `.sheet` niveau 2+ a besoin de
-            // la chrome dessinée à la main (matériau translucide natif
-            // inopérant sur cette surface, retour d'usage 2026-08-21) —
-            // embarquée et inspecteur restent sur leur toolbar native, saine.
+            // See `formContent`: only the `.sheet` level-2+ case needs
+            // hand-drawn chrome (the native translucent material is
+            // inoperative on this surface, per feedback) —
+            // embedded and inspector stay on their native toolbar, which is fine.
             if !isEmbedded, paneHostContext == .modal {
                 macSheetChrome(
                     title: "Mapping des colonnes",
@@ -181,15 +181,15 @@ struct ImportEntryView: View {
         #endif
     }
 
-    /// Écran de mapping d'un fichier, partagé par les deux plateformes
-    /// (poussé sur iOS, substitué sur macOS).
+    /// Mapping screen for one file, shared across both platforms
+    /// (pushed on iOS, swapped in place on macOS).
     @ViewBuilder
     private func mappingView(index: Int, accountId: Int) -> some View {
         let pending = pendingMappings[index]
         ColumnMappingView(
             parsed: pending.grid,
-            // `nil` pour un classeur : ses cellules ne dépendent d'aucun
-            // séparateur, l'écran masque donc le sélecteur.
+            // `nil` for a workbook: its cells don't depend on any
+            // separator, so the screen hides the picker.
             siblingSheets: pending.siblingSheets,
             rawContent: pending.rawText,
             accountId: accountId,
@@ -201,28 +201,28 @@ struct ImportEntryView: View {
             },
             startingRowNumber: coordinator.seedRows.count + 1
         )
-        // Identité liée au fichier : sans ça, l'écran suivant réutiliserait
-        // l'état @State du mapping précédent (colonnes du fichier d'avant,
-        // pré-sélectionnées).
+        // Identity tied to the file: without it, the next screen would reuse
+        // the previous mapping's `@State` (columns from the earlier file,
+        // already pre-selected).
         .id(pending.id)
     }
 
-    /// Chrome (titre + "Annuler") au-dessus de `formBody`, adaptée aux
-    /// multiples contextes de présentation de cette vue :
-    /// - Embarquée (sidebar/MoreView/Settings) : le bouton retour du stack
-    ///   parent suffit, aucune chrome supplémentaire.
-    /// - Panneau macOS niveau 1 (inspecteur) : chrome publiée dans la barre
-    ///   système via `ImportEntryInspectorChrome` (surface native saine, pas
-    ///   de bug).
-    /// - `.sheet` macOS niveau 2+ (`.adaptivePane` imbriqué dans un autre
-    ///   panneau déjà ouvert) : SEUL cas où un `.toolbar` natif atterrirait
-    ///   sur la fenêtre séparée dont le matériau translucide laisse le
-    ///   bureau transparaître (retour d'usage 2026-08-21) — chrome dessinée
-    ///   à la main via `macSheetChrome`, réutilisée depuis `AdaptivePane.swift`
-    ///   plutôt qu'un `.paneChrome` générique qui ne connaît pas l'axe
-    ///   `isEmbedded` propre à cette vue.
-    /// - iOS non-embarquée (sheet) : `.toolbar` natif, jamais affecté (bug
-    ///   macOS-only).
+    /// Chrome (title + "Cancel") above `formBody`, adapted to the
+    /// multiple presentation contexts of this view:
+    /// - Embedded (sidebar/MoreView/Settings): the parent stack's back
+    ///   button is enough, no extra chrome.
+    /// - macOS level-1 pane (inspector): chrome published in the
+    ///   system bar via `ImportEntryInspectorChrome` (a safe native
+    ///   surface, no bug).
+    /// - macOS `.sheet` level-2+ (`.adaptivePane` nested inside another
+    ///   already-open pane): the ONLY case where a native `.toolbar`
+    ///   would land on the separate window whose translucent material
+    ///   lets the desktop show through (per feedback) — chrome hand-drawn
+    ///   via `macSheetChrome`, reused from `AdaptivePane.swift` rather
+    ///   than a generic `.paneChrome` that doesn't know this view's
+    ///   own `isEmbedded` axis.
+    /// - iOS not embedded (sheet): native `.toolbar`, never affected (the
+    ///   bug is macOS-only).
     @ViewBuilder private var formContent: some View {
         #if os(macOS)
         if !isEmbedded, paneHostContext == .modal {
@@ -239,11 +239,11 @@ struct ImportEntryView: View {
                 .localizedNavigationTitle("Importer")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    // Le seul autre cas où ce toolbar peut afficher un bouton
-                    // est déjà couvert par `!isEmbedded, host == .modal`
-                    // ci-dessus (routé vers `macSheetChrome`) — ici il ne
-                    // reste donc que l'inspecteur (chrome publiée à part,
-                    // pas de bouton natif) ou l'embarqué (rien à afficher).
+                    // The only other case where this toolbar could show a button
+                    // is already covered above by `!isEmbedded, host == .modal`
+                    // (routed to `macSheetChrome`) — so what's left here is
+                    // only the inspector (chrome published elsewhere, no native
+                    // button) or embedded (nothing to show).
                 }
                 .modifier(ImportEntryInspectorChrome(isEmbedded: isEmbedded, dismiss: cancelFunnel))
         }
@@ -294,10 +294,10 @@ struct ImportEntryView: View {
                                 HStack {
                                     Text("Compte").foregroundStyle(AppTheme.Colors.textPrimary)
                                     Spacer()
-                                    // Wrap requis : coalescing avec `.name`
-                                    // rend l'expression entière `String` —
-                                    // `Text(String)` reste verbatim sans lui,
-                                    // cf. CLAUDE.md §5.
+                                    // Wrap required: coalescing with `.name`
+                                    // makes the whole expression a `String` —
+                                    // without it `Text(String)` stays verbatim,
+                                    // see CLAUDE.md §5.
                                     Text(LocalizedStringKey(accounts.first(where: { $0.id == selectedAccountId })?.name ?? "Choisir…"))
                                         .foregroundStyle(selectedAccountId == nil ? AppTheme.Colors.textSecondary : AppTheme.Colors.textPrimary)
                                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
@@ -329,8 +329,8 @@ struct ImportEntryView: View {
 
                 Section("Fichiers") {
                     if !preloadedFileURLs.isEmpty {
-                        // fichiers déjà reçus (partage / raccourci) :
-                        // confirmation du compte puis continuation directe.
+                        // files already received (share / shortcut):
+                        // confirm the account then continue directly.
                         HStack(spacing: 10) {
                             Image(systemName: "tray.and.arrow.down.fill")
                                 .foregroundStyle(AppTheme.Colors.accent)
@@ -362,11 +362,10 @@ struct ImportEntryView: View {
                         }
                         .disabled(!hasTargetAccount || isParsing)
                     } else {
-                        // Les sélections s'ACCUMULENT. Rien ne démarre tant que
-                        // l'utilisateur n'a pas cliqué « Importer » : il peut
-                        // ajouter des fichiers et des captures en plusieurs
-                        // fois, ce qu'un lancement automatique à la sélection
-                        // rendait impossible.
+                        // Selections ACCUMULATE. Nothing starts until
+                        // the user taps "Import": they can add files and
+                        // screenshots over several picks, which an
+                        // automatic launch on selection would prevent.
                         Button {
                             showFilePicker = true
                         } label: {
@@ -374,9 +373,9 @@ struct ImportEntryView: View {
                         }
                         .disabled(!hasTargetAccount || isParsing)
 
-                        // Captures d'écran de l'appli bancaire — `PhotosPicker`
-                        // existe aussi sur macOS (Photos y est disponible), la
-                        // photothèque n'était simplement pas proposée ici.
+                        // Bank app screenshots — `PhotosPicker`
+                        // also exists on macOS (Photos is available there), the
+                        // photo library just wasn't offered here.
                         PhotosPicker(selection: $photoItems, maxSelectionCount: 10, matching: .images) {
                             Label("Ajouter des captures", systemImage: "photo.on.rectangle.angled")
                         }
@@ -437,10 +436,10 @@ struct ImportEntryView: View {
                 } header: { Text("À savoir") }
             }
             .nemorisFormStyle()
-            // Convention du projet : le tint ADN est posé PAR VUE (il n'y a pas
-            // de tint global). Une vue présentée en panneau ne l'hérite pas de
-            // son appelant — sans ça, ses contrôles système reprennent la
-            // couleur d'accentuation du système, d'où des icônes bleues.
+            // Project convention: the brand tint is set PER VIEW (there is
+            // no global tint). A view presented in a pane doesn't inherit it
+            // from its caller — without this, its native controls fall back
+            // to the system's accent color, hence blue icons.
             .tint(AppTheme.Colors.accent)
             .fileImporter(
                 isPresented: $showFilePicker,
@@ -454,15 +453,15 @@ struct ImportEntryView: View {
                 guard !items.isEmpty else { return }
                 loadPhotos(items)
             }
-            // iOS uniquement : sur macOS le mapping remplace le contenu sur
-            // place (cf. `stepContent`), sans jamais empiler.
+            // iOS only: on macOS mapping replaces the content in
+            // place (see `stepContent`), never pushes.
             #if !os(macOS)
             .navigationDestination(item: $step) { current in
                 switch current {
                 case .mapping(let index):
-                    // L'index vient de l'étape : `pendingMappings` n'est jamais
-                    // mutée en cours de parcours, donc ce contenu reste valide
-                    // tant que l'écran est poussé.
+                    // The index comes from the step: `pendingMappings` is never
+                    // mutated mid-flow, so this content stays valid for as
+                    // long as the screen is pushed.
                     if index < pendingMappings.count, let accountId = selectedAccountId {
                         mappingView(index: index, accountId: accountId)
                     }
@@ -472,9 +471,9 @@ struct ImportEntryView: View {
             .alert("Une session d'import est déjà en cours",
                    isPresented: $showResumeAlert, presenting: existingActiveSession) { _ in
                 Button("Reprendre") {
-                    // Même passage de main que la fin d'import : présenter la
-                    // session en fermant cet écran dans le même cycle ne
-                    // marchait pas côté iOS (deux `.sheet` concurrentes).
+                    // Same handoff as the end of import: presenting the
+                    // session while dismissing this screen in the same cycle
+                    // didn't work on iOS (two concurrent `.sheet`s).
                     Self.handOver(to: appState, dismissSelf: dismiss)
                 }
                 Button("Annuler la précédente", role: .destructive) {
@@ -504,8 +503,8 @@ struct ImportEntryView: View {
 
     // MARK: - Logic
 
-    /// Destination effective : celle choisie dans l'écran, sinon celle
-    /// pré-remplie par le point d'entrée.
+    /// Effective destination: the one chosen on screen, or else the
+    /// one pre-filled by the entry point.
     private var activeDestination: ImportDestination { destination ?? initialDestination }
 
     private var importButtonLabel: LocalizedStringKey {
@@ -516,7 +515,7 @@ struct ImportEntryView: View {
         }
     }
 
-    /// Un compte cible est-il sélectionné pour la destination courante ?
+    /// Is a target account selected for the current destination?
     private var hasTargetAccount: Bool {
         activeDestination == .transactions ? selectedAccountId != nil : selectedInvestmentAccountId != nil
     }
@@ -537,9 +536,9 @@ struct ImportEntryView: View {
         }
     }
 
-    /// `sharedNaming` : les fichiers de l'inbox ont des noms UUID
-    /// opaques — on leur substitue un nom lisible pour l'affichage et pour le
-    /// `source_file` de la session.
+    /// `sharedNaming`: files from the inbox have opaque UUID
+    /// names — we substitute a readable name for display and for the
+    /// session's `source_file`.
     private func handleFileResult(_ result: Result<[URL], Error>, sharedNaming: Bool = false) {
         parseError = nil
         switch result {
@@ -547,9 +546,9 @@ struct ImportEntryView: View {
             parseError = err.localizedDescription
         case .success(let urls):
             guard !urls.isEmpty else { return }
-            // Fichiers reçus par partage/raccourci : traitement direct.
-            // Sélection manuelle : on empile seulement, l'utilisateur décide
-            // quand lancer (cf. `stagedFiles`).
+            // Files received via share/shortcut: process right away.
+            // Manual selection: just queue it, the user decides
+            // when to launch (see `stagedFiles`).
             guard sharedNaming else {
                 stageFiles(urls)
                 return
@@ -557,8 +556,8 @@ struct ImportEntryView: View {
             resetPipeline()
             isParsing = true
             Task {
-                // Lecture hors du main thread : sur N fichiers, la charger sur
-                // le thread principal fige l'UI pendant tout l'import.
+                // Read off the main thread: on N files, loading it on
+                // the main thread freezes the UI for the whole import.
                 let loaded: [(data: Data, name: String)] = urls.enumerated().compactMap { index, url in
                     let granted = url.startAccessingSecurityScopedResource()
                     defer { if granted { url.stopAccessingSecurityScopedResource() } }
@@ -580,17 +579,17 @@ struct ImportEntryView: View {
         }
     }
 
-    /// Lance le traitement de la sélection accumulée.
+    /// Starts processing the accumulated selection.
     private func startImport() {
         parseError = nil
-        let files = stagedFiles          // capturés AVANT la remise à zéro
+        let files = stagedFiles          // captured BEFORE the reset
         guard !files.isEmpty else { return }
         resetPipeline()
         isParsing = true
         Task { await classify(files) }
     }
 
-    /// Empile des fichiers choisis, sans rien lancer.
+    /// Queues picked files without starting anything.
     private func stageFiles(_ urls: [URL]) {
         Task {
             let loaded: [(data: Data, name: String)] = urls.compactMap { url in
@@ -609,8 +608,8 @@ struct ImportEntryView: View {
         }
     }
 
-    /// Captures choisies dans la photothèque : elles rejoignent exactement la
-    /// même file que les fichiers (le type réel est sniffé sur les octets).
+    /// Screenshots picked from the photo library: they join the exact
+    /// same queue as files (the real type is sniffed from the bytes).
     private func loadPhotos(_ items: [PhotosPickerItem]) {
         parseError = nil
         Task {
@@ -626,29 +625,29 @@ struct ImportEntryView: View {
                     return
                 }
                 stagedFiles.append(contentsOf: loaded)
-                // Le picker est vidé pour qu'une nouvelle sélection déclenche
-                // à nouveau `onChange` (sinon choisir les mêmes captures ne
-                // produirait rien).
+                // The picker is cleared so a new selection triggers
+                // `onChange` again (otherwise picking the same screenshots
+                // again would produce nothing).
                 photoItems = []
             }
         }
     }
 
-    /// Lit les fichiers par le pipeline, puis répartit ce qui a besoin de
-    /// l'utilisateur (tables à mapper) et ce qui part en arrière-plan.
+    /// Reads the files through the pipeline, then splits off what needs
+    /// the user (tables to map) from what goes to the background.
     ///
-    /// ⚠️ Cet écran ne sniffe plus rien lui-même. Il avait sa propre détection
-    /// de format, doublant celle des parseurs — trois copies au total, qui ont
-    /// fini par diverger (l'une connaissait le classeur, les autres non). La
-    /// phase de lecture du pipeline est désormais le seul endroit qui décide
-    /// « ce fichier est un tableau / un document / un relevé structuré ».
+    /// ⚠️ This screen no longer sniffs anything itself. It used to have its
+    /// own format detection, duplicating the parsers' — three copies in total,
+    /// which ended up diverging (one knew about workbooks, the others didn't).
+    /// The pipeline's read phase is now the only place that decides
+    /// "this file is a table / a document / a structured statement".
     private func classify(_ files: [(data: Data, name: String)]) async {
         let sources = files.map { ImportDocumentSource(data: $0.data, displayName: $0.name) }
         let readout = await ImportPipeline.read(sources: sources, destination: activeDestination)
 
-        // Destination « investissements » : pas de mapping de colonnes ni de
-        // session — tout part au parseur dont le prompt est calibré pour des
-        // avis d'opéré et des portefeuilles.
+        // "Investments" destination: no column mapping or
+        // session — everything goes to the parser, whose prompt is tuned
+        // for trade confirmations and portfolios.
         guard activeDestination == .transactions else {
             await MainActor.run {
                 isParsing = false
@@ -657,8 +656,8 @@ struct ImportEntryView: View {
                 coordinator.beginJob(destination: activeDestination,
                                      accountId: account,
                                      sourceLabel: sessionLabel())
-                // Aucun mapping possible côté investissements : rien à attendre
-                // de l'utilisateur, le résultat est relisible dès qu'il est prêt.
+                // No mapping possible on the investments side: nothing to wait
+                // for from the user, the result is reviewable as soon as it's ready.
                 coordinator.setAwaitingUserMapping(false)
                 coordinator.startAnalysis(readout: readout)
                 step = nil
@@ -669,33 +668,33 @@ struct ImportEntryView: View {
 
         await MainActor.run {
             isParsing = false
-            // ⚠️ L'écran de mapping est TOUJOURS affiché, même quand la
-            // signature de l'en-tête est déjà connue. Le format mémorisé sert à
-            // PRÉ-REMPLIR (bandeau « Format connu »), pas à sauter l'étape :
-            // deux fichiers au même en-tête peuvent avoir un séparateur ou une
-            // convention décimale différents, et l'utilisateur doit pouvoir
-            // vérifier les colonnes avant d'importer.
+            // ⚠️ The mapping screen is ALWAYS shown, even when the
+            // header signature is already known. The remembered format is used to
+            // PRE-FILL (the "Known format" banner), not to skip the step:
+            // two files with the same header can have a different separator or
+            // decimal convention, and the user needs to be able to
+            // check the columns before importing.
             pendingMappings = readout.pendingGrids
             mappingIndex = 0
             pendingReadout = ImportPipeline.Readout(units: readout.units)
             handledFileNames = files.map(\.name)
-            // Ouvre le job AVANT la première étape : à partir d'ici, toutes les
-            // sources (tables mappées puis documents analysés) alimentent le
-            // même coordinateur, qui survit à la fermeture de cet écran.
+            // Opens the job BEFORE the first step: from here on, every
+            // source (mapped tables, then analyzed documents) feeds the
+            // same coordinator, which survives this screen's dismissal.
             if let account = targetAccountId {
                 coordinator.beginJob(destination: activeDestination,
                                      accountId: account,
                                      sourceLabel: sessionLabel())
             }
-            // ⚠️ L'analyse des documents part MAINTENANT, en même temps que le
-            // premier écran de mapping. Le mapping d'un CSV ne bloque donc plus
-            // les PDF du même lot — sur un import mixte, l'utilisateur mappe
-            // pendant que les documents sont analysés, au lieu d'attendre après.
+            // ⚠️ Document analysis now starts AT THE SAME TIME as the
+            // first mapping screen. Mapping a CSV no longer blocks the
+            // PDFs in the same batch — on a mixed import, the user maps
+            // while the documents are being analyzed, instead of waiting afterward.
             //
-            // Le verrou `awaitingUserMapping` empêche le bandeau de proposer
-            // « Continuer » avant la fin des mappings : le résultat serait
-            // incomplet, et ouvrirait une seconde feuille par-dessus l'écran de
-            // mapping.
+            // The `awaitingUserMapping` lock keeps the banner from offering
+            // "Continue" before mapping is done: the result would be
+            // incomplete, and would open a second sheet on top of the
+            // mapping screen.
             coordinator.setAwaitingUserMapping(!readout.pendingGrids.isEmpty)
             if !readout.units.isEmpty {
                 coordinator.startAnalysis(readout: ImportPipeline.Readout(units: readout.units))
@@ -704,58 +703,58 @@ struct ImportEntryView: View {
         }
     }
 
-    /// Compte cible de la destination courante.
+    /// Target account for the current destination.
     private var targetAccountId: Int? {
         activeDestination == .transactions ? selectedAccountId : selectedInvestmentAccountId
     }
 
-    /// Étape suivante : documents d'abord (ils ont un écran de revue), puis les
-    /// mappings de colonnes un par un, puis création de la session.
+    /// Next step: documents first (they have a review screen), then the
+    /// column mappings one by one, then session creation.
     private func advance() {
-        // Les mappings de colonnes d'abord : ce sont les SEULES étapes qui
-        // demandent l'utilisateur. L'analyse des documents, elle, tourne déjà
-        // en fond depuis `classify`.
+        // Column mappings first: they're the ONLY steps that need
+        // the user. Document analysis is already
+        // running in the background since `classify`.
         if mappingIndex < pendingMappings.count {
             step = .mapping(index: mappingIndex)
             return
         }
-        // Plus rien à mapper : on libère le verrou, ce qui rend le résultat
-        // d'analyse disponible dans le bandeau dès qu'il est prêt (il peut déjà
-        // l'être — c'est justement le but de l'avoir lancé en parallèle).
+        // Nothing left to map: release the lock, which makes the
+        // analysis result available in the banner as soon as it's ready (it may
+        // already be — that's the whole point of running it in parallel).
         coordinator.setAwaitingUserMapping(false)
 
-        // Des documents sont en cours ou déjà analysés : on rend la main, le
-        // bandeau prend le relais et rouvrira la revue.
+        // Documents are still running or already analyzed: hand off, the
+        // banner takes over and will reopen the review.
         if !pendingReadout.units.isEmpty {
             step = nil
-            // Fermeture au cycle suivant : dépiler, fermer et laisser le
-            // bandeau apparaître dans le même cycle de rendu fait crasher
+            // Dismiss on the next cycle: popping, closing and letting
+            // the banner appear in the same render cycle crashes
             // SwiftUI.
             Task { @MainActor in dismiss() }
             return
         }
-        // Aucun document : toutes les sources étaient des tables, la session
-        // peut être créée tout de suite. On dépile D'ABORD, et la création
-        // (qui ferme cette feuille et en présente une autre) attend le cycle
-        // suivant, pour la même raison.
+        // No documents: every source was a table, the session
+        // can be created right away. Pop FIRST, and creating it
+        // (which closes this sheet and presents another) waits for the next
+        // cycle, for the same reason.
         step = nil
         Task { @MainActor in finalize() }
     }
 
-    /// Abandon du parcours par l'utilisateur (bouton « Annuler »).
+    /// User abandons the flow (the "Cancel" button).
     ///
-    /// ⚠️ Annule AUSSI le job : depuis que l'analyse démarre en parallèle des
-    /// mappings, fermer l'entonnoir laisserait tourner une analyse dont les
-    /// tables ne seront jamais mappées — donc un import amputé d'une partie de
-    /// ses fichiers, présenté comme complet. « Annuler » sur l'écran d'import
-    /// veut dire que l'import n'a pas lieu.
+    /// ⚠️ ALSO cancels the job: since analysis starts in parallel with
+    /// mapping, closing the funnel would leave an analysis running whose
+    /// tables will never be mapped — so an import missing part of
+    /// its files, presented as complete. "Cancel" on the import screen
+    /// means the import doesn't happen.
     private func cancelFunnel() {
         if coordinator.isActive { coordinator.cancel() }
         dismiss()
     }
 
-    /// Aucun document à analyser : toutes les sources sont des CSV déjà mappés,
-    /// on crée la session immédiatement avec l'ensemble accumulé.
+    /// No document to analyze: every source is an already-mapped CSV,
+    /// create the session right away with the accumulated set.
     private func finalize() {
         guard let accountId = selectedAccountId else { return }
         let rows = coordinator.transactionRows
@@ -770,21 +769,21 @@ struct ImportEntryView: View {
             parseError = "Échec de la sauvegarde de la session."
             return
         }
-        coordinator.clear()   // job consommé
+        coordinator.clear()   // job consumed
         appState.activeImportSession = summary
         Self.handOver(to: appState, dismissSelf: dismiss)
     }
 
-    /// Passe la main à la revue complète (tiers, catégories, valider/ignorer
-    /// ligne par ligne) sans clignotement.
+    /// Hands off to the full review (payees, categories, confirm/skip
+    /// row by row) without flickering.
     ///
-    /// ⚠️ Deux mécanismes RADICALEMENT différents :
-    ///   • macOS — l'inspecteur a un slot unique et `InspectorPaneCenter.present`
-    ///     sait remplacer son contenu en UNE opération (il ferme l'ancien
-    ///     propriétaire lui-même). Fermer d'abord produisait une fermeture PUIS
-    ///     une réouverture, visible et désagréable.
-    ///   • iOS — ce sont des `.sheet` : on ne peut pas en présenter une seconde
-    ///     tant que la première est à l'écran, il FAUT fermer puis attendre.
+    /// ⚠️ Two RADICALLY different mechanisms:
+    ///   • macOS — the inspector has a single slot and
+    ///     `InspectorPaneCenter.present` can replace its content in ONE
+    ///     operation (it closes the previous owner itself). Closing first
+    ///     produced a close THEN a reopen, visible and jarring.
+    ///   • iOS — these are `.sheet`s: a second one can't be presented
+    ///     while the first is on screen, closing then waiting is required.
     @MainActor
     static func handOver(to appState: AppState, dismissSelf: () -> Void) {
         #if os(macOS)
@@ -797,7 +796,7 @@ struct ImportEntryView: View {
         #endif
     }
 
-    /// Libellé de la session : le premier fichier, suivi du nombre d'autres.
+    /// Session label: the first file, followed by the count of others.
     private func sessionLabel() -> String? {
         guard let first = handledFileNames.first else { return nil }
         return handledFileNames.count > 1 ? "\(first) +\(handledFileNames.count - 1)" : first
@@ -815,10 +814,10 @@ struct ImportEntryView: View {
 }
 
 #if os(macOS)
-/// Publie "Annuler" dans la barre système macOS UNIQUEMENT quand ce contenu est
-/// réellement hébergé dans le panneau (adaptivePane niveau 1, `!isEmbedded`).
-/// Poussé en module direct (sidebar/MoreView) ou en sheet niveau 2 → no-op (le
-/// `.toolbar` conditionnel du body gère déjà ces cas).
+/// Publishes "Cancel" in the macOS system bar ONLY when this content is
+/// actually hosted in the pane (adaptivePane level 1, `!isEmbedded`).
+/// Pushed as a direct module (sidebar/MoreView) or as a level-2 sheet → no-op
+/// (the body's conditional `.toolbar` already handles those cases).
 private struct ImportEntryInspectorChrome: ViewModifier {
     let isEmbedded: Bool
     let dismiss: () -> Void

@@ -1,15 +1,15 @@
 import SwiftUI
 import NemorisEngine
 
-/// Vue principale du nouveau parcours d'import.
+/// Main view of the import flow.
 ///
-/// Charge la session par id (depuis la DB), lance la résolution moteur en arrière-plan,
-/// affiche la liste des rows avec actions (confirmer / ignorer / réassigner manuellement),
-/// puis commit final dans la table `transactions`.
+/// Loads the session by id (from the DB), runs engine resolution in the background,
+/// shows the list of rows with actions (confirm / skip / manually reassign),
+/// then does the final commit into the `transactions` table.
 ///
-/// Accessible :
-///   - depuis l'entrée import (`ImportEntryView` → `ColumnMappingView` → ici)
-///   - depuis le bandeau "Import en cours" dans `MainTabView` pour reprendre.
+/// Reached:
+///   - from the import entry point (`ImportEntryView` → `ColumnMappingView` → here)
+///   - from the "Import in progress" banner in `MainTabView` to resume.
 struct ImportSessionView: View {
     let sessionId: UUID
 
@@ -21,19 +21,19 @@ struct ImportSessionView: View {
     @State private var showCommitConfirm = false
     @State private var showCancelConfirm = false
     @State private var rowToEnrich: ImportSessionRow?
-    /// Feuille d'aide décrivant chaque option de traitement.
+    /// Help sheet describing each processing option.
     @State private var showActionsHelp = false
-    /// Fiche de création complète (PayeeCreationFormSheet) avec aide IA/Sirene/Maps.
+    /// Full creation form (PayeeCreationFormSheet) with AI/Sirene/Maps help.
     @State private var rowToCreatePayee: ImportSessionRow?
-    /// Étape 1 du flow "lier à un tier existant" : ouvre PayeePickerSheet.
+    /// Step 1 of the "link to an existing payee" flow: opens PayeePickerSheet.
     @State private var rowToPickPayee: ImportSessionRow? = nil
-    /// Étape 2 (ou direct pour .matched) : ouvre TierUpdateSheet.
+    /// Step 2 (or direct for .matched): opens TierUpdateSheet.
     @State private var pendingUpdate: PendingTierUpdate? = nil
-    /// Toast de cascade (auto-dismiss après ~3s).
+    /// Cascade toast (auto-dismisses after ~3s).
     @State private var visibleBulkToast: BulkApplyInfo? = nil
 
-    /// Capture du tier choisi en attente d'être affiché dans TierUpdateSheet (après
-    /// fermeture du PayeePickerSheet — d'où la séparation en 2 @State bindings).
+    /// The chosen payee, captured while waiting to be shown in TierUpdateSheet (after
+    /// PayeePickerSheet closes — hence the split into 2 @State bindings).
     private struct PendingTierUpdate: Identifiable {
         let id = UUID()
         let row: ImportSessionRow
@@ -44,36 +44,36 @@ struct ImportSessionView: View {
         Group {
             if let viewModel {
                 content(viewModel)
-                    // Étape 1 : sélection d'un tier existant via PayeePickerSheet.
+                    // Step 1: pick an existing payee via PayeePickerSheet.
                     .sheet(item: $rowToPickPayee) { row in
                         PayeePickerSheet(rawLabel: row.rawLabel) { picked in
-                            // PayeePickerSheet appelle dismiss() après onPick. Si on set
-                            // pendingUpdate maintenant, SwiftUI verrait l'ouverture
-                            // simultanée d'une 2e sheet → glitch / éjection. On capture
-                            // les valeurs et on attend l'animation de fermeture avant
-                            // d'ouvrir TierUpdateSheet.
+                            // PayeePickerSheet calls dismiss() after onPick. If we set
+                            // pendingUpdate right now, SwiftUI would see a 2nd sheet
+                            // opening at the same time → a glitch / dismissal. We capture
+                            // the values and wait for the closing animation before
+                            // opening TierUpdateSheet.
                             let captured = PendingTierUpdate(row: row, payee: picked)
                             Task { @MainActor in
                                 try? await Task.sleep(nanoseconds: 400_000_000)
                                 pendingUpdate = captured
                             }
                         }
-                        // Cf. CLAUDE.md §5 : ré-injection \.locale obligatoire pour
-                        // toute `.sheet()` niveau 2+ atteignable sur macOS.
-                        // ⚠️ `\.paneHostContext` obligatoire aussi : cette vue
-                        // (`ImportSessionView`) est elle-même hébergée dans
-                        // l'inspecteur macOS (`.inspector`) — un `.sheet()` brut
-                        // ouvert depuis là hérite cette valeur, et `.paneChrome`
-                        // la lit pour publier ses boutons dans la barre système
-                        // au lieu de les dessiner dans CETTE fenêtre séparée
-                        // (aucun bouton visible dans le sheet lui-même). Reset
-                        // à `.modal`, comme le fait `.adaptivePane` sur son
-                        // propre repli `.sheet()` (cf. AdaptivePane.swift).
+                        // See CLAUDE.md §5: re-injecting \.locale is required for
+                        // every level-2+ `.sheet()` reachable on macOS.
+                        // ⚠️ `\.paneHostContext` is required too: this view
+                        // (`ImportSessionView`) is itself hosted in the macOS
+                        // inspector (`.inspector`) — a bare `.sheet()`
+                        // opened from there inherits that value, and `.paneChrome`
+                        // reads it to publish its buttons in the system bar
+                        // instead of drawing them in THIS separate window
+                        // (no button visible in the sheet itself). Reset
+                        // to `.modal`, as `.adaptivePane` does on its
+                        // own fallback `.sheet()` (see AdaptivePane.swift).
                         .presentationDetents([.medium, .large])
                         .environment(\.locale, AppLocalization.locale)
                         .environment(\.paneHostContext, .modal)
                     }
-                    // Étape 2 (ou direct pour .matched) : édition du tier choisi avant assign.
+                    // Step 2 (or direct for .matched): editing the chosen payee before assign.
                     .sheet(item: $pendingUpdate) { pending in
                         TierUpdateSheet(row: pending.row, existingPayee: pending.payee) { updated in
                             if updated == pending.payee {
@@ -125,7 +125,7 @@ struct ImportSessionView: View {
                             withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
                                 visibleBulkToast = info
                             }
-                            // Auto-dismiss après 3s
+                            // Auto-dismiss after 3s
                             Task {
                                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                                 if visibleBulkToast?.timestamp == info.timestamp {
@@ -137,7 +137,7 @@ struct ImportSessionView: View {
             } else if let loadError {
                 EmptyStateView(icon: "exclamationmark.triangle", title: "Erreur", verbatimMessage: loadError)
             } else {
-                // Skeleton initial avant que la session ne soit chargée + résolution moteur démarrée.
+                // Initial skeleton before the session is loaded and engine resolution has started.
                 ScrollView {
                     VStack(spacing: 12) {
                         // Header stats placeholder
@@ -184,11 +184,11 @@ struct ImportSessionView: View {
         appState.reloadActiveImportSession()
     }
 
-    /// Annule la session et referme la vue. Optionnellement supprime les tiers créés en session.
+    /// Cancels the session and dismisses the view. Optionally deletes the payees created during the session.
     private func cancelSession(_ vm: ImportSessionViewModel, deletingCreatedPayees: Bool) {
         vm.cancel(deletingCreatedPayees: deletingCreatedPayees)
         if deletingCreatedPayees {
-            appState.dataRefreshToken = UUID()  // rafraîchit les listes de tiers
+            appState.dataRefreshToken = UUID()  // refreshes payee lists
         }
         appState.activeImportSession = nil
         appState.showImportSessionSheet = false
@@ -344,8 +344,8 @@ struct ImportSessionView: View {
         .background(AppTheme.Colors.background)
     }
 
-    /// Une ligne a-t-elle une proposition validable en un tap ?
-    /// (faux pendant l'analyse et pour les lignes « À classer » sans candidat sûr).
+    /// Does a row have a one-tap-confirmable proposal?
+    /// (false during analysis and for "To classify" rows with no safe candidate.)
     private func canValidate(_ row: ImportSessionRow) -> Bool {
         switch row.resolution {
         case .pending, .needsManualPick: return false
@@ -367,10 +367,10 @@ struct ImportSessionView: View {
                         clusterSize: vm.clusterSize(for: row),
                         allCategories: vm.allCategories,
                         canValidate: canValidate(row),
-                        // Valider : accepte la proposition telle quelle (tous types).
+                        // Confirm: accepts the proposal as-is (all types).
                         onValidate: { vm.confirm(rowId: row.id) },
-                        // Vérifier : relit/ajuste le tier proposé avant validation.
-                        // matched → édite le tier existant ; sinon → fiche de création pré-remplie.
+                        // Verify: reviews/adjusts the proposed payee before confirming.
+                        // matched → edits the existing payee; otherwise → pre-filled creation form.
                         onVerify: {
                             if case .matched(let pid, _, _, _, _) = row.resolution,
                                let pid, let payee = vm.allTiers.first(where: { $0.id == pid }) {
@@ -386,8 +386,8 @@ struct ImportSessionView: View {
                         onReset: { vm.resetAction(rowId: row.id) },
                         onHelp: { showActionsHelp = true }
                     )
-                    // Raccourci vers les 2 verbes principaux (mêmes que la barre inline) :
-                    // swipe iOS / clic droit macOS via RowActions.
+                    // Shortcut to the 2 main verbs (same as the inline bar):
+                    // iOS swipe / macOS right-click via RowActions.
                     .rowActions(
                         leading: (canValidate(row) && row.userAction != .confirmed && row.userAction != .manuallySet)
                             ? [RowAction("Valider", systemImage: "checkmark", tint: AppTheme.Colors.success) { vm.confirm(rowId: row.id) }]
@@ -402,9 +402,9 @@ struct ImportSessionView: View {
             }
             .listStyle(.plain)
             #if os(macOS)
-            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
-            // celui du panneau hôte — sans ce modificateur, le bureau de
-            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            // `List` paints its OWN system background on macOS ON TOP OF
+            // the host pane's — without this modifier, the user's
+            // desktop shows through.
             .scrollContentBackground(.hidden)
             #endif
         }
@@ -450,22 +450,22 @@ private struct ImportSessionRowCell: View {
     let row: ImportSessionRow
     let clusterSize: Int
     let allCategories: [Category]
-    /// La proposition est-elle validable en un tap ? (grise « Valider » sinon.)
+    /// Is the proposal confirmable in one tap? (grays out "Confirm" otherwise.)
     let canValidate: Bool
-    /// **Valider** : accepte la proposition de Nemoris telle quelle.
+    /// **Confirm**: accepts Nemoris's proposal as-is.
     let onValidate: () -> Void
-    /// **Vérifier / modifier** : ouvre la fiche du tier proposé pour la relire/ajuster.
+    /// **Verify / edit**: opens the proposed payee's form to review/adjust it.
     let onVerify: () -> Void
-    /// **Créer un nouveau tier** : fiche de création complète (avec aide IA/Sirene/Maps).
+    /// **Create a new payee**: full creation form (with AI/Sirene/Maps help).
     let onCreatePayee: () -> Void
-    /// **Lier à un tier existant** : picker puis fiche d'édition.
+    /// **Link to an existing payee**: picker then edit form.
     let onLinkExisting: () -> Void
-    /// **Recherche assistée** : recherche enrichissement seule (sans créer de tier).
+    /// **Assisted search**: enrichment search only (without creating a payee).
     let onQuickEnrich: () -> Void
-    /// **Ignorer** cette ligne.
+    /// **Skip** this row.
     let onSkip: () -> Void
     let onReset: () -> Void
-    /// Affiche l'aide décrivant chaque option.
+    /// Shows the help describing each option.
     let onHelp: () -> Void
 
     var body: some View {
@@ -529,13 +529,13 @@ private struct ImportSessionRowCell: View {
         }
     }
 
-    /// Barre d'actions NORMALISÉE — identique pour toutes les lignes en attente.
-    /// Mêmes verbes, même ordre, même place : Valider · Vérifier · ⋯ (options) · ?.
-    /// Seule la *disponibilité* de « Valider » change (grisé quand rien n'est proposé).
+    /// NORMALIZED action bar — identical for every pending row.
+    /// Same verbs, same order, same place: Confirm · Verify · ⋯ (options) · ?.
+    /// Only the *availability* of "Confirm" changes (grayed out when nothing is proposed).
     @ViewBuilder
     private var pendingActions: some View {
         if case .pending = row.resolution {
-            // En cours de résolution moteur — pas encore d'options.
+            // Engine resolution still running — no options yet.
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text("Analyse…").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary)
@@ -560,7 +560,7 @@ private struct ImportSessionRowCell: View {
         }
     }
 
-    /// Menu d'options — TOUJOURS les mêmes entrées, dans le même ordre, quel que soit le type.
+    /// Options menu — ALWAYS the same entries, in the same order, whatever the type.
     @ViewBuilder
     private var optionsMenu: some View {
         Menu {
@@ -707,8 +707,8 @@ private struct ActionChip: View {
     }
 }
 
-/// Badge "+N similaires" pour signaler que cette row a des jumelles dans la session.
-/// Quand l'utilisateur agit dessus, l'action cascade aux autres pending.
+/// "+N similar" badge to flag that this row has twins in the session.
+/// When the user acts on it, the action cascades to the other pending ones.
 private struct ClusterChip: View {
     let count: Int
     var body: some View {
@@ -722,7 +722,7 @@ private struct ClusterChip: View {
     }
 }
 
-/// Bouton d'action inline compact pour la row cell (style import V2 ressuscité).
+/// Compact inline action button for the row cell (revived import V2 style).
 private struct ActionButton: View {
     let title: LocalizedStringKey
     let icon: String
@@ -743,7 +743,7 @@ private struct ActionButton: View {
     }
 }
 
-/// Toast affiché en haut de l'écran après une cascade ("Cascade : 12 lignes similaires validées").
+/// Toast shown at the top of the screen after a cascade ("Cascade: 12 similar rows confirmed").
 private struct BulkApplyToast: View {
     let info: BulkApplyInfo
     var body: some View {
@@ -765,10 +765,10 @@ private struct BulkApplyToast: View {
     }
 }
 
-// MARK: - Aide sur les options de traitement
+// MARK: - Help on processing options
 
-/// Feuille explicative : décrit chaque option de traitement d'une transaction à l'import.
-/// Ouverte via le bouton « ? » (barre de tri, barre d'action inline, menu ⋯).
+/// Explanatory sheet: describes each option for processing a transaction at import time.
+/// Opened via the "?" button (sort bar, inline action bar, ⋯ menu).
 struct ImportActionsHelpSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -798,19 +798,19 @@ struct ImportActionsHelpSheet: View {
     }
 
     var body: some View {
-            // `Form`, PAS `List` : vérifié en direct sur macOS (2026-08-26) —
-            // même armé du correctif `.frame(maxWidth: .infinity, maxHeight:
-            // .infinity)` documenté sur `PayeePickerSheet`, un `List` brut
-            // (`.automatic` style) présenté par un `.sheet()` SANS
-            // `.adaptivePaneFrame()` externe rendait une fenêtre quasiment
-            // sans hauteur : titre + bouton "Compris" collés, aucune row
-            // visible. Un `Form` avec `.nemorisFormStyle()` utilise EXACTEMENT
-            // le même `.frame` greedy mais calcule fiablement sa hauteur —
-            // c'est la voie déjà éprouvée par tous les autres sheets/forms
-            // du repo (`EnrichmentSheetView`, `TierUpdateSheet`,
+            // `Form`, NOT `List`: verified live on macOS — even with the
+            // `.frame(maxWidth: .infinity, maxHeight:
+            // .infinity)` fix documented on `PayeePickerSheet` in place, a bare
+            // `List` (`.automatic` style) presented by a `.sheet()` WITHOUT
+            // an external `.adaptivePaneFrame()` rendered a window with
+            // almost no height: title + "Got it" button squeezed together, no row
+            // visible. A `Form` with `.nemorisFormStyle()` uses EXACTLY
+            // the same greedy `.frame` but reliably computes its height —
+            // it's the path already proven by every other sheet/form
+            // in the repo (`EnrichmentSheetView`, `TierUpdateSheet`,
             // `PayeeCreationFormSheet`, `AddTricountReimbursementSheet`…).
-            // Aucun de ces deux a de contenu interactif (que du texte), donc
-            // rien ne dépend spécifiquement de `List`.
+            // Neither of these two has interactive content (just text), so
+            // nothing specifically depends on `List`.
             Form {
                 Section {
                     ForEach(options) { opt in
@@ -850,10 +850,10 @@ struct ImportActionsHelpSheet: View {
                 }
             }
             .nemorisFormStyle()
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
-            // barre d'outils native laisse le bureau de l'utilisateur
-            // transparaître (retour d'usage 2026-08-21). Cf. le commentaire
-            // de `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on macOS-sheet — the
+            // native toolbar lets the user's desktop show
+            // through. See the `macSheetChrome` comment
+            // in AdaptivePane.swift.
             .paneChrome("Traiter une transaction", confirmLabel: "Compris", confirmIcon: "checkmark", onConfirm: { dismiss() })
     }
 }

@@ -2,23 +2,23 @@ import SwiftUI
 import MapKit
 import NemorisEngine
 
-/// Fiche de création complète d'un nouveau tier depuis une row d'import.
+/// Full creation form for a new payee from an import row.
 ///
-/// Tous les champs sont éditables d'entrée. La section **"Aide à l'identification"**
-/// est repliable en bas — si l'utilisateur ne se souvient pas du marchand, il peut
-/// chercher dans Sirene / Apple Maps / IA on-device et tap un candidat pour pré-remplir
-/// les champs au-dessus (sans appliquer aveuglément).
+/// Every field is editable from the start. The **"Identification help"**
+/// section is collapsible at the bottom — if the user doesn't remember the
+/// merchant, they can search Sirene / Apple Maps / on-device AI and tap a
+/// candidate to pre-fill the fields above (without blindly applying it).
 ///
-/// Carte interactive avec bouton plein écran (`EnrichmentMapFullscreenSheet`) qui
-/// permet de pan/zoom et de relancer une recherche depuis la zone visible.
+/// Interactive map with a full-screen button (`EnrichmentMapFullscreenSheet`)
+/// that allows panning/zooming and re-running a search from the visible area.
 struct PayeeCreationFormSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    /// Row d'import source — nil quand le formulaire est utilisé hors import (ex: création
-    /// de tiers depuis TransactionEditSheet / TransactionCreateSheet / ReferenceDataView).
+    /// Source import row — nil when the form is used outside an import (e.g.
+    /// creating a payee from TransactionEditSheet / TransactionCreateSheet / ReferenceDataView).
     let row: ImportSessionRow?
     let allCategories: [Category]
-    let onCreate: (Tiers) -> Void   // tier prêt à insérer (id=0 placeholder)
+    let onCreate: (Tiers) -> Void   // payee ready to insert (id=0 placeholder)
 
     // Form fields
     @State private var name: String
@@ -43,28 +43,28 @@ struct PayeeCreationFormSheet: View {
     @State private var isSearching: Bool = false
     @State private var hasSearched: Bool = false
     @State private var candidates: [SearchCandidate] = []
-    /// résultat structuré du registre (plan + entreprises + établissements),
-    /// distinct de `candidates` qui reste la liste plate des sources carto et IA.
+    /// Structured registry result (plan + companies + establishments),
+    /// distinct from `candidates`, which stays the flat list of map/AI sources.
     @State private var searchResult: MerchantSearchResult? = nil
-    /// Pins de carte dérivés des établissements géolocalisés du registre.
-    /// Séparés de `candidates` : les y injecter dupliquerait `companiesList`
-    /// dans la liste des résultats — ils n'existent que pour la carte.
+    /// Map pins derived from the registry's geolocated establishments.
+    /// Kept separate from `candidates`: injecting them there would duplicate
+    /// `companiesList` into the results list — they only exist for the map.
     @State private var sireneGeoCandidates: [SearchCandidate] = []
     @State private var selectedCandidateId: UUID? = nil
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var showFullscreenMap: Bool = false
 
-    // Groups (pour picker)
+    // Groups (for the picker)
     @State private var payeeGroups: [PayeeGroup] = []
     @State private var showGroupPicker = false
 
-    /// Toast affiché brièvement quand l'IA / Sirene applique automatiquement
-    /// des métadonnées sur le formulaire (ville/pays/catégorie).
+    /// Toast shown briefly when AI / Sirene automatically applies
+    /// metadata onto the form (city/country/category).
     @State private var autoApplyFeedback: String? = nil
 
     private let repository = TransactionRepository()
 
-    // MARK: - Init depuis import (avec row)
+    // MARK: - Init from an import (with a row)
 
     init(row: ImportSessionRow,
          allCategories: [Category],
@@ -85,10 +85,10 @@ struct PayeeCreationFormSheet: View {
         _useLLM           = State(initialValue: AIEnrichmentBackend.isAvailable(for: .merchantEnrichment))
     }
 
-    // MARK: - Init standalone (sans import)
+    // MARK: - Standalone init (without an import)
 
-    /// Init simplifié pour la création de tiers hors contexte d'import.
-    /// Utilisé par TransactionEditSheet, TransactionCreateSheet, ReferenceDataView, etc.
+    /// Simplified init for creating a payee outside an import context.
+    /// Used by TransactionEditSheet, TransactionCreateSheet, ReferenceDataView, etc.
     init(prefilledName: String = "",
          prefilledCategoryId: Int? = nil,
          allCategories: [Category],
@@ -118,11 +118,10 @@ struct PayeeCreationFormSheet: View {
                 searchHelperSection
             }
             .nemorisFormStyle()
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — un
-            // `NavigationStack`+`.toolbar` natif laisse le bureau de
-            // l'utilisateur transparaître au travers du titre ET des boutons
-            // (retour d'usage 2026-08-21, capture "New Payee"). Cf. le
-            // commentaire de `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on macOS-sheet — a native
+            // `NavigationStack`+`.toolbar` lets the user's desktop show
+            // through the title AND the buttons
+            // (see the `macSheetChrome` comment in AdaptivePane.swift).
             .paneChrome(
                 "Nouveau tier",
                 cancelLabel: "Annuler", onCancel: { dismiss() },
@@ -133,13 +132,13 @@ struct PayeeCreationFormSheet: View {
                     dismiss()
                 }
             )
-            // Cf. CLAUDE.md §5 : ré-injection \.locale obligatoire pour toute
-            // `.sheet()` niveau 2+ atteignable sur macOS. `\.paneHostContext`
-            // itou : cette fiche est elle-même atteinte via un `.sheet()`
-            // ouvert depuis l'inspecteur (`ImportSessionView`), donc hérite
-            // `.inspector` — sans reset à `.modal`, le `.paneChrome` de la
-            // vue présentée ici publierait ses boutons dans la barre système
-            // au lieu de les dessiner dans cette fenêtre séparée.
+            // See CLAUDE.md §5: re-injecting \.locale is required for every
+            // level-2+ `.sheet()` reachable on macOS. `\.paneHostContext`
+            // too: this form is itself reached via a `.sheet()`
+            // opened from the inspector (`ImportSessionView`), so it inherits
+            // `.inspector` — without a reset to `.modal`, this view's
+            // `.paneChrome` would publish its buttons in the system bar
+            // instead of drawing them in this separate window.
             .sheet(isPresented: $showGroupPicker) {
                 PayeeGroupPickerView(currentGroupId: groupId) { group in
                     groupId = group?.id
@@ -158,9 +157,9 @@ struct PayeeCreationFormSheet: View {
                 .environment(\.locale, AppLocalization.locale)
                 .environment(\.paneHostContext, .modal)
             }
-            // Tap sur un pin ÉTABLISSEMENT de la mini-carte → pré-remplit la fiche
-            // (les pins Sirene ne sont pas dans `resultsList`, le tap-liste ne les
-            // couvre donc pas — contrairement aux candidats MapKit/IA).
+            // Tap on an ESTABLISHMENT pin on the mini-map → pre-fills the form
+            // (Sirene pins aren't in `resultsList`, so the list-tap doesn't
+            // cover them — unlike MapKit/AI candidates).
             .onChange(of: selectedCandidateId) { _, newValue in
                 guard let newValue,
                       let pin = sireneGeoCandidates.first(where: { $0.id == newValue }) else { return }
@@ -374,8 +373,8 @@ struct PayeeCreationFormSheet: View {
                 ForEach(geoCandidates) { candidate in
                     if let lat = candidate.result.latitude,
                        let lon = candidate.result.longitude {
-                        // Annotation custom : cercle avec favicon (si domain) ou icône
-                        // thématique, bordure colorée par source, pointer en bas.
+                        // Custom annotation: a circle with a favicon (if a domain) or a
+                        // themed icon, border colored by source, pointer at the bottom.
                         Annotation(
                             candidate.result.displayName ?? "?",
                             coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon)
@@ -419,8 +418,8 @@ struct PayeeCreationFormSheet: View {
                         }
                         .buttonStyle(.plain)
 
-                        // Bouton "Affiner Maps" si le LLM propose une requête nettoyée
-                        // (ex. "Hung Restaurant Ha Giang" extrait depuis "VNPAY HUNG RES PSC VN P HA GIANG")
+                        // "Refine on Maps" button if the LLM proposes a cleaned-up query
+                        // (e.g. "Hung Restaurant Ha Giang" extracted from "VNPAY HUNG RES PSC VN P HA GIANG")
                         if candidate.source == .llm,
                            let hint = candidate.result.searchHint,
                            !hint.isEmpty,
@@ -462,8 +461,8 @@ struct PayeeCreationFormSheet: View {
     private func candidateRow(_ c: SearchCandidate) -> some View {
         HStack(alignment: .top, spacing: 10) {
             sourceBadge(c.source)
-            // Look Around thumbnail pour les POI MapKit (aide à reconnaître la devanture).
-            // Affiché uniquement quand on a des coords ET que Apple a couvert la zone.
+            // Look Around thumbnail for MapKit POIs (helps recognize the storefront).
+            // Shown only when we have coordinates AND Apple has covered the area.
             if c.source == .mapkit,
                let lat = c.result.latitude,
                let lon = c.result.longitude {
@@ -510,9 +509,9 @@ struct PayeeCreationFormSheet: View {
 
     // MARK: - Apply candidate (fills form, doesn't dismiss)
 
-    // MARK: - plan de recherche et entreprises
+    // MARK: - Search plan and companies
 
-    /// Ce qui a été retiré du nom, et ce qui a réellement été tenté.
+    /// What was stripped from the name, and what was actually tried.
     @ViewBuilder
     private var planInspector: some View {
         if let searchResult, !isSearching {
@@ -528,9 +527,9 @@ struct PayeeCreationFormSheet: View {
         }
     }
 
-    /// Entreprises trouvées, dépliables vers leurs établissements.
-    /// Contrairement à la sheet de recherche rapide, un tap PRÉ-REMPLIT le formulaire
-    /// sans fermer : l'utilisateur reste maître de la fiche qu'il est en train de créer.
+    /// Companies found, expandable into their establishments.
+    /// Unlike the quick-search sheet, a tap PRE-FILLS the form
+    /// without closing it: the user stays in control of the payee they're creating.
     @ViewBuilder
     private var companiesList: some View {
         if let searchResult, !searchResult.companies.isEmpty, !isSearching {
@@ -559,7 +558,7 @@ struct PayeeCreationFormSheet: View {
         }
     }
 
-    /// NAF → id de catégorie locale, même logique que `prefill`.
+    /// NAF → local category id, same logic as `prefill`.
     private var resolveNAFCategory: (String) -> Int? {
         { naf in
             guard let cat = NAFCategoryMapper.shared.lookup(naf) else { return nil }
@@ -569,9 +568,9 @@ struct PayeeCreationFormSheet: View {
         }
     }
 
-    /// Remplit les champs du formulaire depuis une entreprise ou un établissement retenu.
-    /// Ne remplace que ce qui est vide côté catégorie — le reste est une proposition
-    /// explicite de l'utilisateur, donc prioritaire sur ce qu'il avait éventuellement saisi.
+    /// Fills the form's fields from a chosen company or establishment.
+    /// Only replaces the category if it's empty — the rest is an explicit
+    /// suggestion the user should take priority over whatever they had already entered.
     private func prefill(from enrichment: MerchantEnrichment) {
         if let n = enrichment.displayName, !n.isEmpty { name = n }
         if let c = enrichment.city, !c.isEmpty { city = c }
@@ -606,7 +605,7 @@ struct PayeeCreationFormSheet: View {
 
     private func buildPayee() -> Tiers {
         Tiers(
-            id: 0,   // placeholder — le ViewModel set le vrai id après insert
+            id: 0,   // placeholder — the ViewModel sets the real id after insert
             name: name.trimmingCharacters(in: .whitespaces),
             regex: regex.trimmingCharacters(in: .whitespaces).nilIfEmpty,
             categoryId: categoryId,
@@ -637,16 +636,16 @@ struct PayeeCreationFormSheet: View {
         var collected: [SearchCandidate] = []
 
         if useSirene {
-            // planificateur + cascade au lieu d'un `q=` construit depuis le libellé
-            // entier. L'API matche `q` contre la raison sociale et les enseignes, jamais
-            // contre l'adresse : y laisser la ville faisait échouer la recherche
-            // (`q=carrefour market flanches` → 0 ; `q=carrefour market` → 1411).
+            // planner + cascade instead of a `q=` built from the whole
+            // label. The API matches `q` against the company name and trade names, never
+            // against the address: leaving the city in used to make the search fail
+            // (`q=carrefour market flanches` → 0; `q=carrefour market` → 1411).
             let rawLabel = row?.rawLabel ?? trimmedQuery
             let userEdited = trimmedQuery != rawLabel
             let input = MerchantQueryPlanner.Input(
                 rawLabel: rawLabel,
-                // Le pays et le code postal du formulaire PRIMENT : l'utilisateur les a
-                // saisis ou corrigés, ils valent mieux que toute déduction automatique.
+                // The form's country and postal code TAKE PRIORITY: the user
+                // entered or corrected them, they're worth more than any automatic inference.
                 userCountry: country.trimmingCharacters(in: .whitespaces).nilIfEmpty,
                 userPostalCode: pc.count == 5 ? pc : nil,
                 userQueryOverride: userEdited ? trimmedQuery : nil
@@ -695,20 +694,20 @@ struct PayeeCreationFormSheet: View {
             cameraPosition = .automatic
         }
 
-        // AUTO-APPLY des métadonnées "faciles" sur les champs vides du formulaire,
-        // sans attendre que l'utilisateur tape un candidat.
+        // AUTO-APPLY the "easy" metadata onto the form's empty fields,
+        // without waiting for the user to tap a candidate.
         autoApplyMetadataFromSearch()
     }
 
-    /// Pour chaque source qui a renvoyé un résultat avec confidence > 0.5, applique
-    /// city / country / categoryId sur les champs encore vides du formulaire.
-    /// L'utilisateur peut toujours surcharger en éditant à la main.
-    /// Toast affiché en bas pour signaler ce qui a été rempli.
+    /// For each source that returned a result with confidence > 0.5, applies
+    /// city / country / categoryId onto the form's fields that are still empty.
+    /// The user can always override by editing by hand.
+    /// A toast is shown at the bottom to report what was filled in.
     private func autoApplyMetadataFromSearch() {
         var applied: [String] = []
 
-        // 1) Re-tente d'abord l'extraction déterministe sur la query éditée par l'utilisateur
-        //    (ex. l'utilisateur a copié-collé un meilleur libellé dans le champ recherche).
+        // 1) First retry deterministic extraction on the query the user edited
+        //    (e.g. the user pasted a better label into the search field).
         let locHit = LocationExtractor.extract(from: searchQuery)
         if country.isEmpty, let c = locHit.country, !c.isEmpty {
             country = c
@@ -719,8 +718,8 @@ struct PayeeCreationFormSheet: View {
             applied.append("Ville \(c)")
         }
 
-        // 2) Pour chaque source avec haute confidence, applique les champs encore vides.
-        //    On parcourt par confidence décroissante (candidates est déjà trié).
+        // 2) For each source with high confidence, apply the fields still empty.
+        //    Iterated in decreasing confidence order (candidates is already sorted).
         for candidate in candidates where candidate.result.confidence >= 0.5 {
             let r = candidate.result
             if country.isEmpty, let c = r.country, !c.isEmpty {
@@ -735,7 +734,7 @@ struct PayeeCreationFormSheet: View {
                 categoryId = cid
                 applied.append("Catégorie")
             }
-            // address / siret seulement depuis Sirene (donnée fiable)
+            // address / siret only from Sirene (reliable data)
             if candidate.source == .sirene {
                 if address.isEmpty, let a = r.address, !a.isEmpty {
                     address = a
@@ -746,7 +745,7 @@ struct PayeeCreationFormSheet: View {
                     applied.append("SIRET")
                 }
             }
-            // domain depuis MapKit (item.url) ou si LLM a proposé un domaine
+            // domain from MapKit (item.url) or if the LLM proposed a domain
             if domain.isEmpty, let d = r.domain, !d.isEmpty {
                 domain = d
                 applied.append("Domaine")
@@ -758,7 +757,7 @@ struct PayeeCreationFormSheet: View {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
                 autoApplyFeedback = msg
             }
-            // Dismiss après 4s
+            // Dismiss after 4s
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
                 withAnimation { autoApplyFeedback = nil }
@@ -822,20 +821,20 @@ struct PayeeCreationFormSheet: View {
     }
 }
 
-// MARK: - Candidate model (partagé avec EnrichmentSheetView via le type SearchCandidate)
+// MARK: - Candidate model (shared with EnrichmentSheetView via the SearchCandidate type)
 
 struct SearchCandidate: Identifiable {
     let id = UUID()
     let source: MerchantEnrichmentSource
     let result: MerchantEnrichment
-    /// Renseigné quand le candidat EST un établissement Sirene (pin de carte
-    /// issu du drill-down entreprise → établissements). Le modèle reste plat :
-    /// `result` porte déjà l'adresse/SIRET/coords de l'établissement via
-    /// `CompanyMatch.enrichment(for:)` — ce contexte ne sert qu'aux badges UI.
+    /// Set when the candidate IS a Sirene establishment (a map pin
+    /// from the company → establishments drill-down). The model stays flat:
+    /// `result` already carries the establishment's address/SIRET/coords via
+    /// `CompanyMatch.enrichment(for:)` — this context is only used for UI badges.
     var establishment: EstablishmentContext? = nil
 }
 
-/// Contexte d'affichage d'un candidat-établissement (badges Siège/Fermé).
+/// Display context of an establishment candidate (Headquarters/Closed badges).
 struct EstablishmentContext {
     let isHeadquarters: Bool
     let isActive: Bool
@@ -843,13 +842,13 @@ struct EstablishmentContext {
 }
 
 extension MerchantSearchResult {
-    /// Pins de carte : un candidat par établissement GÉOLOCALISÉ des meilleures
-    /// entreprises. Cap 5 entreprises × 8 établissements, 25 pins au total —
-    /// une grande enseigne matcherait des centaines de branches et noierait la
-    /// carte. CHEMIN UNIQUE partagé par les 3 écrans (fiche création, recherche
-    /// rapide, plein écran) — avant ce helper, la carte plein écran aplatissait
-    /// chaque entreprise sur son seul meilleur établissement et les deux autres
-    /// écrans n'affichaient RIEN du registre.
+    /// Map pins: one candidate per GEOLOCATED establishment of the best
+    /// companies. Capped at 5 companies × 8 establishments, 25 pins total —
+    /// a large chain would match hundreds of branches and drown the
+    /// map. SINGLE PATH shared by the 3 screens (creation form, quick
+    /// search, full screen) — before this helper, the full-screen map flattened
+    /// every company onto its single best establishment and the other two
+    /// screens showed NOTHING from the registry.
     func establishmentPins(resolveCategory: (String) -> Int? = { _ in nil }) -> [SearchCandidate] {
         var pins: [SearchCandidate] = []
         for ranked in companies.prefix(5) {
@@ -886,14 +885,14 @@ private struct InitialCandidate {
     let categoryId: Int?
 
     init(row: ImportSessionRow) {
-        // Regex : pattern simple matchant le libellé brut
+        // Regex: a simple pattern matching the raw label
         let escaped = NSRegularExpression.escapedPattern(for: row.rawLabel)
             .trimmingCharacters(in: .whitespaces)
         self.regex = escaped.isEmpty ? "" : "(?i)\(escaped)"
 
-        // Pré-extraction déterministe ville/pays depuis le libellé (sans LLM).
-        // Couvre les patterns évidents : VN + HA NOI / DA NANG / etc.,
-        // FR + nom de ville française connue, ou code postal 5 chiffres.
+        // Deterministic city/country pre-extraction from the label (no LLM).
+        // Covers the obvious patterns: VN + HA NOI / DA NANG / etc.,
+        // FR + a known French city name, or a 5-digit postal code.
         let locHit = LocationExtractor.extract(from: row.rawLabel)
 
         switch row.resolution {
