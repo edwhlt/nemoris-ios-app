@@ -11,8 +11,8 @@ struct TransactionDetailPane: View {
     let allCategories: [Category]
     let repository: TransactionRepository
 
-    /// Lecture fraîche à chaque rendu : après une édition (tags modifiés dans
-    /// le sheet), le retour au détail reflète l'état réel en base.
+    /// Fresh read on every render: after an edit (tags changed in
+    /// the sheet), returning to the detail reflects the actual state in the database.
     private var tags: [Tag] {
         repository.fetchTagsForTransactions([tx.id])[tx.id] ?? []
     }

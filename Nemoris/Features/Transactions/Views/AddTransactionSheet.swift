@@ -5,7 +5,7 @@ import UIKit
 import TipKit
 
 struct AddTransactionSheet: View {
-    // Rebind sur paneDismiss (inspector macOS / sheet iOS) — dismiss() reste valide.
+    // Rebound onto paneDismiss (macOS inspector / iOS sheet) — dismiss() stays valid.
     @Environment(\.paneDismiss) private var dismiss
 
     let accounts: [Account]
@@ -87,9 +87,9 @@ struct AddTransactionSheet: View {
                                 .background(Circle().fill(type == .expense ? AppTheme.Colors.danger.opacity(0.12) : AppTheme.Colors.success.opacity(0.12)))
                         }
                         .buttonStyle(.plain)
-                        // Titre vide : cf. TransactionEditSheet — la row a déjà
-                        // son label ("Montant"), un titre non-vide s'affiche en
-                        // permanence sur macOS au lieu de servir de placeholder.
+                        // An empty title: see TransactionEditSheet — the row already
+                        // has its label ("Amount"), a non-empty title displays
+                        // permanently on macOS instead of acting as a placeholder.
                         TextField("", text: $amountText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)

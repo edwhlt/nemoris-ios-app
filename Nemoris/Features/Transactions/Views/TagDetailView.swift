@@ -13,7 +13,7 @@ struct TagDetailView: View {
     @State private var isSyncingRates = false
 
     private var txTotal: Double { transactions.reduce(0) { $0 + $1.amount } }
-    // Exclut les entrées sans taux (devise étrangère non convertie) du total EUR
+    // Excludes entries with no rate (an unconverted foreign currency) from the EUR total
     private var tcTotal: Double { tricountEntries.reduce(0) { $0 + ($1.needsConversion ? 0 : $1.signedAmount) } }
     private var grandTotal: Double { txTotal + tcTotal }
     private var hasConvertedEntries: Bool { tricountEntries.contains { $0.isConverted } }
@@ -21,7 +21,7 @@ struct TagDetailView: View {
 
     var body: some View {
         List {
-            // Résumé
+            // Summary
             Section {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -101,7 +101,7 @@ struct TagDetailView: View {
                             Spacer()
                             VStack(alignment: .trailing, spacing: 2) {
                                 if entry.needsConversion {
-                                    // Pas de taux disponible : afficher en devise originale avec indicateur
+                                    // No rate available: show in the original currency with an indicator
                                     let rawSigned = entry.isExpense ? -entry.myShare : entry.myShare
                                     Text(rawSigned, format: .currency(code: entry.currency))
                                         .font(.subheadline).fontWeight(.semibold)
@@ -109,11 +109,11 @@ struct TagDetailView: View {
                                     Text("non converti")
                                         .font(.caption2).foregroundStyle(AppTheme.Colors.warning)
                                 } else {
-                                    // Montant en EUR (signé : négatif si dépense, positif si revenu)
+                                    // Amount in EUR (signed: negative for an expense, positive for income)
                                     Text(entry.signedAmount, format: .currency(code: "EUR"))
                                         .font(.subheadline).fontWeight(.semibold)
                                         .foregroundStyle(entry.isExpense ? AppTheme.Colors.danger : AppTheme.Colors.success)
-                                    // Montant original si devise étrangère convertie
+                                    // Original amount if a foreign currency was converted
                                     if entry.isConverted {
                                         let rawSigned = entry.isExpense ? -entry.myShare : entry.myShare
                                         Text(rawSigned, format: .currency(code: entry.currency))
@@ -138,9 +138,9 @@ struct TagDetailView: View {
             }
         }
         #if os(macOS)
-        // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS celui du
-        // panneau hôte — sans ce modificateur, le bureau de l'utilisateur
-        // transparaît (retour d'usage 2026-08-19).
+        // `List` paints ITS OWN system background on macOS ON TOP OF the
+        // host pane's — without this modifier, the user's desktop
+        // shows through.
         .scrollContentBackground(.hidden)
         #endif
         .navigationTitle(tag.name)
@@ -155,7 +155,7 @@ struct TagDetailView: View {
         .onAppear {
             transactions = repository.fetchTransactions(forTagId: tag.id)
             tricountEntries = repository.fetchTricountEntries(forTagId: tag.id)
-            // Si des entrées non-EUR sont sans taux, déclencher la sync
+            // If some non-EUR entries have no rate, trigger the sync
             if tricountEntries.contains(where: { $0.needsConversion }) {
                 Task {
                     isSyncingRates = true

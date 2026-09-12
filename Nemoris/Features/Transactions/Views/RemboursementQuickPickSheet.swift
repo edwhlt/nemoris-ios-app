@@ -23,9 +23,9 @@ struct RemboursementQuickPickSheet: View {
                     onSelect(nil, ""); dismiss()
                 }
                 .foregroundStyle(AppTheme.Colors.textSecondary)
-                // Sans ça, macOS applique le chrome de bouton par défaut
-                // (teinté par l'accent de l'app) par-dessus la carte déjà
-                // verte de `macGroupedRow` (retour d'usage 2026-08-21).
+                // Without this, macOS applies the default button chrome
+                // (tinted with the app's accent) on top of `macGroupedRow`'s
+                // already-green card.
                 .buttonStyle(.plain)
                 .macGroupedRow(first: true, last: filtered.isEmpty)
 
@@ -41,11 +41,11 @@ struct RemboursementQuickPickSheet: View {
             }
             #if os(macOS)
             .listStyle(.plain)
-            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
-            // celui du panneau hôte — sans ce modificateur, le bureau de
-            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            // `List` paints ITS OWN system background on macOS ON TOP OF
+            // the host pane's — without this modifier, the user's
+            // desktop shows through.
             .scrollContentBackground(.hidden)
-            // Décolle la 1ère carte du Divider() de `paneChrome` juste au-dessus.
+            // Detaches the 1st card from `paneChrome`'s Divider() right above it.
             .macGroupedListTopGap()
             #endif
             .paneSearchable(text: $search, prompt: "Rechercher un tiers…")

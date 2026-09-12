@@ -6,13 +6,13 @@ import TipKit
 
 // MARK: - Tag color helpers
 extension Tag {
-    /// Couleur SwiftUI du tag. Si l'utilisateur n'en a choisi aucune, une
-    /// teinte est dérivée DÉTERMINISTIQUEMENT de l'id sur une petite palette
-    /// — pas un unique cuivre partagé par tous les tags non colorés. Sinon
-    /// plusieurs tags sans rapport (ex. deux voyages différents) affichent
-    /// EXACTEMENT la même couleur, ce qui défait l'intérêt d'un code couleur
-    /// (retour d'usage 2026-08-19 : « Ha Giang Loop », « Sa Pa » et d'autres
-    /// tags jamais colorés à la main se confondaient visuellement).
+    /// The tag's SwiftUI color. If the user hasn't chosen one, a
+    /// tint is DETERMINISTICALLY derived from the id over a small palette
+    /// — not a single copper shared by every uncolored tag. Otherwise
+    /// several unrelated tags (e.g. two different trips) show
+    /// EXACTLY the same color, which defeats the point of a color code
+    /// (several tags never colored by hand used to look
+    /// visually indistinguishable).
     var displayColor: Color {
         guard let hex = color, !hex.isEmpty else {
             return Tag.fallbackPalette[abs(id) % Tag.fallbackPalette.count]
@@ -20,9 +20,9 @@ extension Tag {
         return Color(tagHex: hex)
     }
 
-    /// Palette fixe (comme les couleurs de tag choisies à la main : un hex
-    /// brut, sans variante dark/light) — juste assez de teintes distinctes
-    /// pour qu'un id proche ne retombe pas visuellement sur le même voisin.
+    /// A fixed palette (like hand-picked tag colors: a raw hex,
+    /// no dark/light variant) — just enough distinct tints
+    /// that a nearby id doesn't visually fall on the same neighbor.
     private static let fallbackPalette: [Color] = [
         AppTheme.Colors.accentSecondary,
         Color(hex: "5B8DB8"),
@@ -70,7 +70,7 @@ struct TransactionsView: View {
     @Environment(AppState.self) private var appState
     private let repository = TransactionRepository()
 
-    // Données
+    // Data
     @State private var transactions: [FinanceTransaction] = []
     @State private var accounts: [Account] = []
     @State private var allTiers: [Tiers] = []
@@ -78,13 +78,13 @@ struct TransactionsView: View {
     @State private var allMdps: [PaymentType] = []
     @State private var allTags: [Tag] = []
 
-    // Lazy loading — `isLoading = true` au boot pour afficher le skeleton dès le 1er rendu.
+    // Lazy loading — `isLoading = true` at boot to show the skeleton from the 1st render.
     @State private var isLoading = true
     @State private var isLoadingMore = false
     @State private var hasMore = true
     private let pageSize = 100
 
-    // Sélection — l'ancre permet le maj+clic (plage), cf. `RangeSelection`
+    // Selection — the anchor enables shift+click (a range), see `RangeSelection`
     // (DesignSystem/MultiSelect.swift).
     @State private var isSelecting = false
     @State private var selectedIds: Set<Int> = []
@@ -95,9 +95,9 @@ struct TransactionsView: View {
     @State private var showBulkCategoryPicker = false
     @State private var bulkTagInitialStates: [Int: TagSelectionState] = [:]
 
-    // Édition
-    /// Transaction sélectionnée : iOS → sheet d'édition directe ; macOS →
-    /// panneau détail (Modifier/Supprimer) puis édition (adaptiveEntityPane).
+    // Editing
+    /// Selected transaction: iOS → a direct edit sheet; macOS →
+    /// a detail pane (Edit/Delete) then editing (adaptiveEntityPane).
     @State private var selectedTransaction: FinanceTransaction? = nil
     @State private var quickCategoryTx: FinanceTransaction? = nil
     @State private var tagQuickTx: FinanceTransaction? = nil
@@ -113,7 +113,7 @@ struct TransactionsView: View {
     private let multiSelectTip = MultiSelectTip()
     private let tagsTip = TagsTip()
 
-    // Analyse filtrée
+    // Filtered analysis
     @State private var showFilteredDashboard = false
 
     // Ajout manuel
@@ -131,19 +131,19 @@ struct TransactionsView: View {
     // Soldes (#6)
     @State private var accountBalance: Double = 0
     @State private var uncategorizedCount: Int = 0
-    /// Fermeture manuelle de l'avertissement "N transactions sans catégorie"
-    /// — remis à `false` dès que le compte change (nouvel import, etc.),
-    /// pour ne pas cacher indéfiniment un vrai nouveau lot à catégoriser.
+    /// Manual dismissal of the "N uncategorized transactions" warning
+    /// — reset to `false` as soon as the account changes (a new import, etc.),
+    /// so a genuinely new batch to categorize isn't hidden indefinitely.
     @State private var uncategorizedBannerDismissed = false
 
-    // Filtres & affichage
+    // Filters & display
     //
-    // ⚠️ Catégorie / tags / groupement PERSISTÉS (`UserDefaults`, clés
-    // `tx.filter.*`) — retour d'usage : ces filtres repartaient à zéro à
-    // chaque lancement de l'app. La recherche texte (tiers/libellé), elle,
-    // NE l'est PAS délibérément : un terme de recherche laissé actif d'une
-    // session à l'autre serait plus surprenant qu'utile (contrairement à
-    // "je filtre toujours sur telle catégorie", une vraie préférence).
+    // ⚠️ Category / tags / grouping are PERSISTED (`UserDefaults`, keys
+    // `tx.filter.*`) — these filters used to reset on every app
+    // launch. The text search (payee/label), however, is
+    // deliberately NOT: a search term left active from one
+    // session to the next would be more surprising than useful (unlike
+    // "I always filter on this category", a real preference).
     @State private var showFilters = false
     @State private var payeeSearchText = ""
     @State private var labelSearchText = ""
@@ -155,15 +155,15 @@ struct TransactionsView: View {
 
     // MARK: Computed
 
-    /// `true` quand l'utilisateur a choisi le sentinel "Tous les comptes" (id = 0) dans
-    /// le picker. Modifie l'UX : solde compte + balance courante par ligne masqués
-    /// (incohérents inter-comptes) et chip compte affiché sur chaque row pour
-    /// distinguer la provenance.
+    /// `true` when the user picked the "All accounts" sentinel (id = 0) in
+    /// the picker. Changes the UX: the account balance + per-row running
+    /// balance are hidden (meaningless across accounts) and an account chip
+    /// is shown on every row to tell the source apart.
     private var isAllAccountsMode: Bool {
         (appState.selectedAccountId ?? 0) == 0
     }
 
-    /// Lookup O(1) pour afficher le nom du compte sur chaque row en mode "Tous".
+    /// O(1) lookup to show the account name on each row in "All" mode.
     private var accountsById: [Int: Account] {
         Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0) })
     }
@@ -222,15 +222,16 @@ struct TransactionsView: View {
             }
     }
 
-    /// Solde du compte après chaque transaction (sans requête SQL supplémentaire).
-    /// Calculé en partant de accountBalance (solde à la fin de la période) et en remontant
-    /// du plus récent au plus ancien. Vide si des filtres actifs rendent les données incomplètes
-    /// ou si on est en mode "Tous les comptes" (running balance n'a aucun sens inter-comptes).
+    /// The account balance after each transaction (with no extra SQL query).
+    /// Computed starting from accountBalance (the balance at the end of the period) and
+    /// walking backward from the most recent to the oldest. Empty if active
+    /// filters make the data incomplete, or in "All accounts" mode (a
+    /// running balance makes no sense across accounts).
     private var txBalances: [Int: Double] {
         guard activeFiltersCount == 0, !isAllAccountsMode else { return [:] }
         var result: [Int: Double] = [:]
         var running = accountBalance
-        for tx in transactions { // trié du plus récent au plus ancien
+        for tx in transactions { // sorted most recent to oldest
             result[tx.id] = running
             running -= tx.amount
         }
@@ -245,15 +246,15 @@ struct TransactionsView: View {
         if isEmbedded { navBody } else { NavigationStack { navBody } }
     }
 
-    // ⚠️ Corps découpé en CHAÎNE de propriétés calculées (`listContent` →
-    // `bodyWithChrome` → … → `navBody`) plutôt qu'en une seule expression
-    // `Group { … }.modifier().modifier()…`. Avec ~30 modificateurs enchaînés
-    // (dont une douzaine de `.adaptivePane` à closure), Xcode 26 échouait sur
-    // « The compiler is unable to type-check this expression in reasonable
-    // time » : le vérificateur de types traite toute la chaîne comme UNE
-    // expression et explose combinatoirement. Chaque maillon est désormais une
-    // expression à part, résolue isolément. Ne pas re-fusionner — ajouter un
-    // nouveau pane dans le maillon thématique correspondant.
+    // ⚠️ The body is split into a CHAIN of computed properties (`listContent` →
+    // `bodyWithChrome` → … → `navBody`) rather than a single
+    // `Group { … }.modifier().modifier()…` expression. With ~30 chained
+    // modifiers (a dozen of them `.adaptivePane` closures), Xcode 26 used to fail with
+    // "The compiler is unable to type-check this expression in reasonable
+    // time": the type checker treats the whole chain as ONE
+    // expression and blows up combinatorially. Each link is now a
+    // separate expression, resolved in isolation. Don't merge them back —
+    // add a new pane in its matching thematic link.
     private var navBody: some View {
         bodyWithLifecycle
     }
@@ -286,18 +287,18 @@ struct TransactionsView: View {
             paginationFooter
         }
         #if os(macOS)
-        // macOS : .plain = base neutre pour les cartes custom
-        // dessinées par macGroupedRow (coins arrondis first/last,
-        // inset, séparateurs internes). iOS garde son insetGrouped
-        // natif — macGroupedRow n'y pose que le listRowBackground.
+        // macOS: .plain = a neutral base for the custom cards
+        // drawn by macGroupedRow (first/last rounded corners,
+        // inset, internal separators). iOS keeps its native
+        // insetGrouped — macGroupedRow there only sets the listRowBackground.
         .listStyle(.plain)
-        // Décolle la 1ʳᵉ carte de la toolbar (iOS insetGrouped ajoute
-        // cet espace automatiquement, pas `.plain`).
+        // Detaches the 1st card from the toolbar (iOS insetGrouped adds
+        // this space automatically, `.plain` doesn't).
         .macGroupedListTopGap()
         #endif
         .scrollContentBackground(.hidden)
         .background(AppTheme.Colors.background)
-        // ⌘A : sélectionne tout ce qui est déjà chargé (cf. `selectAllLoaded`).
+        // ⌘A: selects everything already loaded (see `selectAllLoaded`).
         .background(SelectAllShortcut(isSelecting: $isSelecting, selected: $selectedIds, allIds: transactions.map(\.id)))
     }
 
@@ -308,11 +309,11 @@ struct TransactionsView: View {
     }
 
     @ToolbarContentBuilder private var transactionsToolbar: some ToolbarContent {
-        // #9 macOS : ne pas émettre d'item .navigation (mapping de
-        // navigationBarLeading) — même vide il entre en collision avec le
-        // back système + toggle sidebar du NavigationSplitView, d'où la
-        // flèche de retour qui "voyage". Sur Mac, "Annuler" rejoint le
-        // groupe trailing.
+        // #9 macOS: don't emit a .navigation item (the
+        // navigationBarLeading mapping) — even empty it collides with the
+        // NavigationSplitView's system back + sidebar toggle, hence the
+        // back arrow that "travels". On Mac, "Cancel" joins
+        // the trailing group.
         #if !os(macOS)
         ToolbarItem(placement: .navigationBarLeading) {
             if isSelecting {
@@ -348,9 +349,9 @@ struct TransactionsView: View {
         .localizedAccessibilityLabel("Tout sélectionner")
         if !selectedIds.isEmpty {
             PaneToggleButton(label: "Catégorie", systemImage: "folder", isOn: $showBulkCategoryPicker)
-            // Binding custom : le calcul des états initiaux doit
-            // rester déclenché à l'OUVERTURE (comme avant), pas à
-            // chaque bascule.
+            // Custom binding: computing the initial states must
+            // stay triggered on OPEN (as before), not on
+            // every toggle.
             PaneToggleButton(label: "Tags", systemImage: "tag", isOn: Binding(
                 get: { showBulkTagPicker },
                 set: { newValue in
@@ -382,9 +383,9 @@ struct TransactionsView: View {
             isOn: $showFilters
         )
         #if os(macOS)
-        // macOS : la fenêtre a la place — actions secondaires
-        // étalées en boutons icône seule + tooltip natif (.help),
-        // au lieu du menu "⋯" iOS.
+        // macOS: the window has the room — secondary actions
+        // spread out as icon-only buttons + a native tooltip (.help),
+        // instead of iOS's "⋯" menu.
         PaneToggleButton(label: "Analyse filtrée", systemImage: "chart.bar.xaxis.ascending", isOn: $showFilteredDashboard)
         Spacer()
         PaneToggleButton(label: "Dépenses par tag", systemImage: "tag.circle", isOn: $showTagSummary)
@@ -469,8 +470,8 @@ struct TransactionsView: View {
                 )
                 .environment(appState)
             }
-            // Persistance des préférences de filtre (catégorie/tags/groupement,
-            // pas la recherche texte — cf. commentaire de leurs déclarations).
+            // Persisting filter preferences (category/tags/grouping,
+            // not the text search — see the comment on their declarations).
             .onChange(of: selectedCategoryId) { _, new in
                 UserDefaults.standard.set(new, forKey: "tx.filter.categoryId")
             }
@@ -523,7 +524,7 @@ struct TransactionsView: View {
                 txTags = repository.fetchTagsForTransactions(transactions.map { $0.id })
             }) { tx in
                 TagQuickSheet(transactionId: tx.id, allTags: allTags, repository: repository) { newTag in
-                    // Rafraîchit la liste des tags dispo si un nouveau tag a été créé
+                    // Refreshes the list of available tags if a new one was created
                     if !allTags.contains(where: { $0.id == newTag.id }) {
                         allTags.append(newTag)
                         allTags.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -535,9 +536,9 @@ struct TransactionsView: View {
     private var bodyWithActionPanes: some View {
         bodyWithEntityPanes
             .adaptivePane(isPresented: $showAddTransaction) {
-                // Si l'utilisateur est en mode "Tous" (selectedAccountId == 0), on retombe
-                // sur le premier compte disponible pour l'ajout manuel (impossible
-                // d'imputer une transaction au sentinel "Tous").
+                // If the user is in "All" mode (selectedAccountId == 0), fall back
+                // to the first available account for manual entry (a transaction can't
+                // be charged to the "All" sentinel).
                 AddTransactionSheet(
                     accounts: accounts,
                     defaultAccountId: {
@@ -562,9 +563,9 @@ struct TransactionsView: View {
                                     initialFrom: appState.filterFromDate,
                                     initialTo: appState.filterToDate)
             }
-            // TricountDetailView gère son PROPRE chrome (Fermer/NavigationStack) —
-            // niveau 2 ici (nichée dans une vue déjà hébergée), donc sheet, cf.
-            // \.paneHostContext dans TricountDetailView.
+            // TricountDetailView manages ITS OWN chrome (Close/NavigationStack) —
+            // level 2 here (nested inside a view already hosted), so a sheet, see
+            // \.paneHostContext in TricountDetailView.
             .adaptivePane(item: $tricountDetailGroup, onDismiss: { tricountDetailEntryId = nil }) { group in
                 TricountDetailView(group: group, initialEntryId: tricountDetailEntryId)
             }
@@ -613,12 +614,12 @@ struct TransactionsView: View {
     private var bodyWithLifecycle: some View {
         bodyWithBulkPanes
             .task(id: appState.dataRefreshToken) {
-                // 1-frame guard : laisse le skeleton se peindre avant la requête SQLite.
+                // 1-frame guard: lets the skeleton paint before the SQLite query.
                 await Task.yield()
                 loadInitialData()
             }
             .refreshable {
-                // Pas de skeleton sur pull-to-refresh : l'indicateur système suffit.
+                // No skeleton on pull-to-refresh: the system indicator is enough.
                 loadInitialData()
             }
             .onChange(of: uncategorizedCount) { old, new in
@@ -630,7 +631,7 @@ struct TransactionsView: View {
 
     @ViewBuilder private var transactionsSkeleton: some View {
         List {
-            // Solde period / réel header
+            // Period / actual balance header
             Section {
                 HStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -661,7 +662,7 @@ struct TransactionsView: View {
             }
         }
         #if os(macOS)
-        // Même base .plain que la liste chargée (cartes macGroupedRow).
+        // Same .plain base as the loaded list (macGroupedRow cards).
         .listStyle(.plain)
         .macGroupedListTopGap()
         #endif
@@ -671,18 +672,18 @@ struct TransactionsView: View {
 
     // MARK: List sections
     //
-    // Chacune de ces sections vivait auparavant en ligne dans le `List` du
-    // `navBody` — un seul énorme bloc ViewBuilder (soldes + avertissement +
-    // groupes + pagination, avec conditions et ternaires imbriqués). Xcode 26
-    // (release) échoue à type-checker ce bloc en temps raisonnable
-    // (`the compiler is unable to type-check this expression`) alors qu'Xcode 27
-    // beta, avec un solveur de types plus rapide, n'a pas ce problème — la
-    // découpe en propriétés séparées donne des bornes claires au type-checker,
-    // indépendamment de la version du compilateur.
+    // Each of these sections used to live inline in `navBody`'s
+    // `List` — one huge ViewBuilder block (balances + warning +
+    // groups + pagination, with nested conditionals and ternaries). Xcode 26
+    // (release) fails to type-check that block in reasonable time
+    // ("the compiler is unable to type-check this expression") whereas Xcode 27
+    // beta, with a faster type solver, doesn't have this problem — splitting
+    // it into separate properties gives the type checker clear bounds,
+    // independent of the compiler version.
 
-    /// Soldes période/compte (#6). En mode "Tous les comptes" on n'affiche QUE
-    /// la somme période (flux net) — le "Solde réel" agrégerait tous les
-    /// comptes (CB + cash + épargne…), lecture trompeuse.
+    /// Period/account balances (#6). In "All accounts" mode, ONLY
+    /// the period sum (net flow) is shown — "Actual balance" would aggregate every
+    /// account (checking + cash + savings…), a misleading reading.
     @ViewBuilder
     private var balancesSection: some View {
         let periodBalance = filteredTransactions.reduce(0) { $0 + $1.amount }
@@ -728,7 +729,7 @@ struct TransactionsView: View {
         .macGroupedRow()
     }
 
-    /// Bandeau "N transactions sans catégorie", masquable par session
+    /// "N uncategorized transactions" banner, dismissible per session
     /// (`uncategorizedBannerDismissed`).
     @ViewBuilder
     private var uncategorizedWarningSection: some View {
@@ -757,9 +758,9 @@ struct TransactionsView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    // Fermer sans catégoriser : reste tant que le compte de non
-                    // catégorisées ne change pas (nouvel import, etc. le refait
-                    // réapparaître — cf. `.onChange(of: uncategorizedCount)`).
+                    // Close without categorizing: stays dismissed as long as the
+                    // uncategorized count doesn't change (a new import, etc. makes
+                    // it reappear — see `.onChange(of: uncategorizedCount)`).
                     Button {
                         uncategorizedBannerDismissed = true
                     } label: {
@@ -778,13 +779,13 @@ struct TransactionsView: View {
         }
     }
 
-    /// Groupes de transactions par date, chacun en `Section`.
+    /// Transaction groups by date, each as a `Section`.
     ///
-    /// `flatIds`/`flatIndex` : index GLOBAL (toutes sections confondues) de
-    /// chaque transaction visible — nécessaire au maj+clic, dont la plage
-    /// peut franchir une frontière de groupe (jour/semaine/mois). Calculé
-    /// UNE fois par rendu de la liste (pas par row), sinon O(n²) sur un
-    /// historique de plusieurs centaines de lignes.
+    /// `flatIds`/`flatIndex`: the GLOBAL index (across every section) of
+    /// each visible transaction — needed for shift+click, whose range
+    /// can cross a group boundary (day/week/month). Computed
+    /// ONCE per list render (not per row), otherwise O(n²) on a
+    /// history of several hundred rows.
     @ViewBuilder
     private var transactionGroupsSections: some View {
         let flatIds = groupedTransactions.flatMap { $0.transactions.map(\.id) }
@@ -801,7 +802,7 @@ struct TransactionsView: View {
         }
     }
 
-    /// Sentinelle de pagination (déclenche `loadMore()`) ou compteur final.
+    /// Pagination sentinel (triggers `loadMore()`) or the final count.
     @ViewBuilder
     private var paginationFooter: some View {
         if hasMore {
@@ -820,11 +821,11 @@ struct TransactionsView: View {
 
     // MARK: Row
 
-    // Extraits en fonctions séparées (au lieu d'une seule chaîne de modifiers
-    // dans le ForEach) : le compilateur Swift 6 met un temps déraisonnable à
-    // type-checker un enchaînement `.contentShape().onTapGesture().rowActions().macGroupedRow { … }`
-    // quand il est imbriqué tel quel dans un ForEach/Section — la découpe en
-    // sous-expressions ré-annotées donne au type-checker des bornes claires.
+    // Extracted into separate functions (instead of one modifier chain
+    // in the ForEach): the Swift 6 compiler takes an unreasonable
+    // amount of time to type-check a `.contentShape().onTapGesture().rowActions().macGroupedRow { … }`
+    // chain when it's nested as-is in a ForEach/Section — splitting it into
+    // re-annotated sub-expressions gives the type checker clear bounds.
     private func leadingRowActions(for item: FinanceTransaction) -> [RowAction] {
         guard !isSelecting else { return [] }
         return [
@@ -846,9 +847,9 @@ struct TransactionsView: View {
         ]
     }
 
-    /// Entrées de sélection du menu contextuel (clic droit macOS / appui
-    /// long iOS) — "Sélectionner" hors sélection, actions de groupe si
-    /// plusieurs transactions sont déjà sélectionnées. Cf. `selectionRowActions`.
+    /// Context-menu selection entries (macOS right-click / iOS long
+    /// press) — "Select" outside selection mode, group actions if
+    /// several transactions are already selected. See `selectionRowActions`.
     private func selectionActions(for item: FinanceTransaction, index: Int, allIds: [Int]) -> [RowAction] {
         selectionRowActions(
             isSelecting: isSelecting,
@@ -910,16 +911,16 @@ struct TransactionsView: View {
                 MerchantLogo(transaction: item, allTiers: allTiers, allCategories: allCategories, size: density.logoSize)
             }
             VStack(alignment: .leading, spacing: density == .compact ? 2 : 5) {
-                // Quand y'a pas de description, on centre verticalement le bloc texte
-                // (titre + badges) par rapport au logo via Spacer top+bottom + minHeight.
-                // Sinon : top alignment naturel (description prend de la place).
+                // When there's no description, the text block (title + badges) is
+                // centered vertically relative to the logo via top+bottom Spacers + minHeight.
+                // Otherwise: natural top alignment (the description takes up space).
                 if item.information.isEmpty {
                     Spacer(minLength: 0)
                 }
-                // Ligne 1 : libellé + montant SEUL (la balance est déplacée en bas
-                // pour libérer 13pt sur cette ligne — c'était la balance qui empêchait
-                // le bloc texte de tenir dans la hauteur du logo (52pt) et qui faisait
-                // que le titre n'était jamais centré.
+                // Line 1: label + amount ONLY (the balance is moved to the bottom
+                // to free up 13pt on this line — it was the balance that kept
+                // the text block from fitting the logo's height (52pt) and kept
+                // the title from ever being centered.
                 HStack(alignment: .firstTextBaseline) {
                     Text(item.tiersName)
                         .font(.headline)
@@ -929,9 +930,9 @@ struct TransactionsView: View {
                         .fontWeight(.bold)
                         .foregroundStyle(item.amount < 0 ? AppTheme.Colors.danger : AppTheme.Colors.success)
                 }
-                // Ligne 2 : info user (uniquement si remplie — plus de fallback sur libellé brut
-                // ou paymentTypeName qui surchargeaient la cellule) + badges + balance courante.
-                // En mode compact, on masque toute cette ligne pour avoir un row à 1 ligne.
+                // Line 2: user info (only if filled in — no more fallback to the raw label
+                // or paymentTypeName, which used to clutter the cell) + badges + running balance.
+                // In compact mode, this whole line is hidden to get a 1-line row.
                 if density.showSecondaryInfo {
                 HStack(spacing: 6) {
                     if !item.information.isEmpty {
@@ -941,8 +942,8 @@ struct TransactionsView: View {
                             .lineLimit(1)
                     }
                     Spacer()
-                    // Badge compte — visible uniquement en mode "Tous les comptes" pour
-                    // distinguer la provenance de chaque transaction.
+                    // Account badge — shown only in "All accounts" mode to
+                    // tell each transaction's source apart.
                     if isAllAccountsMode, let acc = accountsById[item.accountId] {
                         Text(acc.name)
                             .font(.caption2)
@@ -963,7 +964,7 @@ struct TransactionsView: View {
                             .background(AppTheme.Colors.warning.opacity(0.13), in: Capsule())
                             .foregroundStyle(AppTheme.Colors.warning)
                     }
-                    // Badge Tricount (lien) — tappable, intégré dans la ligne de badges
+                    // Tricount badge (a link) — tappable, part of the badge row
                     if !isSelecting && linkedTricountTxIds.contains(item.id) {
                         Button {
                             if let info = repository.fetchLinkedTricountInfo(transactionId: item.id) {
@@ -980,7 +981,7 @@ struct TransactionsView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    // Badge catégorie — tappable pour modification rapide
+                    // Category badge — tappable for a quick edit
                     let catLabel = item.categoryName.isEmpty ? "Catégorie" : item.categoryName
                     let catColor: Color = item.categoryName.isEmpty ? AppTheme.Colors.textSecondary : AppTheme.Colors.accent
                     let catIconName = allCategories.first(where: { $0.id == item.categoryId })?.displayIcon ?? "tag.fill"
@@ -1002,7 +1003,7 @@ struct TransactionsView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isSelecting)
-                    // Balance courante après la transaction (collée à droite, après les badges)
+                    // Running balance after the transaction (pinned right, after the badges)
                     if let bal = txBalances[item.id] {
                         Text(bal, format: .currency(code: "EUR"))
                             .font(.caption2)
@@ -1011,7 +1012,7 @@ struct TransactionsView: View {
                     }
                 }
                 }  // end if density.showSecondaryInfo
-                // Ligne 3 : tags (uniquement si présents). Aussi masquée en compact.
+                // Line 3: tags (only if present). Also hidden in compact mode.
                 let itemTags = density.showSecondaryInfo ? (txTags[item.id] ?? []) : []
                 if !itemTags.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -1028,37 +1029,37 @@ struct TransactionsView: View {
                         }
                     }
                 }
-                // Note : libelle_brut et paymentTypeName sont disponibles dans la sheet
-                // d'édition de la transaction (TransactionEditSheet) — pas besoin de les
-                // dupliquer dans chaque row de la liste.
+                // Note: libelle_brut and paymentTypeName are available in the
+                // transaction's edit sheet (TransactionEditSheet) — no need to
+                // duplicate them in every list row.
                 if item.information.isEmpty {
                     Spacer(minLength: 0)
                 }
             }
-            // minHeight pilotée par la densité — permet aux Spacer(minLength: 0)
-            // de centrer verticalement le bloc texte par rapport au logo quand la
-            // description est vide.
+            // minHeight driven by density — lets the Spacer(minLength: 0)s
+            // vertically center the text block relative to the logo when the
+            // description is empty.
             .frame(minHeight: density.rowMinHeight)
         }
         .padding(.vertical, density.verticalPadding)
     }
 
-    // MARK: Chargement
+    // MARK: Loading
 
     private func loadInitialData() {
-        // Navigation depuis la fiche d'un tiers ("Voir les transactions") :
-        // même doctrine de reset que le bouton "Réinitialiser les filtres"
-        // de `TransactionFiltersSheet` — sans elle, un filtre catégorie/tag
-        // laissé actif masquerait une partie des transactions du tiers visé,
-        // à l'encontre de ce que le bouton promet. "Tous les comptes" : un
-        // tiers n'est pas rattaché à un compte particulier.
+        // Navigation from a payee's detail sheet ("View transactions"):
+        // the same reset doctrine as the "Reset filters" button in
+        // `TransactionFiltersSheet` — without it, an active category/tag
+        // filter would hide part of the target payee's transactions,
+        // against what the button promises. "All accounts": a
+        // payee isn't tied to a particular account.
         //
-        // ⚠️ La plage de dates ACTIVE (mois précédent par défaut) fait
-        // exactement la même chose, en silence : sans l'élargir, les
-        // transactions plus anciennes du tiers restent masquées sans aucun
-        // indice que c'est CE filtre-là qui limite l'affichage (retour
-        // d'usage). Élargie plutôt que retirée — la borne reste visible et
-        // modifiable dans `TransactionFiltersSheet` (DatePicker "Du"/"Au").
+        // ⚠️ The ACTIVE date range (the previous month by default) does
+        // exactly the same thing, silently: without widening it, the
+        // payee's older transactions stay hidden with no clue at all that it's
+        // THIS filter limiting the display. Widened rather than removed — the
+        // bound stays visible and editable in `TransactionFiltersSheet` (the
+        // "From"/"To" DatePickers).
         if let pendingPayeeName = appState.pendingPayeeFilterName {
             payeeSearchText    = pendingPayeeName
             labelSearchText    = ""
@@ -1080,7 +1081,7 @@ struct TransactionsView: View {
         linkedTricountTxIds = repository.fetchLinkedTransactionIds()
 
         if appState.selectedAccountId == nil {
-            // Utilise le compte par défaut si défini et présent dans la liste, sinon premier compte
+            // Uses the default account if set and present in the list, otherwise the first account
             let preferred = appState.defaultAccountId
             let target = (preferred > 0 && accounts.contains(where: { $0.id == preferred }))
                 ? accounts.first(where: { $0.id == preferred })
@@ -1092,10 +1093,10 @@ struct TransactionsView: View {
         } else if let accountId = appState.selectedAccountId, appState.selectedAccountName.isEmpty {
             appState.selectedAccountName = accounts.first(where: { $0.id == accountId })?.name ?? ""
         }
-        // `filterTagIds` peut arriver pré-rempli (persisté, cf. sa déclaration)
-        // avant même que l'utilisateur n'ouvre la feuille de filtres — sans ce
-        // recalcul initial, `tagFilteredTxIds` resterait nil et le filtre tag
-        // persisté n'aurait aucun effet tant que "Appliquer" n'est pas retapé.
+        // `filterTagIds` can arrive pre-filled (persisted, see its declaration)
+        // even before the user opens the filter sheet — without this
+        // initial recompute, `tagFilteredTxIds` would stay nil and the persisted
+        // tag filter would have no effect until "Apply" is tapped again.
         if !filterTagIds.isEmpty {
             tagFilteredTxIds = repository.fetchTransactionIds(havingAnyTagIds: filterTagIds)
         }
@@ -1103,8 +1104,8 @@ struct TransactionsView: View {
     }
 
     private func resetAndLoad() {
-        // `accountId == 0` est le sentinel "Tous les comptes" → on le passe tel quel au
-        // repository qui retire la clause WHERE account_id correspondante.
+        // `accountId == 0` is the "All accounts" sentinel → passed as-is to the
+        // repository, which drops the matching account_id WHERE clause.
         let accountId = appState.selectedAccountId ?? 0
         isLoading    = true
         transactions = []
@@ -1113,8 +1114,8 @@ struct TransactionsView: View {
         let hasActiveFilters = !payeeSearchText.isEmpty || !labelSearchText.isEmpty || selectedCategoryId != -1 || tagFilteredTxIds != nil
 
         if hasActiveFilters {
-            // Filtres actifs : on charge TOUTES les transactions correspondantes en SQL
-            // pour ne pas limiter la recherche aux 100 premières lignes paginées.
+            // Active filters: EVERY matching transaction is loaded in SQL
+            // so the search isn't limited to the first 100 paginated rows.
             let loaded = repository.fetchAllFilteredTransactions(filter: buildFilter())
             transactions = loaded.reversed()  // fetchAllFilteredTransactions renvoie ASC → on inverse en DESC
             hasMore = false
@@ -1155,7 +1156,7 @@ struct TransactionsView: View {
         txTags.merge(newTags) { _, new in new }
     }
 
-    // MARK: Sélection
+    // MARK: Selection
 
     private func cancelSelection() {
         isSelecting = false
@@ -1163,16 +1164,16 @@ struct TransactionsView: View {
         selectionAnchor = nil
     }
 
-    /// ⌘A / "Tout sélectionner" : ne porte que sur ce qui est déjà CHARGÉ en
-    /// mémoire (`transactions`), jamais un fetch de tout l'historique — sur
-    /// une liste paginée, on ne veut pas qu'un raccourci ramène silencieusement
-    /// des années de données non affichées.
+    /// ⌘A / "Select all": only covers what's already LOADED in
+    /// memory (`transactions`), never a fetch of the whole history — on
+    /// a paginated list, a shortcut shouldn't silently pull in
+    /// years of undisplayed data.
     private func selectAllLoaded() {
         isSelecting = true
         selectedIds = Set(transactions.map(\.id))
     }
 
-    // MARK: Catégorie rapide
+    // MARK: Quick category
 
     private func quickUpdateBulkCategory(ids: Set<Int>, categoryId: Int?, categoryName: String) {
         for idx in transactions.indices where ids.contains(transactions[idx].id) {
@@ -1207,7 +1208,7 @@ struct TransactionsView: View {
         }
     }
 
-    // MARK: Analyse filtrée
+    // MARK: Filtered analysis
 
     private func buildFilter() -> TransactionFilter {
         let categoryName: String
@@ -1236,7 +1237,7 @@ struct TransactionsView: View {
         )
     }
 
-    // MARK: Suppression
+    // MARK: Deletion
 
     private func deleteSelected() {
         let count = repository.deleteTransactions(ids: selectedIds)
@@ -1254,7 +1255,7 @@ struct TransactionsView: View {
         txToDelete = nil
     }
 
-    // MARK: Tags en masse (tri-state)
+    // MARK: Bulk tags (tri-state)
 
     private func computeBulkTagStates() -> [Int: TagSelectionState] {
         var result: [Int: TagSelectionState] = [:]

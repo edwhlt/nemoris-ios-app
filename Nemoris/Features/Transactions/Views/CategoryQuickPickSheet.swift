@@ -18,8 +18,8 @@ struct CategoryQuickPickSheet: View {
         return allCategories.filter { $0.name.localizedCaseInsensitiveContains(search) }
     }
 
-    /// Arbre des catégories — même construction que l'onglet Catégories de
-    /// « Données » (`ReferenceDataView.categoryForest`).
+    /// Category tree — the same construction as Data's Categories tab
+    /// (`ReferenceDataView.categoryForest`).
     private var categoryForest: [CategoryNode] {
         CategoryNode.buildForest(from: allCategories)
     }
@@ -30,18 +30,18 @@ struct CategoryQuickPickSheet: View {
                 .macGroupedRow(first: true, last: true)
 
             if search.isEmpty {
-                // Mode normal : arbre hiérarchique (comme « Données »), pas de
-                // liste à plat avec préfixe "↳" — la profondeur se lit par
-                // l'indentation + le chevron, pas par un caractère.
+                // Normal mode: a hierarchical tree (like "Data"), no
+                // flat list with an "↳" prefix — depth is read through
+                // indentation + the chevron, not a character.
                 ForEach(categoryForest) { node in
                     CategoryPickerTreeRow(node: node, depth: 0, currentCategoryId: currentCategoryId) { c in
                         onSelect(c.id, c.name); dismiss()
                     }
                 }
             } else {
-                // Mode recherche : le contexte parent est perdu par le filtre
-                // (un enfant peut matcher sans son parent) — liste plate avec
-                // indicateur visuel, même convention que
+                // Search mode: the parent context is lost by the filter
+                // (a child can match with no parent) — a flat list with a
+                // visual indicator, the same convention as
                 // `ReferenceDataView.flatCategoryRow`.
                 ForEach(filtered) { c in
                     categoryRow(c)
@@ -50,16 +50,16 @@ struct CategoryQuickPickSheet: View {
             }
         }
         #if os(macOS)
-        // Même politique que Transactions/Patrimoine/Tricount/ReferenceData :
-        // .plain = base neutre pour les cartes custom dessinées par
-        // macGroupedRow. Sans elle chaque row garde son propre fond
-        // arrondi isolé → l'effet "plein de boutons" au lieu d'une liste.
+        // Same policy as Transactions/Patrimoine/Tricount/ReferenceData:
+        // .plain = a neutral base for the custom cards drawn by
+        // macGroupedRow. Without it, every row keeps its own isolated
+        // rounded background → a "wall of buttons" look instead of a list.
         .listStyle(.plain)
-        // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS celui du
-        // panneau hôte — sans ce modificateur, le bureau de l'utilisateur
-        // transparaît (retour d'usage 2026-08-19).
+        // `List` paints ITS OWN system background on macOS ON TOP OF the
+        // host pane's — without this modifier, the user's desktop
+        // shows through.
         .scrollContentBackground(.hidden)
-        // Décolle la 1ère carte du Divider() de `paneChrome` juste au-dessus.
+        // Detaches the 1st card from `paneChrome`'s Divider() right above it.
         .macGroupedListTopGap()
         #endif
         .paneSearchable(text: $search, prompt: "Rechercher une catégorie…")
@@ -89,11 +89,11 @@ struct CategoryQuickPickSheet: View {
         .buttonStyle(.plain)
     }
 
-    /// Row à plat, utilisée UNIQUEMENT en mode recherche — le contexte parent
-    /// est perdu par le filtre (un enfant peut matcher sans son parent), d'où
-    /// le nom du parent en sous-titre (remplace l'ancien "↳", qui indiquait
-    /// une profondeur sans dire DE QUI — même correctif que
-    /// `ReferenceDataView.flatCategoryRow`, même convention).
+    /// A flat row, used ONLY in search mode — the parent context
+    /// is lost by the filter (a child can match with no parent), hence
+    /// the parent's name as a subtitle (replaces the old "↳", which
+    /// indicated a depth with no clue WHOSE it was — the same fix as
+    /// `ReferenceDataView.flatCategoryRow`, same convention).
     private func categoryRow(_ c: Category) -> some View {
         Button {
             onSelect(c.id, c.name); dismiss()
@@ -128,16 +128,16 @@ struct CategoryQuickPickSheet: View {
     }
 }
 
-/// Row d'arbre sélectionnable — dérivée de `CategoryTreeRow` (Données), mais
-/// SANS édition/suppression et avec chaque nœud (parent OU feuille)
-/// directement sélectionnable.
+/// A selectable tree row — derived from `CategoryTreeRow` (Data), but
+/// WITHOUT editing/deletion and with every node (parent OR leaf)
+/// directly selectable.
 ///
-/// ⚠️ Pas de `DisclosureGroup` : son tap-to-toggle couvrirait TOUTE la ligne,
-/// ce qui empêcherait de taper sur un parent pour le CHOISIR (contrairement à
-/// `CategoryTreeRow`, où les parents ne sont pas sélectionnables). Le chevron
-/// est donc un bouton frère, séparé du bouton de sélection — même doctrine
-/// que l'arborescence de la Console SQL (`SQLConsoleView.entryRow` : "pas de
-/// DisclosureGroup, indentation manuelle + chevron séparé").
+/// ⚠️ No `DisclosureGroup`: its tap-to-toggle would cover the WHOLE row,
+/// which would prevent tapping a parent to SELECT it (unlike
+/// `CategoryTreeRow`, where parents aren't selectable). The chevron
+/// is therefore a sibling button, separate from the selection button — the same
+/// doctrine as the SQL Console's tree (`SQLConsoleView.entryRow`: "no
+/// DisclosureGroup, manual indentation + a separate chevron").
 private struct CategoryPickerTreeRow: View {
     let node: CategoryNode
     let depth: Int
@@ -170,24 +170,23 @@ private struct CategoryPickerTreeRow: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        // ⚠️ Zone de tap EXPLICITEMENT bornée (retour d'usage :
-                        // le tap sur ce chevron sélectionnait parfois la
-                        // catégorie à la place). Un `Button` dont le contenu
-                        // visuel est minuscule (icône 14pt) voit sa zone de
-                        // tap AUTOMATIQUEMENT étendue par le système vers la
-                        // cible tactile minimale (~44pt) — bien au-delà de son
-                        // cadre visible, jusqu'à chevaucher le bouton de
-                        // sélection juste à côté (séparés de 6pt seulement).
-                        // `.frame` + `.contentShape` bornent la zone de tap à
-                        // une taille confortable MAIS FIXE, qui ne déborde
-                        // plus sur son voisin.
+                        // ⚠️ Tap zone EXPLICITLY bounded (a tap on this chevron
+                        // used to sometimes select the category instead). A
+                        // `Button` with tiny visual content (a 14pt icon)
+                        // has its tap zone AUTOMATICALLY extended by the system to
+                        // the minimum touch target (~44pt) — well beyond its
+                        // visible frame, up to overlapping the
+                        // selection button right next to it (only 6pt apart).
+                        // `.frame` + `.contentShape` bound the tap zone to
+                        // a comfortable but FIXED size, which no longer spills
+                        // onto its neighbor.
                         .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             } else {
-                // Réserve la largeur du chevron (28pt, cf. ci-dessus) : feuilles
-                // et parents restent alignés.
+                // Reserves the chevron's width (28pt, see above): leaves
+                // and parents stay aligned.
                 Color.clear.frame(width: 28, height: 1)
             }
 

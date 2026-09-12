@@ -20,7 +20,7 @@ struct TagPickerSheet: View {
 
     var body: some View {
             List {
-                // Création rapide
+                // Quick creation
                 Section {
                     HStack {
                         TextField("Nouveau tag…", text: $newTagName)
@@ -31,14 +31,14 @@ struct TagPickerSheet: View {
                     }
                 }
 
-                // Liste des tags
+                // Tag list
                 Section("Tags disponibles") {
                     if filtered.isEmpty {
                         Text(search.isEmpty ? "Aucun tag créé" : "Aucun résultat")
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     } else {
                         ForEach($allTags) { $tag in
-                            // N'afficher que les tags correspondant à la recherche
+                            // Only show tags matching the search
                             if search.isEmpty || tag.name.localizedCaseInsensitiveContains(search) {
                                 HStack(spacing: 12) {
                                     Button {
@@ -71,17 +71,17 @@ struct TagPickerSheet: View {
                 }
             }
             #if os(macOS)
-            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
-            // celui du panneau hôte — sans ce modificateur, le bureau de
-            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            // `List` paints ITS OWN system background on macOS ON TOP OF
+            // the host pane's — without this modifier, the user's
+            // desktop shows through.
             .scrollContentBackground(.hidden)
             #endif
             .paneSearchable(text: $search, prompt: "Rechercher un tag…")
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
-            // tentative précédente (`.toolbarBackground(for: .windowToolbar)`)
-            // compilait mais n'avait AUCUN effet visuel, confirmé par capture
-            // d'écran en direct (retour d'usage 2026-08-21). Cf. le
-            // commentaire de `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on macOS-sheet — the earlier
+            // attempt (`.toolbarBackground(for: .windowToolbar)`)
+            // compiled but had NO visual effect at all, confirmed by a live
+            // screenshot. See the
+            // `macSheetChrome` comment in AdaptivePane.swift.
             .paneChrome("Tags", confirmLabel: "OK", onConfirm: { dismiss() })
     }
 

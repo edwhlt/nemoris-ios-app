@@ -5,7 +5,7 @@ import UIKit
 import TipKit
 
 struct TransactionEditSheet: View {
-    // Rebind sur paneDismiss (inspector macOS / sheet iOS) — dismiss() reste valide.
+    // Rebound onto paneDismiss (macOS inspector / iOS sheet) — dismiss() stays valid.
     @Environment(\.paneDismiss) private var dismiss
 
     let draft: TransactionEditDraft
@@ -89,13 +89,12 @@ struct TransactionEditSheet: View {
                                 .background(Circle().fill(type == .expense ? AppTheme.Colors.danger.opacity(0.12) : AppTheme.Colors.success.opacity(0.12)))
                         }
                         .buttonStyle(.plain)
-                        // Titre vide, PAS "0.00" : la ligne a déjà son label
-                        // ("Montant") juste avant. Sur macOS, le titre d'un
-                        // TextField dans une row de Form déjà labellisée ne
-                        // sert pas de texte fantôme comme sur iOS — il
-                        // s'affiche en PERMANENCE comme un second label,
-                        // d'où "0.00" ET la vraie valeur côte à côte (retour
-                        // d'usage 2026-08-19).
+                        // An empty title, NOT "0.00": the row already has its label
+                        // ("Amount") just before it. On macOS, a TextField's title
+                        // inside an already-labeled Form row doesn't act
+                        // as ghost text like on iOS — it displays
+                        // PERMANENTLY as a second label, hence "0.00"
+                        // AND the real value side by side.
                         TextField("", text: $amountText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
@@ -124,11 +123,11 @@ struct TransactionEditSheet: View {
                     }
                 }
 
-                // ⚠️ Remplace le picker « Moyen de paiement ». Ce champ imposait
-                // sa sémantique à tout le monde ; il est devenu une métadonnée
-                // parmi d'autres (migration v46). `payment_type_id` reste écrit
-                // tel quel sur les transactions existantes mais n'est plus lu
-                // par l'UI — dépréciation, pas suppression (doctrine du projet).
+                // ⚠️ Replaces the "Payment method" picker. This field imposed
+                // its own semantics on everyone; it became one metadata field
+                // among others (migration v46). `payment_type_id` is still written
+                // as-is on existing transactions but is no longer read
+                // by the UI — deprecated, not removed (project doctrine).
                 TransactionMetadataSection(transactionId: draft.id)
 
                 if reimbursementsEnabled {
@@ -157,7 +156,7 @@ struct TransactionEditSheet: View {
                             if selectedTagIds.isEmpty {
                                 Text("Aucun").foregroundStyle(AppTheme.Colors.textSecondary)
                             } else {
-                                // Afficher les noms des tags sélectionnés
+                                // Show the names of the selected tags
                                 Text(localAllTags.filter { selectedTagIds.contains($0.id) }.map(\.name).joined(separator: ", "))
                                     .foregroundStyle(AppTheme.Colors.accentSecondary)
                                     .lineLimit(1)
@@ -186,7 +185,7 @@ struct TransactionEditSheet: View {
             }
             .adaptivePane(isPresented: $showCreateTiersForm) {
                 PayeeCreationFormSheet(prefilledName: newTiersPrefillName, allCategories: allCategories) { newTiers in
-                    // Insert le tiers minimal puis updatePayeeFull pour tous les champs
+                    // Insert the minimal payee then updatePayeeFull for every field
                     guard let id = repository.addTiersAndGetId(
                         name: newTiers.name,
                         regex: newTiers.regex ?? "",

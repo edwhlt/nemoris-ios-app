@@ -3,38 +3,38 @@ import SQLite3
 
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-// MARK: - Modèles
+// MARK: - Models
 
-/// Une clé de métadonnée définie par l'utilisateur (« Mode de paiement »,
-/// « Projet », « Pro / Perso »…).
+/// A metadata key defined by the user ("Payment method",
+/// "Project", "Work / Personal"…).
 ///
-/// ⚠️ AUCUNE clé n'existe par défaut dans une base neuve. C'est le cœur du
-/// changement : l'app n'impose plus « mode de paiement » à qui n'en a pas
-/// l'usage. Les bases existantes conservent la leur, recréée à l'identique par
-/// la migration v46 à partir de leurs données.
+/// ⚠️ NO key exists by default in a fresh database. That's the heart of the
+/// change: the app no longer imposes "payment method" on someone who has no
+/// use for it. Existing databases keep theirs, recreated identically by
+/// migration v46 from their own data.
 struct TransactionMetadataKey: Identifiable, Hashable, Sendable {
     var id: Int
     var name: String
     /// SF Symbol optionnel.
     var icon: String?
     var sortOrder: Int
-    /// Rôle fonctionnel, `nil` pour une clé purement libre.
+    /// Functional role, `nil` for a purely free-form key.
     var role: MetadataKeyRole?
 
     var displayIcon: String { icon ?? "tag" }
 }
 
-/// Rôles reconnus par l'app. Volontairement minimal : un seul aujourd'hui.
+/// Roles the app recognizes. Deliberately minimal: only one today.
 ///
-/// Une clé sans rôle est une étiquette libre, que rien ne remplit
-/// automatiquement — c'est le cas par défaut et de loin le plus courant.
+/// A key with no role is a free-form label that nothing fills in
+/// automatically — the default and by far the most common case.
 enum MetadataKeyRole: String, Hashable, Sendable, CaseIterable {
-    /// L'import y écrit ce qu'il déduit du libellé (CB, VIREMENT, PRÉLÈVEMENT…).
+    /// The import writes here whatever it infers from the label (CB, TRANSFER, DIRECT DEBIT…).
     ///
-    /// ⚠️ Sans clé portant ce rôle, l'indice d'import est simplement IGNORÉ —
-    /// on ne crée pas une clé dans le dos de l'utilisateur. C'est ce qui permet
-    /// à une base neuve de n'avoir aucune métadonnée tant qu'il n'en veut pas,
-    /// tout en préservant le comportement des bases migrées.
+    /// ⚠️ With no key carrying this role, the import's hint is simply IGNORED —
+    /// no key is created behind the user's back. This is what lets
+    /// a fresh database have no metadata at all until the user wants one,
+    /// while preserving the behavior of migrated databases.
     case paymentMethod = "payment_method"
 
     var displayName: String {
@@ -44,20 +44,20 @@ enum MetadataKeyRole: String, Hashable, Sendable, CaseIterable {
     }
 }
 
-/// Une valeur posée sur une transaction.
+/// A value set on a transaction.
 struct TransactionMetadataValue: Identifiable, Hashable, Sendable {
     var id: Int
     var transactionId: Int
     var keyId: Int
     var value: String
-    /// Nom de la clé, joint pour l'affichage.
+    /// The key's name, joined for display.
     var keyName: String = ""
     var keyIcon: String?
 }
 
 // MARK: - Repository
 
-/// Seul point d'accès aux métadonnées de transaction (migration v46).
+/// The sole access point to transaction metadata (migration v46).
 struct TransactionMetadataRepository {
 
     private let store: SQLiteStore
@@ -66,7 +66,7 @@ struct TransactionMetadataRepository {
         self.store = store
     }
 
-    // MARK: - Clés
+    // MARK: - Keys
 
     func fetchKeys() -> [TransactionMetadataKey] {
         readOnly { db in
@@ -91,20 +91,20 @@ struct TransactionMetadataRepository {
         } ?? []
     }
 
-    /// La clé portant un rôle donné, s'il en existe une.
+    /// The key carrying a given role, if one exists.
     func key(withRole role: MetadataKeyRole) -> TransactionMetadataKey? {
         fetchKeys().first { $0.role == role }
     }
 
-    /// Crée une clé. `nil` si le nom est vide ou déjà pris.
+    /// Creates a key. `nil` if the name is empty or already taken.
     @discardableResult
     func addKey(name: String, icon: String?, role: MetadataKeyRole?) -> Int? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return readWrite { db in
-            // ⚠️ Un rôle est EXCLUSIF (index UNIQUE partiel) : on libère le
-            // précédent porteur plutôt que de laisser l'INSERT échouer sur une
-            // contrainte que l'utilisateur ne peut pas comprendre.
+            // ⚠️ A role is EXCLUSIVE (a partial UNIQUE index): the previous
+            // holder is released rather than letting the INSERT fail on a
+            // constraint the user can't understand.
             if let role { releaseRole(db, role) }
             let sql = """
                 INSERT INTO transaction_metadata_keys (name, icon, sort_order, role, created_at, uuid, updated_at)
@@ -147,12 +147,12 @@ struct TransactionMetadataRepository {
         } ?? false
     }
 
-    /// Supprime une clé ET toutes ses valeurs (ON DELETE CASCADE).
+    /// Deletes a key AND every one of its values (ON DELETE CASCADE).
     @discardableResult
     func deleteKey(id: Int) -> Bool {
         readWrite { db in
-            // ⚠️ Le CASCADE dépend de `PRAGMA foreign_keys` : on l'active
-            // explicitement, il est OFF par défaut sur chaque connexion SQLite.
+            // ⚠️ The CASCADE depends on `PRAGMA foreign_keys`: it's turned on
+            // explicitly, since it's OFF by default on every SQLite connection.
             sqlite3_exec(db, "PRAGMA foreign_keys = ON;", nil, nil, nil)
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, "DELETE FROM transaction_metadata_keys WHERE id = ?;",
@@ -163,7 +163,7 @@ struct TransactionMetadataRepository {
         } ?? false
     }
 
-    /// Retire le rôle à la clé qui le portait, pour préserver son exclusivité.
+    /// Removes the role from the key that held it, to preserve its exclusivity.
     private func releaseRole(_ db: OpaquePointer, _ role: MetadataKeyRole, except keyId: Int? = nil) {
         let sql = "UPDATE transaction_metadata_keys SET role = NULL, updated_at = ? WHERE role = ? AND id <> ?;"
         var stmt: OpaquePointer?
@@ -204,12 +204,12 @@ struct TransactionMetadataRepository {
         } ?? []
     }
 
-    /// Toutes les valeurs déjà employées pour une clé, les plus fréquentes
-    /// d'abord — ce qui alimente les suggestions de saisie.
+    /// Every value already used for a key, most frequent
+    /// first — this feeds the entry suggestions.
     ///
-    /// ⚠️ Suggestions seulement : aucune contrainte en base. Une métadonnée
-    /// reste du texte libre, sinon ce serait une seconde table de référence
-    /// déguisée, exactement ce qu'on vient de retirer.
+    /// ⚠️ Suggestions only: no constraint in the database. A metadata value
+    /// stays free-form text, otherwise it would be a second reference table
+    /// in disguise, exactly what was just removed.
     func distinctValues(keyId: Int, limit: Int = 20) -> [String] {
         readOnly { db in
             let sql = """
@@ -233,8 +233,8 @@ struct TransactionMetadataRepository {
         } ?? []
     }
 
-    /// Pose (ou remplace) la valeur d'une clé sur une transaction. Une valeur
-    /// vide RETIRE la métadonnée — c'est ainsi que l'utilisateur l'efface.
+    /// Sets (or replaces) a key's value on a transaction. An empty
+    /// value REMOVES the metadata field — that's how the user clears it.
     @discardableResult
     func setValue(_ value: String, keyId: Int, transactionId: Int) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -271,8 +271,8 @@ struct TransactionMetadataRepository {
         } ?? false
     }
 
-    /// Écrit l'indice déduit par l'import sur la clé qui porte le rôle
-    /// correspondant. No-op s'il n'y en a pas — cf. `MetadataKeyRole`.
+    /// Writes the hint inferred by the import onto the key carrying the
+    /// matching role. A no-op if there isn't one — see `MetadataKeyRole`.
     @discardableResult
     func applyImportHint(_ hint: String?, transactionId: Int,
                          paymentMethodKeyId: Int?) -> Bool {
@@ -280,8 +280,8 @@ struct TransactionMetadataRepository {
         return setValue(hint, keyId: keyId, transactionId: transactionId)
     }
 
-    /// Identifiants des transactions portant une valeur donnée — alimente le
-    /// filtre des listes, sur le modèle du filtre par tag.
+    /// IDs of transactions carrying a given value — feeds the
+    /// list filter, on the same model as the tag filter.
     func transactionIds(keyId: Int, value: String?) -> Set<Int> {
         readOnly { db in
             var sql = "SELECT transaction_id FROM transaction_metadata_values WHERE key_id = ?"

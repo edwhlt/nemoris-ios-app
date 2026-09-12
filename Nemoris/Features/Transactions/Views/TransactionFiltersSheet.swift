@@ -6,7 +6,7 @@ import TipKit
 
 struct TransactionFiltersSheet: View {
     @Environment(AppState.self) private var appState
-    // Fermeture via le panneau adaptatif (inspector macOS / sheet iOS), cf. AdaptivePane.
+    // Dismissal via the adaptive pane (macOS inspector / iOS sheet), see AdaptivePane.
     @Environment(\.paneDismiss) private var paneDismiss
 
     let accounts: [Account]
@@ -25,18 +25,18 @@ struct TransactionFiltersSheet: View {
     @State private var localLabelSearch: String = ""
     @State private var showAccountPicker = false
 
-    /// Catégories aplaties en pré-ordre (parent puis ses enfants) avec la
-    /// profondeur de chacune — un `Picker` ne peut pas rendre un vrai arbre,
-    /// mais l'indentation suffit à transmettre la hiérarchie sans y perdre la
-    /// sélection directe d'un parent OU d'un enfant (contrairement à une vraie
-    /// arborescence pliable, hors de portée d'un simple `Picker`).
+    /// Categories flattened in pre-order (a parent then its children) with each
+    /// one's depth — a `Picker` can't render a real tree,
+    /// but indentation is enough to convey the hierarchy without losing
+    /// direct selection of a parent OR a child (unlike a real
+    /// foldable tree, out of reach of a plain `Picker`).
     private var categoryPickerEntries: [(node: CategoryNode, depth: Int)] {
         CategoryNode.flattenedForest(CategoryNode.buildForest(from: allCategories))
     }
 
-    /// Suggestions de tiers pour l'autocomplétion — noms déjà connus qui
-    /// contiennent la saisie, le tiers déjà retenu exclu (il n'y a rien à
-    /// proposer de plus une fois qu'il est choisi).
+    /// Payee suggestions for autocomplete — already-known names that
+    /// contain what's typed, excluding the payee already chosen (there's nothing
+    /// more to suggest once it's picked).
     private var payeeSuggestions: [String] {
         guard !localPayeeSearch.isEmpty else { return [] }
         let names = Set(allTiers.map(\.name))
@@ -55,18 +55,18 @@ struct TransactionFiltersSheet: View {
                     if accounts.isEmpty {
                         Text("Aucun compte disponible").foregroundStyle(AppTheme.Colors.textSecondary)
                     } else {
-                        // Sentinel : 0/nil = tous les comptes confondus.
-                        // Aucun account.id ne vaut 0 (AUTOINCREMENT démarre à 1).
+                        // Sentinel: 0/nil = across all accounts.
+                        // No account.id is ever 0 (AUTOINCREMENT starts at 1).
                         Button {
                             showAccountPicker = true
                         } label: {
                             HStack {
                                 Text("Compte").foregroundStyle(AppTheme.Colors.textPrimary)
                                 Spacer()
-                                // `String` d'exécution (le nom du compte ne
-                                // l'est jamais, mais le fallback l'est) :
-                                // `Text(String)` reste verbatim sans ce wrap
-                                // — cf. CLAUDE.md §5.
+                                // A runtime `String` (the account's name
+                                // never is, but the fallback is):
+                                // `Text(String)` stays verbatim without this wrap
+                                // — see CLAUDE.md §5.
                                 Text(LocalizedStringKey(appState.selectedAccountName.isEmpty ? "Tous les comptes" : appState.selectedAccountName))
                                     .foregroundStyle(AppTheme.Colors.textSecondary)
                                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
@@ -93,10 +93,10 @@ struct TransactionFiltersSheet: View {
                         TextField("Tiers…", text: $localPayeeSearch)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
-                        // Suggestions d'autocomplétion — tap = remplit le champ
-                        // avec le nom exact (le filtre reste un `LIKE`, pas une
-                        // égalité stricte, mais un nom exact évite les faux
-                        // positifs d'un tiers dont le nom en contient un autre).
+                        // Autocomplete suggestions — tapping fills the field
+                        // with the exact name (the filter stays a `LIKE`, not a
+                        // strict equality, but an exact name avoids false
+                        // positives from a payee whose name contains another's).
                         if !payeeSuggestions.isEmpty {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 6) {
@@ -121,10 +121,10 @@ struct TransactionFiltersSheet: View {
                     TextField("Libellé…", text: $localLabelSearch)
                         .autocorrectionDisabled()
 
-                    // Aplatie en pré-ordre avec indentation par profondeur —
-                    // un `Picker` ne peut pas rendre un vrai arbre pliable,
-                    // mais l'indentation transmet la hiérarchie sans rien
-                    // retirer : parent ET enfants restent sélectionnables.
+                    // Flattened in pre-order with depth-based indentation —
+                    // a `Picker` can't render a real foldable tree,
+                    // but indentation conveys the hierarchy without
+                    // removing anything: both a parent AND its children stay selectable.
                     Picker("Catégorie", selection: $selectedCategoryId) {
                         Text("Toutes").tag(-1)
                         Text("Non catégorisé").tag(-2)
@@ -144,7 +144,7 @@ struct TransactionFiltersSheet: View {
                         if filterTagIds.isEmpty {
                             Text("Tous les tags").foregroundStyle(AppTheme.Colors.textSecondary)
                         } else {
-                            // Chips des tags sélectionnés
+                            // Selected tag chips
                             TagChipsRow(
                                 tags: allTags.filter { filterTagIds.contains($0.id) },
                                 onRemove: { filterTagIds.remove($0) }
@@ -186,8 +186,8 @@ struct TransactionFiltersSheet: View {
                     }
                     .pickerStyle(.segmented)
 
-                    // Picker de densité — 3 paliers (compact / normal / confortable).
-                    // Tap haptique pour confirmer le changement.
+                    // Density picker — 3 levels (compact / normal / comfortable).
+                    // A haptic tap to confirm the change.
                     Picker(selection: Binding(
                         get: { appState.transactionDensity },
                         set: { newValue in
@@ -225,10 +225,10 @@ struct TransactionFiltersSheet: View {
                 localPayeeSearch = payeeSearchText
                 localLabelSearch = labelSearchText
             }
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
-            // barre d'outils native laisse le bureau de l'utilisateur
-            // transparaître (retour d'usage 2026-08-21). Cf. le commentaire
-            // de `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on macOS-sheet — the native
+            // toolbar lets the user's desktop
+            // show through. See the comment
+            // on `macSheetChrome` in AdaptivePane.swift.
             .paneChrome(
                 "Filtres",
                 cancelLabel: "Fermer", onCancel: { paneDismiss() },

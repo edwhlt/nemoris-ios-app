@@ -7,8 +7,8 @@ struct TransactionRepository {
 
     private let store: SQLiteStore
 
-    /// La valeur par défaut vise la base de l'application : les sites d'appel
-    /// existants n'ont pas à changer.
+    /// The default value targets the app's database: existing call sites
+    /// don't have to change.
     init(store: SQLiteStore = SQLiteStore()) {
         self.store = store
     }
@@ -35,20 +35,20 @@ struct TransactionRepository {
         }) ?? []
     }
 
-    /// Fragment SQL partagé : exclut les transactions rattachées à un compte
-    /// marqué "hors calculs agrégés" (v51). Même convention que le fragment
-    /// d'exclusion des virements internes juste en dessous — jointure sur
-    /// `accounts` plutôt qu'une sous-requête, pour rester un simple `AND` collable
-    /// dans un WHERE existant. `IS NULL` couvre les lignes orphelines (compte
-    /// supprimé) : on ne les exclut pas silencieusement, ce n'est pas leur rôle.
+    /// Shared SQL fragment: excludes transactions attached to an account
+    /// marked "excluded from aggregates" (v51). Same convention as the
+    /// internal-transfer exclusion fragment just below — a join on
+    /// `accounts` rather than a subquery, so it stays a plain `AND` that can be
+    /// pasted into an existing WHERE. `IS NULL` covers orphaned rows (a
+    /// deleted account): they aren't silently excluded, that isn't their role.
     private static let excludedAccountsClause =
         "(a.excluded_from_aggregates IS NULL OR a.excluded_from_aggregates = 0)"
     private static let excludedAccountsJoin =
         "LEFT JOIN accounts a ON a.id = t.account_id"
 
-    /// `accountId == 0` est traité comme le sentinel "Tous les comptes" : la clause
-    /// `t.account_id = ?` est alors retirée du WHERE. Cohérent avec le picker
-    /// `TransactionFiltersSheet` qui expose une entrée "Tous les comptes" (tag 0).
+    /// `accountId == 0` is treated as the "All accounts" sentinel: the
+    /// `t.account_id = ?` clause is then removed from the WHERE. Consistent with the
+    /// `TransactionFiltersSheet` picker, which exposes an "All accounts" entry (tag 0).
     func fetchTransactions(accountId: Int, from: Date, to: Date, limit: Int = 100, offset: Int = 0) -> [FinanceTransaction] {
         let normalizedFrom = min(from, to)
         let normalizedTo = max(from, to)
@@ -133,8 +133,8 @@ struct TransactionRepository {
         }) ?? []
     }
 
-    /// Fetch d'une transaction unique par id (utilisé par le pane détail macOS
-    /// pour rafraîchir après une édition). Mêmes JOINs que `fetchTransactions`.
+    /// Fetches a single transaction by id (used by the macOS detail pane
+    /// to refresh after an edit). Same JOINs as `fetchTransactions`.
     func fetchTransaction(id: Int) -> FinanceTransaction? {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -300,8 +300,8 @@ struct TransactionRepository {
         }) ?? []
     }
 
-    /// Met à jour TOUS les champs éditables d'un payee.
-    /// Retourne true si la ligne a été modifiée.
+    /// Updates EVERY editable field of a payee.
+    /// Returns true if the row was modified.
     @discardableResult
     func updatePayeeFull(_ p: Tiers) -> Bool {
         guard p.id > 0 else { return false }
@@ -399,7 +399,7 @@ struct TransactionRepository {
         return Int(sqlite3_last_insert_rowid(db))
     }
 
-    /// Nombre de tiers rattachés à chaque groupe (id groupe → compte).
+    /// Number of payees attached to each group (group id → count).
     func countPayeesByGroup() -> [Int: Int] {
         query(read: { db in
             let sql = "SELECT group_id, COUNT(*) FROM payees WHERE group_id IS NOT NULL GROUP BY group_id;"
@@ -422,8 +422,8 @@ struct TransactionRepository {
         }
     }
 
-    /// Supprime un groupe. Les tiers qui y étaient rattachés perdent
-    /// simplement leur `group_id` (mis à `NULL`) — ils ne sont pas touchés.
+    /// Deletes a group. Payees attached to it simply lose
+    /// their `group_id` (set to `NULL`) — they aren't otherwise touched.
     @discardableResult
     func deletePayeeGroup(id: Int) -> Bool {
         guard store.databaseExists else { return false }
@@ -458,8 +458,8 @@ struct TransactionRepository {
         return true
     }
 
-    /// Fusionne `sourceId` dans `intoId` : tous les tiers du groupe source
-    /// rejoignent le groupe cible, puis le groupe source est supprimé.
+    /// Merges `sourceId` into `intoId`: every payee in the source group
+    /// joins the target group, then the source group is deleted.
     @discardableResult
     func mergePayeeGroups(sourceId: Int, intoId: Int) -> Bool {
         guard sourceId != intoId, store.databaseExists else { return false }
@@ -498,14 +498,14 @@ struct TransactionRepository {
         return true
     }
 
-    /// Fusionne des tiers DOUBLONS : chaque `sourceIds` rejoint `intoId`
-    /// (transactions, récurrents budget, remboursements réaffectés), puis
-    /// les sources sont supprimées. Contrairement à `deleteTiers`, les
-    /// transactions ne perdent PAS leur tiers — elles sont réaffectées à la
-    /// cible, c'est tout l'intérêt d'une fusion plutôt qu'une suppression.
+    /// Merges DUPLICATE payees: each of `sourceIds` joins `intoId`
+    /// (transactions, budget recurring items, reimbursements reassigned), then
+    /// the sources are deleted. Unlike `deleteTiers`, the
+    /// transactions do NOT lose their payee — they're reassigned to the
+    /// target, which is the whole point of a merge rather than a deletion.
     ///
-    /// Les 3 seules tables qui référencent `payees(id)` sont réaffectées
-    /// (source unique : `SyncPayloadStore.foreignKeys`) : `transactions`,
+    /// The only 3 tables that reference `payees(id)` are reassigned
+    /// (the single source of truth: `SyncPayloadStore.foreignKeys`): `transactions`,
     /// `recurring_patterns`, `reimbursements`.
     @discardableResult
     func mergeTiers(sourceIds: Set<Int>, intoId: Int) -> Bool {
@@ -527,11 +527,11 @@ struct TransactionRepository {
 
         sqlite3_prepare_v2(db, "UPDATE transactions SET payee_id = ? WHERE payee_id = ?;", -1, &reassignTxStmt, nil)
         sqlite3_prepare_v2(db, "UPDATE recurring_patterns SET payee_id = ? WHERE payee_id = ?;", -1, &reassignPatternStmt, nil)
-        // Un remboursement Tricount est unique par (tricount_entry_id, payee_id) :
-        // si la cible a déjà une ligne pour un entry où la source en a une
-        // aussi, la ligne de la cible cède la place (fusion d'identité — les
-        // deux "personnes" deviennent la même) au lieu de faire échouer le
-        // UPDATE qui suit avec une violation de contrainte UNIQUE.
+        // A Tricount reimbursement is unique by (tricount_entry_id, payee_id):
+        // if the target already has a row for an entry where the source has
+        // one too, the target's row yields (an identity merge — the
+        // two "people" become one) instead of failing the following
+        // UPDATE with a UNIQUE constraint violation.
         sqlite3_prepare_v2(db, """
             DELETE FROM reimbursements
             WHERE payee_id = ?
@@ -652,7 +652,7 @@ struct TransactionRepository {
         formatter.dateFormat = "yyyy-MM-dd"
 
         // Auto-fill category_id from tiers.category_id via subquery
-        // Le libellé brut du CSV va dans libelle_brut ; information reste libre pour l'utilisateur.
+        // The CSV's raw label goes into libelle_brut; information stays free for the user.
         let sql = """
         INSERT INTO transactions (account_id, payee_id, payment_type_id, category_id, libelle_brut, amount, tx_date)
         VALUES (?, ?, ?, (SELECT category_id FROM payees WHERE id = ?), ?, ?, ?)
@@ -730,11 +730,11 @@ struct TransactionRepository {
 
     // MARK: - Transaction CRUD
 
-    /// Retourne l'id de la transaction créée (nil si échec). Le remboursement
-    /// éventuel (`remboursementTiersId`) n'est plus une colonne de cette table
-    /// depuis v44 — l'appelant doit enchaîner avec
-    /// `ReimbursementRepository.setReimbursement(transactionId:payeeId:)` une
-    /// fois l'id obtenu.
+    /// Returns the id of the created transaction (nil on failure). Any
+    /// reimbursement (`remboursementTiersId`) is no longer a column of this table
+    /// since v44 — the caller must follow up with
+    /// `ReimbursementRepository.setReimbursement(transactionId:payeeId:)` once
+    /// the id is obtained.
     @discardableResult
     func addTransaction(accountId: Int, tiersId: Int?, categoryId: Int?, paymentTypeId: Int?,
                         information: String, amount: Double, date: Date) -> Int? {
@@ -778,33 +778,33 @@ struct TransactionRepository {
         } ?? false
     }
 
-    /// Supprime tout ce qui pend à une transaction, avant de la supprimer.
+    /// Deletes everything hanging off a transaction, before deleting it.
     ///
-    /// Le schéma déclare pourtant `ON DELETE CASCADE` sur les trois premières
-    /// tables. SQLite ignore les clés étrangères tant que
-    /// `PRAGMA foreign_keys = ON` n'a pas été posé, et ce réglage vaut PAR
-    /// CONNEXION : une déclaration de schéma n'est donc jamais une garantie.
+    /// The schema does declare `ON DELETE CASCADE` on the first three
+    /// tables. SQLite ignores foreign keys until
+    /// `PRAGMA foreign_keys = ON` has been set, and that setting is PER
+    /// CONNECTION: a schema declaration is therefore never a guarantee.
     ///
-    /// ⚠️ Poser ce pragma ici serait pire que le défaut qu'il corrige.
-    /// `tricount_entries.linked_transaction_id` référence `transactions(id)`
-    /// SANS action déclarée, ce qui vaut `NO ACTION` : l'application des clés
-    /// étrangères ferait alors REFUSER la suppression de toute transaction
-    /// rattachée à une dépense Tricount. La cascade explicite obtient le
-    /// nettoyage sans importer ce blocage — c'est le même choix, pour la même
-    /// raison, que celui déjà fait côté investissements.
+    /// ⚠️ Setting that pragma here would be worse than the defect it fixes.
+    /// `tricount_entries.linked_transaction_id` references `transactions(id)`
+    /// with NO declared action, which defaults to `NO ACTION`: enforcing
+    /// foreign keys would then REFUSE deleting any transaction
+    /// linked to a Tricount expense. The explicit cascade achieves the
+    /// cleanup without importing that block — the same choice, for the same
+    /// reason, already made on the investments side.
     ///
-    /// Sans ce nettoyage, les lignes filles survivent en pointant vers une
-    /// transaction disparue. Elles ne sont pas seulement du poids mort : elles
-    /// portent un `uuid` et un `updated_at`, donc elles partent en
-    /// synchronisation et arrivent sur les autres appareils dans le même état.
+    /// Without this cleanup, the child rows survive pointing at a
+    /// vanished transaction. They aren't just dead weight: they
+    /// carry a `uuid` and an `updated_at`, so they go out through
+    /// sync and arrive on other devices in the same state.
     private static func detacherEnfants(_ db: OpaquePointer, transactionId: Int) {
         let instructions = [
             "DELETE FROM transaction_tags WHERE transaction_id = ?;",
             "DELETE FROM reimbursements WHERE transaction_id = ?;",
             "DELETE FROM transaction_metadata_values WHERE transaction_id = ?;",
-            // Ces deux-là ne sont pas supprimées mais détachées : la prévision
-            // budgétaire et la dépense Tricount existent indépendamment de la
-            // transaction à laquelle on les avait rapprochées.
+            // These two aren't deleted but detached: the budget prevision
+            // and the Tricount expense exist independently of the
+            // transaction they were matched to.
             "UPDATE budget_previsions SET actual_transaction_id = NULL WHERE actual_transaction_id = ?;",
             "UPDATE tricount_entries SET linked_transaction_id = NULL WHERE linked_transaction_id = ?;"
         ]
@@ -818,18 +818,18 @@ struct TransactionRepository {
         }
     }
 
-    /// Supprime plusieurs transactions et renvoie le nombre de lignes
-    /// RÉELLEMENT supprimées.
+    /// Deletes several transactions and returns the number of rows
+    /// ACTUALLY deleted.
     ///
-    /// La nuance compte : SQLite répond `SQLITE_DONE` à un `DELETE` qui ne
-    /// touche aucune ligne — l'instruction s'est bien exécutée, elle n'a rien
-    /// trouvé. Compter les instructions réussies, comme le faisait la version
-    /// précédente, surestimait donc le total dès qu'un identifiant était périmé,
-    /// ce qui arrive dès que deux appareils synchronisés suppriment en parallèle.
-    /// `sqlite3_changes` donne le nombre de lignes effectivement touchées.
+    /// The distinction matters: SQLite answers `SQLITE_DONE` for a `DELETE` that
+    /// touches no row at all — the statement ran fine, it just found nothing. Counting
+    /// successful statements, as the previous version did, therefore overstated the
+    /// total as soon as an id was stale, which happens as soon as two
+    /// synced devices delete in parallel. `sqlite3_changes` gives the
+    /// number of rows actually touched.
     ///
-    /// Une seule connexion et un seul statement réutilisé, au lieu d'un cycle
-    /// ouverture/fermeture par identifiant.
+    /// A single connection and a single reused statement, instead of an
+    /// open/close cycle per id.
     func deleteTransactions(ids: Set<Int>) -> Int {
         guard !ids.isEmpty else { return 0 }
         return store.write { db in
@@ -851,8 +851,8 @@ struct TransactionRepository {
         } ?? 0
     }
 
-    /// Remboursement géré séparément par ReimbursementRepository.setReimbursement
-    /// depuis v44 — l'appelant enchaîne après ce updateTransaction.
+    /// Reimbursement handled separately by ReimbursementRepository.setReimbursement
+    /// since v44 — the caller follows up after this updateTransaction.
     @discardableResult
     func updateTransaction(_ draft: TransactionEditDraft) -> Bool {
         let formatter = DateFormatter()
@@ -874,7 +874,7 @@ struct TransactionRepository {
         }
     }
 
-    /// Insère un nouveau tiers et retourne son ID généré.
+    /// Inserts a new payee and returns its generated ID.
     func addTiersAndGetId(name: String, regex: String, categoryId: Int? = nil) -> Int? {
         guard store.databaseExists else { return nil }
         var db: OpaquePointer?
@@ -935,7 +935,7 @@ struct TransactionRepository {
             sqlite3_bind_int(stmt, 4, Int32(id))
             return sqlite3_step(stmt) == SQLITE_DONE
         }
-        // Fallback : colonne icon absente (DB pré-v18), migration non encore appliquée
+        // Fallback: the icon column is absent (a pre-v18 DB), migration not applied yet
         sqlite3_finalize(stmt)
         guard sqlite3_prepare_v2(db, "UPDATE categories SET name = ?, parent_id = ? WHERE id = ?", -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
         defer { sqlite3_finalize(stmt) }
@@ -963,7 +963,7 @@ struct TransactionRepository {
         return sqlite3_step(stmt) == SQLITE_DONE
     }
 
-    /// Déplace une catégorie dans l'arbre (change son parent, nil = racine).
+    /// Moves a category within the tree (changes its parent, nil = root).
     @discardableResult
     func moveCategory(id: Int, toParentId: Int?) -> Bool {
         guard store.databaseExists else { return false }
@@ -981,10 +981,10 @@ struct TransactionRepository {
         return sqlite3_step(stmt) == SQLITE_DONE
     }
 
-    /// Supprime une catégorie (et éventuellement ses sous-catégories) en désassignant
-    /// tout ce qui la référence (transactions, récurrents, enveloppes budget passent à NULL).
-    /// Les transactions ne sont jamais perdues : elles deviennent "non catégorisées".
-    /// Retourne true si la suppression a eu lieu.
+    /// Deletes a category (and possibly its sub-categories), unassigning
+    /// everything that references it (transactions, recurring items, budget envelopes go to NULL).
+    /// Transactions are never lost: they become "uncategorized".
+    /// Returns true if the deletion happened.
     @discardableResult
     func deleteCategory(id: Int, includingChildren childIds: [Int] = []) -> Bool {
         let allIds = [id] + childIds
@@ -1000,7 +1000,7 @@ struct TransactionRepository {
         sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil)
 
         let placeholders = allIds.map { _ in "?" }.joined(separator: ",")
-        // Désassigner les références connues (les tables budget/enrichment tolèrent NULL).
+        // Unassign the known references (the budget/enrichment tables tolerate NULL).
         let nullStatements = [
             "UPDATE transactions SET category_id = NULL WHERE category_id IN (\(placeholders));",
             "UPDATE recurring_patterns SET category_id = NULL WHERE category_id IN (\(placeholders));",
@@ -1028,10 +1028,10 @@ struct TransactionRepository {
         return ok
     }
 
-    // MARK: - Comptage transactions par entité (pour l'écran Données)
+    // MARK: - Transaction count per entity (for the Data screen)
 
-    /// Nombre de transactions par valeur d'une colonne FK de `transactions`.
-    /// `column` est une constante interne (jamais une saisie utilisateur).
+    /// Number of transactions per value of a `transactions` FK column.
+    /// `column` is an internal constant (never user input).
     private func transactionCounts(column: String) -> [Int: Int] {
         query(read: { db in
             var stmt: OpaquePointer?
@@ -1051,7 +1051,7 @@ struct TransactionRepository {
     func countTransactionsByPaymentType() -> [Int: Int] { transactionCounts(column: "payment_type_id") }
     func countTransactionsByAccount() -> [Int: Int]     { transactionCounts(column: "account_id") }
 
-    /// Nombre de transactions taguées par tag (via la table de liaison).
+    /// Number of transactions tagged by tag (via the link table).
     func countTransactionsByTag() -> [Int: Int] {
         query(read: { db in
             var stmt: OpaquePointer?
@@ -1065,9 +1065,9 @@ struct TransactionRepository {
         }) ?? [:]
     }
 
-    // MARK: - Suppression moyen de paiement / compte / tag
+    // MARK: - Deleting a payment method / account / tag
 
-    /// Supprime un moyen de paiement. Les transactions concernées passent à NULL.
+    /// Deletes a payment method. Affected transactions get set to NULL.
     @discardableResult
     func deletePaymentType(id: Int) -> Bool {
         deleteAndUnassign(
@@ -1077,11 +1077,11 @@ struct TransactionRepository {
         )
     }
 
-    /// Supprime un tag et ses liaisons.
+    /// Deletes a tag and its links.
     ///
-    /// Un tag se pose aussi bien sur une transaction que sur une dépense
-    /// Tricount : les DEUX tables de liaison doivent être nettoyées, pas
-    /// seulement celle du module depuis lequel la suppression est déclenchée.
+    /// A tag can be set on both a transaction and a Tricount
+    /// expense: BOTH link tables must be cleaned up, not
+    /// just the one from the module the deletion was triggered from.
     @discardableResult
     func deleteTag(id: Int) -> Bool {
         deleteAndUnassign(
@@ -1094,19 +1094,19 @@ struct TransactionRepository {
         )
     }
 
-    /// Supprime plusieurs tags en une fois (sélection multiple, Données →
-    /// Tags). Boucle sur `deleteTag` — le nombre de tags sélectionnés à la
-    /// fois reste faible (quelques dizaines au plus), pas besoin de la même
-    /// transaction dédiée que `deleteTiers`. Retourne le nombre effectivement
-    /// supprimé.
+    /// Deletes several tags at once (multi-select, Data →
+    /// Tags). Loops over `deleteTag` — the number of tags selected at
+    /// once stays small (a few dozen at most), no need for the same
+    /// dedicated transaction as `deleteTiers`. Returns the number actually
+    /// deleted.
     @discardableResult
     func deleteTags(ids: Set<Int>) -> Int {
         ids.reduce(0) { count, id in deleteTag(id: id) ? count + 1 : count }
     }
 
-    /// Supprime un compte SEULEMENT s'il ne porte aucune transaction (garde-fou :
-    /// un compte est structurant, on ne veut pas orpheliner des écritures).
-    /// Retourne false si le compte est encore utilisé.
+    /// Deletes an account ONLY if it carries no transaction (a safety net:
+    /// an account is structural, we don't want to orphan entries).
+    /// Returns false if the account is still in use.
     @discardableResult
     func deleteAccount(id: Int) -> Bool {
         guard countTransactionsByAccount()[id] == nil else { return false }
@@ -1117,7 +1117,7 @@ struct TransactionRepository {
         )
     }
 
-    /// Helper commun : exécute les UPDATE/DELETE de désassignation puis DELETE la row.
+    /// Common helper: runs the unassignment UPDATEs/DELETEs then DELETEs the row.
     private func deleteAndUnassign(table: String, id: Int, unassign: [String]) -> Bool {
         guard store.databaseExists else { return false }
         var db: OpaquePointer?
@@ -1187,7 +1187,7 @@ struct TransactionRepository {
         }) ?? []
     }
 
-    /// Met à jour la couleur d'un tag (hex sans #, nil = couleur par défaut).
+    /// Updates a tag's color (hex with no #, nil = the default color).
     @discardableResult
     func updateTagColor(id: Int, colorHex: String?) -> Bool {
         guard store.databaseExists else { return false }
@@ -1205,7 +1205,7 @@ struct TransactionRepository {
         return sqlite3_step(stmt) == SQLITE_DONE
     }
 
-    /// Crée le tag s'il n'existe pas (insensible à la casse), retourne son id.
+    /// Creates the tag if it doesn't exist (case-insensitive), returns its id.
     func findOrCreateTag(name: String) -> Int? {
         guard store.databaseExists else { return nil }
         var db: OpaquePointer?
@@ -1273,15 +1273,15 @@ struct TransactionRepository {
         return sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK
     }
 
-    // MARK: - Résumé par tag
+    // MARK: - Summary by tag
 
     func fetchTagExpenseSummary() -> [TagExpenseSummary] {
         query(read: { db in
-            // Conversion EUR pour la sous-requête Tricount :
-            //   1. Déjà en EUR → ts.amount directement
-            //   2. local_currency = 'EUR' et local_total dispo → ratio proportionnel
-            //   3. Fallback → ts.amount brut (pas de conversion connue)
-            // Note : total et local_total sont stockés négatifs pour les dépenses.
+            // EUR conversion for the Tricount subquery:
+            //   1. Already in EUR → ts.amount directly
+            //   2. local_currency = 'EUR' and local_total available → proportional ratio
+            //   3. Fallback → the raw ts.amount (no known conversion)
+            // Note: total and local_total are stored negative for expenses.
             let sql = """
                 SELECT
                     t.id, t.name, t.color,
@@ -1398,9 +1398,9 @@ struct TransactionRepository {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return query(read: { db in
-            // Colonnes 0-6 : données de base
-            // Colonne 7   : eurShare (NULL si pas de taux disponible)
-            // Colonne 8   : type_transaction
+            // Columns 0-6: base data
+            // Column 7   : eurShare (NULL if no rate available)
+            // Column 8   : type_transaction
             let sql = """
                 SELECT te.id, COALESCE(te.description,''),
                     ABS(COALESCE(ts.amount, te.total)),
@@ -1455,7 +1455,7 @@ struct TransactionRepository {
         }) ?? []
     }
 
-    /// Retourne les IDs de transactions ayant au moins un des tags donnés.
+    /// Returns the IDs of transactions carrying at least one of the given tags.
     func fetchTransactionIds(havingAnyTagIds tagIds: Set<Int>) -> Set<Int> {
         guard !tagIds.isEmpty else { return [] }
         return query(read: { db in
@@ -1475,7 +1475,7 @@ struct TransactionRepository {
         }) ?? []
     }
 
-    /// Remplace tous les tags d'une transaction (opération atomique).
+    /// Replaces every tag of a transaction (an atomic operation).
     @discardableResult
     func setTags(_ tagIds: [Int], forTransaction txId: Int) -> Bool {
         guard store.databaseExists else { return false }
@@ -1557,10 +1557,10 @@ struct TransactionRepository {
         }
     }
 
-    // MARK: - Suppression tiers (multi)
+    // MARK: - Payee deletion (multi)
 
-    /// Supprime les tiers et délie les transactions/remboursements associés (SET NULL).
-    /// Retourne le nombre de tiers effectivement supprimés.
+    /// Deletes payees and unlinks the associated transactions/reimbursements (SET NULL).
+    /// Returns the number of payees actually deleted.
     @discardableResult
     func deleteTiers(ids: Set<Int>) -> Int {
         guard !ids.isEmpty, store.databaseExists else { return 0 }
@@ -1579,7 +1579,7 @@ struct TransactionRepository {
         var delTiersStmt:  OpaquePointer?
 
         sqlite3_prepare_v2(db, "UPDATE transactions SET payee_id = NULL WHERE payee_id = ?;",      -1, &nullTiersStmt, nil)
-        // Couvre les 2 origines (transaction simple + Tricount) en un seul DELETE — v44
+        // Covers both origins (a plain transaction + Tricount) in a single DELETE — v44
         sqlite3_prepare_v2(db, "DELETE FROM reimbursements WHERE payee_id = ?;",                    -1, &delRembStmt,  nil)
         sqlite3_prepare_v2(db, "DELETE FROM payees WHERE id = ?;",                                  -1, &delTiersStmt, nil)
         defer {
@@ -1619,7 +1619,7 @@ struct TransactionRepository {
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
 
-        // Charger les noms existants (minuscules) pour déduplication
+        // Load existing names (lowercased) for deduplication
         var existingNames = Set<String>()
         var nameStmt: OpaquePointer?
         if sqlite3_prepare_v2(db, "SELECT LOWER(COALESCE(name,'')) FROM payees;", -1, &nameStmt, nil) == SQLITE_OK, let nameStmt {
@@ -1649,7 +1649,7 @@ struct TransactionRepository {
             if let cid = row.categoryId { sqlite3_bind_int(insertStmt, 3, Int32(cid)) } else { sqlite3_bind_null(insertStmt, 3) }
             if sqlite3_step(insertStmt) == SQLITE_DONE {
                 inserted += 1
-                existingNames.insert(row.name.lowercased()) // évite doublons intra-batch
+                existingNames.insert(row.name.lowercased()) // avoids intra-batch duplicates
             } else {
                 skipped += 1
             }
@@ -1662,7 +1662,7 @@ struct TransactionRepository {
         return TiersBulkImportResult(insertedCount: inserted, skippedCount: skipped)
     }
 
-    // MARK: - Mise à jour rapide catégorie
+    // MARK: - Quick category update
 
     func updateTransactionsCategory(ids: Set<Int>, categoryId: Int?) -> Int {
         ids.reduce(0) { count, id in
@@ -1679,16 +1679,16 @@ struct TransactionRepository {
         }
     }
 
-    // MARK: - Données pour graphiques
+    // MARK: - Chart data
 
-    /// accountId = nil → tous les comptes confondus.
+    /// accountId = nil → across all accounts.
     func fetchMonthlyTotals(accountId: Int? = nil, from: Date, to: Date) -> [MonthlyTotals] {
         let fmt = DateFormatter(); fmt.locale = Locale(identifier: "en_US_POSIX"); fmt.dateFormat = "yyyy-MM-dd"
         let fromRaw = fmt.string(from: min(from, to)); let toRaw = fmt.string(from: max(from, to))
         return query(read: { db in
             let accountClause = accountId != nil ? "AND t.account_id = ?" : ""
-            // Un compte explicite = l'utilisateur consulte CE compte : jamais exclu.
-            // "Tous comptes" (accountId == nil) exclut les comptes marqués "autres".
+            // An explicit account = the user is looking at THIS account: never excluded.
+            // "All accounts" (accountId == nil) excludes accounts marked "other".
             let excludedAccountsJoin = accountId == nil ? Self.excludedAccountsJoin : ""
             let excludedAccountsClause = accountId == nil ? "AND \(Self.excludedAccountsClause)" : ""
             let sql = """
@@ -1722,7 +1722,7 @@ struct TransactionRepository {
         }) ?? []
     }
 
-    /// accountId = nil → tous les comptes confondus.
+    /// accountId = nil → across all accounts.
     func fetchCategoryTotals(accountId: Int? = nil, from: Date, to: Date) -> [CategoryTotal] {
         let fmt = DateFormatter(); fmt.locale = Locale(identifier: "en_US_POSIX"); fmt.dateFormat = "yyyy-MM-dd"
         let fromRaw = fmt.string(from: min(from, to)); let toRaw = fmt.string(from: max(from, to))
@@ -1767,7 +1767,7 @@ struct TransactionRepository {
         }) ?? []
     }
 
-    // MARK: - Fetch toutes transactions (picker)
+    // MARK: - Fetch all transactions (picker)
 
     func fetchAllTransactions(limit: Int = 300) -> [FinanceTransaction] {
         let formatter = DateFormatter()
@@ -1820,7 +1820,7 @@ struct TransactionRepository {
 
     // MARK: - Tricount Links
 
-    /// Retourne l'ensemble des transaction IDs liées à une entrée Tricount.
+    /// Returns the set of transaction IDs linked to a Tricount entry.
     func fetchLinkedTransactionIds() -> Set<Int> {
         query(read: { db in
             let sql = "SELECT linked_transaction_id FROM tricount_entries WHERE linked_transaction_id IS NOT NULL"
@@ -1835,7 +1835,7 @@ struct TransactionRepository {
         }) ?? []
     }
 
-    /// Retourne le groupId, titre et entryId du Tricount lié à une transaction donnée.
+    /// Returns the linked Tricount's groupId, title and entryId for a given transaction.
     func fetchLinkedTricountInfo(transactionId: Int) -> (groupId: Int, groupTitle: String, entryId: Int)? {
         query(read: { db in
             let sql = """
@@ -1854,7 +1854,7 @@ struct TransactionRepository {
         }) ?? nil
     }
 
-    /// Retourne un dictionnaire transaction_id → [Tag] pour une liste d'IDs donnée.
+    /// Returns a transaction_id → [Tag] dictionary for a given list of IDs.
     func fetchTagsForTransactions(_ ids: [Int]) -> [Int: [Tag]] {
         guard !ids.isEmpty else { return [:] }
         return query(read: { db in
@@ -1884,10 +1884,10 @@ struct TransactionRepository {
         }) ?? [:]
     }
 
-    // MARK: - Comptage non catégorisé
+    // MARK: - Uncategorized count
 
-    /// Nombre de transactions en catégorie AUTRE (id=40 ou NULL) sur la période donnée.
-    /// `accountId == 0` = tous les comptes.
+    /// Number of transactions in the OTHER category (id=40 or NULL) over the given period.
+    /// `accountId == 0` = every account.
     func fetchUncategorizedCount(accountId: Int, from: Date, to: Date) -> Int {
         let fmt = DateFormatter()
         fmt.locale = Locale(identifier: "en_US_POSIX")
@@ -1896,8 +1896,8 @@ struct TransactionRepository {
         let toRaw   = fmt.string(from: max(from, to))
         return query(read: { db in
             let accountClause = accountId == 0 ? "" : "account_id = ? AND"
-            // "Tous comptes" (0) exclut les comptes marqués "autres" ; un compte
-            // précis reste inchangé, l'utilisateur consulte CE compte.
+            // "All accounts" (0) excludes accounts marked "other"; a specific
+            // account stays unchanged, the user is looking at THIS account.
             let excludedAccountsClause = accountId == 0
                 ? "AND (a.excluded_from_aggregates IS NULL OR a.excluded_from_aggregates = 0)"
                 : ""
@@ -1923,10 +1923,10 @@ struct TransactionRepository {
 
     // MARK: - Balance
 
-    /// Solde du compte depuis le début jusqu'à upToDate (ou toutes dates si nil).
-    /// `accountId == 0` = somme sur tous les comptes (à manier avec précaution côté UI :
-    /// la TransactionsView masque ce solde global car sa lecture est ambigüe lorsque
-    /// les comptes incluent des CB, du cash et de l'épargne aux régimes différents).
+    /// The account's balance from the start up to upToDate (or every date if nil).
+    /// `accountId == 0` = the sum across all accounts (handle with care on the UI side:
+    /// TransactionsView hides this global balance because reading it is ambiguous when
+    /// the accounts mix checking, cash and savings under different regimes).
     func fetchAccountBalance(accountId: Int, upToDate: Date? = nil) -> Double {
         let fmt = DateFormatter()
         fmt.locale = Locale(identifier: "en_US_POSIX")
@@ -1958,7 +1958,7 @@ struct TransactionRepository {
 
     // MARK: - Tag totals (dashboard)
 
-    /// accountId = nil → tous les comptes confondus.
+    /// accountId = nil → across all accounts.
     func fetchTagTotals(accountId: Int? = nil, from: Date, to: Date) -> [TagTotal] {
         let fmt = DateFormatter(); fmt.locale = Locale(identifier: "en_US_POSIX"); fmt.dateFormat = "yyyy-MM-dd"
         let fromRaw = fmt.string(from: min(from, to)); let toRaw = fmt.string(from: max(from, to))
@@ -1999,17 +1999,17 @@ struct TransactionRepository {
 
     // MARK: - Fetch all filtered transactions (filtered dashboard)
 
-    /// `excludeOtherAccounts` : opt-in, comme `excludeInternalTransfers` — seuls les
-    /// appelants "calcul agrégé" (ex. `FilteredDashboardViewModel`) le passent à `true`.
-    /// L'explorateur Transactions et la recherche globale ne sont PAS des calculs :
-    /// un compte marqué "hors calculs" doit y rester visible/recherchable normalement.
+    /// `excludeOtherAccounts`: opt-in, like `excludeInternalTransfers` — only
+    /// "aggregate calculation" callers (e.g. `FilteredDashboardViewModel`) pass `true`.
+    /// The Transactions explorer and global search are NOT calculations:
+    /// an account marked "excluded from aggregates" must stay normally visible/searchable there.
     func fetchAllFilteredTransactions(filter: TransactionFilter, excludeInternalTransfers: Bool = false, excludeOtherAccounts: Bool = false) -> [FinanceTransaction] {
         let fmt = DateFormatter(); fmt.locale = Locale(identifier: "en_US_POSIX"); fmt.dateFormat = "yyyy-MM-dd"
         let fromRaw = fmt.string(from: min(filter.from, filter.to))
         let toRaw   = fmt.string(from: max(filter.from, filter.to))
 
         return query(read: { db in
-            // accountId == 0 = "Tous les comptes" → on retire la clause account.
+            // accountId == 0 = "All accounts" → the account clause is dropped.
             var conditions: [String] = []
             if filter.accountId != 0 { conditions.append("t.account_id = ?") }
             conditions.append(contentsOf: ["t.tx_date >= ?", "t.tx_date <= ?"])
@@ -2131,10 +2131,10 @@ struct TransactionRepository {
         store.writeSingle(sql: sql, bind: bind)
     }
 
-    // MARK: - Toutes transactions toutes comptes (budget)
+    // MARK: - All transactions, all accounts (budget)
 
-    /// Recupere les transactions de TOUS les comptes sur une periode donnee.
-    /// Utilise par le module Budget qui ne filtre pas par compte.
+    /// Fetches transactions across ALL accounts for a given period.
+    /// Used by the Budget module, which doesn't filter by account.
     func fetchTransactionsAllAccounts(from: Date, to: Date, limit: Int = 500, offset: Int = 0) -> [FinanceTransaction] {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

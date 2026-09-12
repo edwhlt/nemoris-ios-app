@@ -13,13 +13,13 @@ struct ReimbursementsSheet: View {
     @State private var toDate: Date
     @State private var groups: [ReimbursementGroup] = []
     @State private var expandedIds: Set<Int> = []
-    /// Groupement TOUJOURS par payee — ce toggle ne fait que sous-détailler les
-    /// items D'UN MÊME payee par catégorie, il ne remplace pas le groupement.
+    /// ALWAYS grouped by payee — this toggle only sub-details a
+    /// single payee's items by category, it doesn't replace the grouping.
     @State private var detailByCategory = false
-    /// Disclosure des sous-groupes catégorie, repliés par défaut. Clé composite
-    /// "payeeId|categoryId" : un même categoryId peut apparaître sous plusieurs
-    /// payees (ex. "Alimentation" chez Papa ET chez Maman) — un Set<Int> seul
-    /// ferait coïncider à tort leurs états d'expansion.
+    /// Disclosure of category sub-groups, collapsed by default. A composite key
+    /// "payeeId|categoryId": the same categoryId can appear under several
+    /// payees (e.g. "Groceries" for both Mom AND Dad) — a plain Set<Int>
+    /// would wrongly conflate their expansion states.
     @State private var expandedCategoryKeys: Set<String> = []
 
     init(repository: TransactionRepository, initialFrom: Date, initialTo: Date) {
@@ -32,10 +32,10 @@ struct ReimbursementsSheet: View {
     private var grandTotal: Double { groups.reduce(0) { $0 + $1.total } }
 
     var body: some View {
-            // Form (pas List) : contenu type formulaire → boxes arrondies
-            // natives macOS via nemorisFormStyle(), insetGrouped natif sur iOS.
+            // A Form (not List): form-like content → native rounded macOS
+            // boxes via nemorisFormStyle(), native insetGrouped on iOS.
             Form {
-                // Période
+                // Period
                 Section("Période") {
                     DatePicker("Du", selection: $fromDate, displayedComponents: .date)
                     DatePicker("Au", selection: $toDate, displayedComponents: .date)
@@ -69,7 +69,7 @@ struct ReimbursementsSheet: View {
                         }
                     }
 
-                    // Liste unifiée — toujours groupée par payee
+                    // A unified list — always grouped by payee
                     ForEach(groups) { group in
                         Section {
                             groupHeader(id: group.id, title: group.payeeName, total: group.total,
@@ -99,7 +99,7 @@ struct ReimbursementsSheet: View {
             .paneChrome("Remboursements", cancelLabel: "Fermer", onCancel: { paneDismiss() })
     }
 
-    // MARK: En-tête de groupe (tappable pour expand)
+    // MARK: Group header (tappable to expand)
 
     @ViewBuilder
     private func groupHeader(id: Int, title: String, total: Double, transactionCount: Int, tricountCount: Int) -> some View {
@@ -123,7 +123,7 @@ struct ReimbursementsSheet: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: Sous-titre du groupe
+    // MARK: Group subtitle
 
     @ViewBuilder
     private func groupSubtitle(transactionCount: Int, tricountCount: Int) -> some View {
@@ -146,12 +146,12 @@ struct ReimbursementsSheet: View {
         }
     }
 
-    // MARK: Sous-détail par catégorie (au sein d'un même payee)
+    // MARK: Category sub-detail (within a single payee)
 
-    /// Découpe les items d'UN payee par catégorie — calculé en mémoire à partir
-    /// des données déjà chargées (categoryId/categoryName portés par
-    /// Reimbursement), pas de requête supplémentaire. Tri par montant absolu
-    /// décroissant : la catégorie la plus lourde en premier.
+    /// Splits ONE payee's items by category — computed in memory from
+    /// the already-loaded data (categoryId/categoryName carried by
+    /// Reimbursement), no extra query. Sorted by decreasing absolute amount:
+    /// the heaviest category first.
     private func categorySubgroups(of items: [Reimbursement]) -> [CategoryReimbursementGroup] {
         var grouped: [Int: (name: String, items: [Reimbursement])] = [:]
         for item in items {
@@ -164,8 +164,8 @@ struct ReimbursementsSheet: View {
         }.sorted { abs($0.total) > abs($1.total) }
     }
 
-    /// Clé composite payee+catégorie pour l'état d'expansion — cf. commentaire
-    /// sur `expandedCategoryKeys`.
+    /// A composite payee+category key for the expansion state — see the comment
+    /// on `expandedCategoryKeys`.
     private func categoryKey(payeeId: Int, sub: CategoryReimbursementGroup) -> String {
         "\(payeeId)|\(sub.id)"
     }
@@ -187,9 +187,9 @@ struct ReimbursementsSheet: View {
 
     // MARK: Ligne item
 
-    /// Repli : la note libre (`information`) est souvent vide (transactions
-    /// importées, jamais annotées par l'utilisateur) → repli sur le payee ORIGINAL de
-    /// la transaction (ex. "Netflix"), pas sur un libellé générique.
+    /// Fallback: the free-form note (`information`) is often empty (imported
+    /// transactions, never annotated by the user) → falls back to the transaction's
+    /// ORIGINAL payee (e.g. "Netflix"), not a generic label.
     private func displayLabel(_ item: Reimbursement) -> String {
         if !item.originDescription.isEmpty { return item.originDescription }
         if !item.originPayeeName.isEmpty { return item.originPayeeName }
@@ -238,7 +238,7 @@ struct ReimbursementsSheet: View {
         .padding(.leading, 12)
     }
 
-    // MARK: Chargement
+    // MARK: Loading
 
     private func load() {
         groups = reimbursementRepo.fetchReimbursementGroups(from: fromDate, to: toDate)

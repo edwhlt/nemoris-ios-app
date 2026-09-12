@@ -49,10 +49,10 @@ struct NewTiersFormSheet: View {
                 }
             }
             .nemorisFormStyle()
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
-            // barre d'outils native laisse le bureau de l'utilisateur
-            // transparaître (retour d'usage 2026-08-21). Cf. le commentaire
-            // de `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on macOS-sheet — the native
+            // toolbar lets the user's desktop
+            // show through. See the comment
+            // on `macSheetChrome` in AdaptivePane.swift.
             .paneChrome(
                 "Nouveau tiers",
                 cancelLabel: "Annuler", onCancel: { dismiss() },

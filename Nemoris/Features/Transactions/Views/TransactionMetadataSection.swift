@@ -1,30 +1,30 @@
 import SwiftUI
 
-/// Section « Métadonnées » d'une fiche transaction — remplace le picker
-/// « moyen de paiement ».
+/// "Metadata" section of a transaction sheet — replaces the
+/// "payment method" picker.
 ///
-/// ─── Ce qui change, et pourquoi ────────────────────────────────────────────
+/// ─── What changes, and why ──────────────────────────────────────────────
 ///
-/// `transactions.payment_type_id` était le seul attribut libre posable sur une
-/// transaction en dehors de tiers/catégorie/tags, et il imposait sa sémantique à
-/// tout le monde. Il devient une métadonnée parmi d'autres, définies par
-/// l'utilisateur : « Projet », « Pro / Perso », « Compte joint »… ou rien du
-/// tout.
+/// `transactions.payment_type_id` was the only free-form attribute a
+/// transaction could carry outside of payee/category/tags, and it imposed its own
+/// semantics on everyone. It becomes one metadata field among others, defined by
+/// the user: "Project", "Work / Personal", "Joint account"… or nothing
+/// at all.
 ///
-/// ⚠️ Une base NEUVE n'a AUCUNE clé. Cette section affiche alors une invitation
-/// à en créer, pas un champ vide — sinon elle ressemblerait à une fonctionnalité
-/// cassée.
+/// ⚠️ A FRESH database has NO key at all. This section then shows an
+/// invitation to create one, not an empty field — otherwise it would look like a
+/// broken feature.
 struct TransactionMetadataSection: View {
 
-    /// `nil` tant que la transaction n'existe pas en base (création) : on ne
-    /// peut pas rattacher une valeur à une ligne qui n'a pas d'id.
+    /// `nil` as long as the transaction doesn't exist in the database yet (creation): a
+    /// value can't be attached to a row that has no id.
     let transactionId: Int?
 
     @State private var keys: [TransactionMetadataKey] = []
     @State private var values: [Int: String] = [:]        // keyId → valeur
-    @State private var suggestions: [Int: [String]] = [:] // keyId → valeurs déjà vues
+    @State private var suggestions: [Int: [String]] = [:] // keyId → values already seen
     @State private var showKeyManager = false
-    /// Écritures différées en cours, une par clé (cf. `commit`).
+    /// Pending debounced writes, one per key (see `commit`).
     @State private var pendingWrites: [Int: Task<Void, Never>] = [:]
 
     private let repository = TransactionMetadataRepository()
@@ -93,12 +93,12 @@ struct TransactionMetadataSection: View {
                 .disabled(transactionId == nil)
             }
 
-            // Suggestions : ce qui a DÉJÀ été saisi pour cette clé, du plus
-            // fréquent au moins fréquent.
+            // Suggestions: what has ALREADY been typed for this key, most
+            // frequent first.
             //
-            // ⚠️ Suggestions seulement — aucune contrainte en base. Les figer en
-            // liste fermée recréerait une table de référence, exactement ce
-            // qu'on vient de retirer.
+            // ⚠️ Suggestions only — no constraint in the database. Locking them into a
+            // closed list would recreate a reference table, exactly what was
+            // just removed.
             let proposals = (suggestions[key.id] ?? []).filter { $0 != (values[key.id] ?? "") }
             if !proposals.isEmpty, transactionId != nil {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -124,7 +124,7 @@ struct TransactionMetadataSection: View {
         .padding(.vertical, 2)
     }
 
-    // MARK: - Données
+    // MARK: - Data
 
     private func load() {
         keys = repository.fetchKeys()
@@ -136,16 +136,16 @@ struct TransactionMetadataSection: View {
             repository.fetchValues(transactionId: transactionId).map { ($0.keyId, $0.value) })
     }
 
-    /// Écriture sans bouton « enregistrer », mais DIFFÉRÉE.
+    /// A write with no "save" button, but DEBOUNCED.
     ///
-    /// Cohérent avec les tags, qui s'appliquent aussi à la volée : une
-    /// métadonnée est une étiquette, pas un champ du formulaire principal. Une
-    /// valeur vidée retire la ligne (cf. `setValue`).
+    /// Consistent with tags, which also apply on the fly: a
+    /// metadata field is a label, not a field of the main form. An
+    /// emptied value removes the row (see `setValue`).
     ///
-    /// ⚠️ Le délai n'est pas un confort. La version initiale écrivait en base à
-    /// CHAQUE FRAPPE : une ouverture de connexion SQLite et un UPSERT par
-    /// caractère, sur le main actor — saisie hachée garantie. On ne conserve que
-    /// la dernière frappe d'une rafale.
+    /// ⚠️ The delay isn't a convenience. The initial version wrote to the database on
+    /// EVERY KEYSTROKE: an SQLite connection opened and an UPSERT run per
+    /// character, on the main actor — guaranteed choppy typing. Only the
+    /// last keystroke of a burst is kept.
     private func commit(key: TransactionMetadataKey, value: String) {
         guard let transactionId else { return }
         pendingWrites[key.id]?.cancel()
@@ -156,8 +156,8 @@ struct TransactionMetadataSection: View {
         }
     }
 
-    /// Vide la file d'écriture : la dernière frappe ne doit pas être perdue
-    /// parce que l'utilisateur a fermé la fiche dans la foulée.
+    /// Flushes the write queue: the last keystroke shouldn't be lost
+    /// because the user closed the sheet right after.
     private func flushPendingWrites() {
         guard let transactionId else { return }
         for (keyId, task) in pendingWrites {
@@ -168,11 +168,11 @@ struct TransactionMetadataSection: View {
     }
 }
 
-/// Création, renommage et suppression des clés de métadonnées.
+/// Creating, renaming and deleting metadata keys.
 ///
-/// Volontairement séparé de `ReferenceDataView` : c'est un référentiel léger,
-/// créé au fil de l'eau depuis la fiche transaction, là où catégories et tiers
-/// se gèrent en masse.
+/// Deliberately separate from `ReferenceDataView`: this is a lightweight
+/// reference table, created on the fly from the transaction sheet, whereas
+/// categories and payees are managed in bulk.
 struct MetadataKeyManagerView: View {
     @Environment(\.paneDismiss) private var dismiss
     var onChange: () -> Void = {}
@@ -183,19 +183,19 @@ struct MetadataKeyManagerView: View {
     @State private var fillsFromImport = false
     @State private var errorMessage: String?
 
-    // Édition en place d'une clé existante.
+    // In-place editing of an existing key.
     @State private var editingKeyId: Int?
     @State private var editName = ""
     @State private var editIcon = "tag"
     @State private var editFillsFromImport = false
-    /// ⚠️ Confirmation avant suppression : le CASCADE efface TOUTES les valeurs
-    /// posées sur les transactions. Un tap malencontreux ne doit pas les perdre.
+    /// ⚠️ Confirmation before deletion: the CASCADE wipes EVERY value
+    /// set on transactions. An accidental tap shouldn't lose them.
     @State private var deleteTarget: TransactionMetadataKey?
 
     private let repository = TransactionMetadataRepository()
 
-    /// Quelques symboles courants — saisir un nom de SF Symbol à la main n'a
-    /// aucun sens pour un utilisateur.
+    /// A few common symbols — typing an SF Symbol name by hand makes
+    /// no sense for a user.
     private let iconChoices = ["tag", "creditcard", "briefcase", "folder", "person.2",
                                "building.2", "airplane", "car", "house", "star"]
 
@@ -203,11 +203,11 @@ struct MetadataKeyManagerView: View {
         Form {
             Section {
                 ForEach(keys) { key in
-                    // Une clé se MODIFIE : renommer, changer d'icône, déplacer
-                    // le rôle « renseignée par l'import ». La première version
-                    // ne savait que créer et supprimer, ce qui obligeait à
-                    // détruire toutes les valeurs pour corriger une faute de
-                    // frappe dans un nom.
+                    // A key can be EDITED: renamed, its icon changed, its
+                    // "filled in by import" role moved. The first version
+                    // could only create and delete, which forced
+                    // destroying every value to fix a
+                    // typo in a name.
                     if editingKeyId == key.id {
                         editor(for: key)
                     } else {
@@ -248,7 +248,7 @@ struct MetadataKeyManagerView: View {
             } header: {
                 Text("Métadonnées existantes")
             } footer: {
-                // ⚠️ Le CASCADE est réel : le dire avant, pas après.
+                // ⚠️ The CASCADE is real: say so before, not after.
                 Text("Supprimer une métadonnée efface aussi toutes les valeurs posées sur les transactions.")
             }
 
@@ -281,7 +281,7 @@ struct MetadataKeyManagerView: View {
         .nemorisFormStyle()
         .scrollContentBackground(.hidden)
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        // Convention : toute vue présentée en panneau pose son propre tint.
+        // Convention: any view presented in a pane sets its own tint.
         .tint(AppTheme.Colors.accent)
         .paneChrome("Métadonnées", cancelLabel: "Fermer", onCancel: { dismiss() })
         .confirmationDialog("Supprimer « \(deleteTarget?.name ?? "") » ?",
@@ -300,7 +300,7 @@ struct MetadataKeyManagerView: View {
         .task { reload() }
     }
 
-    /// Édition en place d'une clé, dans la ligne elle-même.
+    /// In-place editing of a key, right in the row itself.
     @ViewBuilder
     private func editor(for key: TransactionMetadataKey) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -337,8 +337,9 @@ struct MetadataKeyManagerView: View {
         var updated = key
         updated.name = editName.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.icon = editIcon
-        // Poser le rôle ici le RETIRE automatiquement à la clé qui le portait
-        // (index UNIQUE partiel géré par le repository) : il reste exclusif.
+        // Setting the role here automatically REMOVES it from the key that
+        // held it (a partial UNIQUE index managed by the repository): it stays
+        // exclusive.
         updated.role = editFillsFromImport ? .paymentMethod : nil
         guard repository.updateKey(updated) else {
             errorMessage = "Ce nom est déjà utilisé."
@@ -368,16 +369,16 @@ struct MetadataKeyManagerView: View {
     }
 }
 
-/// Création ET édition d'une clé — un seul formulaire pour les deux, comme
-/// `PayeeDetailView` (`key: nil` = création). Utilisé par l'onglet
-/// « Métadonnées » de l'écran Données (`ReferenceDataView`), via le bouton
-/// "+" de la toolbar (création) et le panneau détail (édition) — même
-/// parcours swipeable/inspecteur que Comptes/Tiers/Tags. Distinct de
-/// `MetadataKeyManagerView` ci-dessus, qui reste le raccourci de création
-/// rapide DEPUIS la fiche transaction (ne pas fusionner : contextes différents).
+/// Creating AND editing a key — a single form for both, like
+/// `PayeeDetailView` (`key: nil` = creation). Used by the Data screen's
+/// "Metadata" tab (`ReferenceDataView`), via the toolbar "+"
+/// button (creation) and the detail pane (editing) — the same
+/// swipeable/inspector flow as Accounts/Payees/Tags. Distinct from
+/// `MetadataKeyManagerView` above, which stays the quick-creation
+/// shortcut FROM the transaction sheet (don't merge them: different contexts).
 struct MetadataKeyFormView: View {
     @Environment(\.paneDismiss) private var dismiss
-    /// `nil` = nouvelle clé.
+    /// `nil` = a new key.
     let key: TransactionMetadataKey?
     var onSave: () -> Void = {}
 
@@ -388,8 +389,8 @@ struct MetadataKeyFormView: View {
 
     private let repository = TransactionMetadataRepository()
 
-    /// Mêmes symboles que `MetadataKeyManagerView` — saisir un nom de SF
-    /// Symbol à la main n'a aucun sens pour un utilisateur.
+    /// Same symbols as `MetadataKeyManagerView` — typing an SF
+    /// Symbol name by hand makes no sense for a user.
     private let iconChoices = ["tag", "creditcard", "briefcase", "folder", "person.2",
                                "building.2", "airplane", "car", "house", "star"]
 
@@ -423,7 +424,7 @@ struct MetadataKeyFormView: View {
         .nemorisFormStyle()
         .scrollContentBackground(.hidden)
         .background(AppTheme.Colors.background.ignoresSafeArea())
-        // Convention : toute vue présentée en panneau pose son propre tint.
+        // Convention: any view presented in a pane sets its own tint.
         .tint(AppTheme.Colors.accent)
         .paneChrome(
             key == nil ? "Nouvelle métadonnée" : "Renommer",
@@ -458,9 +459,9 @@ struct MetadataKeyFormView: View {
     }
 }
 
-/// Détail en lecture seule d'une clé (Fermer / Supprimer / Modifier) — le
-/// `detail:` d'`adaptiveEntityPane` dans `ReferenceDataView`. Même gabarit
-/// que `PayeeDetailPane`/`ReferenceDetailPane`.
+/// Read-only detail of a key (Close / Delete / Edit) — the
+/// `detail:` of `adaptiveEntityPane` in `ReferenceDataView`. Same template
+/// as `PayeeDetailPane`/`ReferenceDetailPane`.
 struct MetadataKeyDetailPane: View {
     let key: TransactionMetadataKey
     let usageCount: Int

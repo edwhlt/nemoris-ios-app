@@ -3,18 +3,18 @@ import SQLite3
 
 private let SQLITE_TRANSIENT_RB = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-/// Remboursements — table unifiée `reimbursements` (v44), rattachée à
-/// une transaction simple (0..1 payee, `idx_reimbursements_transaction`) OU une
-/// entrée Tricount (0..N payees, `idx_reimbursements_tricount`), jamais les
-/// deux (CHECK XOR en base). Remplace la logique historiquement éclatée entre
-/// `TransactionRepository` (colonne `reimbursement_payee_id`, retirée v44) et
-/// `TricountRepository` (table `tricount_reimbursements`, migrée v44).
+/// Reimbursements — a unified `reimbursements` table (v44), attached to
+/// either a plain transaction (0..1 payee, `idx_reimbursements_transaction`) OR a
+/// Tricount entry (0..N payees, `idx_reimbursements_tricount`), never
+/// both (a CHECK XOR in the database). Replaces logic that used to be split
+/// between `TransactionRepository` (the `reimbursement_payee_id` column, removed
+/// in v44) and `TricountRepository` (the `tricount_reimbursements` table, migrated in v44).
 struct ReimbursementRepository {
 
     private let store: SQLiteStore
 
-    /// La valeur par défaut vise la base de l'application : les sites d'appel
-    /// existants n'ont pas à changer.
+    /// The default value targets the app's database: existing call sites
+    /// don't have to change.
     init(store: SQLiteStore = SQLiteStore()) {
         self.store = store
     }
@@ -22,9 +22,9 @@ struct ReimbursementRepository {
 
     // MARK: - Transaction simple (0..1, pas de montant — cf. doctrine v44)
 
-    /// Assigne (ou retire si `payeeId == nil`) le payee remboursant d'une
-    /// transaction. Upsert sur `idx_reimbursements_transaction` : changer de
-    /// payee met à jour la ligne existante, ne crée jamais de doublon.
+    /// Assigns (or removes, if `payeeId == nil`) a transaction's reimbursing
+    /// payee. An upsert on `idx_reimbursements_transaction`: changing the
+    /// payee updates the existing row, never creates a duplicate.
     @discardableResult
     func setReimbursement(transactionId: Int, payeeId: Int?) -> Bool {
         guard let payeeId else {
@@ -79,8 +79,8 @@ struct ReimbursementRepository {
 
     // MARK: - Tricount (0..N, montant obligatoire = part personnelle)
 
-    /// Premier assignement (ou ajustement du montant) d'un remboursement pour
-    /// un couple (entrée, payee). Upsert sur `idx_reimbursements_tricount`.
+    /// First assignment (or amount adjustment) of a reimbursement for
+    /// an (entry, payee) pair. An upsert on `idx_reimbursements_tricount`.
     @discardableResult
     func addOrUpdateReimbursement(tricountEntryId: Int, payeeId: Int, amount: Double, currency: String) -> Bool {
         guard store.databaseExists else { return false }
@@ -105,10 +105,10 @@ struct ReimbursementRepository {
         return sqlite3_step(stmt) == SQLITE_DONE
     }
 
-    /// Édition d'une ligne EXISTANTE par son id — au contraire de
-    /// `addOrUpdateReimbursement` (keyé sur le couple entrée/payee), celle-ci
-    /// met à jour la ligne identifiée même si le payee change, pour ne
-    /// jamais dupliquer silencieusement (fix du bug "Modifier…").
+    /// Edits an EXISTING row by its id — unlike
+    /// `addOrUpdateReimbursement` (keyed on the entry/payee pair), this one
+    /// updates the identified row even if the payee changes, so it never
+    /// silently duplicates (the fix for the "Edit…" bug).
     @discardableResult
     func updateReimbursement(id: Int, payeeId: Int, amount: Double, currency: String) -> Bool {
         guard store.databaseExists else { return false }
@@ -171,7 +171,7 @@ struct ReimbursementRepository {
         }) ?? []
     }
 
-    /// Remboursements d'un groupe Tricount spécifique, groupés par payee.
+    /// Reimbursements of a specific Tricount group, grouped by payee.
     func fetchReimbursements(forTricountGroup groupId: Int) -> [ReimbursementGroup] {
         query(read: { db in
             let sql = tricountGroupSQL(where: "e.group_id = ?")
@@ -183,11 +183,11 @@ struct ReimbursementRepository {
         }) ?? []
     }
 
-    // MARK: - Vue unifiée (transactions simples + Tricount)
+    // MARK: - Unified view (plain transactions + Tricount)
 
-    /// Remplace TransactionRepository.fetchReimbursementGroups ET
-    /// TricountRepository.fetchReimbursementGroups — une seule requête au lieu
-    /// d'un merge applicatif de 2 sources (ex-ReimbursementsSheet.load()).
+    /// Replaces both TransactionRepository.fetchReimbursementGroups AND
+    /// TricountRepository.fetchReimbursementGroups — a single query instead
+    /// of an app-level merge of 2 sources (the former ReimbursementsSheet.load()).
     func fetchReimbursementGroups(from: Date, to: Date) -> [ReimbursementGroup] {
         var grouped: [Int: (name: String, items: [Reimbursement])] = [:]
         for item in fetchReimbursementRows(from: from, to: to) {
@@ -198,9 +198,9 @@ struct ReimbursementRepository {
         }.sorted { $0.payeeName.localizedCaseInsensitiveCompare($1.payeeName) == .orderedAscending }
     }
 
-    /// Liste plate des remboursements (transaction + Tricount confondus) sur
-    /// une période, avec catégorie résolue (utilisée pour le sous-détail par
-    /// catégorie au sein d'un payee, calculé côté vue — cf. ReimbursementsSheet).
+    /// A flat list of reimbursements (transaction + Tricount combined) over
+    /// a period, with the category resolved (used for the per-category
+    /// sub-detail within a payee, computed on the view side — see ReimbursementsSheet).
     private func fetchReimbursementRows(from: Date, to: Date) -> [Reimbursement] {
         let fmt = DateFormatter()
         fmt.locale = Locale(identifier: "en_US_POSIX")
@@ -293,12 +293,12 @@ struct ReimbursementRepository {
         }
     }
 
-    // MARK: - Cascade suppression payee
+    // MARK: - Payee-deletion cascade
 
-    /// Remplace les 2 statements séparés de l'ancien
-    /// TransactionRepository.deleteTiers (NULL sur reimbursement_payee_id +
-    /// DELETE tricount_reimbursements) par UN SEUL — bénéfice direct de
-    /// l'unification.
+    /// Replaces the old TransactionRepository.deleteTiers's 2 separate
+    /// statements (NULL on reimbursement_payee_id +
+    /// DELETE tricount_reimbursements) with A SINGLE ONE — a direct benefit
+    /// of the unification.
     @discardableResult
     func deleteReimbursements(payeeId: Int) -> Bool {
         writeSingle(sql: "DELETE FROM reimbursements WHERE payee_id = ?;") { stmt in
@@ -306,7 +306,7 @@ struct ReimbursementRepository {
         }
     }
 
-    // MARK: - Helpers privés
+    // MARK: - Private helpers
 
     private func tricountGroupSQL(where condition: String) -> String {
         """

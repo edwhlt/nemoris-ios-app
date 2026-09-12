@@ -25,9 +25,9 @@ struct TiersSearchSheet: View {
                     dismiss()
                 }
                 .foregroundStyle(AppTheme.Colors.textSecondary)
-                // Sans ça, macOS applique le chrome de bouton par défaut
-                // (teinté par l'accent de l'app) par-dessus la carte déjà
-                // verte de `macGroupedRow` (retour d'usage 2026-08-21).
+                // Without this, macOS applies the default button chrome
+                // (tinted with the app's accent) on top of `macGroupedRow`'s
+                // already-green card.
                 .buttonStyle(.plain)
                 .macGroupedRow(first: true, last: filtered.isEmpty)
 
@@ -54,42 +54,41 @@ struct TiersSearchSheet: View {
                 }
             }
             #if os(macOS)
-            // Même politique que les autres pickers (PayeePickerSheet,
-            // CategoryQuickPickSheet…) : base neutre pour les cartes
-            // dessinées par macGroupedRow.
+            // Same policy as the other pickers (PayeePickerSheet,
+            // CategoryQuickPickSheet…): a neutral base for the cards
+            // drawn by macGroupedRow.
             .listStyle(.plain)
-            // Décolle la 1ère carte du Divider() de `paneChrome` juste au-dessus.
+            // Detaches the 1st card from `paneChrome`'s Divider() right above it.
             .macGroupedListTopGap()
-            // ⚠️ Vérifié en direct (2026-08-26) sur `ImportActionsHelpSheet` :
-            // un `.frame(maxWidth: .infinity, maxHeight: .infinity)` seul
-            // (« greedy », qui ne fait que remplir l'espace déjà offert) NE
-            // SUFFIT PAS à empêcher un `List` de s'effondrer quand cette vue
-            // est atteinte via un `.sheet()` brut SANS `.adaptivePaneFrame()`
-            // externe (ex. `AddTricountReimbursementSheet`) — macOS calcule
-            // alors la hauteur de la fenêtre depuis la taille "naturelle" du
-            // contenu, et un `List` ne la reporte pas de façon fiable dans ce
-            // contexte. Le `minHeight` NUMÉRIQUE est ce qui force réellement
-            // une hauteur — même valeur que `AdaptivePane.adaptivePaneFrame()`
-            // (`minHeight: 520`), pour rester cohérent avec les panes qui,
-            // eux, obtiennent cette contrainte de l'extérieur.
+            // ⚠️ Verified live on `ImportActionsHelpSheet`:
+            // a `.frame(maxWidth: .infinity, maxHeight: .infinity)` alone
+            // ("greedy", which only fills the space already offered) is NOT
+            // ENOUGH to keep a `List` from collapsing when this view
+            // is reached via a bare `.sheet()` with NO external
+            // `.adaptivePaneFrame()` (e.g. `AddTricountReimbursementSheet`) —
+            // macOS then computes the window's height from the content's
+            // "natural" size, and a `List` doesn't report it reliably in that
+            // context. The NUMERIC `minHeight` is what actually forces
+            // a height — the same value as `AdaptivePane.adaptivePaneFrame()`
+            // (`minHeight: 520`), to stay consistent with panes that
+            // get this constraint from the outside.
             .frame(maxWidth: .infinity, minHeight: 520, maxHeight: .infinity)
             #endif
-            // `List` peint SON PROPRE fond système sur macOS (matériau
-            // vibrant/translucide) PAR-DESSUS tout `.background()` posé sur
-            // le conteneur — sans `.scrollContentBackground(.hidden)`, le
-            // fond explicite ci-dessous est invisible, cf. `TagSummaryView`
-            // (retour d'usage 2026-08-19, capture montrant le bureau de
-            // l'utilisateur qui bleedait à travers un inspecteur/modal).
+            // `List` paints ITS OWN system background on macOS (a vibrant/
+            // translucent material) ON TOP OF any `.background()` set on
+            // the container — without `.scrollContentBackground(.hidden)`, the
+            // explicit background below is invisible, see `TagSummaryView`
+            // (a screenshot once showed the user's desktop
+            // bleeding through an inspector/modal).
             .scrollContentBackground(.hidden)
             .paneSearchable(text: $search, prompt: "Rechercher un tiers…")
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
-            // tentative précédente (`.toolbarBackground(for: .windowToolbar)`)
-            // compilait mais n'avait AUCUN effet visuel, confirmé par capture
-            // d'écran en direct (retour d'usage 2026-08-21). Cf. le
-            // commentaire de `macSheetChrome` dans AdaptivePane.swift. Le "+"
-            // (créer un tiers) prend le rôle "confirm" — il n'y a pas de
-            // vrai bouton de confirmation ici (les rows sélectionnent et
-            // ferment directement).
+            // `.paneChrome` draws its own bars on macOS-sheet — the earlier
+            // attempt (`.toolbarBackground(for: .windowToolbar)`)
+            // compiled but had NO visual effect at all, confirmed by a live
+            // screenshot. See the `macSheetChrome` comment in
+            // AdaptivePane.swift. The "+" (create a payee) takes on the
+            // "confirm" role — there's no real confirmation button here
+            // (the rows select and dismiss directly).
             .paneChrome(
                 "Choisir un tiers",
                 cancelLabel: "Annuler", onCancel: { dismiss() },

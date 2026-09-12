@@ -9,10 +9,10 @@ struct TagSummaryView: View {
     let repository: TransactionRepository
     @State private var summaries: [TagExpenseSummary] = []
     @State private var isSyncingRates = false
-    /// État à la place d'un `NavigationLink` : un push depuis ce contenu, une
-    /// fois hébergé dans le panneau macOS, ferait remonter le titre/back-button
-    /// de `TagDetailView` dans la barre du MODULE (aucune fenêtre séparée pour
-    /// l'absorber). Le détail s'ouvre en sheet (niveau 2, scopée) à la place.
+    /// State instead of a `NavigationLink`: a push from this content, once
+    /// hosted in the macOS pane, would bubble `TagDetailView`'s title/back-button
+    /// up into the MODULE's bar (no separate window to absorb it).
+    /// The detail opens as a sheet (level 2, scoped) instead.
     @State private var selectedTag: Tag?
 
     var body: some View {
@@ -50,10 +50,9 @@ struct TagSummaryView: View {
                         }
                     }
                     #if os(macOS)
-                    // `List` peint SON PROPRE fond système sur macOS
-                    // PAR-DESSUS celui posé par le panneau hôte — sans ce
-                    // modificateur, le bureau de l'utilisateur transparaît
-                    // (retour d'usage 2026-08-19).
+                    // `List` paints ITS OWN system background on macOS
+                    // ON TOP OF the one set by the host pane — without this
+                    // modifier, the user's desktop shows through.
                     .scrollContentBackground(.hidden)
                     #endif
                 }
