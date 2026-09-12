@@ -19,23 +19,22 @@ struct EnvelopeEditSheet: View {
                 Section {
                     TextField("Nom (ex: Alimentation)", text: $name)
                     HStack {
-                        // `LabeledContent` plutôt qu'un `TextField` nu : sur
-                        // macOS, le titre d'un `TextField` devient un LABEL à
-                        // gauche plutôt qu'un placeholder DANS le champ
-                        // (contrairement à iOS) — le champ n'avait alors
-                        // aucun label visible sur macOS. Un placeholder
-                        // "0,00" puis `.textFieldStyle(.roundedBorder)` ont
-                        // été essayés pour rendre le champ plus visiblement
-                        // "éditable", puis retirés à la demande — le style
-                        // natif (sans bordure ni placeholder, cohérent avec
-                        // le reste du Form) reste préférable. Cf.
-                        // PatternEditSheet (même symptôme). `.frame(minWidth:)`
-                        // sur le conteneur : sans lui, cette ligne partage
-                        // l'espace avec un Picker segmenté — sur macOS l'un
-                        // des deux peut se faire écraser à une largeur quasi
-                        // nulle (invisible, non cliquable) au lieu de se
-                        // répartir l'espace comme sur iOS (retour d'usage
-                        // 2026-08-19).
+                        // `LabeledContent` rather than a bare `TextField`: on
+                        // macOS, a `TextField`'s title becomes a LABEL on the
+                        // left rather than a placeholder INSIDE the field
+                        // (unlike on iOS) — the field then had
+                        // no visible label on macOS. A
+                        // "0.00" placeholder then `.textFieldStyle(.roundedBorder)`
+                        // were tried to make the field look more visibly
+                        // "editable", then removed on request — the
+                        // native style (no border or placeholder, consistent with
+                        // the rest of the Form) remains preferable. See
+                        // PatternEditSheet (same symptom). `.frame(minWidth:)`
+                        // on the container: without it, this row shares
+                        // the space with a segmented Picker — on macOS one
+                        // of the two can get squeezed to near-zero
+                        // width (invisible, unclickable) instead of
+                        // splitting the space as on iOS.
                         LabeledContent("Montant") {
                             TextField("", text: $amount)
                                 .keyboardType(.decimalPad)

@@ -2,10 +2,10 @@ import SwiftUI
 import Charts
 import TipKit
 
-/// Hauteur réelle du panneau de détail du jour ouvert dans le calendrier
-/// (`DayDetailPanel`) — remontée par mesure plutôt qu'estimée, son contenu
-/// (0 à N prévisions + 0 à N transactions) n'a pas de taille fixe. Seul
-/// consommateur : `BudgetView.calendarCarouselHeight`.
+/// Actual height of the day-detail pane opened in the calendar
+/// (`DayDetailPanel`) — measured rather than estimated, since its content
+/// (0 to N previsions + 0 to N transactions) has no fixed size. Sole
+/// consumer: `BudgetView.calendarCarouselHeight`.
 private struct DayDetailHeightPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
@@ -25,46 +25,44 @@ struct BudgetView: View {
     @State private var allTiers: [Tiers] = []
     @State private var allCategories: [Category] = []
     private let referenceRepo = TransactionRepository()
-    // Carrousel de mois — remplace l'ancien geste de swipe custom (snapshot
-    // qui glissait, mois cible chargé APRÈS relâchement, d'où la sensation
-    // de "ça recharge"). `pageMonths` est une fenêtre de 3 mois [M-1, M, M+1]
-    // rendue par un `TabView(.page)` NATIF : le doigt suit du contenu RÉEL
-    // déjà pré-rendu des deux côtés (même prefetch que l'ancien système,
-    // cf. `loadData()`), sans geste maison à réinventer — cf. retour
-    // d'usage "comme si on avait une scrollview horizontale qui figeait sur
-    // la vue du mois". `pageIndex` ne bouge QUE par la pagination native
-    // (swipe ou changement programmatique animé) ; dès qu'il s'éloigne de 1,
-    // `.onChange` traduit ça en vrai changement de mois côté ViewModel, puis
-    // `.onChange(of: vm.displayedMonth)` recentre la fenêtre SANS animation
-    // (`Transaction.disablesAnimations`) pour que ce recentrage soit invisible.
+    // Month carousel — replaces the old custom swipe gesture (a sliding
+    // snapshot, the target month loaded AFTER release, hence the feeling
+    // of "it's reloading"). `pageMonths` is a 3-month window [M-1, M, M+1]
+    // rendered by a NATIVE `TabView(.page)`: the finger follows REAL, already
+    // pre-rendered content on both sides (the same prefetch as the old system,
+    // see `loadData()`), with no custom gesture to reinvent. `pageIndex` only
+    // moves via native pagination (a swipe or an animated programmatic change);
+    // as soon as it drifts from 1, `.onChange` translates that into a real
+    // month change on the ViewModel side, then
+    // `.onChange(of: vm.displayedMonth)` recenters the window WITH NO animation
+    // (`Transaction.disablesAnimations`) so that recentering stays invisible.
     @State private var pageMonths: [Date] = []
     @State private var pageIndex: Int = 1
     @State private var previsionPendingChoice: BudgetPrevision?
     @State private var showMonthYearPicker = false
-    /// Coach dépenses — déplacé depuis Transactions (2026-08-29), qui reste un
-    /// pur explorateur de transactions. L'analyse budgétaire a sa place ici.
+    /// Spending coach — moved here from Transactions (2026-08-29), which stays
+    /// a pure transaction explorer. Budget analysis belongs here.
     @State private var showCoach = false
-    // Groupes repliables de la carte "Récurrents" — état par groupe, pas un
-    // seul bool : replier "7 prochains jours" ne doit pas affecter "Ce mois".
-    // "Ce mois" replié par défaut (généralement la plus longue des deux
-    // listes) ; "7 prochains jours" reste ouvert, c'est l'horizon le plus
-    // actionnable (retour d'usage 2026-08-26).
+    // Collapsible groups on the "Recurring" card — state per group, not a
+    // single bool: collapsing "Next 7 days" must not affect "This month".
+    // "This month" collapsed by default (usually the longer of the two
+    // lists); "Next 7 days" stays open, it's the more actionable horizon.
     @State private var upcomingExpanded = true
     @State private var thisMonthExpanded = false
 
-    /// Skeleton uniquement sur la 1ère ouverture (ou sur un changement de mois non-caché).
-    /// Voir `loadData()` qui met à `true` quand le mois cible est absent du cache.
+    /// Skeleton only on the 1st open (or on an uncached month change).
+    /// See `loadData()`, which sets it to `true` when the target month is missing from the cache.
     @State private var isInitialLoading = true
 
-    /// Hauteur RÉELLE de `DayDetailPanel` telle que remontée par
-    /// `DayDetailHeightPreferenceKey` — jamais une constante, cf.
+    /// The ACTUAL height of `DayDetailPanel` as reported by
+    /// `DayDetailHeightPreferenceKey` — never a constant, see
     /// `calendarCarouselHeight`.
     @State private var measuredDetailHeight: CGFloat = 0
 
     var isEmbedded: Bool = false
 
     #if os(macOS)
-    /// Sous-écran du module ouvert en navigation PAR ÉTAT (jamais un push).
+    /// The module's sub-screen, opened via STATE-DRIVEN navigation (never a push).
     enum BudgetSection: Identifiable {
         case envelopes, recurring
         var id: Self { self }
@@ -76,10 +74,10 @@ struct BudgetView: View {
         }
     }
     @State private var pushedSection: BudgetSection?
-    /// Pour fermer le panneau en revenant au calendrier.
+    /// To close the pane by returning to the calendar.
     @Environment(InspectorPaneCenter.self) private var paneCenter: InspectorPaneCenter?
 
-    /// Sous-écran en pleine page + retour vers le calendrier.
+    /// A full-page sub-screen + a way back to the calendar.
     @ViewBuilder
     private func budgetSectionPage(_ section: BudgetSection) -> some View {
         Group {
@@ -88,9 +86,9 @@ struct BudgetView: View {
             case .recurring: RecurringManagementView(vm: vm)
             }
         }
-        // ⚠️ Résolution explicite, jamais un littéral/`LocalizedStringKey` nu :
-        // `.navigationTitle` ponte vers la chrome native (barre de titre macOS),
-        // qui ne respecte pas fiablement `\.locale` forcé par l'app. Cf. CLAUDE.md §5.
+        // ⚠️ Explicit resolution, never a bare literal/`LocalizedStringKey`:
+        // `.navigationTitle` bridges to native chrome (the macOS title bar),
+        // which doesn't reliably respect the app-forced `\.locale`. See CLAUDE.md §5.
         .localizedNavigationTitle(section.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -108,11 +106,11 @@ struct BudgetView: View {
     }
     #endif
 
-    /// Symboles de jours pour l'en-tête de la grille calendrier — un seul
-    /// caractère, semaine commençant le lundi (`leadingEmpty` fige cet ordre
-    /// indépendamment de `Calendar.current.firstWeekday`). Dérivés de
-    /// `appState.locale` (pas `Locale.current`) pour suivre le réglage de
-    /// langue de l'app plutôt que celui, potentiellement différent, de l'appareil.
+    /// Day symbols for the calendar grid header — a single
+    /// character, week starting on Monday (`leadingEmpty` fixes this order
+    /// independently of `Calendar.current.firstWeekday`). Derived from
+    /// `appState.locale` (not `Locale.current`) to follow the app's
+    /// language setting rather than the device's, which may differ.
     private var weekdaySymbols: [String] {
         var cal = Calendar(identifier: .gregorian)
         cal.locale = appState.locale
@@ -124,8 +122,8 @@ struct BudgetView: View {
     var body: some View {
         Group {
             #if os(macOS)
-            // Sous-écran ouvert → il REMPLACE le contenu du module (navigation
-            // par état, avec son propre retour). Cf. commentaire de la toolbar.
+            // A sub-screen is open → it REPLACES the module's content (state-driven
+            // navigation, with its own back button). See the toolbar comment.
             if let section = pushedSection {
                 budgetSectionPage(section)
             } else if isEmbedded {
@@ -137,11 +135,11 @@ struct BudgetView: View {
             if isEmbedded { navContent } else { NavigationStack { navContent } }
             #endif
         }
-        // `.task` et NON `.onAppear` : dans la colonne détail d'un
-        // `NavigationSplitView` macOS, `.onAppear` n'est pas fiable — il ne se
-        // déclenchait pas ici, et le module s'affichait donc vide (« Aucun
-        // récurrent », budget à 0 €) alors que la base contenait les données.
-        // Le calendrier, lui, se chargeait : il passe par un `.task(id:)`.
+        // `.task`, NOT `.onAppear`: in the detail column of a macOS
+        // `NavigationSplitView`, `.onAppear` isn't reliable — it wasn't firing
+        // here, so the module showed empty ("No recurring items", budget at €0)
+        // even though the database held the data. The calendar, on the other
+        // hand, loaded fine: it goes through a `.task(id:)`.
         .task {
             vm.onAppear()
             if allTiers.isEmpty { allTiers = referenceRepo.fetchTiers() }
@@ -160,22 +158,18 @@ struct BudgetView: View {
         ZStack {
             AppTheme.Colors.background.ignoresSafeArea()
             ScrollView {
-                // `.frame(maxWidth: .infinity)` explicite : un `ScrollView`
-                // propose sa largeur dispo à son contenu, mais un `VStack`
-                // dont aucun enfant direct ne force `.infinity` reste replié
-                // sur sa largeur intrinsèque — sur macOS (colonne détail
-                // large), ça se traduisait par un calendrier collé au coin
-                // haut-gauche avec tout le reste de la fenêtre vide (retour
-                // d'usage 2026-08-26, capture à l'appui).
+                // Explicit `.frame(maxWidth: .infinity)`: a `ScrollView`
+                // offers its available width to its content, but a `VStack`
+                // with no direct child forcing `.infinity` stays collapsed
+                // to its intrinsic width — on macOS (a wide detail
+                // column), that showed up as a calendar stuck in the
+                // top-left corner with the rest of the window empty.
                 VStack(spacing: AppTheme.Spacing.md) {
 
-                    // Month navigation — les flèches jouent la MÊME transition
-                    // de page native que le swipe (`pageIndex` change,
-                    // `.onChange` fait le reste) ; le libellé mois/année est
-                    // maintenant un bouton qui ouvre le sélecteur rapide
-                    // (retour d'usage : "faire de l'affichage du mois et de
-                    // l'année ... des boutons pour sélectionner le mois et
-                    // l'année").
+                    // Month navigation — the arrows play the SAME native page
+                    // transition as the swipe (`pageIndex` changes,
+                    // `.onChange` does the rest); the month/year label is
+                    // now a button that opens the quick picker.
                     MonthNavigationView(
                         vm: vm,
                         onPrevious: goToPreviousMonth,
@@ -192,15 +186,15 @@ struct BudgetView: View {
                         calendarCarousel
                             .background(AppTheme.Colors.background)
 
-                        // Récurrents à venir : 1 carte, 2 groupes repliables
-                        // (au lieu de 2 cartes empilées) — déclutter la vue.
+                        // Upcoming recurring items: 1 card, 2 collapsible groups
+                        // (instead of 2 stacked cards) — decluttering the view.
                         recurringPrevisionsCard
 
                         // Empty state when no patterns
                         if vm.patterns.isEmpty {
-                            // macOS : le menu "⋯" a été aplati en boutons dans la
-                            // barre d'outils — le message doit suivre, sinon il
-                            // renvoie vers un menu qui n'existe plus.
+                            // macOS: the "⋯" menu was flattened into toolbar
+                            // buttons — the message must follow suit, otherwise it
+                            // points to a menu that no longer exists.
                             #if os(macOS)
                             EmptyStateView(
                                 icon: "arrow.clockwise.circle",
@@ -227,27 +221,27 @@ struct BudgetView: View {
             .task(id: vm.displayedMonth) { await loadData() }
             .onAppear { syncPagerToDisplayedMonth(animated: false) }
             .onChange(of: pageIndex) { _, new in
-                // Le carrousel a fini une transition (swipe utilisateur OU
-                // flèche programmatique, cf. `MonthNavigationView`) — `1`
-                // reste le centre, seul un écart en est le signe.
+                // The carousel finished a transition (a user swipe OR a
+                // programmatic arrow, see `MonthNavigationView`) — `1`
+                // stays the center, only a drift from it is the signal.
                 guard new != 1 else { return }
                 if new == 2 { vm.nextMonth() } else { vm.previousMonth() }
                 selectedDay = nil
                 HapticService.shared.selection()
             }
             .onChange(of: vm.displayedMonth) { _, _ in
-                // `pageIndex == 1` ⇒ le changement ne vient PAS d'un
-                // page-turn du carrousel (donc "aujourd'hui", le sélecteur
-                // mois/année, ou le scrubber) → un fondu est approprié. Sinon
-                // (0 ou 2) c'est un recentrage post-swipe : DOIT rester
-                // invisible, sous peine de re-glisser par-dessus la
-                // transition native qui vient de jouer.
+                // `pageIndex == 1` ⇒ the change did NOT come from a
+                // carousel page-turn (so "today", the month/year picker,
+                // or the scrubber) → a fade is appropriate. Otherwise
+                // (0 or 2) it's a post-swipe recentering: it MUST stay
+                // invisible, or it would slide back over the
+                // native transition that just played.
                 syncPagerToDisplayedMonth(animated: pageIndex == 1)
             }
             .onChange(of: vm.previsions) { _, _ in
-                // Transactions du mois déjà en cache dans l'immense majorité des cas
-                // (posées par `loadData()`) → recalcul synchrone, pas de aller-retour
-                // SQL pour un simple skip/match/edit de récurrent.
+                // The month's transactions are already cached in the vast majority of
+                // cases (set by `loadData()`) → a synchronous recompute, no SQL
+                // round trip for a plain skip/match/edit of a recurring item.
                 if let txs = txCache[monthKey(vm.displayedMonth)] {
                     summary = vm.monthlySummary(transactions: txs)
                 } else {
@@ -279,9 +273,9 @@ struct BudgetView: View {
             }
             .allowsHitTesting(summary != nil)
         }
-        // Swipe à deux doigts sur trackpad = changement de mois (no-op sur
-        // iOS, qui a déjà le swipe natif du `TabView(.page)`). Partage les
-        // mêmes déclencheurs que les flèches de `MonthNavigationView`.
+        // A two-finger trackpad swipe = a month change (a no-op on
+        // iOS, which already has `TabView(.page)`'s native swipe). Shares the
+        // same triggers as `MonthNavigationView`'s arrows.
         .trackpadMonthSwipe(onPrevious: goToPreviousMonth, onNext: goToNextMonth)
         .adaptivePane(item: $apercuPresentation) { p in
             BudgetApercuSheet(summary: p.summary, days: p.days, month: p.month, categories: vm.categories, allTiers: allTiers, allCategories: allCategories)
@@ -298,11 +292,11 @@ struct BudgetView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             #if os(macOS)
-            // macOS : actions en boutons icône (pas de menu "⋯"), et surtout
-            // AUCUN `NavigationLink` — un push depuis un module désynchronise la
-            // sidebar et, dans une toolbar, déclenchait un crash. Les deux
-            // destinations passent par un état (cf. `pushedSection`), comme dans
-            // Investissements, Tricount et Réglages.
+            // macOS: icon-button actions (no "⋯" menu), and above all
+            // NO `NavigationLink` — a push from a module desynchronizes the
+            // sidebar and, in a toolbar, used to trigger a crash. Both
+            // destinations go through state (see `pushedSection`), as in
+            // Investments, Tricount and Settings.
             ToolbarItemGroup(placement: .primaryAction) {
                 ToolbarPaywallGate(feature: .budget) {
                     Button { vm.runAutoDetection() } label: {
@@ -357,7 +351,7 @@ struct BudgetView: View {
 
     // MARK: - Calendar Carousel
 
-    /// Fenêtre de 3 mois [M-1, M, M+1] centrée sur `month`.
+    /// A 3-month window [M-1, M, M+1] centered on `month`.
     private func neighborWindow(around month: Date) -> [Date] {
         let cal = Calendar.current
         let prev = cal.date(byAdding: .month, value: -1, to: month) ?? month
@@ -365,11 +359,11 @@ struct BudgetView: View {
         return [prev, month, next]
     }
 
-    /// Recentre `pageMonths`/`pageIndex` sur `vm.displayedMonth`. `animated:
-    /// false` (recentrage post-swipe/bouton, DOIT être invisible — sinon on
-    /// verrait un second glissé se superposer à la transition native qui
-    /// vient de jouer) vs `true` (saut direct — "aujourd'hui", sélecteur
-    /// mois/année, scrubber — un fondu léger est approprié).
+    /// Recenters `pageMonths`/`pageIndex` on `vm.displayedMonth`. `animated:
+    /// false` (a post-swipe/button recentering, MUST be invisible — otherwise
+    /// a second slide would be seen layering over the native transition that
+    /// just played) vs `true` (a direct jump — "today", the month/year
+    /// picker, the scrubber — a light fade is appropriate).
     private func syncPagerToDisplayedMonth(animated: Bool) {
         let wanted = neighborWindow(around: vm.displayedMonth)
         guard pageMonths != wanted || pageIndex != 1 else { return }
@@ -388,10 +382,10 @@ struct BudgetView: View {
         }
     }
 
-    /// Mois précédent/suivant, PARTAGÉ par les flèches de `MonthNavigationView`
-    /// ET le swipe trackpad macOS (`.trackpadMonthSwipe`) — même mécanisme
-    /// (`pageIndex` change, `.onChange` fait le reste) pour ne pas dupliquer
-    /// la logique de transition entre les deux déclencheurs.
+    /// Previous/next month, SHARED by `MonthNavigationView`'s arrows
+    /// AND the macOS trackpad swipe (`.trackpadMonthSwipe`) — the same
+    /// mechanism (`pageIndex` changes, `.onChange` does the rest) so as not to
+    /// duplicate the transition logic between the two triggers.
     private func goToPreviousMonth() {
         withAnimation(.easeInOut(duration: 0.3)) { pageIndex = 0 }
     }
@@ -400,8 +394,8 @@ struct BudgetView: View {
         withAnimation(.easeInOut(duration: 0.3)) { pageIndex = 2 }
     }
 
-    /// Saut direct (scrubber, sélecteur mois/année) — pas de notion de
-    /// "précédent/suivant" ici, donc jamais via `pageIndex`.
+    /// A direct jump (the scrubber, the month/year picker) — there's no
+    /// notion of "previous/next" here, so never via `pageIndex`.
     private func jumpToMonth(_ month: Date) {
         let cal = Calendar.current
         guard !cal.isDate(month, equalTo: vm.displayedMonth, toGranularity: .month) else { return }
@@ -409,31 +403,31 @@ struct BudgetView: View {
         HapticService.shared.selection()
     }
 
-    /// `TabView(.page)` NATIF : le doigt suit du contenu déjà rendu des deux
-    /// côtés (fenêtre pré-chargée par `loadData()`), sans geste maison — Apple
-    /// gère le suivi 1:1 et le rejet en dessous du seuil pour nous.
+    /// NATIVE `TabView(.page)`: the finger follows content already rendered on
+    /// both sides (a window preloaded by `loadData()`), with no custom gesture — Apple
+    /// handles 1:1 tracking and the below-threshold rejection for us.
     ///
-    /// ⚠️ macOS : `PageTabViewStyle` n'est PAS un style pris en charge sur
-    /// macOS (uniquement iOS/iPadOS/tvOS/watchOS d'après Apple) — appliqué
-    /// quand même, il compile (le type existe côté framework) mais son rendu
-    /// est dégradé : la grille restait quasi vide (en-tête des jours affiché,
-    /// aucun chiffre) et le `TabView` se repliait sur une largeur intrinsèque
-    /// minuscule au lieu de suivre celle proposée par le parent — d'où le
-    /// calendrier collé au coin de la fenêtre (retour d'usage 2026-08-26,
-    /// capture à l'appui). Un geste de swipe n'a de toute façon aucun sens au
-    /// clavier/souris : macOS affiche directement le mois RÉGLÉ, sans
-    /// carrousel — la navigation reste les flèches + le sélecteur mois/année.
+    /// ⚠️ macOS: `PageTabViewStyle` is NOT a supported style on
+    /// macOS (only iOS/iPadOS/tvOS/watchOS per Apple) — applied
+    /// anyway, it compiles (the type exists on the framework side) but its
+    /// rendering is degraded: the grid stayed nearly empty (the day header
+    /// shown, no numbers at all) and the `TabView` collapsed to a tiny
+    /// intrinsic width instead of following the one offered by the parent —
+    /// hence the calendar stuck in the corner of the window. A swipe gesture makes
+    /// no sense with keyboard/mouse anyway: macOS shows the SET month
+    /// directly, with no carousel — navigation stays the arrows + the
+    /// month/year picker.
     @ViewBuilder private var calendarCarousel: some View {
         VStack(spacing: AppTheme.Spacing.xs) {
             weekdayHeaderRow
 
             #if os(macOS)
-            // Pas de `.frame(height:)` ici : contrairement à iOS (TabView(.page),
-            // qui a besoin d'UNE hauteur partagée par les 3 pages voisines),
-            // macOS n'affiche que le mois réglé — le VStack englobant peut
-            // simplement suivre la hauteur réelle du contenu, panneau de
-            // détail compris, quelle que soit sa taille (cf. le commentaire
-            // de `calendarCarouselHeight` sur le bug d'origine).
+            // No `.frame(height:)` here: unlike iOS (TabView(.page),
+            // which needs ONE height shared by the 3 neighboring pages),
+            // macOS only shows the set month — the enclosing VStack can
+            // simply follow the content's actual height, detail
+            // pane included, whatever its size (see the comment
+            // on `calendarCarouselHeight` about the original bug).
             monthPage(vm.displayedMonth)
                 .frame(maxWidth: .infinity)
                 .id(monthKey(vm.displayedMonth))
@@ -446,9 +440,9 @@ struct BudgetView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            // Le fond système d'un `.page` TabView est opaque sur iOS —
-            // sans ça, une bande blanche/grise apparaît derrière le point
-            // d'indicateur masqué.
+            // The system background of a `.page` TabView is opaque on iOS —
+            // without it, a white/gray band shows up behind the hidden
+            // page-indicator dots.
             .background(AppTheme.Colors.background)
             .frame(height: calendarCarouselHeight)
             .animation(AppTheme.Animations.springSnappy, value: calendarCarouselHeight)
@@ -481,11 +475,11 @@ struct BudgetView: View {
         .padding(.horizontal, AppTheme.Spacing.lg)
     }
 
-    /// Une page du carrousel = un mois. Lit `txCache`/`vm.cachedPrevisions`
-    /// directement (déjà pré-chargés en fenêtre ±1 par `loadData()`) plutôt
-    /// que de dépendre de `calendarDays`/`vm.displayedMonth`, qui ne
-    /// décrivent QUE le mois RÉGLÉ — sinon les pages voisines montreraient
-    /// soit rien, soit le mauvais mois pendant le glissé.
+    /// One carousel page = one month. Reads `txCache`/`vm.cachedPrevisions`
+    /// directly (already preloaded in a ±1 window by `loadData()`) rather
+    /// than depending on `calendarDays`/`vm.displayedMonth`, which describe
+    /// ONLY the SET month — otherwise the neighboring pages would show
+    /// either nothing or the wrong month during the slide.
     @ViewBuilder
     private func monthPage(_ month: Date) -> some View {
         let key = monthKey(month)
@@ -499,12 +493,10 @@ struct BudgetView: View {
         }
     }
 
-    /// Grille de semaines + détail du jour sélectionné inséré INLINE, juste
-    /// sous SA semaine (retour d'usage : "un espace qui s'ouvre dans le
-    /// calendrier, entre la ligne de la semaine et celle du dessous").
-    /// `showsSelection` : seule la page RÉGLÉE affiche `selectedDay` — une
-    /// page voisine encore visible pendant le glissé n'a pas à montrer le
-    /// panneau d'un jour d'un AUTRE mois.
+    /// A grid of weeks + the selected day's detail inserted INLINE, right
+    /// under ITS week. `showsSelection`: only the SET page shows
+    /// `selectedDay` — a neighboring page still visible during the slide
+    /// shouldn't show the panel for a day in ANOTHER month.
     @ViewBuilder
     private func dayGrid(days: [CalendarDay], showsSelection: Bool) -> some View {
         VStack(spacing: 4) {
@@ -526,11 +518,11 @@ struct BudgetView: View {
                             }
                             .buttonStyle(DayCellButtonStyle())
                         } else {
-                            // `.frame(maxWidth: .infinity)` explicite : un
-                            // `HStack` ne donne aux enfants sans contenu
-                            // propre AUCUNE largeur par défaut — sans lui,
-                            // les cases vides de bord de mois s'écrasaient à
-                            // zéro et décalaient tout le reste de la ligne.
+                            // Explicit `.frame(maxWidth: .infinity)`: an
+                            // `HStack` gives children with no content of their
+                            // own NO default width — without it,
+                            // the empty cells at the edges of the month collapsed to
+                            // zero width and threw off the rest of the row.
                             Color.clear
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 54)
@@ -542,9 +534,9 @@ struct BudgetView: View {
                    let column = week.firstIndex(where: { $0?.id == selectedDay.id }) {
                     dayDetailCaret(column: column)
                     DayDetailPanel(day: selectedDay, vm: vm, allTiers: allTiers, allCategories: allCategories)
-                        // Mesure la hauteur RÉELLE du panneau (nombre variable
-                        // de prévisions/transactions) au lieu de l'estimer —
-                        // cf. `calendarCarouselHeight`, consommateur unique.
+                        // Measures the panel's ACTUAL height (a variable count
+                        // of previsions/transactions) instead of estimating it —
+                        // see `calendarCarouselHeight`, the sole consumer.
                         .background(
                             GeometryReader { geo in
                                 Color.clear.preference(key: DayDetailHeightPreferenceKey.self, value: geo.size.height)
@@ -557,21 +549,20 @@ struct BudgetView: View {
         .padding(.horizontal, AppTheme.Spacing.md)
     }
 
-    /// Hauteur du carrousel — dérivée UNIQUEMENT de la page RÉGLÉE (nombre de
-    /// semaines du mois affiché + le panneau de détail s'il est ouvert).
-    /// Une page voisine plus courte/longue pendant un glissé transitoire
-    /// peut donc être clippée/laisser un espace résiduel — compromis assumé
-    /// (redimensionner en direct pendant le drag n'est pas vérifiable sans
-    /// appareil sous la main).
+    /// Carousel height — derived ONLY from the SET page (the number of
+    /// weeks in the displayed month + the detail pane if it's open).
+    /// A shorter/longer neighboring page during a transient slide can
+    /// therefore be clipped/leave a residual gap — an accepted tradeoff
+    /// (resizing live during the drag isn't verifiable without a
+    /// device on hand).
     ///
-    /// ⚠️ Utilise `measuredDetailHeight` (mesuré via
-    /// `DayDetailHeightPreferenceKey`), PAS une constante : le panneau
-    /// contient 0 à N prévisions + 0 à N transactions, une hauteur fixe (300
-    /// à l'origine) débordait dès qu'un jour avait beaucoup de mouvements —
-    /// le reste du calendrier/les cartes suivantes se retrouvaient
-    /// chevauchés/coupés (retour d'usage 2026-08-27, capture iOS + macOS à
-    /// l'appui). +11 = hauteur du petit triangle `dayDetailCaret` (7pt) +
-    /// son espacement dans le `VStack(spacing: 4)` de `dayGrid`.
+    /// ⚠️ Uses `measuredDetailHeight` (measured via
+    /// `DayDetailHeightPreferenceKey`), NOT a constant: the panel
+    /// holds 0 to N previsions + 0 to N transactions, a fixed height (300
+    /// originally) overflowed as soon as a day had many movements —
+    /// the rest of the calendar/the following cards ended up
+    /// overlapped/clipped. +11 = the height of the small `dayDetailCaret`
+    /// triangle (7pt) + its spacing in `dayGrid`'s `VStack(spacing: 4)`.
     private var calendarCarouselHeight: CGFloat {
         let rowH: CGFloat = 54
         let rowSpacing: CGFloat = 4
@@ -581,10 +572,10 @@ struct BudgetView: View {
         return gridH + detailH
     }
 
-    /// Découpe `days` (+ cases vides de bord de mois) en lignes de 7 —
-    /// même construction que `leadingEmpty`/`trailingEmpty`, mais sous forme
-    /// de grille explicite : la page a besoin de savoir sous QUELLE semaine
-    /// ouvrir le détail, ce qu'un `LazyVGrid` à plat ne permet pas d'exprimer.
+    /// Splits `days` (+ the empty edge-of-month cells) into rows of 7 —
+    /// the same construction as `leadingEmpty`/`trailingEmpty`, but as an
+    /// explicit grid: the page needs to know UNDER WHICH week to
+    /// open the detail, which a flat `LazyVGrid` can't express.
     private func weekRows(_ days: [CalendarDay]) -> [[CalendarDay?]] {
         var cells: [CalendarDay?] = Array(repeating: nil, count: leadingEmpty(days))
         cells.append(contentsOf: days.map { $0 as CalendarDay? })
@@ -592,9 +583,9 @@ struct BudgetView: View {
         return stride(from: 0, to: cells.count, by: 7).map { Array(cells[$0..<min($0 + 7, cells.count)]) }
     }
 
-    /// Petit triangle qui pointe vers la colonne (0...6) du jour sélectionné,
-    /// pour rattacher visuellement `DayDetailPanel` à sa case du calendrier
-    /// plutôt qu'un panneau qui semble flotter sans lien avec le jour tapé.
+    /// A small triangle pointing to the selected day's column (0...6),
+    /// to visually anchor `DayDetailPanel` to its calendar cell
+    /// rather than a panel that seems to float with no link to the tapped day.
     @ViewBuilder private func dayDetailCaret(column: Int) -> some View {
         HStack(spacing: 1) {
             ForEach(0..<7, id: \.self) { i in
@@ -624,15 +615,15 @@ struct BudgetView: View {
 
     // MARK: - Prevision Sections
 
-    /// Une seule carte pour les deux horizons ("7 prochains jours" / "Ce
-    /// mois"), chacun repliable indépendamment — remplace les 2 cartes
-    /// empilées d'avant, qui pouvaient occuper tout l'écran sur un mois
-    /// chargé en récurrents.
+    /// A single card for both horizons ("Next 7 days" / "This
+    /// month"), each independently collapsible — replaces the 2 stacked
+    /// cards from before, which could take up the whole screen on a month
+    /// loaded with recurring items.
     @ViewBuilder private var recurringPrevisionsCard: some View {
-        // ⚠️ `upcomingPrevisions` est lu UNE fois et converti en `Set` d'ids.
-        // La version d'origine le relisait DANS le filtre — donc une fois par
-        // prévision testée — et chaque lecture reconstruisait toute la liste
-        // enrichie : coût quadratique à chaque rendu de la vue.
+        // ⚠️ `upcomingPrevisions` is read ONCE and converted to a `Set` of ids.
+        // The original version re-read it INSIDE the filter — so once per
+        // prevision tested — and every read rebuilt the whole enriched
+        // list: quadratic cost on every render of the view.
         let upcoming = vm.upcomingPrevisions
         let upcomingIds = Set(upcoming.map(\.id))
         let thisMonth = vm.pendingPrevisions.filter { !upcomingIds.contains($0.id) }
@@ -703,10 +694,10 @@ struct BudgetView: View {
             SkeletonCalendarGrid()
                 .padding(.horizontal, AppTheme.Spacing.md)
 
-            // Bubble overlay placeholder (visuel uniquement, dans le flux ici)
+            // Bubble overlay placeholder (visual only, in the flow here)
             SkeletonBudgetBubble()
 
-            // Carte "Dans les 7 prochains jours" skeleton
+            // "Next 7 days" card skeleton
             AppCard {
                 VStack(spacing: AppTheme.Spacing.sm) {
                     SkeletonLine(width: 200, height: 15)
@@ -741,17 +732,17 @@ struct BudgetView: View {
         }.value
         calendarDays = vm.calendarDays(transactions: txs)
         txCache[monthKey(month)] = txs
-        // Calculé en mémoire à partir de `txs` — évite le 2e fetch SQLite quasi
-        // identique que `vm.monthlySummary()` faisait en interne pour le même mois.
+        // Computed in memory from `txs` — avoids the near-identical 2nd SQLite
+        // fetch `vm.monthlySummary()` used to do internally for the same month.
         summary = vm.monthlySummary(transactions: txs)
         selectedDay = nil
-        // Premier chargement terminé → on cache le skeleton.
+        // The first load is done → hide the skeleton.
         if isInitialLoading { isInitialLoading = false }
 
-        // Pré-charger les mois adjacents en arrière-plan. Priorité `.utility` (pas
-        // `.background`) : un swipe peu après l'ouverture de l'écran doit trouver le
-        // cache déjà rempli, sinon la grille apparaît vide le temps du fetch — c'est
-        // précisément la sensation de "chargement" au changement de mois à corriger.
+        // Preload the adjacent months in the background. `.utility` priority (not
+        // `.background`): a swipe soon after opening the screen must find the
+        // cache already filled, otherwise the grid appears empty while fetching —
+        // that's precisely the "loading" feeling this is meant to fix on a month change.
         let cal = Calendar.current
         for delta in [-1, 1] {
             let adjMonth = cal.date(byAdding: .month, value: delta, to: month) ?? month

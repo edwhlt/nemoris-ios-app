@@ -94,15 +94,15 @@ struct BudgetApercuSheet: View {
             .background(AppTheme.Colors.background)
             .paneChromeInline(month.formatted(.dateTime.month(.wide).year().locale(appState.locale)).capitalized,
                                cancelLabel: "Fermer", onCancel: { paneDismiss() })
-            // #8 macOS : une .sheet imbriquée dans une vue elle-même présentée
-            // en .sheet s'affiche VIDE sur Mac. On pousse la liste dans la
-            // NavigationStack existante via navigationDestination (comportement
+            // #8 macOS: a .sheet nested inside a view that's itself presented
+            // as a .sheet renders EMPTY on Mac. The list is pushed onto the
+            // existing NavigationStack via navigationDestination instead (behavior
         }
-        // Niveau 2 (adaptivePane depuis un contenu déjà dans le panneau macOS
-        // → sheet, cf. paneHostContext). Un push (navigationDestination) ferait
-        // remonter son titre/back-button dans la barre du MODULE (le panneau
-        // n'a pas de fenêtre séparée pour l'absorber) — la sheet, elle, est sa
-        // propre fenêtre sur macOS et reste scopée correctement.
+        // Level 2 (an adaptivePane from content already inside the macOS pane
+        // → a sheet, see paneHostContext). A push (navigationDestination) would
+        // bubble its title/back-button up into the MODULE's bar (the pane
+        // has no separate window to absorb it) — a sheet, on the other hand, is its
+        // own window on macOS and stays scoped correctly.
         .adaptivePane(isPresented: $showCategoryTxSheet) {
             List(filteredTransactionsForSelectedCategory()) { tx in
                 HStack(spacing: 10) {
@@ -125,9 +125,9 @@ struct BudgetApercuSheet: View {
                 }
             }
             #if os(macOS)
-            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
-            // celui du panneau hôte — sans ce modificateur, le bureau de
-            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            // `List` paints ITS OWN system background on macOS ON TOP OF
+            // the host pane's — without this modifier, the user's
+            // desktop shows through.
             .scrollContentBackground(.hidden)
             #endif
             .paneChrome(selectedCategoryName ?? "Transactions",

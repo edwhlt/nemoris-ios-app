@@ -6,8 +6,8 @@ struct PatternDetailPane: View {
     let pattern: RecurringPattern
     let categories: [Category]
 
-    /// Tiers chargés localement pour résoudre le nom du tier associé
-    /// (RecurringManagementView ne les possède pas).
+    /// Payees loaded locally to resolve the associated payee's name
+    /// (RecurringManagementView doesn't own them).
     @State private var allTiers: [Tiers] = []
 
     private var categoryName: String? {

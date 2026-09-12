@@ -64,11 +64,11 @@ struct MoneyFlowSankeyView: View {
         let usable = height - totalGap
         var y: CGFloat = 0
         return nodes.map { node in
-            // Plancher relevé au-dessus du minimum purement visuel (4pt) : sans
-            // ça, une petite catégorie obtenait une bande si fine que son label
-            // à 2 lignes + montant chevauchait le node voisin — la vraie cause
-            // du rendu "écrasé" sur un conteneur étroit, pas seulement la
-            // largeur de `labelW`.
+            // A floor raised above the purely visual minimum (4pt): without
+            // it, a small category got a band so thin that its 2-line label
+            // + amount overlapped the neighboring node — the real cause
+            // of the "squashed" look on a narrow container, not just
+            // `labelW`'s width.
             let h = max((node.amount / scale) * usable, minHeight)
             let ln = NodeLayout(node: node, y: y, height: h)
             y += h + gap
@@ -87,10 +87,10 @@ struct MoneyFlowSankeyView: View {
             let chartH = CGFloat(max(incomeNodes.count, expenseNodes.count + extraRow)) * 60 + 20
             GeometryReader { geo in
                 let nodeW: CGFloat = 10
-                // Largeur de label proportionnelle à l'espace dispo (au lieu d'une
-                // valeur fixe) : sur un conteneur étroit (panneau macOS, mobile
-                // portrait), 90pt de chaque côté écrasait le flux central à
-                // presque rien. Bornée pour rester lisible aux deux extrêmes.
+                // Label width proportional to the available space (instead of a
+                // fixed value): on a narrow container (a macOS pane, mobile
+                // portrait), 90pt on each side squeezed the central flow to
+                // almost nothing. Bounded to stay readable at both extremes.
                 let labelW: CGFloat = min(max(geo.size.width * 0.24, 58), 92)
                 let gap: CGFloat = 5
                 let leftX: CGFloat = labelW + 4

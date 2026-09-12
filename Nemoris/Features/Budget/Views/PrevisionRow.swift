@@ -4,8 +4,8 @@ import TipKit
 
 struct PrevisionRow: View {
     let enriched: EnrichedPrevision
-    /// Si fourni ET status == .pending, affiche un bouton inline "skip" trailing.
-    /// (les rows sont dans VStack/AppCard, pas dans List → pas de .swipeActions natif)
+    /// If provided AND status == .pending, shows a trailing inline "skip" button.
+    /// (the rows are in a VStack/AppCard, not a List → no native .swipeActions)
     var onSkip: (() -> Void)? = nil
 
     var body: some View {
@@ -30,7 +30,7 @@ struct PrevisionRow: View {
                     .font(AppTheme.Typography.labelSmall)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             }
-            // Bouton rapide skip : visible seulement sur les .pending
+            // Quick skip button: shown only on .pending rows
             if let onSkip, enriched.status == .pending {
                 Button(action: onSkip) {
                     Image(systemName: "xmark")

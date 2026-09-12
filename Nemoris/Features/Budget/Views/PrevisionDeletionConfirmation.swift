@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// Confirmation demandée avant d'ignorer une échéance de récurrent : le user
-/// doit préciser s'il veut ignorer UNIQUEMENT cette occurrence (le récurrent
-/// continue le mois suivant), ou arrêter le récurrent à partir d'ici (modifie
-/// la date de fin du motif, aucune échéance après celle-ci ne sera générée).
-/// Partagée entre `BudgetView` (listes "7 prochains jours" / "Ce mois") et
-/// `DayDetailPanel` (calendrier) pour éviter de dupliquer ce choix 3 fois.
+/// Confirmation requested before skipping a recurring item's due date: the user
+/// must specify whether to skip ONLY this occurrence (the recurring item
+/// continues next month), or stop the recurring item from here on (changes
+/// the pattern's end date, no due date after this one will be generated).
+/// Shared between `BudgetView` (the "Next 7 days" / "This month" lists) and
+/// `DayDetailPanel` (the calendar) to avoid duplicating this choice 3 times.
 struct PrevisionDeletionConfirmation: ViewModifier {
     @Binding var target: BudgetPrevision?
     let vm: BudgetViewModel

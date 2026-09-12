@@ -5,16 +5,16 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 
 // MARK: - BudgetRepository
 //
-// CRUD pour les tables budget (recurring_patterns, budget_envelopes, budget_previsions).
-// Meme pattern que les autres repositories : OpaquePointer SQLite3, pas de Combine.
+// CRUD for the budget tables (recurring_patterns, budget_envelopes, budget_previsions).
+// Same pattern as the other repositories: OpaquePointer SQLite3, no Combine.
 
 final class BudgetRepository: @unchecked Sendable {
     static let shared = BudgetRepository()
 
     private let store: SQLiteStore
 
-    /// `shared` reste le point d'accès de l'application ; l'init injectable
-    /// permet aux tests d'instancier le repository sur une base temporaire.
+    /// `shared` stays the app's access point; the injectable init
+    /// lets tests instantiate the repository against a temporary database.
     init(store: SQLiteStore = SQLiteStore()) {
         self.store = store
     }
@@ -124,13 +124,13 @@ final class BudgetRepository: @unchecked Sendable {
         sqlite3_step(stmt)
     }
 
-    /// ⚠️ `PRAGMA foreign_keys = ON` est indispensable ici.
+    /// ⚠️ `PRAGMA foreign_keys = ON` is essential here.
     ///
-    /// SQLite désactive les clés étrangères PAR CONNEXION et par défaut. Le
-    /// `ON DELETE CASCADE` déclaré sur `budget_previsions.recurring_pattern_id`
-    /// ne se déclenche donc pas tout seul : sans ce pragma, supprimer un
-    /// récurrent laissait ses prévisions orphelines, et elles continuaient
-    /// d'apparaître au calendrier sans récurrent pour les expliquer.
+    /// SQLite disables foreign keys PER CONNECTION and by default. The
+    /// `ON DELETE CASCADE` declared on `budget_previsions.recurring_pattern_id`
+    /// therefore doesn't fire on its own: without this pragma, deleting a
+    /// recurring item left its previsions orphaned, and they kept
+    /// showing up in the calendar with no recurring item to explain them.
     func deletePattern(id: Int) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
@@ -317,15 +317,15 @@ final class BudgetRepository: @unchecked Sendable {
         sqlite3_finalize(stmt)
     }
 
-    /// Supprime toutes les previsions PENDING d'un pattern, puis les regenere sur toute la
-    /// plage active (jusqu'a 6 mois en arriere, 3 mois en avant).
-    /// Les previsions MATCHED et SKIPPED sont conservees.
+    /// Deletes every PENDING prevision of a pattern, then regenerates them over the whole
+    /// active range (up to 6 months back, 3 months forward).
+    /// MATCHED and SKIPPED previsions are kept.
     func regeneratePrevisions(for pattern: RecurringPattern, monthsAhead: Int = 3) {
         guard let db = openDB() else { return }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
 
-        // Supprimer UNIQUEMENT les PENDING (MATCHED et SKIPPED sont preserves)
+        // Delete ONLY the PENDING ones (MATCHED and SKIPPED are preserved)
         var stmt: OpaquePointer?
         let deleteSql = "DELETE FROM budget_previsions WHERE recurring_pattern_id = ? AND status = 'PENDING';"
         if sqlite3_prepare_v2(db, deleteSql, -1, &stmt, nil) == SQLITE_OK {
@@ -334,7 +334,7 @@ final class BudgetRepository: @unchecked Sendable {
             sqlite3_finalize(stmt)
         }
 
-        // Cleanup global : supprimer les PENDING trop anciens (> 2 ans) pour eviter le gonflement de la base
+        // Global cleanup: delete PENDING items that are too old (> 2 years) to avoid bloating the database
         let now = Date()
         let twoYearsAgoStr = isoString(Calendar.current.date(byAdding: .year, value: -2, to: now) ?? now)
         var cleanStmt: OpaquePointer?
@@ -345,9 +345,9 @@ final class BudgetRepository: @unchecked Sendable {
             sqlite3_finalize(cleanStmt)
         }
 
-        // Determiner la plage de generation
+        // Determine the generation range
         let cal = Calendar.current
-        // Remonte jusqu'a 6 mois en arriere pour couvrir l'historique visible
+        // Goes back up to 6 months to cover the visible history
         let lookback = cal.date(byAdding: .month, value: -6, to: now) ?? now
         let genStart = max(pattern.startDate, lookback)
         let genEnd: Date = {
@@ -357,7 +357,7 @@ final class BudgetRepository: @unchecked Sendable {
         }()
         guard genStart <= genEnd else { return }
 
-        // Recuperer les dates deja couvertes par MATCHED/SKIPPED pour eviter les doublons
+        // Get the dates already covered by MATCHED/SKIPPED to avoid duplicates
         var coveredDates = Set<String>()
         var qStmt: OpaquePointer?
         let querySql = """
@@ -372,7 +372,7 @@ final class BudgetRepository: @unchecked Sendable {
             sqlite3_finalize(qStmt)
         }
 
-        // Generer et inserer les nouvelles echeances PENDING
+        // Generate and insert the new PENDING due dates
         let dates = RecurringDetector.generateOccurrences(for: pattern, from: genStart, to: genEnd)
         for date in dates {
             let key = isoString(date)

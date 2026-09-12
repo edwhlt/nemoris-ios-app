@@ -2,55 +2,55 @@ import Foundation
 
 // MARK: - EnvelopeSuggestionService
 //
-// Suggère des enveloppes budgétaires à partir de l'historique de l'utilisateur.
-// L'algo : on regarde les 90 derniers jours, on groupe les dépenses par
-// catégorie, on calcule la moyenne mensuelle et on propose un budget de
-// `moyenne × 1.10` (arrondi à la dizaine) — léger overhead pour ne pas
-// rendre l'utilisateur "en dépassement" dès le 1er mois.
+// Suggests budget envelopes from the user's history.
+// The algorithm: looks at the last 90 days, groups expenses by
+// category, computes the monthly average and suggests a budget of
+// `average × 1.10` (rounded up to the nearest ten) — a light overhead so the
+// user isn't "over budget" from the very first month.
 //
-// **Filtre catégorie déjà couverte** : si une enveloppe existe déjà pour
-// cette catégorie, on ne la propose pas (évite les doublons). On peut
-// l'écraser via le form classique si l'utilisateur veut ajuster.
+// **Already-covered-category filter**: if an envelope already exists for
+// a category, it isn't suggested again (avoids duplicates). It can be
+// overridden via the regular form if the user wants to adjust it.
 //
-// **Critères de pertinence** :
-//   - Minimum 3 transactions dans les 90 derniers jours (signal solide)
-//   - Minimum 30 € de dépenses cumulées (catégories marginales filtrées)
-//   - Catégorie non `nil` (uncategorized ignoré)
+// **Relevance criteria**:
+//   - At least 3 transactions in the last 90 days (a solid signal)
+//   - At least €30 of cumulative spending (filters out marginal categories)
+//   - A non-`nil` category (uncategorized is ignored)
 
 struct EnvelopeSuggestion: Identifiable, Hashable {
     var id: Int { categoryId }
     let categoryId: Int
     let categoryName: String
     let categoryIcon: String
-    /// Moyenne mensuelle observée (en € positifs).
+    /// Observed monthly average (in positive euros).
     let averageMonthly: Double
-    /// Montant suggéré pour l'enveloppe (moyenne arrondie à la dizaine + 10 % d'overhead).
+    /// Amount suggested for the envelope (average rounded up to the nearest ten + 10% overhead).
     let suggestedBudget: Double
-    /// Nombre de transactions sur la période d'analyse — utile pour afficher
-    /// la robustesse statistique de la suggestion ("18 achats sur 3 mois").
+    /// Number of transactions over the analysis period — useful to show
+    /// the suggestion's statistical robustness ("18 purchases over 3 months").
     let transactionCount: Int
 }
 
 enum EnvelopeSuggestionService {
 
-    /// Période d'analyse — 90 jours = 3 mois glissants. Long enough pour
-    /// lisser les variations saisonnières d'un mois unique mais court pour
-    /// rester réactif aux changements de mode de vie récents.
+    /// Analysis period — 90 days = a rolling 3 months. Long enough to
+    /// smooth out a single month's seasonal swings but short enough to
+    /// stay responsive to recent lifestyle changes.
     private static let analysisDays = 90
 
-    /// Seuils de pertinence — sous ces valeurs, la catégorie est trop
-    /// marginale pour mériter une enveloppe.
+    /// Relevance thresholds — below these values, the category is too
+    /// marginal to deserve an envelope.
     private static let minTransactions = 3
     private static let minTotalSpent: Double = 30
 
-    /// Calcule les suggestions à partir de l'historique courant. Les catégories
-    /// déjà couvertes par une enveloppe existante sont exclues du résultat.
+    /// Computes suggestions from the current history. Categories
+    /// already covered by an existing envelope are excluded from the result.
     /// - Parameters:
-    ///   - txRepo: repository des transactions. La valeur par défaut vise la
-    ///     base de l'application ; les tests l'injectent sur une base
-    ///     temporaire, comme pour les repositories eux-mêmes.
-    ///   - now: date d'évaluation, pour que la fenêtre d'analyse de 90 jours
-    ///     soit reproductible au lieu de dépendre du jour d'exécution.
+    ///   - txRepo: the transaction repository. The default value targets the
+    ///     app's database; tests inject it against a
+    ///     temporary database, as with the repositories themselves.
+    ///   - now: the evaluation date, so the 90-day analysis window
+    ///     is reproducible instead of depending on the day it runs.
     static func computeSuggestions(
         existingEnvelopes: [BudgetEnvelope],
         allCategories: [Category],
@@ -60,13 +60,13 @@ enum EnvelopeSuggestionService {
         let cal = Calendar(identifier: .gregorian)
         guard let from = cal.date(byAdding: .day, value: -analysisDays, to: now) else { return [] }
 
-        // Fetch les tx sur la période — toutes catégories, dépenses uniquement
-        // (amount < 0). Cap à 5000 pour les gros historiques (peu probable de
-        // dépasser sur 90j).
+        // Fetch the transactions over the period — every category, expenses only
+        // (amount < 0). Capped at 5000 for large histories (unlikely to
+        // exceed that over 90 days).
         let txs = txRepo.fetchTransactionsAllAccounts(from: from, to: now, limit: 5000, offset: 0)
         let expenses = txs.filter { $0.amount < 0 && $0.categoryId != nil }
 
-        // Catégories déjà couvertes (set pour exclusion O(1))
+        // Categories already covered (a set for O(1) exclusion)
         let coveredCategoryIds = Set(existingEnvelopes.compactMap { $0.categoryId })
 
         // Groupement par categoryId
@@ -77,7 +77,7 @@ enum EnvelopeSuggestionService {
             byCategoryId[cid] = (count: current.count + 1, total: current.total + abs(tx.amount))
         }
 
-        // Convertit en suggestions et applique les seuils
+        // Converts to suggestions and applies the thresholds
         let categoryById = Dictionary(uniqueKeysWithValues: allCategories.map { ($0.id, $0) })
         let monthlyFactor = 30.0 / Double(analysisDays)  // 90j → mensuel
         var suggestions: [EnvelopeSuggestion] = []
@@ -85,14 +85,14 @@ enum EnvelopeSuggestionService {
             guard stats.count >= minTransactions, stats.total >= minTotalSpent else { continue }
             guard let cat = categoryById[cid] else { continue }
             let avgMonthly = stats.total * monthlyFactor
-            // Arrondi à la dizaine supérieure + 10 % d'overhead — donne une cible
-            // réaliste mais pas serrée au point que l'utilisateur soit en dépassement
-            // dès le 1er mois.
-            // ⚠️ Arrondi au centime AVANT de monter à la dizaine. En virgule
-            // flottante, 100 × 1,10 vaut 110.00000000000001 : un ceil direct le
-            // pousse à 120, soit 20 % de marge au lieu des 10 % voulus. Le cas
-            // se produit pile sur les moyennes rondes — 100, 200 — c'est-à-dire
-            // les plus courantes.
+            // Rounded up to the nearest ten + 10% overhead — gives a
+            // realistic target, but not so tight the user is over budget
+            // from the very first month.
+            // ⚠️ Rounded to the nearest cent BEFORE rounding up to the ten. In
+            // floating point, 100 × 1.10 equals 110.00000000000001: a direct ceil
+            // would push it to 120, i.e. 20% margin instead of the intended 10%. The
+            // case happens exactly on round averages — 100, 200 — i.e.
+            // the most common ones.
             let budgetRaw = (avgMonthly * 1.10 * 100).rounded() / 100
             let budgetRounded = ceil(budgetRaw / 10.0) * 10.0
 
@@ -106,7 +106,7 @@ enum EnvelopeSuggestionService {
             ))
         }
 
-        // Tri par montant suggéré décroissant (les plus impactantes d'abord)
+        // Sorted by decreasing suggested amount (the most impactful first)
         return suggestions.sorted { $0.suggestedBudget > $1.suggestedBudget }
     }
 }

@@ -2,22 +2,22 @@ import Foundation
 
 // MARK: - TransactionMatcher
 //
-// Moteur de correspondance entre une transaction réelle et une prévision budgétaire.
+// Engine that matches a real transaction against a budget prevision.
 //
-// Stratégie de scoring (somme pondérée, résultat 0…1) :
-//   • Payee ID exact           — 40 % (signal le plus fiable)
-//   • Similarité du libellé    — 30 % (tokens normalisés, intersection Jaccard)
-//   • Proximité de date        — 20 % (fenêtre ±7 jours, décroissance linéaire)
-//   • Proximité du montant     — 10 % (tolérance paramétrée par le pattern)
+// Scoring strategy (a weighted sum, result 0…1):
+//   • Exact payee ID           — 40% (the most reliable signal)
+//   • Label similarity         — 30% (normalized tokens, Jaccard intersection)
+//   • Date proximity           — 20% (±7-day window, linear decay)
+//   • Amount proximity         — 10% (tolerance set by the pattern)
 //
-// Seuil d'acceptation automatique : 0.60
-// Seuil de suggestion manuelle    : 0.35
+// Automatic acceptance threshold: 0.60
+// Manual suggestion threshold:    0.35
 
 struct MatchCandidate {
     let prevision: BudgetPrevision
     /// Score de confiance 0…1
     let confidence: Double
-    /// Explication lisible du match (debug / UI)
+    /// A readable explanation of the match (debug / UI)
     let reason: String
 }
 
@@ -28,12 +28,12 @@ enum TransactionMatcher {
     static let autoAcceptThreshold: Double = 0.60
     static let suggestThreshold: Double    = 0.35
 
-    /// Cherche la meilleure prevision correspondant a une transaction.
+    /// Looks for the best prevision matching a transaction.
     /// - Parameters:
-    ///   - tx: Transaction reelle a matcher.
-    ///   - previsions: Previsions candidates (status == .pending).
-    ///   - patterns: Patterns pour acceder a payeeId, amountTolerance, name.
-    /// - Returns: Meilleur candidat si son score >= suggestThreshold, nil sinon.
+    ///   - tx: The real transaction to match.
+    ///   - previsions: Candidate previsions (status == .pending).
+    ///   - patterns: Patterns, to access payeeId, amountTolerance, name.
+    /// - Returns: The best candidate if its score >= suggestThreshold, nil otherwise.
     static func findBestMatch(
         for tx: FinanceTransaction,
         in previsions: [BudgetPrevision],
@@ -50,8 +50,8 @@ enum TransactionMatcher {
             .max(by: { $0.confidence < $1.confidence })
     }
 
-    /// Tente de matcher automatiquement toutes les transactions contre les previsions PENDING.
-    /// Retourne les paires (previsionId, transactionId) qui depassent autoAcceptThreshold.
+    /// Tries to automatically match every transaction against PENDING previsions.
+    /// Returns the (previsionId, transactionId) pairs exceeding autoAcceptThreshold.
     static func autoMatch(
         transactions: [FinanceTransaction],
         previsions: [BudgetPrevision],
@@ -60,14 +60,14 @@ enum TransactionMatcher {
         var results: [(previsionId: Int, transactionId: Int, confidence: Double)] = []
         var unmatchedPrevisions = previsions.filter { $0.status == .pending }
 
-        // Trier les transactions par date pour un matching deterministe
+        // Sort transactions by date for deterministic matching
         let sortedTxs = transactions.sorted { $0.date < $1.date }
 
         for tx in sortedTxs {
             guard let best = findBestMatch(for: tx, in: unmatchedPrevisions, patterns: patterns),
                   best.confidence >= autoAcceptThreshold else { continue }
             results.append((best.prevision.id, tx.id, best.confidence))
-            // Retirer la prevision matchee pour eviter les doublons
+            // Remove the matched prevision to avoid duplicates
             unmatchedPrevisions.removeAll { $0.id == best.prevision.id }
         }
         return results
@@ -80,7 +80,7 @@ enum TransactionMatcher {
         prevision: BudgetPrevision,
         pattern: RecurringPattern
     ) -> MatchCandidate? {
-        // Le montant doit etre dans le meme sens (depense/revenu)
+        // The amount must be in the same direction (expense/income)
         guard tx.amount.sign == prevision.amount.sign else { return nil }
 
         var reasons: [String] = []
@@ -94,7 +94,7 @@ enum TransactionMatcher {
             payeeScore = 0.0
         }
 
-        // 2. Similarite du libelle (30%)
+        // 2. Label similarity (30%)
         let txLabel   = normalizeLabel(bestLabel(tx))
         let patLabel  = normalizeLabel(pattern.name)
         let labelScore = labelSimilarity(txLabel, patLabel)
@@ -105,7 +105,7 @@ enum TransactionMatcher {
         let dateScore: Double = daysDiff <= 7 ? 1.0 - Double(daysDiff) / 7.0 : 0.0
         if dateScore > 0 { reasons.append("\(daysDiff)j d'ecart") }
 
-        // 4. Proximite du montant (10%)
+        // 4. Amount proximity (10%)
         let tolerance = max(pattern.amountTolerance, 0.05)
         let txAmt = abs(tx.amount)
         let prevAmt = abs(prevision.amount)
@@ -115,7 +115,7 @@ enum TransactionMatcher {
 
         let total = payeeScore * 0.40 + labelScore * 0.30 + dateScore * 0.20 + amountScore * 0.10
 
-        // Un match sans aucun signal fort (ni payee, ni libelle, ni date proche) n'est pas fiable
+        // A match with no strong signal at all (no payee, no label, no close date) isn't reliable
         guard payeeScore > 0 || labelScore > 0.4 || dateScore > 0.5 else { return nil }
 
         return MatchCandidate(
@@ -127,18 +127,18 @@ enum TransactionMatcher {
 
     // MARK: - Label Normalization
 
-    /// Retourne le meilleur libelle disponible pour une transaction.
+    /// Returns the best available label for a transaction.
     static func bestLabel(_ tx: FinanceTransaction) -> String {
         if !tx.tiersName.isEmpty { return tx.tiersName }
         if let raw = tx.libelleBrut, !raw.isEmpty { return raw }
         return tx.information
     }
 
-    /// Normalise un libelle pour la comparaison :
-    ///  - minuscules
-    ///  - supprime les mots bancaires parasites (SEPA, VIR, CB, PRLV, etc.)
-    ///  - supprime les tokens purement numeriques
-    ///  - garde les 5 premiers tokens significatifs
+    /// Normalizes a label for comparison:
+    ///  - lowercase
+    ///  - removes stray bank words (SEPA, VIR, CB, PRLV, etc.)
+    ///  - removes purely numeric tokens
+    ///  - keeps the first 5 significant tokens
     static func normalizeLabel(_ s: String) -> String {
         let banking: Set<String> = [
             "sepa", "vir", "virement", "prlv", "prelevement", "cb", "carte",
@@ -155,16 +155,16 @@ enum TransactionMatcher {
         let tokens = cleaned
             .components(separatedBy: .whitespaces)
             .filter { !$0.isEmpty }
-            .filter { !$0.allSatisfy(\.isNumber) }      // pas que des chiffres
+            .filter { !$0.allSatisfy(\.isNumber) }      // not just digits
             .filter { !banking.contains($0) }            // pas un mot bancaire
-            .filter { $0.count >= 2 }                    // au moins 2 caracteres
+            .filter { $0.count >= 2 }                    // at least 2 characters
 
         return tokens.prefix(5).joined(separator: " ")
     }
 
-    // MARK: - Label Similarity (Jaccard sur tokens)
+    // MARK: - Label Similarity (Jaccard over tokens)
 
-    /// Similarite de Jaccard entre deux libelles normalises (0…1).
+    /// Jaccard similarity between two normalized labels (0…1).
     static func labelSimilarity(_ a: String, _ b: String) -> Double {
         let tokA = Set(a.components(separatedBy: .whitespaces).filter { !$0.isEmpty })
         let tokB = Set(b.components(separatedBy: .whitespaces).filter { !$0.isEmpty })
@@ -175,7 +175,7 @@ enum TransactionMatcher {
         let union = tokA.union(tokB)
         let jaccardExact = Double(intersection.count) / Double(union.count)
 
-        // Bonus : sous-chaine (ex: "netflix" dans "netflixcom")
+        // Bonus: substring (e.g. "netflix" inside "netflixcom")
         let substringBonus: Double = tokA.contains(where: { a in tokB.contains { b in
             a.contains(b) || b.contains(a)
         }}) ? 0.2 : 0.0

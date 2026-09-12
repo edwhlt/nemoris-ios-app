@@ -2,47 +2,47 @@ import Foundation
 
 // MARK: - EnvelopeSpendingCalculator
 //
-// **Moteur pur** du calcul "dépensé par enveloppe" — aucun accès base, cache ou
-// réseau, donc testable sans Xcode (cf. `Tests/EnvelopeSpendingTests.swift`).
-// Même doctrine que `Services/PortfolioEvolutionBuilder.swift` : un seul moteur
-// partagé par tous les niveaux, qui ne peuvent donc plus diverger.
+// **Pure engine** for the "spent per envelope" calculation — no database, cache or
+// network access, so testable outside Xcode (see `Tests/EnvelopeSpendingTests.swift`).
+// Same doctrine as `Services/PortfolioEvolutionBuilder.swift`: a single engine
+// shared by every level, which can therefore no longer diverge.
 //
-// **Pourquoi il existe** : avant cette factorisation, le calcul vivait en QUATRE
-// exemplaires incompatibles, ce qui produisait des contradictions visibles à
-// l'écran (une enveloppe "dépassée" dans l'AlertsBanner et "saine" dans le
-// bandeau Budget, sur le même Dashboard) :
+// **Why it exists**: before this factoring, the calculation lived in FOUR
+// incompatible copies, which produced contradictions visible on
+// screen (an envelope "over budget" in the AlertsBanner and "healthy" in the
+// Budget banner, on the same Dashboard):
 //
-// | Implémentation                              | Sous-catégories | Enveloppes annuelles |
+// | Implementation                              | Sub-categories  | Yearly envelopes     |
 // |---------------------------------------------|-----------------|----------------------|
-// | AnnualDashboardViewModel.computeBudgetRecap | incluses        | ignorées             |
-// | BudgetViewModel.monthlySummary              | incluses        | amount / 12          |
-// | AlertEngine.overspentEnvelopesAlerts        | catégorie seule | ignorées             |
-// | WidgetDataStore.refreshBudget               | catégorie seule | amount / 12          |
+// | AnnualDashboardViewModel.computeBudgetRecap | included        | ignored              |
+// | BudgetViewModel.monthlySummary              | included        | amount / 12          |
+// | AlertEngine.overspentEnvelopesAlerts        | category only   | ignored              |
+// | WidgetDataStore.refreshBudget               | category only   | amount / 12          |
 //
-// **Règles retenues** (celles de `BudgetViewModel`, la plus complète) :
-//   1. `allocated` = `period == .yearly ? amount / 12 : amount` — une enveloppe
-//      annuelle est mensualisée, sinon on compare un budget d'un an à un mois de
-//      dépenses et rien n'est jamais "dépassé".
-//   2. Le matching inclut la catégorie **et ses sous-catégories** — une enveloppe
-//      "Alimentation" doit capter les dépenses de "Supermarché".
-//   3. Seules les dépenses (`amount < 0`) comptent, en valeur absolue.
+// **Rules kept** (`BudgetViewModel`'s, the most complete):
+//   1. `allocated` = `period == .yearly ? amount / 12 : amount` — a yearly
+//      envelope is turned monthly, otherwise a one-year budget is compared to a month of
+//      spending and nothing is ever "over budget".
+//   2. Matching includes the category **and its sub-categories** — a
+//      "Groceries" envelope must capture "Supermarket" spending.
+//   3. Only expenses (`amount < 0`) count, in absolute value.
 
 enum EnvelopeSpendingCalculator {
 
-    /// Calcule la progression de chaque enveloppe sur la période couverte par
+    /// Computes each envelope's progress over the period covered by
     /// `transactions`.
     ///
     /// - Parameters:
-    ///   - envelopes: enveloppes à évaluer. **L'appelant filtre `isActive`** — le
-    ///     moteur n'a pas à décider ce qui est pertinent pour l'écran appelant.
-    ///   - transactions: transactions de la période, tous comptes confondus.
-    ///   - categories: référentiel complet (sert à la hiérarchie parent/enfant et
-    ///     aux libellés).
-    ///   - previsions: prévisions de la période. Optionnel — sans elles,
-    ///     `recurringSpent` et `forecasted` valent 0, ce qui suffit aux appelants
-    ///     qui n'affichent que "dépensé vs alloué" (Dashboard, alertes, widget).
-    ///   - patterns: motifs récurrents, nécessaires pour rattacher une prévision à
-    ///     une catégorie. Optionnel, même raison.
+    ///   - envelopes: envelopes to evaluate. **The caller filters `isActive`** — the
+    ///     engine doesn't have to decide what's relevant for the calling screen.
+    ///   - transactions: the period's transactions, across all accounts.
+    ///   - categories: the full reference data (used for the parent/child hierarchy
+    ///     and labels).
+    ///   - previsions: the period's previsions. Optional — without them,
+    ///     `recurringSpent` and `forecasted` are 0, which is enough for callers
+    ///     that only show "spent vs. allocated" (Dashboard, alerts, widget).
+    ///   - patterns: recurring patterns, needed to link a prevision to
+    ///     a category. Optional, same reason.
     static func progresses(
         envelopes: [BudgetEnvelope],
         transactions: [FinanceTransaction],
@@ -52,10 +52,10 @@ enum EnvelopeSpendingCalculator {
     ) -> [EnvelopeProgress] {
         guard !envelopes.isEmpty else { return [] }
 
-        // --- Index construits UNE fois ---------------------------------------
-        // La version d'origine refaisait un `filter` sur toutes les transactions
-        // pour chaque enveloppe (O(enveloppes × transactions)) et un
-        // `patterns.first(where:)` par prévision et par enveloppe.
+        // --- Indexes built ONCE ------------------------------------------------
+        // The original version re-ran a `filter` over every transaction
+        // for every envelope (O(envelopes × transactions)) and a
+        // `patterns.first(where:)` per prevision and per envelope.
 
         let childrenByParent: [Int: [Int]] = Dictionary(
             grouping: categories.compactMap { cat in cat.parentId.map { ($0, cat.id) } },
@@ -70,12 +70,12 @@ enum EnvelopeSpendingCalculator {
             expensesByCategory[cid, default: []].append(tx)
         }
 
-        // Transactions déjà rattachées à un récurrent confirmé → part "fixe".
+        // Transactions already attached to a confirmed recurring item → the "fixed" share.
         let matchedTxIds = Set(
             previsions.filter { $0.status == .matched }.compactMap(\.actualTransactionId)
         )
 
-        // patternId → categoryId, pour rattacher une prévision à une enveloppe.
+        // patternId → categoryId, to link a prevision to an envelope.
         let categoryByPatternId = Dictionary(
             patterns.compactMap { p in p.categoryId.map { (p.id, $0) } },
             uniquingKeysWith: { a, _ in a }
@@ -114,14 +114,14 @@ enum EnvelopeSpendingCalculator {
         }
     }
 
-    /// Montant mensualisé d'une enveloppe. Une enveloppe annuelle vaut `amount / 12`
-    /// sur un mois donné.
+    /// An envelope's monthly amount. A yearly envelope is worth `amount / 12`
+    /// for a given month.
     static func allocatedMonthly(for envelope: BudgetEnvelope) -> Double {
         envelope.period == .yearly ? envelope.amount / 12 : envelope.amount
     }
 
-    /// La catégorie de l'enveloppe + ses enfants directs. Vide si l'enveloppe n'est
-    /// rattachée à aucune catégorie (elle affiche alors 0 dépensé, ce qui est exact).
+    /// The envelope's category + its direct children. Empty if the envelope isn't
+    /// attached to any category (it then shows 0 spent, which is accurate).
     static func categoryIds(for categoryId: Int?, childrenByParent: [Int: [Int]]) -> [Int] {
         guard let id = categoryId else { return [] }
         return [id] + (childrenByParent[id] ?? [])
@@ -130,11 +130,11 @@ enum EnvelopeSpendingCalculator {
 
 // MARK: - BudgetRecap
 
-/// État synthétique des enveloppes sur la période — pour le bandeau "Vue d'ensemble"
-/// du Dashboard ("11 enveloppes · 7 ✓ · 4 ✗").
+/// Summary state of the envelopes over the period — for the Dashboard's
+/// "Overview" banner ("11 envelopes · 7 ✓ · 4 ✗").
 ///
-/// Dérivé de `[EnvelopeProgress]` : la classification vit dans `EnvelopeHealth`,
-/// jamais recalculée ici.
+/// Derived from `[EnvelopeProgress]`: the classification lives in `EnvelopeHealth`,
+/// never recomputed here.
 struct BudgetRecap {
     let totalCount: Int
     let healthyCount: Int

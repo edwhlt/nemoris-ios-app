@@ -1,11 +1,9 @@
 import SwiftUI
 
-/// Sélecteur rapide de mois/année — ouvert en tapant le libellé mois/année
-/// de `MonthNavigationView` (retour d'usage : "faire de l'affichage du mois
-/// et de l'année ... des boutons pour sélectionner le mois et l'année").
-/// Deux roues (mois, année) plutôt qu'un `DatePicker` : celui-ci n'a pas de
-/// mode "mois + année seuls" sans jour, et afficherait un sélecteur de jour
-/// inutile pour ce cas d'usage.
+/// Quick month/year picker — opened by tapping the month/year label
+/// on `MonthNavigationView`. Two wheels (month, year) rather than a
+/// `DatePicker`: the latter has no "month + year only" mode with no day, and
+/// would show a day picker that's useless for this use case.
 struct MonthYearPickerSheet: View {
     let month: Date
     let onPick: (Date) -> Void
@@ -15,8 +13,8 @@ struct MonthYearPickerSheet: View {
     @State private var selectedMonthIndex: Int
     @State private var selectedYear: Int
 
-    /// ±15 ans autour de l'année courante — largement assez pour un usage
-    /// budget personnel, sans liste interminable.
+    /// ±15 years around the current year — more than enough for
+    /// personal budgeting, with no endless list.
     private static var yearRange: [Int] {
         let current = Calendar.current.component(.year, from: Date())
         return Array((current - 15)...(current + 5))
@@ -30,9 +28,9 @@ struct MonthYearPickerSheet: View {
         _selectedYear = State(initialValue: cal.component(.year, from: month))
     }
 
-    /// Noms de mois dans la langue de l'app (pas celle, potentiellement
-    /// différente, de l'appareil) — même convention que `weekdaySymbols`
-    /// dans `BudgetView`.
+    /// Month names in the app's language (not the device's, which may
+    /// differ) — the same convention as `weekdaySymbols`
+    /// in `BudgetView`.
     private var monthSymbols: [String] {
         var cal = Calendar(identifier: .gregorian)
         cal.locale = appState.locale
@@ -49,12 +47,11 @@ struct MonthYearPickerSheet: View {
     var body: some View {
         Group {
             #if os(macOS)
-            // `.wheel` n'existe pas sur macOS (iOS/watchOS uniquement) — un
-            // `Form` groupé (convention `nemorisFormStyle()`, cf. CLAUDE.md
-            // §N.1) au lieu d'un `HStack` flottant dans un `VStack` vide :
-            // ce dernier laissait les deux pickers écartés sans repère visuel
-            // au milieu du panneau (retour d'usage 2026-08-26, capture à
-            // l'appui).
+            // `.wheel` doesn't exist on macOS (iOS/watchOS only) — a
+            // grouped `Form` (the `nemorisFormStyle()` convention, see CLAUDE.md
+            // §N.1) instead of an `HStack` floating in an empty `VStack`:
+            // the latter left the two pickers adrift with no visual anchor
+            // in the middle of the pane.
             Form {
                 Section {
                     Picker("Mois", selection: $selectedMonthIndex) {
@@ -110,12 +107,12 @@ struct MonthYearPickerSheet: View {
         .paneChrome(
             "Choisir un mois",
             cancelLabel: "Annuler", onCancel: { dismiss() },
-            // Icône groupée avec le "✕" d'annulation dans la barre système
-            // macOS (niveau inspecteur) — un "OK" en texte nu à côté d'un
-            // "✕" icône seule créait un déséquilibre visuel (retour d'usage
-            // 2026-08-26). Sans ambiguïté possible ici (pas d'action de
-            // masse à distinguer d'un simple "valider"), contrairement à
-            // "Tout accepter" (cf. commentaire de `InspectorChromeToolbar.barButton`).
+            // The icon grouped with the "✕" cancel button in the macOS system
+            // bar (inspector level) — a plain-text "OK" next to an
+            // icon-only "✕" created a visual imbalance. No possible
+            // ambiguity here (no bulk action to distinguish from a plain
+            // "confirm"), unlike "Accept all" (see the comment on
+            // `InspectorChromeToolbar.barButton`).
             confirmLabel: "OK", confirmIcon: "checkmark",
             onConfirm: {
                 var comps = DateComponents()

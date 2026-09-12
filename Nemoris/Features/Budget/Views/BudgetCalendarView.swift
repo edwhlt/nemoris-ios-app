@@ -2,11 +2,11 @@ import SwiftUI
 
 // MARK: - DayCellButtonStyle
 
-/// Léger enfoncement au tap — `DayCell` était juste un `.onTapGesture` sans
-/// AUCUN retour visuel à l'appui (contrairement à Apple Calendar, dont
-/// chaque case réagit tactilement). Convertir en vrai `Button` donne ce
-/// retour gratuitement via `configuration.isPressed`, sur iOS ET au clic
-/// sur macOS.
+/// A slight press-down on tap — `DayCell` used to be just an `.onTapGesture` with
+/// NO visual feedback at all on press (unlike Apple Calendar, where
+/// every cell reacts tactilely). Converting it to a real `Button` gives this
+/// feedback for free via `configuration.isPressed`, on iOS AND on a
+/// macOS click.
 struct DayCellButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -17,9 +17,9 @@ struct DayCellButtonStyle: ButtonStyle {
 
 // MARK: - CalendarDetailCaret
 
-/// Petit triangle plein pointant vers le haut — rattache visuellement
-/// `DayDetailPanel` à la colonne du jour sélectionné quand il s'ouvre
-/// inline entre deux lignes de semaine du calendrier.
+/// A small solid triangle pointing up — visually anchors
+/// `DayDetailPanel` to the selected day's column when it opens
+/// inline between two of the calendar's week rows.
 struct CalendarDetailCaret: Shape {
     func path(in rect: CGRect) -> Path {
         var p = Path()
@@ -49,13 +49,12 @@ struct DayCell: View {
     var body: some View {
         VStack(spacing: 4) {
             ZStack {
-                // Fond léger présent sur TOUTES les cases, pas seulement
-                // aujourd'hui/sélectionné — sans lui rien ne distingue
-                // visuellement un jour "bouton" d'un simple chiffre, et
-                // "cliquable" ne se devine qu'en essayant (retour d'usage :
-                // "à première vue on sait pas que les jours sont
-                // cliquables"). Recouvert par le cercle accent quand
-                // aujourd'hui/sélectionné (dessiné après, donc au-dessus).
+                // A light background on EVERY cell, not just
+                // today's/selected — without it, nothing visually
+                // distinguishes a "button" day from a plain number, and
+                // "clickable" can only be guessed by trying it. Covered
+                // by the accent circle when it's
+                // today/selected (drawn afterward, so on top).
                 if !isToday && !isSelected {
                     Circle()
                         .fill(AppTheme.Colors.surfaceSecondary.opacity(0.6))
@@ -160,7 +159,7 @@ struct DayDetailPanel: View {
                                 .font(AppTheme.Typography.bodySmall)
                                 .fontWeight(.semibold)
                                 .foregroundStyle(ep.isExpense ? AppTheme.Colors.danger : AppTheme.Colors.success)
-                            // Bouton skip inline sur .pending (calendrier)
+                            // Inline skip button on .pending (calendar)
                             if ep.status == .pending {
                                 Button {
                                     previsionPendingChoice = ep.prevision

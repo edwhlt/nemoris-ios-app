@@ -2,12 +2,12 @@ import SwiftUI
 
 // MARK: - EnvelopeSuggestionSheet
 //
-// Sheet déclenchée depuis BudgetView → "Suggérer des enveloppes". Présente
-// les suggestions calculées par `EnvelopeSuggestionService`, l'utilisateur toggle
-// celles qu'il veut créer, ajuste le montant inline si besoin, puis valide.
+// Sheet triggered from BudgetView → "Suggest envelopes". Shows
+// the suggestions computed by `EnvelopeSuggestionService`; the user toggles
+// the ones they want to create, adjusts the amount inline if needed, then confirms.
 //
-// **UX cible** : que la création de 4-5 enveloppes d'un coup prenne 30 s
-// max — sinon l'utilisateur va à la pêche aux montants à la main et abandonne.
+// **Target UX**: creating 4-5 envelopes at once should take 30s
+// max — otherwise the user goes fishing for amounts by hand and gives up.
 
 struct EnvelopeSuggestionSheet: View {
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
@@ -18,7 +18,7 @@ struct EnvelopeSuggestionSheet: View {
     let allCategories: [Category]
 
     @State private var suggestions: [EnvelopeSuggestion] = []
-    @State private var selected: Set<Int> = []           // categoryIds sélectionnés
+    @State private var selected: Set<Int> = []           // selected categoryIds
     @State private var customBudgets: [Int: Double] = [:] // override par categoryId
     @State private var isLoading: Bool = true
     @State private var isCreating: Bool = false
@@ -132,7 +132,7 @@ struct EnvelopeSuggestionSheet: View {
                 .tint(AppTheme.Colors.accent)
             }
 
-            // Slider de réglage du montant — visible uniquement si sélectionné
+            // Amount-adjustment slider — visible only if selected
             if isSelected {
                 VStack(spacing: 4) {
                     HStack {
@@ -144,8 +144,8 @@ struct EnvelopeSuggestionSheet: View {
                             .font(AppTheme.Typography.titleSmall)
                             .foregroundStyle(AppTheme.Colors.accent)
                     }
-                    // Range = 0.5× → 2× la suggestion par défaut, step 10 € pour
-                    // rester sur des montants ronds lisibles.
+                    // Range = 0.5× → 2× the default suggestion, €10 steps to
+                    // stay on readable round amounts.
                     Slider(
                         value: Binding(
                             get: { customBudgets[sug.categoryId] ?? sug.suggestedBudget },
@@ -165,7 +165,7 @@ struct EnvelopeSuggestionSheet: View {
         .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md))
         .contentShape(Rectangle())
         .onTapGesture {
-            // Tap row entière pour sélectionner — friction réduite vs micro-toggle
+            // Tap the whole row to select — less friction than a tiny toggle
             if isSelected {
                 selected.remove(sug.categoryId)
                 customBudgets.removeValue(forKey: sug.categoryId)
@@ -179,8 +179,8 @@ struct EnvelopeSuggestionSheet: View {
     // MARK: - Logic
 
     private func loadSuggestions() async {
-        // Détaché car fetchTransactionsAllAccounts peut être un peu long sur
-        // grosses bases. Pas bloquant pour l'UI grâce au `isLoading`.
+        // Detached because fetchTransactionsAllAccounts can be a bit slow on
+        // large databases. Not blocking for the UI thanks to `isLoading`.
         let result = await Task.detached(priority: .userInitiated) {
             EnvelopeSuggestionService.computeSuggestions(
                 existingEnvelopes: existingEnvelopes,
@@ -188,8 +188,8 @@ struct EnvelopeSuggestionSheet: View {
             )
         }.value
         suggestions = result
-        // Pré-sélectionne les 5 plus impactantes — friction minimale pour l'utilisateur
-        // qui n'a qu'à valider.
+        // Pre-selects the 5 most impactful ones — minimal friction for the user,
+        // who only has to confirm.
         selected = Set(result.prefix(5).map(\.categoryId))
         isLoading = false
     }
@@ -213,7 +213,7 @@ struct EnvelopeSuggestionSheet: View {
             )
             _ = BudgetRepository.shared.insertEnvelope(env)
         }
-        // Refresh le VM pour que la liste d'enveloppes affiche les nouvelles
+        // Refreshes the VM so the envelope list shows the new ones
         viewModel.refresh()
         HapticService.shared.success()
         appState.postToast(.success, "\(count) enveloppe\(count > 1 ? "s" : "") créée\(count > 1 ? "s" : "")")

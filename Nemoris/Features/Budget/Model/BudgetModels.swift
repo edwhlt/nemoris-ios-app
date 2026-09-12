@@ -5,10 +5,10 @@ import Foundation
 enum RecurrenceFrequency: String, CaseIterable, Identifiable {
     case daily      = "DAILY"
     case weekly     = "WEEKLY"
-    case biweekly   = "BIWEEKLY"    // bimensuel : toutes les ~2 semaines
+    case biweekly   = "BIWEEKLY"    // biweekly: roughly every 2 weeks
     case monthly    = "MONTHLY"
-    case quarterly  = "QUARTERLY"   // trimestriel : tous les 3 mois
-    case semiannual = "SEMIANNUAL"  // semestriel : tous les 6 mois
+    case quarterly  = "QUARTERLY"   // quarterly: every 3 months
+    case semiannual = "SEMIANNUAL"  // semiannual: every 6 months
     case yearly     = "YEARLY"
 
     var id: String { rawValue }
@@ -37,7 +37,7 @@ enum RecurrenceFrequency: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Nombre de jours approximatif entre deux occurrences
+    /// Approximate number of days between two occurrences
     var approximateDays: Int {
         switch self {
         case .daily:      return 1
@@ -50,9 +50,9 @@ enum RecurrenceFrequency: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Nombre de mois entre deux occurrences pour les frequences basees sur
-    /// un jour du mois fixe (MONTHLY/QUARTERLY/SEMIANNUAL partagent la meme
-    /// logique de projection, seul le pas change).
+    /// Number of months between two occurrences for frequencies based on
+    /// a fixed day of the month (MONTHLY/QUARTERLY/SEMIANNUAL share the
+    /// same projection logic, only the step changes).
     var monthStep: Int? {
         switch self {
         case .monthly:    return 1
@@ -62,10 +62,10 @@ enum RecurrenceFrequency: String, CaseIterable, Identifiable {
         }
     }
 
-    /// true si l'ancrage pertinent est un jour du mois (1-31)
+    /// true if the relevant anchor is a day of the month (1-31)
     var usesDayOfMonthAnchor: Bool { monthStep != nil }
 
-    /// true si l'ancrage pertinent est un jour ISO de semaine (1=lundi)
+    /// true if the relevant anchor is an ISO day of the week (1=Monday)
     var usesWeekdayAnchor: Bool {
         self == .weekly || self == .biweekly
     }
@@ -73,7 +73,7 @@ enum RecurrenceFrequency: String, CaseIterable, Identifiable {
 
 enum PrevisionStatus: String, CaseIterable {
     case pending = "PENDING"   // A venir, non confirme
-    case matched = "MATCHED"   // Associe a une transaction reelle
+    case matched = "MATCHED"   // Matched to a real transaction
     case skipped = "SKIPPED"   // Ignore manuellement
 
     var label: String {
@@ -99,7 +99,7 @@ enum BudgetPeriod: String, CaseIterable {
 
 // MARK: - Core Models
 
-/// Motif recurrent detecte ou saisi manuellement (abonnement, loyer, salaire, etc.)
+/// A recurring pattern, detected or entered manually (subscription, rent, salary, etc.)
 struct RecurringPattern: Identifiable, Hashable {
     let id: Int
     var name: String
@@ -110,23 +110,23 @@ struct RecurringPattern: Identifiable, Hashable {
     var categoryId: Int?
     var payeeId: Int?
     var frequency: RecurrenceFrequency
-    /// Jour d'ancrage : jour du mois (1-31) pour MONTHLY, ou ISO weekday (1=lundi) pour WEEKLY
+    /// Anchor day: day of the month (1-31) for MONTHLY, or ISO weekday (1=Monday) for WEEKLY
     var anchorDay: Int?
     var isActive: Bool
-    /// true si cree manuellement par l'utilisateur
+    /// true if created manually by the user
     var isManual: Bool
     var createdAt: Date
     var lastDetectedAt: Date?
-    /// Date a partir de laquelle les previsions sont generees (debut du contrat, de l'abonnement, etc.)
+    /// Date from which previsions are generated (start of the contract, the subscription, etc.)
     var startDate: Date
-    /// Date de fin optionnelle. nil = sans fin.
+    /// Optional end date. nil = no end.
     var endDate: Date?
 
     var isExpense: Bool { amountAvg < 0 }
     var displayAmount: Double { abs(amountAvg) }
 }
 
-/// Enveloppe budgetaire : plafond de depenses alloue a une categorie sur une periode
+/// A budget envelope: a spending cap allocated to a category over a period
 struct BudgetEnvelope: Identifiable, Hashable {
     let id: Int
     var name: String
@@ -137,7 +137,7 @@ struct BudgetEnvelope: Identifiable, Hashable {
     var isActive: Bool
 }
 
-/// Echeance previsionnelle d'un motif recurrent
+/// A forecasted due date of a recurring pattern
 struct BudgetPrevision: Identifiable, Hashable {
     let id: Int
     var recurringPatternId: Int?
@@ -153,7 +153,7 @@ struct BudgetPrevision: Identifiable, Hashable {
 
 // MARK: - Aggregates
 
-/// Prevision enrichie avec les infos du pattern parent, pour l'affichage
+/// A prevision enriched with its parent pattern's info, for display
 struct EnrichedPrevision: Identifiable {
     let prevision: BudgetPrevision
     let patternName: String
@@ -168,31 +168,31 @@ struct EnrichedPrevision: Identifiable {
     var displayAmount: Double { abs(amount) }
 }
 
-/// État de santé d'une enveloppe sur la période. Les seuils vivent ICI et nulle
-/// part ailleurs — avant, chaque écran refaisait sa propre comparaison de ratio.
+/// An envelope's health state over the period. The thresholds live HERE and
+/// nowhere else — before, every screen redid its own ratio comparison.
 enum EnvelopeHealth {
-    case healthy   // < 80 % du budget consommé
+    case healthy   // < 80% of the budget used
     case warning   // 80 % … 100 %
     case exceeded  // > 100 %
 }
 
-/// Resume d'une enveloppe budgetaire pour un mois donne
+/// Summary of a budget envelope for a given month
 struct EnvelopeProgress: Identifiable {
     let envelope: BudgetEnvelope
     let categoryName: String
     let categoryIcon: String
-    let spent: Double          // Total réel dépensé (positif)
-    let allocated: Double      // Budget alloué (positif)
-    let recurringSpent: Double // Portion issue de récurrents confirmés (positif)
-    let forecasted: Double     // Total prévu (prévisions actives du mois pour cette catégorie)
+    let spent: Double          // Actual total spent (positive)
+    let allocated: Double      // Allocated budget (positive)
+    let recurringSpent: Double // Portion coming from confirmed recurring items (positive)
+    let forecasted: Double     // Total planned (this month's active previsions for this category)
 
     var id: Int { envelope.id }
     var variableSpent: Double { max(spent - recurringSpent, 0) }
     var remaining: Double { allocated - spent }
-    /// ⚠️ Clampé à 1.0 — c'est une **largeur de barre de progression**, pas une mesure.
-    /// Pour classer/comparer, utiliser `rawRatio` ou `healthState`.
+    /// ⚠️ Clamped to 1.0 — this is a **progress-bar width**, not a measurement.
+    /// To rank/compare, use `rawRatio` or `healthState`.
     var ratio: Double { allocated > 0 ? min(spent / allocated, 1.0) : 0 }
-    /// Ratio réel, non clampé. Sans lui, un dépassement est indétectable via `ratio`.
+    /// The real, unclamped ratio. Without it, going over budget is undetectable via `ratio`.
     var rawRatio: Double { allocated > 0 ? spent / allocated : 0 }
     var recurringRatio: Double { allocated > 0 ? min(recurringSpent / allocated, 1.0) : 0 }
     var forecastedRatio: Double { allocated > 0 ? min(forecasted / allocated, 1.0) : 0 }
@@ -206,15 +206,15 @@ struct EnvelopeProgress: Identifiable {
     }
 }
 
-/// Resume budgetaire mensuel (pour le dashboard)
+/// Monthly budget summary (for the dashboard)
 struct MonthlyBudgetSummary {
     let month: String               // "2025-01"
-    let forecastedExpenses: Double  // Somme des previsions de depenses du mois
-    let actualExpenses: Double      // Depenses reelles du mois
+    let forecastedExpenses: Double  // Sum of the month's forecasted expenses
+    let actualExpenses: Double      // The month's actual expenses
     let matchedCount: Int
     let pendingCount: Int
     let envelopes: [EnvelopeProgress]
-    let totalIncome: Double        // Revenus reels du mois (positif)
+    let totalIncome: Double        // The month's actual income (positive)
     let fixedActual: Double        // Charges confirmees (recurrents matches, positif)
 
     var variableActual: Double { max(actualExpenses - fixedActual, 0) }
@@ -223,7 +223,7 @@ struct MonthlyBudgetSummary {
     var isOverBudget: Bool { variance > 0 }
 }
 
-/// Journee dans le calendrier financier
+/// A day in the financial calendar
 struct CalendarDay: Identifiable {
     let date: Date
     let previsions: [EnrichedPrevision]

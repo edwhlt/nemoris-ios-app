@@ -48,8 +48,8 @@ struct EnvelopeListView: View {
                 }
             }
             #if os(macOS)
-            // Même politique que TricountListView/TransactionsView : .plain =
-            // base neutre pour les cartes custom dessinées par macGroupedRow.
+            // Same policy as TricountListView/TransactionsView: .plain =
+            // a neutral base for the custom cards drawn by macGroupedRow.
             .listStyle(.plain)
             .macGroupedListTopGap()
             #endif

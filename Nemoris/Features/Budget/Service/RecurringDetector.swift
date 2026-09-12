@@ -2,29 +2,29 @@ import Foundation
 
 // MARK: - RecurringDetector
 //
-// Analyse l'historique des transactions pour detecter automatiquement
-// les depenses et revenus recurrents (abonnements, loyer, salaire, etc.)
+// Analyzes transaction history to automatically detect recurring
+// expenses and income (subscriptions, rent, salary, etc.)
 //
-// Une recurrence n'est retenue QUE si les 4 criteres suivants sont TOUS
-// verifies (portes strictes, pas un score qui compense un critere faible
-// par un autre) :
-//  1. Tiers identique         -> le regroupement se fait par payee_id (ou
-//                                 nom normalise a defaut), donc structurel.
-//  2. Frequence reguliere     -> TOUS les ecarts consecutifs (pas seulement
-//                                 la mediane) doivent tomber dans la fenetre
-//                                 d'une frequence canonique (hebdomadaire,
-//                                 bimensuel, mensuel, trimestriel,
-//                                 semestriel, annuel).
-//  3. Montant quasi identique -> ecart-type relatif sous un seuil serre
-//                                 (AMOUNT_TOLERANCE), pas les 50% laxistes
-//                                 d'avant.
-//  4. Date d'echeance stable  -> le jour du mois (ou le jour de semaine)
-//                                 de chaque occurrence doit rester proche
-//                                 de l'ancrage (DATE_TOLERANCE_DAYS).
+// A recurrence is only kept if ALL 4 of the following criteria are
+// met (strict gates, not a score that lets a strong criterion
+// compensate for a weak one):
+//  1. Same payee            -> grouping is done by payee_id (or a
+//                                normalized name otherwise), so it's structural.
+//  2. Regular frequency     -> ALL consecutive gaps (not just
+//                                the median) must fall within the
+//                                window of a canonical frequency (weekly,
+//                                biweekly, monthly, quarterly,
+//                                semiannual, yearly).
+//  3. Near-identical amount -> a relative standard deviation under a tight
+//                                threshold (AMOUNT_TOLERANCE), not the old
+//                                lax 50%.
+//  4. Stable due date       -> the day of the month (or the day of the
+//                                week) of each occurrence must stay close
+//                                to the anchor (DATE_TOLERANCE_DAYS).
 //
-// Si un seul de ces criteres echoue, le groupe est rejete entierement
-// (retourne nil) : on ne "degrade" plus la confiance, on refuse le candidat.
-// La confiance restante ne sert qu'a trier les candidats valides entre eux.
+// If even one of these criteria fails, the whole group is rejected
+// (returns nil): confidence is no longer "degraded", the candidate is refused
+// outright. Remaining confidence only ranks valid candidates against each other.
 
 struct DetectionCandidate: Identifiable {
     let name: String
@@ -35,19 +35,19 @@ struct DetectionCandidate: Identifiable {
     let frequency: RecurrenceFrequency
     let anchorDay: Int?
     let occurrences: [Date]
-    /// Montants des transactions a l'origine de la detection, meme ordre et
-    /// meme index que `occurrences` — pour pouvoir afficher le detail de
-    /// chaque occurrence (pas seulement la moyenne agregee).
+    /// Amounts of the transactions behind the detection, same order and
+    /// same index as `occurrences` — so each occurrence's detail can be
+    /// shown (not just the aggregated average).
     let occurrenceAmounts: [Double]
-    /// Score de confiance 0…1 (classement uniquement, tous les candidats
-    /// retournes ont deja passe les portes strictes ci-dessus)
+    /// Confidence score 0…1 (ranking only, every returned candidate has
+    /// already passed the strict gates above)
     let confidence: Double
 
     var id: String { name }
 
-    /// Brouillon de motif pre-rempli avec les valeurs detectees, pour
-    /// permettre a l'utilisateur d'ajuster (montant, jour, categorie…) avant
-    /// de confirmer — plutot que de n'avoir que le choix "tel quel".
+    /// A draft pattern pre-filled with the detected values, to let the
+    /// user adjust it (amount, day, category…) before
+    /// confirming — rather than only being able to accept it "as is".
     func asDraftPattern() -> RecurringPattern {
         RecurringPattern(
             id: 0, name: name, amountAvg: amountAvg, amountTolerance: 0.15,
@@ -58,11 +58,11 @@ struct DetectionCandidate: Identifiable {
         )
     }
 
-    /// Le motif existant (actif OU inactif) qui correspond déjà à ce
-    /// candidat — même règle d'identité que le regroupement de détection
-    /// (payee d'abord, nom sinon). Source UNIQUE de cette décision : utilisée
-    /// à la fois pour trier/griser "Déjà suivi" dans le panneau et pour
-    /// éviter qu'un "Confirmer" y crée un doublon.
+    /// The existing pattern (active OR inactive) that already matches this
+    /// candidate — the same identity rule as detection grouping
+    /// (payee first, name otherwise). SINGLE source for this decision: used
+    /// both to sort/gray out "Already tracked" in the panel and to
+    /// keep a "Confirm" from creating a duplicate there.
     func existingMatch(in patterns: [RecurringPattern]) -> RecurringPattern? {
         if let pid = payeeId, let match = patterns.first(where: { $0.payeeId == pid }) {
             return match
@@ -70,11 +70,11 @@ struct DetectionCandidate: Identifiable {
         return patterns.first { $0.name.lowercased() == name.lowercased() }
     }
 
-    /// true si ce qui vient d'être détecté (montant, fréquence, jour
-    /// d'ancrage) s'écarte sensiblement du motif déjà suivi — signale un prix
-    /// qui a changé (abonnement, cotisation) ou une échéance qui a glissé,
-    /// que le motif existant n'a jamais rattrapé (il n'est ré-évalué qu'à la
-    /// création, jamais automatiquement par la suite).
+    /// true if what was just detected (amount, frequency, anchor day)
+    /// noticeably differs from the already-tracked pattern — signals a price
+    /// that changed (a subscription, a membership fee) or a due date that
+    /// drifted, which the existing pattern never caught up with (it's only
+    /// re-evaluated at creation, never automatically afterward).
     func differsFrom(_ existing: RecurringPattern) -> Bool {
         let existingAmount = abs(existing.amountAvg)
         let detectedAmount = abs(amountAvg)
@@ -85,10 +85,10 @@ struct DetectionCandidate: Identifiable {
         return false
     }
 
-    /// Fusionne les valeurs fraîchement détectées dans un motif EXISTANT —
-    /// pour corriger un récurrent dont le prix ou l'échéance a dérivé, sans
-    /// perdre sa configuration propre (catégorie, tier, actif/inactif,
-    /// tolérance, période).
+    /// Merges freshly detected values into an EXISTING pattern —
+    /// to fix a recurring item whose price or due date has drifted, without
+    /// losing its own configuration (category, payee, active/inactive,
+    /// tolerance, period).
     func updating(_ existing: RecurringPattern) -> RecurringPattern {
         RecurringPattern(
             id: existing.id, name: existing.name, amountAvg: amountAvg,
@@ -105,17 +105,17 @@ enum RecurringDetector {
 
     // MARK: - Tuning
 
-    /// Ecart-type relatif maximal tolere entre les montants d'un groupe pour
-    /// le considerer comme "prix identique". 8% absorbe l'arrondi/la TVA
-    /// variable d'un abonnement sans laisser passer des montants qui varient
-    /// vraiment (facture d'energie, courses...).
-    /// Pas `private` : reutilise tel quel par l'UI de detail pour expliquer
-    /// pourquoi un candidat a ete retenu (source unique du seuil reel).
+    /// Maximum relative standard deviation tolerated between a group's amounts
+    /// to consider them "the same price". 8% absorbs a subscription's
+    /// rounding/variable VAT without letting through amounts that
+    /// really do vary (an energy bill, groceries...).
+    /// Not `private`: reused as-is by the detail UI to explain
+    /// why a candidate was retained (the single source of the real threshold).
     static let amountTolerance = 0.08
 
-    /// Nombre minimal d'occurrences pour affirmer une periodicite. Avec 2
-    /// points on n'a qu'un seul ecart : impossible de verifier qu'il se
-    /// repete. Il en faut au moins 3 (2 ecarts consecutifs a comparer).
+    /// Minimum number of occurrences to claim a periodicity. With 2
+    /// points there's only one gap: no way to check that it
+    /// repeats. At least 3 are needed (2 consecutive gaps to compare).
     private static let minOccurrences = 3
 
     /// Tolerance de date, en jours, par famille de frequence — "date
@@ -130,11 +130,11 @@ enum RecurringDetector {
         }
     }
 
-    /// Fenetre [min, max] en jours qu'un ecart CONSECUTIF doit respecter
-    /// pour appartenir a cette frequence. Chaque ecart du groupe doit y
-    /// tomber — pas seulement la mediane — sinon la "frequence" n'est
-    /// qu'une coincidence entre deux points. Pas `private` : reutilise
-    /// par l'UI de detail.
+    /// [min, max] window in days a CONSECUTIVE gap must respect
+    /// to belong to this frequency. Every gap in the group must fall
+    /// within it — not just the median — otherwise the "frequency" is
+    /// just a coincidence between two points. Not `private`: reused
+    /// by the detail UI.
     static func gapWindow(for frequency: RecurrenceFrequency) -> ClosedRange<Int> {
         switch frequency {
         case .daily:      return 0...2
@@ -147,27 +147,27 @@ enum RecurringDetector {
         }
     }
 
-    /// Ordre de detection : du plus court au plus long, pour retenir la
-    /// frequence la plus fine qui explique TOUS les ecarts (un groupe dont
-    /// les ecarts sont tous ~14j doit rester "bimensuel", pas glisser vers
-    /// une fenetre plus large qui l'engloberait aussi).
+    /// Detection order: shortest to longest, to retain the
+    /// finest frequency that explains ALL the gaps (a group whose
+    /// gaps are all ~14 days should stay "biweekly", not drift toward
+    /// a broader window that would also fit it).
     private static let candidateFrequencies: [RecurrenceFrequency] =
         [.daily, .weekly, .biweekly, .monthly, .quarterly, .semiannual, .yearly]
 
     // MARK: - Public API
 
-    /// Detecte les motifs recurrents dans un tableau de transactions.
-    /// - Parameter transactions: Toutes les transactions disponibles (tri non requis).
-    /// - Returns: Candidats tries par confiance decroissante.
+    /// Detects recurring patterns in an array of transactions.
+    /// - Parameter transactions: Every available transaction (no sort order required).
+    /// - Returns: Candidates sorted by decreasing confidence.
     static func detect(from transactions: [FinanceTransaction]) -> [DetectionCandidate] {
-        // Grouper par payee_id puis par nom normalise (critere "tiers identique")
+        // Group by payee_id then by normalized name (the "same payee" criterion)
         let groups = groupTransactions(transactions)
 
         var candidates: [DetectionCandidate] = []
         for (_, txs) in groups {
             guard txs.count >= minOccurrences else { continue }
 
-            // Sous-grouper par montant similaire (meme tiers, montants proches = probablement le meme abonnement)
+            // Sub-group by similar amount (same payee, close amounts = likely the same subscription)
             let subGroups = subGroupByAmount(txs)
             for subGroup in subGroups {
                 guard subGroup.count >= minOccurrences else { continue }
@@ -187,9 +187,9 @@ enum RecurringDetector {
 
     // MARK: - Sub-grouping by amount cluster
     //
-    // Regroupe les transactions d'un meme tiers par montant similaire (meme
-    // tolerance que le critere final : pas la peine de clusterer plus large
-    // que ce que le gate final acceptera).
+    // Groups a payee's transactions by similar amount (the same
+    // tolerance as the final criterion: no point clustering more broadly
+    // than what the final gate will accept).
 
     private static func subGroupByAmount(_ txs: [FinanceTransaction]) -> [[FinanceTransaction]] {
         // Trier par montant absolu croissant
@@ -246,7 +246,7 @@ enum RecurringDetector {
         let relativeStdDev = abs(avgAmount) > 0 ? stdDev / abs(avgAmount) : 1.0
         guard relativeStdDev <= amountTolerance else { return nil }
 
-        // --- Critere "frequence reguliere" : TOUS les ecarts consecutifs ---
+        // --- "Regular frequency" criterion: ALL consecutive gaps ---
         let gaps = zip(dates, dates.dropFirst()).map { earlier, later in
             Calendar.current.dateComponents([.day], from: earlier, to: later).day ?? 0
         }
@@ -273,9 +273,9 @@ enum RecurringDetector {
         sorted: [FinanceTransaction], dates: [Date], avgAmount: Double, stdDev: Double,
         relativeStdDev: Double, frequency: RecurrenceFrequency, anchorDay: Int?, gaps: [Int]
     ) -> DetectionCandidate {
-        // Score de classement uniquement (tous les criteres durs sont deja
-        // valides a ce stade) : recompense la regularite fine des ecarts,
-        // la precision du montant et le nombre d'occurrences observees.
+        // Ranking score only (every hard criterion is already
+        // validated at this point): rewards fine-grained regularity of the
+        // gaps, amount precision, and the number of occurrences observed.
         let target = Double(frequency.approximateDays)
         let gapDeviation = gaps.map { abs(Double($0) - target) / target }.reduce(0, +) / Double(gaps.count)
         let freqScore = max(0, 1.0 - gapDeviation * 2)
@@ -303,11 +303,11 @@ enum RecurringDetector {
 
     // MARK: - Frequency Matching
 
-    /// Trouve la frequence canonique la plus fine dont la fenetre de tolerance
-    /// contient TOUS les ecarts consecutifs du groupe. Contrairement a
-    /// l'ancienne version (mediane seule), un groupe dont un seul ecart
-    /// s'ecarte de la fenetre est rejete : ce n'est pas une "frequence
-    /// approximative avec du bruit", c'est un motif qui n'est pas regulier.
+    /// Finds the finest canonical frequency whose tolerance window
+    /// contains ALL of the group's consecutive gaps. Unlike
+    /// the old version (median only), a group with even one gap
+    /// outside the window is rejected: it isn't an "approximate
+    /// frequency with noise", it's a pattern that isn't regular.
     private static func matchingFrequency(forGaps gaps: [Int]) -> RecurrenceFrequency? {
         for frequency in candidateFrequencies {
             let window = gapWindow(for: frequency)
@@ -323,35 +323,35 @@ enum RecurringDetector {
     private static func computeAnchorDay(dates: [Date], frequency: RecurrenceFrequency) -> Int? {
         let cal = Calendar.current
         if frequency.usesDayOfMonthAnchor {
-            // Jour du mois le plus frequent. Les jours de fin de mois
-            // (28-31) sont regroupes : "le 31" et "le 28 (fevrier)" sont la
-            // meme echeance "fin de mois" pour un abonnement mensualise.
+            // Most frequent day of the month. End-of-month days
+            // (28-31) are grouped together: "the 31st" and "the 28th (February)" are the
+            // same "end of month" due date for a monthly-billed subscription.
             let days = dates.map { normalizedMonthDay(for: $0, calendar: cal) }
             return mostFrequent(days)
         }
         if frequency.usesWeekdayAnchor {
-            // Jour de la semaine ISO le plus frequent (1=lundi)
+            // Most frequent ISO day of the week (1=Monday)
             let weekdays = dates.compactMap { cal.dateComponents([.weekday], from: $0).weekday }
             let isoWeekdays = weekdays.map { ($0 + 5) % 7 + 1 }
             return mostFrequent(isoWeekdays)
         }
         if frequency == .yearly {
-            // Jour de l'annee (1-366) le plus proche, pour verifier la
-            // stabilite mois+jour d'une echeance annuelle.
+            // Closest day of the year (1-366), to check the
+            // month+day stability of a yearly due date.
             let doys = dates.compactMap { cal.ordinality(of: .day, in: .year, for: $0) }
             return mostFrequent(doys)
         }
         return nil // .daily : pas d'ancrage pertinent
     }
 
-    /// Jour du mois normalise : un jour >= 28 est ramene au dernier jour du
-    /// mois considere (28/29/30/31 selon le mois), pour que "fin de mois"
-    /// soit une seule categorie plutot que 4 valeurs distinctes.
+    /// Normalized day of the month: a day >= 28 is rounded to the last day of
+    /// the month in question (28/29/30/31 depending on the month), so that "end
+    /// of month" is a single category rather than 4 distinct values.
     private static func normalizedMonthDay(for date: Date, calendar: Calendar) -> Int {
         let day = calendar.component(.day, from: date)
         guard day >= 28, let range = calendar.range(of: .day, in: .month, for: date) else { return day }
         let lastDay = range.upperBound - 1
-        return day >= lastDay - 2 ? 31 : day // "31" sert de code conventionnel pour "fin de mois"
+        return day >= lastDay - 2 ? 31 : day // "31" is used as a conventional code for "end of month"
     }
 
     // MARK: - Date Consistency ("date identique, a quelques jours pres")
@@ -363,8 +363,8 @@ enum RecurringDetector {
         if frequency.usesDayOfMonthAnchor {
             return dates.allSatisfy { date in
                 let day = normalizedMonthDay(for: date, calendar: cal)
-                // Distance circulaire simplifiee : la normalisation "fin de
-                // mois" (valeur 31) rend deja la comparaison directe fiable.
+                // Simplified circular distance: the "end of month"
+                // normalization (value 31) already makes a direct comparison reliable.
                 return abs(day - anchorDay) <= tolerance
             }
         }
@@ -390,12 +390,12 @@ enum RecurringDetector {
 
     // MARK: - Prevision Generation
 
-    /// Genere les echeances entre deux dates pour un motif recurrent.
+    /// Generates due dates between two dates for a recurring pattern.
     /// - Parameters:
-    ///   - pattern: Motif a projeter
-    ///   - startDate: Date de debut (incluse)
-    ///   - endDate: Date de fin (incluse)
-    /// - Returns: Toutes les dates d'echeances dans la plage
+    ///   - pattern: The pattern to project
+    ///   - startDate: Start date (included)
+    ///   - endDate: End date (included)
+    /// - Returns: Every due date within the range
     static func generateOccurrences(
         for pattern: RecurringPattern,
         from startDate: Date,
@@ -413,12 +413,12 @@ enum RecurringDetector {
         return dates
     }
 
-    /// Genere les echeances futures a partir d'un motif recurrent.
+    /// Generates future due dates from a recurring pattern.
     /// - Parameters:
-    ///   - pattern: Motif a projeter
-    ///   - from: Date de debut de la projection
-    ///   - months: Nombre de mois a projeter en avant
-    /// - Returns: Dates des prochaines echeances
+    ///   - pattern: The pattern to project
+    ///   - from: Start date of the projection
+    ///   - months: Number of months to project forward
+    /// - Returns: Dates of the upcoming due dates
     static func generateNextOccurrences(
         for pattern: RecurringPattern,
         from startDate: Date = Date(),
@@ -438,7 +438,7 @@ enum RecurringDetector {
         case .weekly, .biweekly:
             let step = pattern.frequency == .weekly ? 7 : 14
             if let anchor = pattern.anchorDay {
-                // Trouver le prochain jour ISO de semaine specifie
+                // Find the next specified ISO day of the week
                 var next = cal.date(byAdding: .day, value: 1, to: date)!
                 for _ in 0..<8 {
                     let weekday = cal.dateComponents([.weekday], from: next).weekday ?? 1
@@ -455,13 +455,13 @@ enum RecurringDetector {
             let step = pattern.frequency.monthStep ?? 1
             var comps = cal.dateComponents([.year, .month], from: date)
             comps.month = (comps.month ?? 1) + step
-            // "31" est le code conventionnel "fin de mois" (cf. normalizedMonthDay)
+            // "31" is the conventional "end of month" code (see normalizedMonthDay)
             comps.day = day >= 29 ? 31 : day
-            // Gerer les mois courts (ex: 31 -> 28 en fevrier)
+            // Handle short months (e.g. 31 -> 28 in February)
             if let candidate = cal.date(from: comps) {
                 return candidate
             }
-            // Fallback: dernier jour du mois vise
+            // Fallback: last day of the target month
             comps.day = 1
             if let firstOfNext = cal.date(from: comps) {
                 return cal.date(byAdding: .day, value: -1, to: firstOfNext)
@@ -475,20 +475,20 @@ enum RecurringDetector {
 
     // MARK: - Duplicate Matching
 
-    /// Verifie si une transaction reelle correspond a une prevision.
-    /// Utilise la fenetres de date +/-3 jours et la tolerance de montant du pattern.
+    /// Checks whether a real transaction matches a prevision.
+    /// Uses a +/-3-day date window and the pattern's amount tolerance.
     static func matchTransaction(
         _ tx: FinanceTransaction,
         toPrevision prevision: BudgetPrevision,
         pattern: RecurringPattern
     ) -> Bool {
-        // Verification du montant
+        // Amount check
         let txAmt = tx.amount
         let expectedAmt = prevision.amount
         let tolerance = abs(expectedAmt) * pattern.amountTolerance
         guard abs(txAmt - expectedAmt) <= tolerance else { return false }
 
-        // Verification de la date (+/-3 jours)
+        // Date check (+/-3 days)
         let daysDiff = abs(Calendar.current.dateComponents([.day], from: tx.date, to: prevision.expectedDate).day ?? 999)
         return daysDiff <= 3
     }
@@ -510,7 +510,7 @@ enum RecurringDetector {
     }
 
     private static func normalizedName(_ name: String) -> String {
-        // Supprimer les tokens purement numeriques (dates, references) et les caracteres parasites
+        // Remove purely numeric tokens (dates, references) and stray characters
         let cleaned = name
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -521,7 +521,7 @@ enum RecurringDetector {
             .components(separatedBy: .whitespaces)
             .filter { !$0.isEmpty }
             .filter { token in
-                // Exclure les tokens purement numeriques (ex: "20251201", "75001")
+                // Exclude purely numeric tokens (e.g. "20251201", "75001")
                 !token.allSatisfy({ $0.isNumber })
             }
 

@@ -4,17 +4,15 @@ import TipKit
 
 struct MonthNavigationView: View {
     @Bindable var vm: BudgetViewModel
-    /// Par défaut : bascule immédiate, sans transition (comportement
-    /// historique). `BudgetView` les surcharge pour rejouer le MÊME glissé
-    /// que le swipe du calendrier — avant, seul le swipe était animé et les
-    /// flèches/le bouton "aujourd'hui" coupaient sec, moins fluide.
+    /// By default: an immediate switch, with no transition (the historical
+    /// behavior). `BudgetView` overrides these to replay the SAME slide
+    /// as the calendar's swipe — before, only the swipe was animated and the
+    /// arrows/the "Today" button cut sharply, less smooth.
     var onPrevious: () -> Void = {}
     var onNext: () -> Void = {}
     var onToday: () -> Void = {}
-    /// Tap sur le libellé mois/année — ouvre le sélecteur rapide (retour
-    /// d'usage : "faire de l'affichage du mois et de l'année ... des boutons
-    /// pour sélectionner le mois et l'année"). "Aujourd'hui" reste
-    /// accessible via son icône dédiée, séparée de ce tap.
+    /// Tapping the month/year label — opens the quick picker. "Today"
+    /// stays reachable via its own dedicated icon, separate from this tap.
     var onSelectMonthYear: () -> Void = {}
 
     private var cal: Calendar { .current }

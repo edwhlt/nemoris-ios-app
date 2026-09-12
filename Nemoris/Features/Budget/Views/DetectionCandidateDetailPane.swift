@@ -1,16 +1,16 @@
 import SwiftUI
 
-/// Détail en lecture seule d'un candidat détecté par `RecurringDetector` :
-/// justifie pourquoi les 4 critères (tiers/fréquence/montant/date) sont
-/// réunis, avec les valeurs réellement observées et les tolérances
-/// réellement utilisées par le moteur (jamais des nombres recopiés à la
-/// main — `RecurringDetector.amountTolerance`/`gapWindow`/`dateTolerance`
-/// sont la source unique, cf. RecurringDetector.swift).
+/// Read-only detail of a candidate detected by `RecurringDetector`:
+/// explains why the 4 criteria (payee/frequency/amount/date) are
+/// all met, with the actually observed values and the tolerances
+/// actually used by the engine (never numbers copied by
+/// hand — `RecurringDetector.amountTolerance`/`gapWindow`/`dateTolerance`
+/// are the single source, see RecurringDetector.swift).
 struct DetectionCandidateDetailPane: View {
     let candidate: DetectionCandidate
-    /// Motif déjà suivi correspondant à ce candidat (même payee/nom), s'il en
-    /// existe un — actif ou non. Non-nil ⇒ confirmer créerait un doublon, la
-    /// vue le signale au lieu de le permettre (cf. `DetectionCandidatePane`).
+    /// An already-tracked pattern matching this candidate (same payee/name), if
+    /// one exists — active or not. Non-nil ⇒ confirming would create a
+    /// duplicate, the view flags it instead of allowing it (see `DetectionCandidatePane`).
     var existingPattern: RecurringPattern? = nil
 
     private var gaps: [Int] {
@@ -133,14 +133,14 @@ struct DetectionCandidateDetailPane: View {
         .padding(.vertical, 2)
     }
 
-    // `LocalizedStringKey` (pas `String`) : construite par interpolation
-    // LITTÉRALE (comme `Text("était \(...)")` ailleurs dans l'app), la partie
-    // structurelle française devient une clé traduisible et les valeurs
-    // interpolées (listes de jours, libellés d'enum déjà en français) passent
-    // en argument — cf. CLAUDE.md §5. Les mots intégrés (noms de jours de la
-    // semaine, "fin de mois", "jour"/"jours") restent en français quel que
-    // soit le réglage de langue : les traduire recursivement dépasserait le
-    // périmètre de ce correctif.
+    // `LocalizedStringKey` (not `String`): built via a LITERAL interpolation
+    // (like `Text("était \(...)")` elsewhere in the app), the structural
+    // French part becomes a translatable key and the interpolated values
+    // (day lists, enum labels already in French) pass as
+    // arguments — see CLAUDE.md §5. The embedded words (weekday
+    // names, "end of month", "day"/"days") stay in French whatever
+    // the language setting: translating them recursively is out of
+    // scope for this fix.
     private var frequencyExplanation: LocalizedStringKey {
         let window = RecurringDetector.gapWindow(for: candidate.frequency)
         let gapList = gaps.map(String.init).joined(separator: ", ")

@@ -5,16 +5,16 @@ import TipKit
 struct PatternEditSheet: View {
     @Bindable var vm: BudgetViewModel
     let pattern: RecurringPattern?
-    /// Pré-remplissage optionnel pour une CRÉATION (pattern == nil) — utilisé
-    /// pour laisser l'utilisateur ajuster un candidat détecté (montant, jour,
-    /// catégorie…) avant de le valider, au lieu de ne pouvoir que l'accepter
-    /// tel quel. Ignoré si `pattern` n'est pas nil (édition d'un existant).
+    /// Optional pre-fill for a CREATION (pattern == nil) — used
+    /// to let the user adjust a detected candidate (amount, day,
+    /// category…) before confirming it, instead of only being able to accept it
+    /// as is. Ignored if `pattern` isn't nil (editing an existing one).
     var prefill: RecurringPattern? = nil
-    /// Appelé après une création réussie (pattern == nil) — permet à l'appelant
-    /// (ex: la liste de candidats détectés) de retirer l'élément d'origine.
+    /// Called after a successful creation (pattern == nil) — lets the caller
+    /// (e.g. the list of detected candidates) remove the original item.
     var onCreated: (() -> Void)? = nil
-    // paneDismiss (pas \.dismiss) : la vue est présentée via adaptivePane —
-    // sheet iOS OU panneau macOS, la fermeture est uniforme.
+    // paneDismiss (not \.dismiss): the view is presented via adaptivePane —
+    // an iOS sheet OR a macOS pane, dismissal is uniform either way.
     @Environment(\.paneDismiss) private var dismiss
 
     @State private var name = ""
@@ -28,7 +28,7 @@ struct PatternEditSheet: View {
     @State private var hasEndDate = false
     @State private var endDate = Date()
 
-    // Tiers chargés à l'ouverture pour le picker (lecture seule, pas via VM)
+    // Payees loaded on open for the picker (read-only, not via the VM)
     @State private var allTiers: [Tiers] = []
     @State private var showCategoryPicker = false
     @State private var showPayeePicker = false
@@ -38,27 +38,25 @@ struct PatternEditSheet: View {
                 Section("Informations") {
                     TextField("Nom (ex: Netflix, Loyer)", text: $name)
                     HStack {
-                        // `LabeledContent` plutôt qu'un `TextField` nu : sur
-                        // macOS, le titre d'un `TextField` devient un LABEL à
-                        // gauche plutôt qu'un placeholder DANS le champ
-                        // (contrairement à iOS) — le champ n'avait alors
-                        // aucun label visible sur macOS. Retour d'usage
-                        // 2026-08-28. Un placeholder "0,00" puis
-                        // `.textFieldStyle(.roundedBorder)` ont été essayés
-                        // pour rendre le champ plus visiblement "éditable",
-                        // puis retirés à la demande — le style natif
-                        // (sans bordure ni placeholder, cohérent avec le
-                        // reste du Form) reste préférable.
-                        // `.frame(minWidth:)` toujours nécessaire sur le
-                        // conteneur : sans lui, cette ligne partage l'espace
-                        // avec un Picker segmenté à largeur fixe (160pt) — sur
-                        // macOS, l'un des deux se fait écraser à une largeur
-                        // quasi nulle (invisible, non cliquable) au lieu de se
-                        // répartir l'espace comme sur iOS. Retour d'usage
-                        // 2026-08-19 : le champ montant disparaissait,
-                        // rendant le formulaire impossible à valider
-                        // (confirmDisabled restait vrai puisque le champ,
-                        // invisible, ne pouvait jamais être rempli).
+                        // `LabeledContent` rather than a bare `TextField`: on
+                        // macOS, a `TextField`'s title becomes a LABEL on the
+                        // left rather than a placeholder INSIDE the field
+                        // (unlike on iOS) — the field then had
+                        // no visible label on macOS. A "0.00" placeholder then
+                        // `.textFieldStyle(.roundedBorder)` were tried
+                        // to make the field look more visibly "editable",
+                        // then removed on request — the native style
+                        // (no border or placeholder, consistent with
+                        // the rest of the Form) remains preferable.
+                        // `.frame(minWidth:)` is still needed on the
+                        // container: without it, this row shares space
+                        // with a fixed-width (160pt) segmented Picker — on
+                        // macOS, one of the two gets squeezed to
+                        // near-zero width (invisible, unclickable) instead of
+                        // splitting the space as on iOS. The amount field
+                        // used to disappear, making the form impossible to submit
+                        // (confirmDisabled stayed true since the field,
+                        // invisible, could never be filled in).
                         LabeledContent("Montant") {
                             TextField("", text: $amount)
                                 .keyboardType(.decimalPad)
@@ -102,8 +100,8 @@ struct PatternEditSheet: View {
                         }
                     }
                 }
-                // Le tier associé pré-remplit le picker quand la transaction matchée arrive,
-                // et permet à l'auto-matching de cibler ce tier en priorité (TransactionMatcher).
+                // The associated payee pre-fills the picker when the matched transaction arrives,
+                // and lets auto-matching target that payee as a priority (TransactionMatcher).
                 Section {
                     Button {
                         showPayeePicker = true
@@ -150,8 +148,8 @@ struct PatternEditSheet: View {
     }
 
     private func populateFields() {
-        // Un pattern existant (édition) prime sur le pré-remplissage d'un
-        // candidat détecté — les deux ne sont jamais fournis en même temps.
+        // An existing pattern (editing) takes priority over pre-filling from a
+        // detected candidate — the two are never provided at the same time.
         guard let p = pattern ?? prefill else { return }
         name = p.name
         amount = String(format: "%.2f", p.displayAmount)
@@ -179,9 +177,9 @@ struct PatternEditSheet: View {
             )
             vm.updatePattern(updated)
         } else {
-            // isManual reflète l'origine réelle : "détecté" si on part d'un
-            // candidat (même ajusté), "saisi manuellement" sinon — cohérent
-            // avec le champ "Origine" affiché dans PatternDetailPane.
+            // isManual reflects the real origin: "detected" if starting from a
+            // candidate (even adjusted), "entered manually" otherwise — consistent
+            // with the "Origin" field shown in PatternDetailPane.
             let new = RecurringPattern(
                 id: 0, name: name, amountAvg: signed, amountTolerance: 0.15,
                 categoryId: categoryId, payeeId: payeeId, frequency: frequency,

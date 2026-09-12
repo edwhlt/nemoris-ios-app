@@ -1,35 +1,35 @@
 import Foundation
 import UserNotifications
 
-/// planifie/annule les rappels "Échéance budget dans 3 jours".
+/// schedules/cancels "Budget due date in 3 days" reminders.
 ///
-/// Permission demandée *lazy* (uniquement au premier scheduling, pas au launch),
-/// conformément à la convention CLAUDE.md §6.7. Si l'utilisateur refuse, no-op silencieux.
+/// Permission requested *lazily* (only on the first scheduling, not at launch),
+/// per the CLAUDE.md §6.7 convention. If the user refuses, a silent no-op.
 ///
-/// Architecture :
-///   - 1 notification par prévision PENDING dont `expectedDate - 3 jours >= maintenant`.
-///   - Identifier : `budget_prevision_<id>` → permet de cancel quand l'utilisateur skip/match.
-///   - Trigger : `UNCalendarNotificationTrigger` daté pour le j-3 à 9h00 locale.
-///   - Idempotent : `removePendingNotificationRequests` avant chaque add (re-schedule safe).
+/// Architecture:
+///   - 1 notification per PENDING prevision where `expectedDate - 3 days >= now`.
+///   - Identifier: `budget_prevision_<id>` → lets it be canceled when the user skips/matches.
+///   - Trigger: `UNCalendarNotificationTrigger` dated for j-3 at 9:00 AM local time.
+///   - Idempotent: `removePendingNotificationRequests` before every add (safe to re-schedule).
 ///
-/// Hooks ViewModel :
-///   - Après `regeneratePrevisions(for:)` → `rescheduleForPattern(...)`
+/// ViewModel hooks:
+///   - After `regeneratePrevisions(for:)` → `rescheduleForPattern(...)`
 ///   - `skipPrevision` / `matchPrevision` → `cancel(forPrevisionId:)`
 ///   - `deletePattern` → `cancelAll(forPatternId:)`
-///   - `togglePattern` désactivé → `cancelAll(forPatternId:)`
+///   - `togglePattern` disabled → `cancelAll(forPatternId:)`
 enum BudgetNotificationService {
 
-    /// Heure du j-3 à laquelle on déclenche la notif (locale appareil).
+    /// Time of day at j-3 when the notification fires (device local time).
     static let notifyHour = 9
     static let notifyMinute = 0
 
-    /// Décalage avant l'échéance (en jours). 3 = j-3.
+    /// Offset before the due date (in days). 3 = j-3.
     static let leadDays = 3
 
     // MARK: - Permission
 
-    /// Demande la permission notifications si pas encore décidée.
-    /// Retourne `true` si autorisée (in fine), `false` sinon.
+    /// Requests notification permission if not yet decided.
+    /// Returns `true` if authorized (in the end), `false` otherwise.
     @discardableResult
     static func requestPermissionIfNeeded() async -> Bool {
         let center = UNUserNotificationCenter.current()
@@ -53,21 +53,21 @@ enum BudgetNotificationService {
 
     // MARK: - Schedule
 
-    /// Planifie le rappel j-3 pour une prévision PENDING.
-    /// No-op si :
+    /// Schedules the j-3 reminder for a PENDING prevision.
+    /// A no-op if:
     ///   - status != .pending
-    ///   - j-3 est déjà passé (expectedDate trop proche ou dans le passé)
-    ///   - permission refusée
+    ///   - j-3 has already passed (expectedDate too close or in the past)
+    ///   - permission was refused
     static func schedule(for prevision: BudgetPrevision, patternName: String) async {
         guard prevision.status == .pending else { return }
 
         let cal = Calendar.current
         guard let triggerDate = cal.date(byAdding: .day, value: -leadDays, to: prevision.expectedDate) else { return }
-        guard triggerDate > Date() else { return } // j-3 déjà passé
+        guard triggerDate > Date() else { return } // j-3 already past
 
         guard await requestPermissionIfNeeded() else { return }
 
-        // Idempotent : remove ancien avant re-add
+        // Idempotent: remove the old one before re-adding
         cancel(forPrevisionId: prevision.id)
 
         var dateComps = cal.dateComponents([.year, .month, .day], from: triggerDate)
@@ -91,8 +91,8 @@ enum BudgetNotificationService {
         }
     }
 
-    /// Re-schedule en masse pour toutes les prévisions PENDING d'un pattern.
-    /// À appeler après `BudgetRepository.regeneratePrevisions(for:)` côté ViewModel.
+    /// Bulk re-schedule for every PENDING prevision of a pattern.
+    /// Call after `BudgetRepository.regeneratePrevisions(for:)` on the ViewModel side.
     static func rescheduleForPattern(patternId: Int, patternName: String, previsions: [BudgetPrevision]) async {
         let relevant = previsions.filter { $0.recurringPatternId == patternId && $0.status == .pending }
         for prev in relevant {
@@ -102,13 +102,13 @@ enum BudgetNotificationService {
 
     // MARK: - Cancel
 
-    /// Annule la notif d'une prévision (à appeler sur skip / match / delete).
+    /// Cancels a prevision's notification (call on skip / match / delete).
     static func cancel(forPrevisionId id: Int) {
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(withIdentifiers: [identifier(for: id)])
     }
 
-    /// Annule toutes les notifs d'un pattern (delete ou désactivation).
+    /// Cancels every notification of a pattern (delete or disabling).
     static func cancelAll(forPatternId patternId: Int, previsions: [BudgetPrevision]) {
         let ids = previsions
             .filter { $0.recurringPatternId == patternId }
@@ -125,8 +125,8 @@ enum BudgetNotificationService {
 
     private static func formatAmount(_ amount: Double) -> String {
         let f = NumberFormatter()
-        // Service statique, pas d'accès à l'environnement SwiftUI — AppLocalization
-        // relit la même préférence de langue directement depuis UserDefaults.
+        // A static service, no access to the SwiftUI environment — AppLocalization
+        // re-reads the same language preference directly from UserDefaults.
         f.locale = AppLocalization.locale
         f.numberStyle = .currency
         f.currencyCode = "EUR"
