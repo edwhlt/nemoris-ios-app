@@ -2,8 +2,8 @@ import SwiftUI
 import TipKit
 
 /// Draft state for creating/editing a Compte/Catégorie from `ReferenceDataView`.
-/// (Les Tiers ont leur propre fiche riche, `PayeeDetailView` — cf. commentaire
-/// de `ReferenceEditFormPane` plus bas.)
+/// (Payees have their own rich form, `PayeeDetailView` — see the
+/// `ReferenceEditFormPane` comment below.)
 struct ReferenceEditDraft {
     var name = ""
     var parentCategoryId: Int? = nil
@@ -13,34 +13,33 @@ struct ReferenceEditDraft {
     var excludedFromAggregates: Bool = false
 }
 
-/// Formulaire d'ajout/édition Compte/Catégorie, extrait de `ReferenceDataView`
-/// en un View DÉDIÉ portant son PROPRE `@State`.
+/// Add/edit form for Compte/Catégorie, extracted from `ReferenceDataView`
+/// into a DEDICATED View carrying its OWN `@State`.
 ///
-/// ⚠️ Pourquoi cette extraction est nécessaire (pas juste "plus propre") : sur
-/// macOS, `.adaptivePane(isPresented:)` hébergé au niveau racine (inspecteur,
-/// cf. `AdaptivePane.swift`) construit son contenu en appelant le closure
-/// `paneContent()` UNE SEULE FOIS (`presentPane`), puis fige le résultat dans un
-/// `AnyView`. Tout ce qui était calculé INLINE dans ce closure à partir d'un
-/// `@State` du view APPELANT (ex. `editDraftName` sur `ReferenceDataView`) restait
-/// donc gelé à sa valeur au moment de l'OUVERTURE du panneau —
-/// `confirmDisabled: editDraftName.isEmpty` restait bloqué à `true` (nom vide au
-/// moment d'« Ajouter ») même après avoir tapé un nom, car rien ne rappelait
-/// jamais ce closure. Le bouton « Enregistrer » semblait mort (retour user,
-/// 2026-08-18).
+/// ⚠️ Why this extraction is necessary (not just "cleaner"): on
+/// macOS, an `.adaptivePane(isPresented:)` hosted at the root level (the
+/// inspector, see `AdaptivePane.swift`) builds its content by calling the
+/// `paneContent()` closure EXACTLY ONCE (`presentPane`), then freezes the result in an
+/// `AnyView`. Anything computed INLINE in that closure from a
+/// CALLING view's `@State` (e.g. `editDraftName` on `ReferenceDataView`) therefore
+/// stayed frozen at its value at the moment the pane OPENED —
+/// `confirmDisabled: editDraftName.isEmpty` stayed stuck at `true` (an empty name at
+/// the moment "Add" was tapped) even after typing a name, because nothing ever
+/// called that closure again. The "Save" button looked dead.
 ///
-/// Un `@State` DÉCLARÉ SUR CE VIEW, en revanche, continue de déclencher un
-/// ré-affichage de CE view (donc de `confirmDisabled`) à chaque frappe — SwiftUI
-/// suit l'identité/le state d'un enfant indépendamment du fait que le parent qui
-/// l'a construit soit lui-même figé. Règle à retenir : tout `.paneChrome`/
-/// `confirmDisabled` dynamique hébergé en panneau racine macOS doit vivre dans un
-/// View dédié avec son PROPRE `@State`, jamais dans une closure inline qui lit le
-/// `@State` du parent.
+/// A `@State` DECLARED ON THIS VIEW, on the other hand, keeps triggering a
+/// re-render of THIS view (so of `confirmDisabled`) on every keystroke — SwiftUI
+/// tracks a child's identity/state independently of whether the parent that
+/// built it is itself frozen. Rule of thumb: any dynamic `.paneChrome`/
+/// `confirmDisabled` hosted in a macOS root pane must live in a dedicated
+/// View with its OWN `@State`, never in an inline closure reading the
+/// parent's `@State`.
 ///
-/// ⚠️ Ne gère PLUS les Tiers (retour user 2026-08-19 : la création d'un tiers
-/// doit exposer les MÊMES champs riches qu'à l'édition — localisation, groupe,
-/// type, note… — pas un form minimal nom/regex/catégorie à compléter après
-/// coup). `ReferenceDataView.startAdd()` route désormais directement vers
-/// `PayeeDetailView(payee: nil, …)` pour `selectedTab == .tiers`.
+/// ⚠️ No longer handles Payees (creating a payee must expose the SAME
+/// rich fields as when editing — location, group,
+/// type, note… — not a minimal name/regex/category form to fill in
+/// afterward). `ReferenceDataView.startAdd()` now routes directly to
+/// `PayeeDetailView(payee: nil, …)` for `selectedTab == .tiers`.
 struct ReferenceEditFormPane: View {
     let kind: ReferenceDataView.ReferenceTab
     let editItemId: Int?
@@ -67,8 +66,8 @@ struct ReferenceEditFormPane: View {
         _draft = State(initialValue: initial)
     }
 
-    /// Icône à afficher dans la preview : reflète l'icône RÉELLEMENT utilisée à
-    /// l'affichage (custom si définie, sinon fallback auto sur le nom).
+    /// Icon to show in the preview: reflects the icon ACTUALLY used for
+    /// display (custom if set, otherwise the automatic fallback on the name).
     private var previewCategoryIcon: String {
         Category(id: editItemId ?? 0, name: draft.name, parentId: draft.parentCategoryId, icon: draft.icon).displayIcon
     }
@@ -101,7 +100,7 @@ struct ReferenceEditFormPane: View {
                         .listRowBackground(Color.clear)
                 }
                 Section("Catégorie parente") {
-                    // Seules les racines (sans parent) peuvent être choisies comme parent
+                    // Only roots (with no parent) can be chosen as a parent
                     let roots = categories.filter { $0.parentId == nil && $0.id != editItemId }
                     Picker("Parent", selection: $draft.parentCategoryId) {
                         Text("Aucun (catégorie racine)").tag(Int?.none)
@@ -120,8 +119,8 @@ struct ReferenceEditFormPane: View {
                                 Circle()
                                     .fill(AppTheme.Colors.accent.opacity(0.15))
                                     .frame(width: 32, height: 32)
-                                // Affiche l'icône RÉELLEMENT utilisée — soit celle stockée,
-                                // soit le fallback auto calculé sur le nom.
+                                // Shows the icon ACTUALLY used — either the stored one,
+                                // or the automatic fallback computed from the name.
                                 Image(systemName: previewCategoryIcon)
                                     .font(.system(size: 15, weight: .semibold))
                                     .foregroundStyle(AppTheme.Colors.accent)

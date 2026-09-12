@@ -1,15 +1,15 @@
 import SwiftUI
 
-/// Sheet de conversation avec l'assistant SQL.
-/// Multi-tours : chaque question raffine la requête précédente (l'IA garde le contexte).
-/// Pour chaque réponse contenant un bloc SQL, 2 boutons :
-///   - "Utiliser cette requête" → colle dans l'éditeur parent et dismiss
-///   - "Tester maintenant" → exécute la requête et affiche le résultat tronqué inline
+/// Conversation sheet with the SQL assistant.
+/// Multi-turn: each question refines the previous query (the AI keeps context).
+/// For every response containing an SQL block, 2 buttons:
+///   - "Use this query" → pastes it into the parent editor and dismisses
+///   - "Test now" → runs the query and shows the truncated result inline
 struct SQLAssistantSheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.locale) private var locale
-    /// Callback appelé quand l'utilisateur confirme "Utiliser cette requête" — après
-    /// avoir éventuellement ajusté le titre suggéré dans l'alerte de confirmation.
+    /// Callback called when the user confirms "Use this query" — after
+    /// possibly adjusting the suggested title in the confirmation alert.
     let onApply: (_ title: String, _ sql: String) -> Void
 
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
@@ -18,14 +18,14 @@ struct SQLAssistantSheet: View {
     @State private var messages: [ChatMessage] = []
     @State private var inputText: String = ""
     @State private var isThinking = false
-    /// SQL en attente de confirmation de titre (déclenché par "Utiliser cette
-    /// requête"). Non-nil ⇒ l'alerte de titre est présentée.
+    /// SQL awaiting title confirmation (triggered by "Use this
+    /// query"). Non-nil ⇒ the title alert is presented.
     @State private var pendingApplySQL: String? = nil
     @State private var titleInput: String = ""
-    /// Instruction bloquée (modification de SCHÉMA) proposée par l'IA — jamais
-    /// exécutée par "Tester", cf. `SQLStatementGuard`.
+    /// A blocked instruction (a SCHEMA change) proposed by the AI — never
+    /// run by "Test", see `SQLStatementGuard`.
     @State private var blockedTestStatement: SQLStatementClassification? = nil
-    /// Requête en attente de confirmation (modification de DONNÉES) avant "Tester".
+    /// A query awaiting confirmation (a DATA change) before "Test".
     @State private var pendingTestConfirmation: (sql: String, messageId: UUID, summary: SQLStatementClassification)? = nil
     @State private var testBackupFailure: (sql: String, messageId: UUID, message: String)? = nil
 
@@ -36,7 +36,7 @@ struct SQLAssistantSheet: View {
         let id = UUID()
         let role: Role
         var text: String
-        /// Résultat d'un "Tester maintenant" si l'utilisateur l'a déclenché.
+        /// Result of a "Test now" if the user triggered it.
         var inlineResult: InlineResult? = nil
     }
     struct InlineResult {
@@ -346,11 +346,11 @@ struct SQLAssistantSheet: View {
             TextField("Décrivez votre requête…", text: $inputText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...4)
-                // Le champ étant multi-ligne (axis: .vertical), Retour insère un
-                // saut de ligne — comportement conservé. macOS dessine par défaut
-                // un anneau de focus SYSTÈME par-dessus le fond custom arrondi
-                // ci-dessous, qui jure visuellement ; désactivé pour ne garder que
-                // ce fond comme indicateur de focus (iOS : no-op).
+                // Since the field is multi-line (axis: .vertical), Return inserts a
+                // line break — behavior kept as-is. macOS by default draws a
+                // SYSTEM focus ring on top of the rounded custom background
+                // below, which clashes visually; disabled so this
+                // background is the only focus indicator (iOS: a no-op).
                 .focusEffectDisabled()
                 .padding(.horizontal, AppTheme.Spacing.md)
                 .padding(.vertical, AppTheme.Spacing.sm)
@@ -364,8 +364,8 @@ struct SQLAssistantSheet: View {
                     .foregroundStyle(canSend ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary.opacity(0.4))
             }
             .disabled(!canSend)
-            // ⌘Retour envoie, en plus du tap — convention macOS standard pour un
-            // champ de texte multi-ligne où Retour seul reste un saut de ligne.
+            // ⌘Return sends, in addition to tapping — the standard macOS convention
+            // for a multi-line text field where Return alone stays a line break.
             .keyboardShortcut(.return, modifiers: [.command])
             .localizedHelp("Envoyer (⌘Retour)")
         }
@@ -394,8 +394,8 @@ struct SQLAssistantSheet: View {
         }
     }
 
-    /// "Tester" exécute pour de vrai sur la base live (ce n'est pas un dry-run) —
-    /// même garde-fou que la Console SQL avant d'y toucher (`SQLStatementGuard`).
+    /// "Test" runs for real against the live database (it isn't a dry run) —
+    /// same safety net as the SQL Console before touching it (`SQLStatementGuard`).
     private func testQuery(_ sql: String, in messageId: UUID) {
         let classification = SQLStatementGuard.classify(sql)
         if classification.kind.isBlockedBySchemaGuard {
@@ -444,9 +444,9 @@ struct SQLAssistantSheet: View {
         }
     }
 
-    /// Dérive un titre par défaut depuis la question de l'utilisateur qui a produit
-    /// cette réponse — déjà en langage naturel, donc un bon point de départ pour
-    /// l'en-tête `-- titre --` de la section SQL insérée dans le fichier.
+    /// Derives a default title from the user's question that produced
+    /// this response — already in natural language, so a good starting point for
+    /// the `-- title --` header of the SQL section inserted into the file.
     private func suggestedTitle(for messageId: UUID) -> String {
         guard let idx = messages.firstIndex(where: { $0.id == messageId }), idx > 0,
               messages[idx - 1].role == .user else { return "" }
@@ -482,7 +482,7 @@ struct SQLAssistantSheet: View {
 
     // MARK: - Parsing helpers
 
-    /// Extrait le bloc ```sql ... ``` (ou ``` ... ``` générique) et le reste comme prose.
+    /// Extracts the ```sql ... ``` block (or a generic ``` ... ```) and keeps the rest as prose.
     private func parseAssistantResponse(_ text: String) -> (prose: String, sql: String?) {
         let pattern = "```(?:sql)?\\s*([\\s\\S]*?)```"
         guard let re = try? NSRegularExpression(pattern: pattern, options: []) else {

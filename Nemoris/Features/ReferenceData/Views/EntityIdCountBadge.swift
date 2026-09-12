@@ -12,10 +12,10 @@ struct EntityIdCountBadge: View {
                 .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.55))
                 .localizedAccessibilityLabel("Identifiant \(id)")
 
-            // Pas de fond en pilule : c'est une info secondaire (comme l'id
-            // juste à côté), pas une action — un badge rempli à côté d'un
-            // checkmark/chevron se lit comme un bouton de plus dans une
-            // rangée déjà chargée. Cf. retour d'usage 2026-08-18.
+            // No pill background: this is secondary info (like the id
+            // right next to it), not an action — a filled badge next to a
+            // checkmark/chevron reads as one more button in an already
+            // busy row.
             HStack(spacing: 3) {
                 Image(systemName: "arrow.left.arrow.right")
                     .font(.system(size: 8, weight: .semibold))

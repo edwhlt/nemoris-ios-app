@@ -8,8 +8,8 @@ import TipKit
 // MARK: - Syntax Highlighting Editor
 
 #if os(macOS)
-/// Version macOS : NSTextView dans son scroll view. Même highlight partagé
-/// que la version iOS (UIFont/UIColor → NSFont/NSColor via PlatformShims).
+/// macOS version: an NSTextView in its scroll view. Same shared highlighting
+/// as the iOS version (UIFont/UIColor → NSFont/NSColor via PlatformShims).
 struct SyntaxHighlightingEditor: NSViewRepresentable {
     @Binding var text: String
 
@@ -93,7 +93,7 @@ struct SyntaxHighlightingEditor: UIViewRepresentable {
 }
 #endif
 
-/// Highlight SQL partagé iOS/macOS (UIFont/UIColor typealiasés côté Mac).
+/// SQL highlighting shared between iOS/macOS (UIFont/UIColor typealiased on Mac).
 private func sqlHighlight(_ text: String) -> NSAttributedString {
         let attr = NSMutableAttributedString(string: text)
         let full = NSRange(location: 0, length: (text as NSString).length)
@@ -138,17 +138,17 @@ private func sqlHighlight(_ text: String) -> NSAttributedString {
 
 // MARK: - Variable Form
 //
-// Syntaxe des tokens : {{nom}} | {{nom:type}} | {{nom:type=défaut}} | {{nom=défaut}}.
-// Un {{nom}} nu (sans ":") reste traité comme .text — les .sql déjà sauvegardés
-// avec leurs propres guillemets autour de {{x}} continuent de marcher à l'identique.
+// Token syntax: {{name}} | {{name:type}} | {{name:type=default}} | {{name=default}}.
+// A bare {{name}} (no ":") is still treated as .text — .sql files already saved
+// with their own quotes around {{x}} keep working identically.
 
-/// Type déclaré pour une variable. `.text` est le défaut si omis.
+/// Declared type for a variable. `.text` is the default if omitted.
 enum SQLVariableType: String {
-    case text     // chaîne libre — substituée entre guillemets SQL (échappés)
-    case number   // nombre — substitué tel quel, sans guillemets
-    case year     // année 4 chiffres — clavier numérique ; substituée ENTRE GUILLEMETS
-                  // car comparée à strftime('%Y', ...), qui renvoie du texte, jamais un entier
-    case date     // date — DatePicker natif ; substituée en 'yyyy-MM-dd'
+    case text     // a free-form string — substituted inside SQL quotes (escaped)
+    case number   // a number — substituted as-is, no quotes
+    case year     // a 4-digit year — numeric keyboard; substituted INSIDE QUOTES
+                  // because it's compared against strftime('%Y', ...), which returns text, never an integer
+    case date     // a date — native DatePicker; substituted as 'yyyy-MM-dd'
 }
 
 struct SQLVariableSpec: Identifiable, Hashable {
@@ -158,13 +158,13 @@ struct SQLVariableSpec: Identifiable, Hashable {
     var id: String { name }
 }
 
-/// Grammaire des tokens `{{...}}`, centralisée pour que la détection
-/// (formulaire), le pré-remplissage et la substitution (exécution) ne
-/// puissent jamais diverger entre eux.
+/// Grammar for `{{...}}` tokens, centralized so that detection
+/// (the form), pre-filling, and substitution (execution) can never
+/// diverge from one another.
 enum SQLVariableParsing {
     private static let tokenRegex = try? NSRegularExpression(pattern: "\\{\\{([^}]+)\\}\\}")
 
-    /// Parse le contenu d'un seul token (le texte déjà extrait des `{{ }}`).
+    /// Parses a single token's content (the text already extracted from `{{ }}`).
     static func parse(_ raw: String) -> SQLVariableSpec {
         var namePart = raw
         var defaultValue: String?
@@ -184,9 +184,9 @@ enum SQLVariableParsing {
         return SQLVariableSpec(name: name, type: type, defaultValue: defaultValue)
     }
 
-    /// Variables détectées dans un texte SQL, dédupliquées par nom (garde la
-    /// première occurrence si le même nom est annoté différemment ailleurs —
-    /// cas limite, mais le champ du formulaire doit rester unique par nom).
+    /// Variables detected in an SQL text, deduplicated by name (keeps the
+    /// first occurrence if the same name is annotated differently elsewhere —
+    /// an edge case, but the form field must stay unique per name).
     static func extract(from sql: String) -> [SQLVariableSpec] {
         guard let re = tokenRegex else { return [] }
         let range = NSRange(sql.startIndex..., in: sql)
@@ -200,10 +200,10 @@ enum SQLVariableParsing {
         return result
     }
 
-    /// Encode une valeur brute tapée par l'utilisateur en littéral SQL selon le type
-    /// déclaré. Seul `.number` reste non guillemété — tout le reste (y compris
-    /// `.year`) est quoté et échappé pour être un littéral SQL valide sans que
-    /// l'utilisateur ait à retaper ses propres guillemets dans le corps de la requête.
+    /// Encodes a raw value typed by the user into an SQL literal according to the
+    /// declared type. Only `.number` stays unquoted — everything else (including
+    /// `.year`) is quoted and escaped to be a valid SQL literal without the
+    /// user having to type their own quotes in the query body.
     static func sqlLiteral(_ rawValue: String, type: SQLVariableType) -> String {
         switch type {
         case .number:
@@ -214,10 +214,10 @@ enum SQLVariableParsing {
         }
     }
 
-    /// Substitue chaque `{{...}}` par son littéral SQL. Reparse CHAQUE
-    /// occurrence indépendamment (plutôt qu'un remplacement nom→texte global)
-    /// pour rester correct même si un même nom apparaît avec des annotations
-    /// différentes à plusieurs endroits du fichier.
+    /// Substitutes each `{{...}}` with its SQL literal. Re-parses EACH
+    /// occurrence independently (rather than a global name→text replacement)
+    /// to stay correct even if the same name appears with different
+    /// annotations in several places in the file.
     static func substitute(_ sql: String, values: [String: String]) -> String {
         guard let re = tokenRegex else { return sql }
         let ns = sql as NSString
@@ -331,9 +331,9 @@ enum SQLConsoleHelper {
         let hasAccess = pickerURL.startAccessingSecurityScopedResource()
         defer { if hasAccess { pickerURL.stopAccessingSecurityScopedResource() } }
         #if os(macOS)
-        // Sous App Sandbox, une bookmark créée sans .withSecurityScope se résout
-        // en URL "plate" — startAccessingSecurityScopedResource() échoue au
-        // prochain lancement et l'accès au dossier est silencieusement perdu.
+        // Under App Sandbox, a bookmark created without .withSecurityScope resolves
+        // to a "plain" URL — startAccessingSecurityScopedResource() fails on
+        // the next launch and access to the folder is silently lost.
         let data = try pickerURL.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
         #else
         let data = try pickerURL.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
@@ -383,7 +383,7 @@ enum SQLConsoleHelper {
 
     // MARK: - Hierarchical browsing (folders + files)
 
-    /// Une entrée dans le browser SQL : soit un dossier, soit un fichier .sql.
+    /// An entry in the SQL browser: either a folder or a .sql file.
     enum Entry: Identifiable, Hashable {
         case folder(URL)
         case file(URL)
@@ -413,8 +413,8 @@ enum SQLConsoleHelper {
         }
     }
 
-    /// Liste les entrées d'un répertoire. `nil` = racine (`sqlDirectory()`).
-    /// Dossiers en premier (triés alpha), puis fichiers .sql (triés alpha).
+    /// Lists a directory's entries. `nil` = root (`sqlDirectory()`).
+    /// Folders first (alpha-sorted), then .sql files (alpha-sorted).
     static func listEntries(in directory: URL?) -> [Entry] {
         let dir = directory ?? sqlDirectory()
         let urls = (try? FileManager.default.contentsOfDirectory(
@@ -438,19 +438,19 @@ enum SQLConsoleHelper {
         return folders.map { .folder($0) } + files.map { .file($0) }
     }
 
-    /// Nœud de l'arborescence du browser. Chargement EAGER récursif — le
-    /// répertoire SQL de l'utilisateur est petit (quelques dizaines d'entrées),
-    /// le coût d'un scan complet est négligeable devant la simplicité gagnée.
+    /// A node in the browser's tree. Loaded EAGERLY and recursively — the
+    /// user's SQL directory is small (a few dozen entries), so the cost of a
+    /// full scan is negligible next to the simplicity it buys.
     struct TreeNode: Identifiable {
         let entry: Entry
         let depth: Int
         var children: [TreeNode]
-        var id: String { entry.id }   // = url.path : clé stable pour le Set d'expansion
+        var id: String { entry.id }   // = url.path: a stable key for the expansion Set
     }
 
-    /// Construit l'arborescence complète depuis la racine (ou `root`).
-    /// S'appuie sur `listEntries(in:)` à chaque niveau — l'ordre « dossiers
-    /// d'abord, tri alpha » est donc conservé à chaque profondeur.
+    /// Builds the full tree from the root (or `root`).
+    /// Relies on `listEntries(in:)` at every level — the "folders
+    /// first, alpha sort" order is therefore preserved at every depth.
     static func buildTree(rootedAt root: URL? = nil, depth: Int = 0) -> [TreeNode] {
         listEntries(in: root ?? sqlDirectory()).map { entry in
             TreeNode(
@@ -461,8 +461,8 @@ enum SQLConsoleHelper {
         }
     }
 
-    /// Tous les dossiers récursivement, racine incluse. Utilisé par le picker "Déplacer vers…".
-    /// Renvoie des paires (label affichable avec indentation, URL).
+    /// Every folder recursively, root included. Used by the "Move to…" picker.
+    /// Returns pairs (a displayable, indented label, and a URL).
     static func listAllFoldersRecursive(rootedAt root: URL? = nil, depth: Int = 0) -> [(label: String, url: URL)] {
         let dir = root ?? sqlDirectory()
         var result: [(String, URL)] = []
@@ -476,8 +476,8 @@ enum SQLConsoleHelper {
         return result
     }
 
-    /// Crée un fichier .sql vide dans `directory` (ou la racine si nil).
-    /// Renvoie l'URL du fichier créé, ou nil en cas d'échec / collision.
+    /// Creates an empty .sql file in `directory` (or the root if nil).
+    /// Returns the created file's URL, or nil on failure / a name collision.
     @discardableResult
     static func createFile(name: String, in directory: URL?) -> URL? {
         let dir = directory ?? sqlDirectory()
@@ -490,7 +490,7 @@ enum SQLConsoleHelper {
         return url
     }
 
-    /// Crée un sous-dossier dans `directory` (ou la racine si nil).
+    /// Creates a subfolder in `directory` (or the root if nil).
     @discardableResult
     static func createFolder(name: String, in directory: URL?) -> URL? {
         let dir = directory ?? sqlDirectory()
@@ -506,8 +506,8 @@ enum SQLConsoleHelper {
         }
     }
 
-    /// Renomme un fichier ou un dossier. Pour un fichier .sql, l'extension est
-    /// re-ajoutée automatiquement si absente du nouveau nom.
+    /// Renames a file or a folder. For a .sql file, the extension is
+    /// re-added automatically if missing from the new name.
     @discardableResult
     static func rename(_ url: URL, to newName: String) -> URL? {
         let cleaned = newName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -526,7 +526,7 @@ enum SQLConsoleHelper {
         }
     }
 
-    /// Déplace `url` à l'intérieur du dossier `destinationFolder` (en gardant son nom).
+    /// Moves `url` into the `destinationFolder` folder (keeping its name).
     @discardableResult
     static func move(_ url: URL, toFolder destinationFolder: URL) -> URL? {
         let target = destinationFolder.appendingPathComponent(url.lastPathComponent)
@@ -540,7 +540,7 @@ enum SQLConsoleHelper {
         }
     }
 
-    /// Supprime un fichier ou un dossier (récursif).
+    /// Deletes a file or a folder (recursively).
     @discardableResult
     static func delete(_ url: URL) -> Bool {
         do {
@@ -564,33 +564,33 @@ struct SQLQuerySection: Identifiable {
 
 // MARK: - Chart detection (heuristic)
 
-/// Détecte si un résultat a une forme "graphable" : EXACTEMENT une colonne
-/// label + 1 à 4 colonnes numériques. Volontairement conservateur — pas de
-/// tentative de tout visualiser, seulement le cas le plus courant d'une
-/// requête d'agrégat (GROUP BY + SUM/COUNT/AVG), qui couvre la plupart des
-/// recettes de `DatabaseSchemaView` (total par catégorie, évolution par mois,
-/// répartition par métadonnée…). Un résultat qui ne matche pas reste un
-/// tableau, sans message d'erreur — c'est un bonus, pas une fonctionnalité
-/// qui peut "rater".
+/// Detects whether a result has a "chartable" shape: EXACTLY one label
+/// column + 1 to 4 numeric columns. Deliberately conservative — no
+/// attempt to visualize everything, just the most common case of an
+/// aggregate query (GROUP BY + SUM/COUNT/AVG), which covers most of
+/// `DatabaseSchemaView`'s recipes (total per category, evolution per month,
+/// breakdown per metadata field…). A result that doesn't match stays a
+/// table, with no error message — it's a bonus, not a feature that
+/// can "fail".
 struct SQLResultChartPlan {
     let labelIndex: Int
     let seriesIndices: [Int]
-    /// Ligne (LineMark) si le label ressemble à une date/mois (« 2026-01 »,
-    /// « 2026-01-15 ») — sinon barres (BarMark) pour une répartition catégorielle.
+    /// A line (LineMark) if the label looks like a date/month ("2026-01",
+    /// "2026-01-15") — otherwise bars (BarMark) for a categorical breakdown.
     let isTimeSeries: Bool
 
     static func detect(from result: SQLQueryResult) -> SQLResultChartPlan? {
-        // Cap de lignes : au-delà, un bar chart devient illisible et une requête
-        // de ce volume n'est presque jamais la forme "1 label + N numériques"
-        // qu'on cible ici (elle a déjà échoué la règle des colonnes en pratique).
+        // Row cap: beyond that, a bar chart becomes unreadable and a query
+        // of that size is almost never the "1 label + N numerics" shape
+        // targeted here (it would already have failed the column rule in practice).
         guard !result.rows.isEmpty, result.columns.count >= 2, result.rows.count <= 60 else { return nil }
 
         var labelIndices: [Int] = []
         var numericIndices: [Int] = []
         for (idx, name) in result.columns.enumerated() {
-            // Les colonnes d'identifiant (id, foo_id) sont numériques mais ne
-            // portent aucune magnitude à représenter — ce sont des clés, pas
-            // des grandeurs. Les ignorer évite un bar chart de "id" absurde.
+            // Identifier columns (id, foo_id) are numeric but carry no
+            // magnitude worth representing — they're keys, not
+            // quantities. Ignoring them avoids an absurd bar chart of "id".
             let lower = name.lowercased()
             if lower == "id" || lower.hasSuffix("_id") { continue }
 
@@ -621,26 +621,27 @@ enum SQLResultViewMode {
 struct SQLFilesListView: View {
 
     @Environment(PurchaseManager.self) private var store
-    /// Arborescence COMPLÈTE (eager) — les dossiers ne sont plus des vues
-    /// poussées mais des nœuds pliables/dépliables dans une même liste.
+    /// The FULL tree (eager) — folders are no longer pushed views
+    /// but foldable/unfoldable nodes in the same list.
     @State private var tree: [SQLConsoleHelper.TreeNode] = []
-    /// Paths (= `TreeNode.id`) des dossiers actuellement dépliés. `@State`
-    /// suffit : re-déplier après un aller-retour coûte un tap, et persister
-    /// l'expansion en AppStorage serait du bruit pour un répertoire user petit.
+    /// Paths (= `TreeNode.id`) of the folders currently expanded. `@State`
+    /// is enough: re-expanding after navigating away and back costs one tap,
+    /// and persisting expansion in AppStorage would be noise for a small
+    /// user directory.
     @State private var expandedPaths: Set<String> = []
-    /// Dossier cible des alertes de création. `nil` = racine (toolbar « + ») ;
-    /// posé par le menu contextuel « Nouveau … ici » d'une row dossier.
+    /// Target folder for the creation alerts. `nil` = root (toolbar "+");
+    /// set by a folder row's "New … here" context menu.
     @State private var creationDir: URL?
     @State private var showCreateFileAlert = false
     @State private var showCreateFolderAlert = false
     @State private var newName = ""
     @State private var selectedFile: URL?
     @State private var showEditor = false
-    /// Vrai UNIQUEMENT quand `selectedFile` a été ouvert via l'action « Exécuter »
-    /// (swipe iOS / clic droit macOS) — dans tous les autres cas (tap sur la row,
-    /// création de fichier), ouvrir un fichier affiche l'éditeur SANS l'exécuter.
+    /// True ONLY when `selectedFile` was opened via the "Run" action
+    /// (iOS swipe / macOS right-click) — in every other case (tapping the row,
+    /// creating a file), opening a file shows the editor WITHOUT running it.
     @State private var autoRunOnOpen = false
-    /// Doc du schéma en panneau (cf. `.adaptivePane` dans le body) plutôt qu'en push.
+    /// Schema docs as a pane (see `.adaptivePane` in the body) rather than a push.
     @State private var showSchema = false
     @State private var renamingEntry: SQLConsoleHelper.Entry?
     @State private var movingEntry: SQLConsoleHelper.Entry?
@@ -648,15 +649,15 @@ struct SQLFilesListView: View {
     @State private var errorMessage: String?
     private let consoleTip = SQLConsoleTip()
 
-    /// Rendu par `.localizedNavigationTitle`, qui résout la CLÉ contre le bundle
-    /// de la langue choisie dans l'app et se rafraîchit au changement (cf.
-    /// `AppLocalization`). On renvoie donc la clé source telle quelle, jamais une
-    /// chaîne déjà résolue.
+    /// Rendered by `.localizedNavigationTitle`, which resolves the KEY against the
+    /// app's chosen language bundle and refreshes on a language change (see
+    /// `AppLocalization`). We therefore return the source key as-is, never an
+    /// already-resolved string.
     ///
-    /// ⚠️ Un nom de fichier utilisateur n'est pas une clé de traduction — mais le
-    /// faire passer par le même chemin est SANS RISQUE : une clé absente de la
-    /// table retombe sur le texte source, donc sur le nom de fichier lui-même
-    /// (vérifié). Ça évite d'avoir deux modificateurs concurrents sur la même vue.
+    /// ⚠️ A user's file name isn't a translation key — but routing it through
+    /// the same path is SAFE: a key missing from the table falls back to the
+    /// source text, i.e. to the file name itself (verified). This avoids having
+    /// two competing modifiers on the same view.
     private var navTitle: String {
         #if os(macOS)
         if let file = selectedFile { return file.deletingPathExtension().lastPathComponent }
@@ -666,9 +667,9 @@ struct SQLFilesListView: View {
         #endif
     }
 
-    /// Aplatissement préfixe de l'arbre : on ne descend dans `children` que si
-    /// le dossier est déplié. Les paths périmés de `expandedPaths` (dossier
-    /// supprimé/déplacé) sont simplement ignorés par le parcours.
+    /// Prefix flattening of the tree: we only descend into `children` if
+    /// the folder is expanded. Stale paths in `expandedPaths` (a folder that
+    /// was deleted/moved) are simply ignored by the traversal.
     private var visibleRows: [SQLConsoleHelper.TreeNode] {
         var rows: [SQLConsoleHelper.TreeNode] = []
         func walk(_ nodes: [SQLConsoleHelper.TreeNode]) {
@@ -685,18 +686,19 @@ struct SQLFilesListView: View {
 
     var body: some View {
         #if os(macOS)
-        // ⚠️ Sur macOS, le fichier n'est PAS ouvert par un push (même via
-        // `.navigationDestination(isPresented:)`, la forme "sûre"). Constaté
-        // sur device : dès qu'une vue est poussée dans CETTE
-        // NavigationStack, tout `.adaptivePane` ouvert depuis elle (le panneau
-        // latéral desktop de `MainTabView`, cf. `AdaptivePane.swift`) se peint
-        // SOUS le contenu poussé au lieu d'à côté — repro à 100% en ouvrant
-        // l'assistant IA depuis l'éditeur ; redevient visible dès qu'on revient
-        // (pop) à la racine. Root cause côté AppKit/NavigationStack (macOS 27
-        // beta). Remède : zéro push, swap de contenu conditionnel par @State
-        // (`selectedFile`) pour que la NavigationStack du module reste TOUJOURS
-        // à sa racine. Les dossiers, eux, ne naviguent plus DU TOUT depuis la
-        // refonte en arborescence : ils se plient/déplient sur place.
+        // ⚠️ On macOS, the file is NOT opened by a push (even via
+        // `.navigationDestination(isPresented:)`, the "safe" form). Observed
+        // on device: as soon as a view is pushed in THIS
+        // NavigationStack, any `.adaptivePane` opened from it (the desktop
+        // side pane of `MainTabView`, see `AdaptivePane.swift`) gets painted
+        // UNDER the pushed content instead of beside it — reproduces 100% of
+        // the time by opening the AI assistant from the editor; becomes visible
+        // again once popping back to the root. Root cause is on the AppKit/
+        // NavigationStack side (macOS 27 beta). Fix: zero push, conditional
+        // content swap via @State (`selectedFile`) so the module's
+        // NavigationStack ALWAYS stays at its root. Folders themselves no
+        // longer navigate AT ALL since the tree redesign: they fold/unfold
+        // in place.
         Group {
             if let file = selectedFile {
                 SQLEditorView(fileURL: file, autoRunOnOpen: autoRunOnOpen)
@@ -717,10 +719,10 @@ struct SQLFilesListView: View {
                 }
             }
         }
-        // Fond de l'app posé explicitement — sans lui la colonne « content » de
-        // la NavigationSplitView macOS montre son matériau vibrant par défaut
-        // au lieu du fond neutre AppTheme (). Couvre les deux
-        // branches (liste de fichiers ET éditeur, swap par @State).
+        // The app's background is set explicitly — without it, the macOS
+        // NavigationSplitView's "content" column shows its vibrant material by
+        // default instead of the neutral AppTheme background. Covers both
+        // branches (the file list AND the editor, swapped via @State).
         .background(AppTheme.Colors.background.ignoresSafeArea())
         #else
         fileListBody
@@ -732,14 +734,14 @@ struct SQLFilesListView: View {
         #endif
     }
 
-    // MARK: - File list (contenu partagé, jamais lui-même poussé sur macOS)
+    // MARK: - File list (shared content, never itself pushed on macOS)
 
     @ViewBuilder
     private var fileListBody: some View {
-        // L'état vide est rendu HORS de la `List` : dans une row il hérite de la
-        // largeur de la row et se retrouve calé à gauche sur une fenêtre large
-        // (au lieu d'être centré dans la vue). En overlay il occupe toute la
-        // surface disponible et se centre naturellement.
+        // The empty state is rendered OUTSIDE the `List`: inside a row it inherits
+        // the row's width and ends up pinned to the left on a wide window
+        // (instead of being centered in the view). As an overlay it takes up the
+        // whole available surface and centers naturally.
         List {
             TipView(consoleTip, arrowEdge: .none)
                 .listRowInsets(EdgeInsets())
@@ -750,11 +752,11 @@ struct SQLFilesListView: View {
             }
         }
         #if os(macOS)
-        // Même politique que TricountListView/TransactionsView : .plain =
-        // base neutre pour les cartes custom dessinées par macGroupedRow.
+        // Same policy as TricountListView/TransactionsView: .plain =
+        // a neutral base for the custom cards drawn by macGroupedRow.
         .listStyle(.plain)
-        // Décolle la 1ère carte du délimiteur natif macOS (barre d'outils ↔
-        // contenu scrollé) — même correctif que TransactionsView.
+        // Detaches the 1st card from the native macOS separator (toolbar ↔
+        // scrolled content) — same fix as TransactionsView.
         .macGroupedListTopGap()
         #endif
         .scrollContentBackground(.hidden)
@@ -768,11 +770,11 @@ struct SQLFilesListView: View {
             }
         }
         .paywallOverlay(for: .sqlConsole)
-        // Doc du schéma : contenu de RÉFÉRENCE (une feuille qu'on consulte à côté
-        // de sa requête) → panneau, pas un push. Un push depuis un module empile
-        // une vue dans sa NavigationStack, ce qui pose les problèmes de bascule
-        // de module déjà rencontrés sur Tricount/Investissements (et, depuis,
-        // le masquage du panneau documenté dans `body` ci-dessus).
+        // Schema docs: REFERENCE content (a sheet you consult next to
+        // your query) → a pane, not a push. A push from a module stacks
+        // a view onto its NavigationStack, which raises the module-switch
+        // issues already seen on Tricount/Investments (and, since,
+        // the pane-masking issue documented in `body` above).
         .adaptivePane(isPresented: $showSchema) {
             DatabaseSchemaView()
                 .paneChrome("Schéma de la base",
@@ -847,11 +849,11 @@ struct SQLFilesListView: View {
         .onAppear { reload() }
     }
 
-    /// Row de l'arbre — indentation MANUELLE + chevron animé, PAS de
-    /// `DisclosureGroup` : les rows restent des `Button` plats, ce qui garantit
-    /// par construction la compatibilité avec `rowActions` (swipe iOS / clic
-    /// droit macOS) et évite de composer notre indentation avec celle,
-    /// automatique, du DisclosureGroup.
+    /// Tree row — MANUAL indentation + an animated chevron, NO
+    /// `DisclosureGroup`: rows stay plain `Button`s, which guarantees
+    /// compatibility with `rowActions` (iOS swipe / macOS right-click) by
+    /// construction and avoids composing our own indentation with
+    /// `DisclosureGroup`'s automatic one.
     @ViewBuilder
     private func entryRow(_ node: SQLConsoleHelper.TreeNode) -> some View {
         let entry = node.entry
@@ -909,8 +911,8 @@ struct SQLFilesListView: View {
                 openFile(fileURL, autoRun: false)
             } label: {
                 HStack(spacing: 6) {
-                    // Réserve la largeur du chevron des dossiers : fichiers et
-                    // dossiers d'une même profondeur restent alignés.
+                    // Reserve the folder chevron's width: files and
+                    // folders at the same depth stay aligned.
                     Color.clear.frame(width: 14, height: 1)
                     Label(entry.displayName, systemImage: "doc.text.fill")
                         .foregroundStyle(AppTheme.Colors.textPrimary)
@@ -922,10 +924,10 @@ struct SQLFilesListView: View {
             .buttonStyle(.plain)
             .rowActions(
                 leading: [
-                    // Seule façon d'exécuter SANS d'abord voir l'éditeur : swipe
-                    // (iOS) ou clic droit (macOS, `rowActions` rend `leading` dans
-                    // le menu contextuel). Le tap normal sur la row, lui, ouvre
-                    // toujours l'éditeur SANS exécuter (cf. `openFile`).
+                    // The only way to run WITHOUT seeing the editor first: swipe
+                    // (iOS) or right-click (macOS, `rowActions` renders `leading` in
+                    // the context menu). A normal tap on the row always opens
+                    // the editor WITHOUT running (see `openFile`).
                     RowAction("Exécuter", systemImage: "play.fill", tint: AppTheme.Colors.accent, iconOnly: true) {
                         openFile(fileURL, autoRun: true)
                     }
@@ -945,8 +947,8 @@ struct SQLFilesListView: View {
 
     // MARK: - Actions
 
-    /// Point d'ouverture UNIQUE d'un fichier — `autoRun` distingue un tap normal
-    /// (éditeur seul) de l'action « Exécuter » (swipe iOS / clic droit macOS).
+    /// SINGLE point where a file gets opened — `autoRun` distinguishes a normal
+    /// tap (editor only) from the "Run" action (iOS swipe / macOS right-click).
     private func openFile(_ url: URL, autoRun: Bool) {
         selectedFile = url
         autoRunOnOpen = autoRun
@@ -959,10 +961,10 @@ struct SQLFilesListView: View {
         tree = SQLConsoleHelper.buildTree()
     }
 
-    /// Rend visible ce qu'on vient de créer/déplacer : déplie le dossier cible.
-    /// Ses ancêtres sont forcément déjà dépliés quand la cible vient d'un menu
-    /// contextuel (la row était visible) ; après un « Déplacer vers… », on
-    /// déplie toute la chaîne d'ancêtres sous la racine SQL.
+    /// Makes what was just created/moved visible: expands the target folder.
+    /// Its ancestors are necessarily already expanded when the target comes
+    /// from a context menu (the row was visible); after a "Move to…", the
+    /// whole chain of ancestors under the SQL root is expanded.
     private func revealFolder(_ folder: URL?) {
         guard let folder else { return }
         let rootPath = SQLConsoleHelper.sqlDirectory().path
@@ -1021,8 +1023,8 @@ struct SQLFilesListView: View {
 
 private struct FolderPickerSheet: View {
     let title: LocalizedStringKey
-    /// Si non-nil, ce dossier (et ses sous-dossiers) sont exclus pour éviter
-    /// de déplacer un dossier dans lui-même.
+    /// If non-nil, this folder (and its subfolders) is excluded to avoid
+    /// moving a folder into itself.
     let excludingFolder: URL?
     let onSelect: (URL) -> Void
 
@@ -1056,19 +1058,18 @@ private struct FolderPickerSheet: View {
                 }
             }
             #if os(macOS)
-            // Même politique que TricountListView/TransactionsView : .plain =
-            // base neutre pour les cartes custom dessinées par macGroupedRow.
+            // Same policy as TricountListView/TransactionsView: .plain =
+            // a neutral base for the custom cards drawn by macGroupedRow.
             .listStyle(.plain)
-            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
-            // celui du panneau hôte — sans ce modificateur, le bureau de
-            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            // `List` paints ITS OWN system background on macOS ON TOP OF
+            // the host pane's — without this modifier, the user's
+            // desktop shows through.
             .scrollContentBackground(.hidden)
             #endif
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
-            // tentative précédente (`.toolbarBackground(for: .windowToolbar)`)
-            // compilait mais n'avait AUCUN effet visuel, confirmé par capture
-            // d'écran en direct (retour d'usage 2026-08-21). Cf. le
-            // commentaire de `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on macOS-sheet — the
+            // earlier attempt (`.toolbarBackground(for: .windowToolbar)`)
+            // compiled but had NO visual effect at all, confirmed by a live
+            // screenshot. See the `macSheetChrome` comment in AdaptivePane.swift.
             .paneChrome("Choisir un dossier", cancelLabel: "Annuler", onCancel: { dismiss() })
     }
 }
@@ -1084,12 +1085,12 @@ private struct FolderPickerSheet: View {
 
 struct SQLEditorView: View {
     let fileURL: URL
-    /// Vrai UNIQUEMENT quand ce fichier a été ouvert via l'action « Exécuter »
-    /// (swipe iOS / clic droit macOS sur `SQLFilesListView`) — dans ce cas, et
-    /// seulement dans ce cas, le fichier s'exécute automatiquement à l'ouverture
-    /// et atterrit sur la page Résultats. Par défaut (tap normal, toolbar
-    /// « Exécuter » de cette vue elle-même) : l'ouverture affiche l'éditeur SANS
-    /// exécuter, l'exécution restant un geste explicite de l'utilisateur.
+    /// True ONLY when this file was opened via the "Run" action
+    /// (iOS swipe / macOS right-click on `SQLFilesListView`) — in that case, and
+    /// only in that case, the file runs automatically on open and lands
+    /// on the Results page. By default (a normal tap, this view's own
+    /// "Run" toolbar button): opening shows the editor WITHOUT
+    /// running it, running staying an explicit user gesture.
     var autoRunOnOpen: Bool = false
 
     private let repository = TransactionRepository()
@@ -1101,25 +1102,25 @@ struct SQLEditorView: View {
     @State private var variables: [String: String] = [:]
     @State private var currentPage: Int = 0   // 0 = results, 1 = editor
     @State private var showAssistant: Bool = false
-    /// Doc du schéma, accessible SANS quitter le fichier — avant cet ajout,
-    /// seule `SQLFilesListView` (l'écran de liste) l'exposait, obligeant un
-    /// aller-retour pour vérifier une colonne pendant qu'on écrit une requête.
+    /// Schema docs, reachable WITHOUT leaving the file — before this addition,
+    /// only `SQLFilesListView` (the list screen) exposed it, forcing a
+    /// round trip to check a column while writing a query.
     @State private var showSchema: Bool = false
-    /// Le contenu lu depuis le disque (`loadFile`) n'est plus synchrone sur le
-    /// main thread — tant qu'il n'est pas revenu, on affiche un spinner léger
-    /// au lieu de figer l'app le temps de la lecture (retour terrain : ouvrir
-    /// un fichier "prenait parfois un peu de temps" avec l'UI gelée pendant).
+    /// The content read from disk (`loadFile`) is no longer synchronous on the
+    /// main thread — until it comes back, a light spinner is shown
+    /// instead of freezing the app for the duration of the read (opening
+    /// a file "sometimes took a while" with the UI frozen in the meantime).
     @State private var isLoadingFile = true
 
-    /// Instructions bloquées (modification de SCHÉMA) — jamais exécutées,
-    /// cf. `SQLStatementGuard`. Non-nil ⇒ l'alerte de blocage est affichée.
+    /// Blocked instructions (a SCHEMA change) — never executed,
+    /// see `SQLStatementGuard`. Non-nil ⇒ the blocking alert is shown.
     @State private var blockedStatements: [SQLStatementClassification]? = nil
-    /// Lot en attente de confirmation (modification de DONNÉES) — capturé tel
-    /// quel (variables déjà substituées) pour être rejoué après confirmation
-    /// sans reclassifier ni resubstituer.
+    /// A batch awaiting confirmation (a DATA change) — captured as-is
+    /// (variables already substituted) to be replayed after confirmation
+    /// with no reclassification or resubstitution.
     @State private var pendingConfirmation: (queries: [(name: String, sql: String)], summary: [SQLStatementClassification])? = nil
-    /// Échec de la sauvegarde proposée avant une modification de données —
-    /// l'utilisateur choisit alors d'exécuter quand même ou d'annuler.
+    /// Failure of the backup offered before a data change —
+    /// the user then chooses to run anyway or to cancel.
     @State private var backupFailure: (queries: [(name: String, sql: String)], message: String)? = nil
 
     private var fileName: String { fileURL.deletingPathExtension().lastPathComponent }
@@ -1131,11 +1132,11 @@ struct SQLEditorView: View {
                 loadingPlaceholder
             } else {
                 #if os(macOS)
-                // Le swipe entre pages n'existe pas au trackpad de la même façon,
-                // et `.tabViewStyle(.page(...))` est shimmé vers le TabView natif
-                // macOS (PlatformShims.swift) qui, sans `.tabItem`, dessine deux
-                // boutons de bascule VIERGES (le "pilule transparente" observée) —
-                // seule issue : le picker segmenté explicite ci-dessous.
+                // Swiping between pages doesn't work the same way on a trackpad,
+                // and `.tabViewStyle(.page(...))` is shimmed to the native macOS
+                // TabView (PlatformShims.swift), which, with no `.tabItem`, draws two
+                // BLANK toggle buttons (the "transparent pill" observed) —
+                // the only fix: the explicit segmented picker below.
                 if currentPage == 0 { resultsPage } else { editorPage }
                 #else
                 TabView(selection: $currentPage) {
@@ -1174,10 +1175,10 @@ struct SQLEditorView: View {
         }
         .adaptivePane(isPresented: $showAssistant) {
             SQLAssistantSheet { title, generatedSQL in
-                // Section nommée par le titre confirmé dans l'alerte de l'assistant
-                // (au lieu du générique "-- Assistant IA --" d'avant, qui rendait
-                // toutes les requêtes insérées indiscernables dans la liste des
-                // résultats dès qu'il y en avait plusieurs dans le même fichier).
+                // Section named after the title confirmed in the assistant's alert
+                // (instead of the earlier generic "-- AI Assistant --", which made
+                // every inserted query indistinguishable in the results
+                // list as soon as there were several in the same file).
                 let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
                 let block = cleanTitle.isEmpty ? generatedSQL : "-- \(cleanTitle) --\n" + generatedSQL
                 if sqlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1187,7 +1188,7 @@ struct SQLEditorView: View {
                 }
                 autoSave()
                 refreshVariables(sqlText)
-                currentPage = 1  // bascule vers l'éditeur pour montrer l'insertion
+                currentPage = 1  // switches to the editor to show the insertion
             }
         }
         .adaptivePane(isPresented: $showSchema) {
@@ -1328,9 +1329,9 @@ struct SQLEditorView: View {
     // MARK: - File I/O
 
     private func loadFile() async {
-        // Lecture hors main thread : sur un fichier volumineux ou un disque
-        // lent, `String(contentsOf:)` synchrone sur le main actor gelait
-        // l'app pendant toute la durée de la lecture.
+        // Read off the main thread: on a large file or a slow disk,
+        // a synchronous `String(contentsOf:)` on the main actor froze
+        // the app for the whole duration of the read.
         let url = fileURL
         let text = await Task.detached(priority: .userInitiated) {
             (try? String(contentsOf: url, encoding: .utf8)) ?? ""
@@ -1338,17 +1339,17 @@ struct SQLEditorView: View {
         sqlText = text
         isLoadingFile = false
         refreshVariables(sqlText)
-        // Ouvrir un fichier n'exécute JAMAIS par défaut — seule l'action
-        // explicite « Exécuter » (swipe iOS / clic droit macOS sur la liste des
-        // fichiers) déclenche l'auto-run ici, et seulement si toutes les
-        // variables sont déjà renseignées (sinon l'utilisateur doit les remplir
-        // dans l'éditeur, comme avant).
+        // Opening a file NEVER runs it by default — only the explicit
+        // "Run" action (iOS swipe / macOS right-click on the file list)
+        // triggers auto-run here, and only if every
+        // variable is already filled in (otherwise the user must fill them
+        // in the editor, as before).
         let trimmed = sqlText.trimmingCharacters(in: .whitespacesAndNewlines)
         if autoRunOnOpen && !trimmed.isEmpty && detectedVarSpecs.isEmpty {
             executeSQL()          // run immediately, stay on results page
             currentPage = 0
         } else {
-            currentPage = 1       // toujours l'éditeur par défaut
+            currentPage = 1       // always the editor by default
         }
     }
 
@@ -1379,7 +1380,7 @@ struct SQLEditorView: View {
         currentPage = 0
     }
 
-    /// Run without changing page (called from the results page "Exécuter" button).
+    /// Run without changing page (called from the results page "Run" button).
     private func runAndStay() {
         executeSQL()
     }
@@ -1392,9 +1393,9 @@ struct SQLEditorView: View {
         runGuarded(queries)
     }
 
-    /// Classe chaque instruction du lot (variables déjà substituées) et, selon
-    /// le verdict le plus sévère : bloque (schéma), demande confirmation
-    /// (données), ou exécute directement (lecture seule / maintenance).
+    /// Classifies every instruction in the batch (variables already substituted) and,
+    /// based on the most severe verdict: blocks (schema), asks for confirmation
+    /// (data), or runs directly (read-only / maintenance).
     private func runGuarded(_ queries: [(name: String, sql: String)]) {
         let assessment = SQLStatementGuard.assess(queries.map(\.sql))
         if assessment.isBlocked {
@@ -1408,9 +1409,9 @@ struct SQLEditorView: View {
         performExecution(queries)
     }
 
-    /// Crée une sauvegarde manuelle avant d'exécuter un lot déjà confirmé par
-    /// l'utilisateur — même mécanisme que "Sauvegarder maintenant" dans
-    /// Réglages › Sauvegarde (`BackupService.createSnapshot`), synchrone.
+    /// Creates a manual backup before running a batch the user has already
+    /// confirmed — the same mechanism as "Back up now" in
+    /// Settings › Backup (`BackupService.createSnapshot`), synchronous.
     private func backupThenRun(_ queries: [(name: String, sql: String)]) {
         do {
             try BackupService.shared.createSnapshot()
@@ -1508,7 +1509,7 @@ struct SQLResultSectionView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Header tappable pour collapse/expand
+            // Tappable header to collapse/expand
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
             } label: {
@@ -1590,19 +1591,19 @@ struct SQLResultSectionView: View {
 
 // MARK: - Aligned table
 
-/// Tableau dont les colonnes restent alignées entre header et lignes, peu importe
-/// la longueur du contenu. On calcule la largeur de chaque colonne (max sur
-/// header + cellules) avec un peu de padding, puis on l'applique uniformément.
-/// Scroll horizontal si la somme dépasse la largeur disponible.
+/// A table whose columns stay aligned between the header and the rows, no matter
+/// the content's length. Each column's width is computed (max of the
+/// header + cells) with a bit of padding, then applied uniformly.
+/// Scrolls horizontally if the sum exceeds the available width.
 private struct SQLResultTable: View {
     let columns: [String]
     let rows: [[String]]
 
-    /// Largeur calculée par colonne. Index = colonne.
+    /// Width computed per column. Index = column.
     private var columnWidths: [CGFloat] {
         columns.enumerated().map { (idx, header) in
-            // Compte les caractères du header et de chaque cellule pour estimer
-            // la largeur nécessaire en monospace ~7pt/char. Cap min/max pour rester lisible.
+            // Counts the characters of the header and each cell to estimate
+            // the needed width at monospace ~7pt/char. Min/max cap to stay readable.
             var maxChars = header.count
             for row in rows {
                 if idx < row.count {
@@ -1664,14 +1665,14 @@ private struct SQLResultTable: View {
 
 // MARK: - Result Chart
 
-/// Rendu graphique d'un résultat "graphable" (cf. `SQLResultChartPlan`).
-/// Barres pour une répartition catégorielle, ligne pour une série temporelle.
+/// Chart rendering for a "chartable" result (see `SQLResultChartPlan`).
+/// Bars for a categorical breakdown, a line for a time series.
 private struct SQLResultChart: View {
     let result: SQLQueryResult
     let plan: SQLResultChartPlan
 
-    /// Palette stable, dérivée de l'accent — même esprit que
-    /// `AllocationDonutChart` (Investissements), en plus court : 4 séries max.
+    /// A stable palette, derived from the accent color — same spirit as
+    /// `AllocationDonutChart` (Investments), shorter: 4 series max.
     private static let palette: [Color] = [
         AppTheme.Colors.accent,
         AppTheme.Colors.accentSecondary,
@@ -1701,9 +1702,9 @@ private struct SQLResultChart: View {
 
     private var seriesNames: [String] { plan.seriesIndices.map { result.columns[$0] } }
 
-    /// Labels dans l'ordre où SQL les a renvoyés — souvent un ORDER BY
-    /// intentionnel (ex. un "Top 10" trié par montant). Sans domaine explicite,
-    /// Swift Charts trie un axe String par ordre alphabétique et détruirait ce tri.
+    /// Labels in the order SQL returned them — often an intentional ORDER BY
+    /// (e.g. a "Top 10" sorted by amount). With no explicit domain,
+    /// Swift Charts sorts a String axis alphabetically and would destroy that order.
     private var orderedLabels: [String] {
         var seen = Set<String>()
         var out: [String] = []

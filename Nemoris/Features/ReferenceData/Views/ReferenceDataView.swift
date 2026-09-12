@@ -10,21 +10,21 @@ struct ReferenceDataView: View {
         case comptes        = "Comptes"
         case categories     = "Catégories"
         case tiers          = "Tiers"
-        // ⚠️ « Moyens de paiement » a été RETIRÉ (migration v46). Ce n'est plus
-        // un concept de premier ordre : il est devenu une métadonnée libre
-        // parmi d'autres, gérée depuis la fiche transaction. Le laisser ici
-        // aurait donné deux endroits où éditer la même information — la
-        // coexistence explicitement écartée.
+        // ⚠️ "Payment methods" was REMOVED (migration v46). It's no longer a
+        // first-class concept: it became one free-form metadata entry among
+        // others, managed from the transaction detail screen. Keeping it here
+        // too would give two places to edit the same information — the
+        // coexistence was explicitly ruled out.
         //
-        // La table `payment_types` reste en base, dépréciée et non lue
-        // (doctrine du projet : on ne supprime qu'une fois certain que plus rien
-        // ne la référence), ce qui rend la bascule réversible.
+        // The `payment_types` table stays in the database, deprecated and unread
+        // (project doctrine: only remove a table once certain nothing still
+        // references it), which keeps the switch reversible.
         case metadata       = "Métadonnées"
         case tags           = "Tags"
         var id: String { rawValue }
 
-        /// Libellé affiché — distinct de `rawValue` (identité interne du
-        /// `Picker`) pour pouvoir traduire sans toucher à cette identité.
+        /// Displayed label — distinct from `rawValue` (the `Picker`'s internal
+        /// identity) so it can be translated without touching that identity.
         var label: LocalizedStringKey { LocalizedStringKey(rawValue) }
     }
 
@@ -36,33 +36,33 @@ struct ReferenceDataView: View {
     @State private var tags: [Tag] = []
     @State private var payeeGroups: [PayeeGroup] = []
     @State private var metadataKeys: [TransactionMetadataKey] = []
-    /// Skeleton tant que le 1er `loadReferenceData()` n'est pas terminé.
+    /// Skeleton until the first `loadReferenceData()` completes.
     @State private var hasLoaded = false
 
     // Tri
     enum SortOrder { case alphabetical, creation }
     @State private var sortOrder: SortOrder = .alphabetical
 
-    /// Cible d'une suppression déclenchée par swipe (avant confirmation).
+    /// Target of a swipe-triggered deletion (before confirmation).
     struct DeleteTarget: Identifiable {
         let id = UUID()
         let tab: ReferenceTab
         let entityId: Int
         let name: String
-        let count: Int          // transactions associées
-        let childIds: [Int]     // sous-catégories emportées (catégories parentes)
-        let blocked: Bool       // true = suppression impossible (compte encore utilisé)
+        let count: Int          // associated transactions
+        let childIds: [Int]     // sub-categories carried along (parent categories)
+        let blocked: Bool       // true = deletion impossible (account still in use)
     }
 
     // Recherche
     @State private var searchText = ""
 
-    // Filtre structuré de l'onglet Tiers (groupe / catégorie / ville / pays)
-    // — distinct de la recherche texte ci-dessus (nom/regex, via `.searchable`).
-    // Cf. `TiersFilterSheet`. `tiersFilterGroupId` double aussi de mécanisme
-    // pour "voir les tiers d'un groupe" (déclenché depuis
-    // `PayeeGroupManagerView.onSelectGroup`) — pas besoin d'un écran séparé,
-    // c'est la même question posée avec un critère déjà rempli.
+    // Structured filter for the Payees tab (group / category / city / country)
+    // — distinct from the text search above (name/regex, via `.searchable`).
+    // See `TiersFilterSheet`. `tiersFilterGroupId` also doubles as the
+    // mechanism for "see the payees of a group" (triggered from
+    // `PayeeGroupManagerView.onSelectGroup`) — no need for a separate screen,
+    // it's the same question asked with a criterion already filled in.
     @State private var showTiersFilters = false
     @State private var tiersFilterGroupId: Int? = nil
     @State private var tiersFilterCategoryId: Int? = nil
@@ -76,44 +76,41 @@ struct ReferenceDataView: View {
         + (tiersFilterCountry.isEmpty ? 0 : 1)
     }
 
-    // Édition / ajout
+    // Edit / add
     @State private var showEditSheet = false
-    /// Valeurs initiales transmises à `ReferenceEditFormPane` à l'ouverture. Le
-    /// `@State` VIVANT pendant la saisie appartient à ce view dédié, pas ici —
-    /// cf. son commentaire de tête pour la raison (staleness du panneau racine
-    /// macOS).
+    /// Initial values passed to `ReferenceEditFormPane` when it opens. The
+    /// `@State` that's LIVE during entry belongs to that dedicated view, not
+    /// here — see its header comment for why (staleness of the macOS root pane).
     @State private var editInitialDraft = ReferenceEditDraft()
-    @State private var editItemId: Int? = nil   // nil = nouvel élément
+    @State private var editItemId: Int? = nil   // nil = a new item
 
-    // édition complète d'un payee via PayeeDetailView.
+    // full payee editing via PayeeDetailView.
     @State private var editingPayee: Tiers? = nil
-    /// Création d'un tiers : passe directement par `PayeeDetailView` (fiche
-    /// riche) plutôt que par `ReferenceEditFormPane` — même parcours qu'à
-    /// l'édition, pas de form minimal séparé à compléter après coup.
+    /// Creating a payee: goes straight through `PayeeDetailView` (the rich
+    /// form) rather than `ReferenceEditFormPane` — the same flow as editing,
+    /// no separate minimal form to fill out afterward.
     @State private var creatingPayee = false
 
-    // Gestion des clés de métadonnées (onglet "Métadonnées") : même parcours
-    // swipeable/inspecteur que les autres onglets (Comptes/Tiers/Tags) — tap
-    // ou swipe "Modifier" → `editingMetadataKey` (détail ⇄ édition via
-    // `adaptiveEntityPane`, cf. `metadataRow`) ; "+" de la toolbar →
-    // `creatingMetadataKey` (`MetadataKeyFormView(key: nil, …)`). Remplace
-    // l'ancien bouton "Gérer les métadonnées" (retour d'usage : "il sert à
-    // rien") + `MetadataKeyManagerView`, qui reste néanmoins en service
-    // ailleurs — cf. son commentaire de tête dans `TransactionMetadataSection.swift`.
+    // Managing metadata keys (the "Metadata" tab): the same swipeable/inspector
+    // flow as the other tabs (Accounts/Payees/Tags) — tap or swipe "Edit" →
+    // `editingMetadataKey` (detail ⇄ edit via `adaptiveEntityPane`, see
+    // `metadataRow`); the toolbar "+" → `creatingMetadataKey`
+    // (`MetadataKeyFormView(key: nil, …)`). Replaces the old "Manage metadata"
+    // button, which stayed around unused elsewhere too — see its header
+    // comment in `TransactionMetadataSection.swift`.
     @State private var editingMetadataKey: TransactionMetadataKey? = nil
     @State private var creatingMetadataKey = false
 
-    // Gestion des groupes de tiers (onglet "Tiers") : ajouter/renommer/
-    // supprimer/fusionner — cf. `PayeeGroupManagerView`. Présenté ICI, hors de
-    // la `List`, pour la même raison structurelle que les autres panes de cet
-    // écran (`showEditSheet`, `creatingPayee`, `detailTarget`…) : un
-    // `.sheet`/`.adaptivePane` attaché à une vue qui EST elle-même du contenu
-    // de row à l'intérieur d'une `List` (a fortiori une `List` avec
-    // `.searchable`, comme ici) peut être annulé par le système au tout
-    // premier essai (bug SwiftUI connu, retour d'usage).
+    // Managing payee groups (the "Payees" tab): add/rename/delete/merge — see
+    // `PayeeGroupManagerView`. Presented HERE, outside the `List`, for the
+    // same structural reason as this screen's other panes (`showEditSheet`,
+    // `creatingPayee`, `detailTarget`…): a `.sheet`/`.adaptivePane` attached to
+    // a view that IS itself row content inside a `List` (all the more so a
+    // `List` with `.searchable`, as here) can be dismissed by the system on the
+    // very first attempt (a known SwiftUI bug).
     @State private var showGroupManager = false
 
-    // Nombre de transactions associées, par entité (id → count).
+    // Count of associated transactions, per entity (id → count).
     @State private var categoryCounts: [Int: Int] = [:]
     @State private var tierCounts: [Int: Int] = [:]
     @State private var paymentTypeCounts: [Int: Int] = [:]
@@ -121,12 +118,12 @@ struct ReferenceDataView: View {
     @State private var tagCounts: [Int: Int] = [:]
     @State private var metadataKeyCounts: [Int: Int] = [:]
 
-    // Suppression unitaire par swipe (toutes les tables).
+    // One-off deletion via swipe (every table).
     @State private var pendingDelete: DeleteTarget? = nil
 
-    /// Cible du panneau détail macOS (clic sur une row compte / catégorie /
-    /// moyen de paiement / tag). Jamais settée sur iOS (les taps y gardent
-    /// leur comportement historique).
+    /// Target of the macOS detail pane (tap on an account / category /
+    /// payment-method / tag row). Never set on iOS (taps there keep their
+    /// historical behavior).
     enum ReferenceDetailTarget: Identifiable {
         case account(Account)
         case category(Category)
@@ -144,21 +141,22 @@ struct ReferenceDataView: View {
     }
     @State private var detailTarget: ReferenceDetailTarget? = nil
 
-    // Arbre des catégories — recalculé à la volée pour réagir au tri.
+    // Category tree — recomputed on the fly to react to sorting.
     private var categoryForest: [CategoryNode] {
         CategoryNode.buildForest(from: categories,
                                  sort: sortOrder == .creation ? .creation : .alphabetical)
     }
 
-    /// Catégories PARENTES actuellement REPLIÉES — vide par défaut (tout
-    /// déplié, comportement historique du `DisclosureGroup` avant lui).
+    /// Parent categories currently COLLAPSED — empty by default (everything
+    /// expanded, the historical behavior of the `DisclosureGroup` that
+    /// preceded it).
     @State private var collapsedCategoryIds: Set<Int> = []
 
-    /// Aplatissement préfixe de `categoryForest`, en ne descendant dans les
-    /// enfants que si le parent n'est PAS replié — même doctrine que
-    /// `SQLConsoleView.visibleRows` (cf. commentaire de tête de
-    /// `CategoryTreeRow`). C'est cette liste PLATE, et elle seule, qui donne
-    /// à `first`/`last` un sens global cohérent avec le reste de l'app.
+    /// Prefix flattening of `categoryForest`, descending into children only if
+    /// the parent is NOT collapsed — same doctrine as
+    /// `SQLConsoleView.visibleRows` (see `CategoryTreeRow`'s header comment).
+    /// This FLAT list, and only this one, gives `first`/`last` a meaning
+    /// consistent with the rest of the app.
     private var visibleCategoryRows: [(node: CategoryNode, depth: Int)] {
         var rows: [(node: CategoryNode, depth: Int)] = []
         func walk(_ nodes: [CategoryNode], depth: Int) {
@@ -173,40 +171,40 @@ struct ReferenceDataView: View {
         return rows
     }
 
-    // Sélection / suppression tiers — l'ancre permet le maj+clic (plage),
-    // cf. `RangeSelection` (DesignSystem/MultiSelect.swift).
+    // Payee selection/deletion — the anchor enables shift+click (a range),
+    // see `RangeSelection` (DesignSystem/MultiSelect.swift).
     @State private var isSelectingTiers = false
     @State private var selectedTiersIds: Set<Int> = []
     @State private var tiersSelectionAnchor: Int? = nil
 
-    // Sélection / suppression tags — même mécanique que Tiers, état séparé
-    // (changer d'onglet ne doit pas mélanger les deux sélections).
+    // Tag selection/deletion — same mechanics as Payees, separate state
+    // (switching tabs must not mix up the two selections).
     @State private var isSelectingTags = false
     @State private var selectedTagIds: Set<Int> = []
     @State private var tagsSelectionAnchor: Int? = nil
 
     @State private var showDeleteConfirm = false
 
-    /// Fusion de tiers DOUBLONS — 2 chemins vers le même résolveur final :
-    /// - swipe "Fusionner…" d'UNE row → `mergeTierSearchSourceId` (recherche
-    ///   d'un second tier, cf. `PayeeMergeTargetPicker`) → une fois choisi,
-    ///   les 2 ids alimentent `mergeTierCandidateIds`.
-    /// - bouton "Fusionner (N)" en sélection groupée (2+ déjà cochés) →
-    ///   `mergeTierCandidateIds` directement, PAS de recherche : demander de
-    ///   choisir une cible parmi une liste n'a pas de sens quand l'utilisateur
-    ///   a déjà désigné les tiers en question (retour d'usage).
+    /// Merging DUPLICATE payees — 2 paths to the same final resolver:
+    /// - swipe "Merge…" on ONE row → `mergeTierSearchSourceId` (search for
+    ///   a second payee, see `PayeeMergeTargetPicker`) → once chosen,
+    ///   the 2 ids feed `mergeTierCandidateIds`.
+    /// - the "Merge (N)" button in group selection (2+ already checked) →
+    ///   `mergeTierCandidateIds` directly, NO search: asking the user to
+    ///   pick a target from a list makes no sense when they've already
+    ///   designated the payees in question.
     @State private var mergeTierSearchSourceId: Int? = nil
     @State private var mergeTierCandidateIds: [Int] = []
 
-    // Import CSV des tiers : retiré lors d'un nettoyage (cluster SmartImport legacy supprimé).
+    // CSV import of payees: removed during a cleanup (the legacy SmartImport cluster was deleted).
 
-    // MARK: Filtrage + tri
+    // MARK: Filtering + sorting
     //
-    // ⚠️ Ces listes sont mises en CACHE dans `@State`, elles ne sont PAS des
-    // propriétés calculées. En calculé, chaque évaluation du `body` les relisait
-    // deux fois (test `.isEmpty`, puis `ForEach`) → deux tris localisés complets
-    // sur ~1000 tiers à chaque frappe clavier, chaque bascule d'onglet et chaque
-    // toggle de sélection. Recalcul uniquement via `recomputeFiltered()`.
+    // ⚠️ These lists are CACHED in `@State`, they are NOT computed
+    // properties. As computed properties, every `body` evaluation re-read them
+    // twice (an `.isEmpty` check, then `ForEach`) → two full localized sorts
+    // over ~1000 payees on every keystroke, every tab switch and every
+    // selection toggle. Recomputed only via `recomputeFiltered()`.
     @State private var filteredAccounts: [Account] = []
     @State private var filteredCategories: [Category] = []
     @State private var filteredTiers: [Tiers] = []
@@ -214,13 +212,13 @@ struct ReferenceDataView: View {
     @State private var filteredTags: [Tag] = []
     @State private var filteredMetadataKeys: [TransactionMetadataKey] = []
 
-    /// Recherche réellement appliquée aux listes = `searchText` debouncé
-    /// (cf. `.task(id: searchText)`), pour ne pas refiltrer à chaque caractère.
+    /// The search actually applied to the lists = `searchText` debounced
+    /// (see `.task(id: searchText)`), so as not to refilter on every character.
     @State private var appliedSearch = ""
 
-    /// Pagination de l'onglet Tiers — la seule table volumineuse (~1000 lignes).
-    /// Même principe que `TransactionsView` : on ne matérialise que les premières
-    /// lignes, la suite s'ajoute quand la sentinelle de fin de liste apparaît.
+    /// Pagination of the Payees tab — the only large table (~1000 rows).
+    /// Same principle as `TransactionsView`: only the first rows are
+    /// materialized, the rest is appended when the end-of-list sentinel appears.
     private let tiersPageSize = 100
     @State private var tiersDisplayLimit = 100
 
@@ -236,10 +234,10 @@ struct ReferenceDataView: View {
             : items.sorted { $0.id < $1.id }
     }
 
-    /// Reconstruit les 5 listes affichées. `resetPaging` remet l'onglet Tiers à sa
-    /// première page : vrai quand la recherche ou le tri change (le contenu n'a
-    /// plus rien à voir), faux sur un simple rechargement des données (on ne veut
-    /// pas ramener l'utilisateur en haut de liste après une suppression).
+    /// Rebuilds the 5 displayed lists. `resetPaging` resets the Payees tab to
+    /// its first page: true when the search or sort changes (the content has
+    /// nothing to do with before), false on a plain data reload (we don't want
+    /// to jump the user back to the top of the list after a deletion).
     private func recomputeFiltered(resetPaging: Bool) {
         let q = appliedSearch
 
@@ -293,7 +291,7 @@ struct ReferenceDataView: View {
         if resetPaging {
             tiersDisplayLimit = tiersPageSize
         } else {
-            // On garde la page atteinte, sans dépasser le nouveau total.
+            // Keep the page reached, without exceeding the new total.
             tiersDisplayLimit = max(tiersPageSize, min(tiersDisplayLimit, filteredTiers.count))
         }
     }
@@ -333,29 +331,29 @@ struct ReferenceDataView: View {
                     }  // end else (hasLoaded)
                 }
                 #if os(macOS)
-                // Même politique que Transactions/Patrimoine/Tricount : .plain =
-                // base neutre pour les cartes custom dessinées par macGroupedRow.
-                // iOS garde son insetGrouped natif.
+                // Same policy as Transactions/Patrimoine/Tricount: .plain =
+                // a neutral base for the custom cards drawn by macGroupedRow.
+                // iOS keeps its native insetGrouped.
                 .listStyle(.plain)
-                // Décolle la 1ère carte du Divider() du dessus — même correctif
-                // que TransactionsView (macGroupedRow ne pose pas de marge
-                // extérieure en haut de la 1ère row, seulement en bas de la
-                // dernière). Cf. retour d'usage.
+                // Detaches the 1st card from the Divider() above it — same fix
+                // as TransactionsView (macGroupedRow doesn't add an outer
+                // margin at the top of the 1st row, only at the bottom of the
+                // last one).
                 .macGroupedListTopGap()
                 #endif
                 .scrollContentBackground(.hidden)
                 .searchable(text: $searchText, prompt: "Rechercher…")
             }
-            // Fond de l'app posé explicitement — sans lui la colonne « content »
-            // de la NavigationSplitView macOS montre son matériau vibrant par
-            // défaut (translucide, capte la couleur du bureau/fenêtre derrière),
-            // pas le fond neutre AppTheme. Même correctif que TricountListView/
-            // TricountDetailView/SQLConsoleView ().
+            // The app's background is set explicitly — without it, the "content"
+            // column of the macOS NavigationSplitView shows its vibrant material by
+            // default (translucent, picks up the color of the desktop/window behind
+            // it), not the neutral AppTheme background. Same fix as TricountListView/
+            // TricountDetailView/SQLConsoleView.
             .background(AppTheme.Colors.background.ignoresSafeArea())
-            // ⌘A : sélectionne tout ce qui est déjà chargé pour l'onglet
-            // affiché. Un seul bouton caché, dispatché par `selectedTab` —
-            // les DEUX ne peuvent jamais être dans l'arbre en même temps
-            // (switch sur l'onglet actif), donc pas d'ambiguïté de raccourci.
+            // ⌘A: selects everything already loaded for the displayed
+            // tab. A single hidden button, dispatched by `selectedTab` —
+            // the TWO can never be in the tree at the same time
+            // (a switch on the active tab), so no shortcut ambiguity.
             .background(
                 Group {
                     switch selectedTab {
@@ -368,25 +366,25 @@ struct ReferenceDataView: View {
                     }
                 }
             )
-            // ⚠️ Résolution explicite, jamais un littéral nu : `.navigationTitle`
-            // ponte vers la chrome native (barre de titre macOS), qui ne respecte
-            // pas fiablement `\.locale` forcé par l'app (contrairement à un `Text`
-            // de contenu). Cf. CLAUDE.md §5.
+            // ⚠️ Explicit resolution, never a bare literal: `.navigationTitle`
+            // bridges to native chrome (the macOS title bar), which doesn't
+            // reliably respect the app-forced `\.locale` (unlike a content
+            // `Text`). See CLAUDE.md §5.
             .localizedNavigationTitle("Données")
             .toolbar {
-                // Actions secondaires + bouton + groupés dans UNE pilule sur macOS.
-                // `ToolbarItemGroup` (et NON `ControlGroup`, qui rendait des boutons
-                // isolés) : c'est le groupement natif de la barre d'outils.
-                // Icônes seules + tooltip natif `.help`, cohérent avec le reste.
+                // Secondary actions + the "+" button grouped in ONE pill on macOS.
+                // `ToolbarItemGroup` (NOT `ControlGroup`, which rendered isolated
+                // buttons): it's the toolbar's native grouping.
+                // Icon-only + native `.help` tooltip, consistent with the rest.
                 #if os(macOS)
-                // Retour d'usage : réorganisé en 2 groupes séparés par un
-                // `Spacer()` — filtre/groupes/tri (ou, en sélection, les
-                // actions de groupe) à gauche, bascule de sélection + ajouter
-                // collés au bord droit. `Spacer()` dans un `ToolbarItemGroup`
-                // est déjà le pattern utilisé par `TransactionsView`.
+                // Reorganized into 2 groups separated by a `Spacer()` —
+                // filter/groups/sort (or, in selection mode, the group
+                // actions) on the left, the selection toggle + add
+                // glued to the right edge. A `Spacer()` inside a `ToolbarItemGroup`
+                // is already the pattern used by `TransactionsView`.
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     if !isCurrentlySelecting {
-                        // Filtre + groupes : n'ont de sens que sur l'onglet Tiers.
+                        // Filter + groups: only make sense on the Payees tab.
                         if selectedTab == .tiers {
                             PaneToggleButton(
                                 label: "Filtrer",
@@ -404,8 +402,8 @@ struct ReferenceDataView: View {
                         }
                         .localizedHelp(sortOrder == .alphabetical ? "Trier par création" : "Trier par nom")
                     } else if currentSelectionCount > 0 {
-                        // En sélection, ce même emplacement porte les actions
-                        // de groupe — filtre/groupes/tri n'ont plus de sens ici.
+                        // In selection mode, this same slot carries the group
+                        // actions — filter/groups/sort no longer make sense here.
                         Button {
                             selectAllInCurrentTab()
                         } label: {
@@ -413,8 +411,8 @@ struct ReferenceDataView: View {
                         }
                         .localizedHelp("Tout sélectionner")
                         .localizedAccessibilityLabel("Tout sélectionner")
-                        // Fusion de doublons — n'a de sens que pour les tiers
-                        // (pas les tags), et à partir de 2 sélectionnés.
+                        // Merging duplicates — only makes sense for payees
+                        // (not tags), and from 2 selected onward.
                         if selectedTab == .tiers && currentSelectionCount >= 2 {
                             Button {
                                 mergeTierCandidateIds = Array(selectedTiersIds)
@@ -434,9 +432,9 @@ struct ReferenceDataView: View {
 
                     Spacer()
 
-                    // Bascule de sélection — retour d'usage : c'était un
-                    // bouton TEXTE ("Sélectionner"/"Annuler") à gauche de la
-                    // barre ; icône, collée au bord droit avec "Ajouter".
+                    // Selection toggle — this used to be a TEXT
+                    // button ("Select"/"Cancel") on the left of the
+                    // bar; now an icon, glued to the right edge next to "Add".
                     if selectedTab == .tiers || selectedTab == .tags {
                         Button {
                             toggleCurrentSelectionMode()
@@ -446,18 +444,17 @@ struct ReferenceDataView: View {
                         .localizedHelp(isCurrentlySelecting ? "Annuler la sélection" : "Sélectionner")
                         .localizedAccessibilityLabel(isCurrentlySelecting ? "Annuler la sélection" : "Sélectionner")
                     }
-                    // ⚠️ Retrait CONDITIONNEL (`if !isCurrentlySelecting`), pas
-                    // `.opacity(0).disabled(...)` (retour d'usage : le système
-                    // dessine une pilule/fond autour du GROUPE de boutons de la
-                    // toolbar — masquer juste le CONTENU d'un bouton laisse sa
-                    // pilule vide visible, une "bulle" fantôme à la place
-                    // d'"Ajouter" pendant la sélection). Un `if` retire le
-                    // bouton du groupe, pas seulement son contenu.
+                    // ⚠️ CONDITIONAL removal (`if !isCurrentlySelecting`), not
+                    // `.opacity(0).disabled(...)`: the system draws a
+                    // pill/background around the toolbar button GROUP — hiding just a
+                    // button's CONTENT leaves its empty pill visible, a phantom
+                    // "bubble" where "Add" should be during selection. An `if`
+                    // removes the button from the group, not just its content.
                     if !isCurrentlySelecting {
-                        // Binding custom : `startAdd()` réinitialise plusieurs
-                        // champs brouillon — doit rester déclenché à
-                        // l'OUVERTURE, pas à chaque bascule (la fermeture n'a
-                        // rien à réinitialiser).
+                        // Custom binding: `startAdd()` resets several
+                        // draft fields — it must stay triggered on
+                        // OPEN, not on every toggle (closing has
+                        // nothing to reset).
                         PaneToggleButton(label: "Ajouter", systemImage: "plus", isOn: Binding(
                             get: { showEditSheet },
                             set: { newValue in
@@ -467,13 +464,13 @@ struct ReferenceDataView: View {
                     }
                 }
                 #else
-                // Retour d'usage : filtre + tri restent des icônes de premier
-                // niveau (accès direct) ; groupes/sélectionner/ajouter — des
-                // actions plus rares — vont dans le menu "…", groupes séparé
-                // du reste par un `Divider()` (question distincte : organiser
-                // les tiers vs. agir sur la liste courante). En sélection,
-                // la bascule + les actions de groupe restent au 1er niveau
-                // (on ne veut pas enterrer "Annuler la sélection").
+                // Filter + sort stay top-level icons (direct access);
+                // groups/select/add — rarer actions — go into the "…"
+                // menu, in a group separated from the rest by a `Divider()`
+                // (a distinct question: organizing payees vs. acting on
+                // the current list). In selection mode, the toggle
+                // + group actions stay top-level (we don't want to
+                // bury "Cancel selection").
                 if isCurrentlySelecting {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button {
@@ -494,8 +491,8 @@ struct ReferenceDataView: View {
                             .localizedHelp("Tout sélectionner")
                             .localizedAccessibilityLabel("Tout sélectionner")
                         }
-                        // Fusion de doublons — n'a de sens que pour les tiers
-                        // (pas les tags), et à partir de 2 sélectionnés.
+                        // Merging duplicates — only makes sense for payees
+                        // (not tags), and from 2 selected onward.
                         if selectedTab == .tiers && currentSelectionCount >= 2 {
                             ToolbarItem(placement: .navigationBarTrailing) {
                                 Button {
@@ -610,10 +607,10 @@ struct ReferenceDataView: View {
                         candidates: tiers.filter { $0.id != sourceId },
                         onSelect: { target in
                             mergeTierSearchSourceId = nil
-                            // ⚠️ Ne PAS ouvrir le résolveur dans le même cycle
-                            // que la fermeture de ce picker — présenter un
-                            // `.adaptivePane` en fermer un autre exige de
-                            // différer le second (cf. CLAUDE.md §N.1).
+                            // ⚠️ Do NOT open the resolver in the same cycle
+                            // as this picker's dismissal — presenting one
+                            // `.adaptivePane` while dismissing another requires
+                            // deferring the second (see CLAUDE.md §N.1).
                             Task { @MainActor in
                                 mergeTierCandidateIds = [sourceId, target.id]
                             }
@@ -667,9 +664,9 @@ struct ReferenceDataView: View {
             .adaptiveEntityPane(
                 item: $editingMetadataKey,
                 title: "Métadonnée",
-                // Lecture fraîche en base, jamais depuis `metadataKeys` (cache
-                // local) — même doctrine que le `refresh` des Tiers juste
-                // au-dessus.
+                // Fresh read from the database, never from `metadataKeys` (the
+                // local cache) — same doctrine as the Payees `refresh` just
+                // above.
                 refresh: { k in metadataRepository.fetchKeys().first { $0.id == k.id } },
                 onDelete: { k in
                     pendingDelete = DeleteTarget(tab: .metadata, entityId: k.id, name: k.name,
@@ -735,8 +732,8 @@ struct ReferenceDataView: View {
                 recomputeFiltered(resetPaging: true)
             }
             .task(id: searchText) {
-                // Debounce : sans ça, chaque caractère saisi refiltre et retrie
-                // les ~1000 tiers (comparaison localisée = la plus coûteuse).
+                // Debounce: without it, every character typed refilters and re-sorts
+                // the ~1000 payees (a localized comparison — the costliest kind).
                 if !(searchText.isEmpty && appliedSearch.isEmpty) {
                     try? await Task.sleep(nanoseconds: 250_000_000)
                     guard !Task.isCancelled else { return }
@@ -746,7 +743,7 @@ struct ReferenceDataView: View {
                 recomputeFiltered(resetPaging: true)
             }
             .task(id: appState.dataRefreshToken) {
-                // 1-frame guard pour afficher le skeleton avant la lecture SQLite.
+                // A 1-frame guard so the skeleton shows before the SQLite read.
                 await Task.yield()
                 loadReferenceData()
                 hasLoaded = true
@@ -754,12 +751,12 @@ struct ReferenceDataView: View {
             .refreshable { loadReferenceData() }
     }
 
-    // MARK: - Contenus d'onglet (extraits de `navBody` pour le type-check, cf. commentaire ci-dessus)
+    // MARK: - Tab content (extracted from `navBody` for type-checking, see the comment above)
 
     @ViewBuilder private var accountsTabContent: some View {
         if filteredAccounts.isEmpty { emptyRow
         } else if sortOrder == .alphabetical && searchText.isEmpty {
-            // Groupé par type, trié alphabétiquement.
+            // Grouped by type, sorted alphabetically.
             let groups = accounts.groupedByType
             ForEach(groups, id: \.type) { group in
                 Section {
@@ -775,7 +772,7 @@ struct ReferenceDataView: View {
                 .listRowSeparator(.hidden)
             }
         } else {
-            // Plat : résultats de recherche ou tri par création
+            // Flat: search results or sorted by creation date
             ForEach(filteredAccounts) { a in
                 accountRow(a)
                     .macGroupedRow(first: a.id == filteredAccounts.first?.id, last: a.id == filteredAccounts.last?.id)
@@ -787,16 +784,16 @@ struct ReferenceDataView: View {
         if categories.isEmpty {
             emptyRow
         } else if !searchText.isEmpty {
-            // Mode recherche : liste plate avec indicateur visuel
+            // Search mode: a flat list with a visual indicator
             ForEach(filteredCategories) { c in
                 flatCategoryRow(c)
                     .macGroupedRow(first: c.id == filteredCategories.first?.id, last: c.id == filteredCategories.last?.id)
             }
         } else {
-            // Mode normal : arbre hiérarchique, aplati en une liste plate des
-            // nœuds VISIBLES (cf. `visibleCategoryRows` et le commentaire de
-            // tête de `CategoryTreeRow`) — first/last globaux à cette liste,
-            // pas par groupe de frères, pour UNE seule carte continue.
+            // Normal mode: a hierarchical tree, flattened into a flat list of
+            // VISIBLE nodes (see `visibleCategoryRows` and `CategoryTreeRow`'s
+            // header comment) — global first/last on this list,
+            // not per group of siblings, for ONE continuous card.
             let rows = visibleCategoryRows
             ForEach(Array(rows.enumerated()), id: \.element.node.id) { index, entry in
                 CategoryTreeRow(
@@ -867,8 +864,8 @@ struct ReferenceDataView: View {
                     )
                     .macGroupedRow(first: t.id == visibleTiers.first?.id, last: t.id == visibleTiers.last?.id)
             }
-            // Sentinelle de pagination : son apparition à l'écran
-            // déclenche le chargement de la page suivante.
+            // Pagination sentinel: its appearing on screen
+            // triggers loading the next page.
             if filteredTiers.count > visibleTiers.count {
                 HStack {
                     Spacer()
@@ -923,11 +920,10 @@ struct ReferenceDataView: View {
         }
     }
 
-    /// Onglet Métadonnées — même parcours que Comptes/Tiers/Tags : tap ou
-    /// swipe "Modifier" ouvrent le détail (`editingMetadataKey`, cf.
-    /// `adaptiveEntityPane`), swipe "Supprimer" la confirmation générique
-    /// (`pendingDelete`). Remplace l'ancien bouton "Gérer les métadonnées"
-    /// (retour d'usage : "il sert à rien").
+    /// Metadata tab — same flow as Accounts/Payees/Tags: tap or
+    /// swipe "Edit" open the detail (`editingMetadataKey`, see
+    /// `adaptiveEntityPane`), swipe "Delete" the generic confirmation
+    /// (`pendingDelete`). Replaces the old "Manage metadata" button.
     @ViewBuilder private var metadataTabContent: some View {
         if filteredMetadataKeys.isEmpty { emptyRow } else {
             ForEach(filteredMetadataKeys) { key in
@@ -980,12 +976,12 @@ struct ReferenceDataView: View {
 
     // MARK: Helpers
 
-    // `EmptyStateView` (icône/titre/message) est le mécanisme unique pour les
-    // écrans vides — cf. CLAUDE.md §5. C'était jusqu'ici un simple `Text` sans
-    // icône, seul écran vide de l'app dans ce cas (retour d'usage). Toujours
-    // UNE row dans la `List` (pas un plein écran), donc le fond/séparateur par
-    // défaut de la row sont retirés pour laisser l'état vide se centrer
-    // proprement, comme les autres modules.
+    // `EmptyStateView` (icon/title/message) is the single mechanism for
+    // empty screens — see CLAUDE.md §5. This used to be a plain `Text` with no
+    // icon, the only empty screen in the app in that state. Always
+    // ONE row in the `List` (not a full screen), so the row's default
+    // background/separator are removed to let the empty state center
+    // properly, like the other modules.
     @ViewBuilder private var emptyRow: some View {
         Group {
             if !searchText.isEmpty {
@@ -995,17 +991,17 @@ struct ReferenceDataView: View {
                     verbatimMessage: "Aucun résultat pour « \(searchText) »"
                 )
             } else if selectedTab == .tiers && tiersActiveFiltersCount > 0 {
-                // Distinct du cas "base vide" ci-dessous : des tiers existent,
-                // seuls les filtres structurés (groupe/catégorie/ville/pays)
-                // ne renvoient rien.
+                // Distinct from the "empty database" case below: payees do
+                // exist, only the structured filters (group/category/city/country)
+                // return nothing.
                 EmptyStateView(
                     icon: "line.3.horizontal.decrease.circle",
                     title: "Aucun résultat",
                     message: "Aucun tier ne correspond à ces filtres."
                 )
             } else if selectedTab == .metadata {
-                // Une base neuve n'a AUCUNE métadonnée par design (§ AXE Y) —
-                // pas "importe d'abord", contrairement au cas générique.
+                // A fresh database has NO metadata at all by design (§ AXE Y) —
+                // not "import first", unlike the generic case.
                 EmptyStateView(
                     icon: "tag",
                     title: "Aucune métadonnée",
@@ -1028,8 +1024,8 @@ struct ReferenceDataView: View {
     private func accountRow(_ a: Account) -> some View {
         Button {
             #if os(macOS)
-            // macOS : clic = panneau détail (la navigation vers les transactions
-            // reste accessible via le bouton dédié du panneau).
+            // macOS: a click opens the detail pane (navigation to the transactions
+            // stays reachable via the pane's dedicated button).
             detailTarget = .account(a)
             #else
             appState.selectedAccountId = a.id
@@ -1062,11 +1058,10 @@ struct ReferenceDataView: View {
                     .font(.caption2).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
             }
         }
-        // Sans ça, macOS applique le chrome de bouton par défaut (teinté par
-        // l'accent de l'app) — un surlignement vert par-dessus une carte déjà
-        // verte (`macGroupedRow`). iOS n'a pas ce style par défaut au même
-        // endroit, d'où l'écart jamais remarqué avant (retour d'usage
-        // 2026-08-21).
+        // Without this, macOS applies the default button chrome (tinted with
+        // the app's accent) — a green highlight on top of an already-green
+        // card (`macGroupedRow`). iOS doesn't have this default style at the
+        // same spot, hence the gap that went unnoticed for a while.
         .buttonStyle(.plain)
         .rowActions(
             leading: [editAction { startEdit(id: a.id, name: a.name, accountType: a.type, excludedFromAggregates: a.excludedFromAggregates) }],
@@ -1078,11 +1073,11 @@ struct ReferenceDataView: View {
         )
     }
 
-    /// "Voir les transactions" d'un tiers (`PayeeDetailPane`) : bascule sur
-    /// l'onglet Transactions, filtré par son nom, tous comptes confondus (un
-    /// tiers n'est pas rattaché à un compte particulier) — même mécanique
-    /// que `accountRow` pour un compte, via `AppState.pendingPayeeFilterName`
-    /// (consommé par `TransactionsView.loadInitialData()`).
+    /// "View transactions" for a payee (`PayeeDetailPane`): switches to
+    /// the Transactions tab, filtered by its name, across all accounts (a
+    /// payee isn't tied to a particular account) — the same mechanism
+    /// as `accountRow` for an account, via `AppState.pendingPayeeFilterName`
+    /// (consumed by `TransactionsView.loadInitialData()`).
     private func showTransactionsFor(_ payee: Tiers) {
         appState.pendingPayeeFilterName = payee.name
         appState.dataRefreshToken = UUID()
@@ -1109,8 +1104,8 @@ struct ReferenceDataView: View {
     private func startAdd() {
         switch selectedTab {
         case .tiers:
-            // Fiche riche directement (mêmes champs qu'à l'édition), pas le
-            // form minimal de `ReferenceEditFormPane`.
+            // The rich form directly (the same fields as when editing), not the
+            // minimal form of `ReferenceEditFormPane`.
             creatingPayee = true
         case .metadata:
             creatingMetadataKey = true
@@ -1132,20 +1127,20 @@ struct ReferenceDataView: View {
             if let id = editItemId { repository.updateCategory(id: id, name: name, parentId: draft.parentCategoryId, icon: draft.icon) }
             else { repository.addCategory(name: name, parentId: draft.parentCategoryId, icon: draft.icon) }
         case .tiers:
-            // Mort en pratique : `startAdd()` route désormais `.tiers` vers
-            // `PayeeDetailView` (fiche riche) AVANT de jamais ouvrir ce
-            // panneau, et aucun tiers n'est édité via `startEdit` (l'édition
-            // passe par `editingPayee`/`PayeeDetailView`). Garder ce cas —
-            // requis par l'exhaustivité du switch sur `ReferenceTab`, utilisé
-            // pour bien d'autres choses dans cette vue.
+            // Dead in practice: `startAdd()` now routes `.tiers` to
+            // `PayeeDetailView` (the rich form) BEFORE ever opening this
+            // pane, and no payee is edited via `startEdit` (editing
+            // goes through `editingPayee`/`PayeeDetailView`). This case is kept —
+            // required by the exhaustiveness of the switch on `ReferenceTab`, used
+            // for plenty of other things in this view.
             break
         case .metadata:
-            // Mort en pratique, comme `.tiers` ci-dessus : `startAdd()` route
-            // `.metadata` vers `MetadataKeyFormView` AVANT de jamais ouvrir ce
-            // panneau, et l'édition passe par `editingMetadataKey`.
+            // Dead in practice, like `.tiers` above: `startAdd()` routes
+            // `.metadata` to `MetadataKeyFormView` BEFORE ever opening this
+            // pane, and editing goes through `editingMetadataKey`.
             break
         case .tags:
-            break  // Les tags ne sont pas éditables ici
+            break  // Tags aren't editable here
         }
         loadReferenceData()
         showEditSheet = false
@@ -1160,14 +1155,14 @@ struct ReferenceDataView: View {
         payeeGroups     = repository.fetchPayeeGroups()
         metadataKeys    = metadataRepository.fetchKeys()
 
-        // Compteurs de transactions associées (une passe GROUP BY par table).
+        // Counts of associated transactions (one GROUP BY pass per table).
         categoryCounts    = repository.countTransactionsByCategory()
         tierCounts        = repository.countTransactionsByPayee()
         paymentTypeCounts = repository.countTransactionsByPaymentType()
         accountCounts     = repository.countTransactionsByAccount()
         tagCounts         = repository.countTransactionsByTag()
-        // Pas de comptage groupé côté métadonnées (peu de clés en pratique,
-        // contrairement aux ~1000 tiers) : une requête par clé suffit.
+        // No grouped count on the metadata side (few keys in practice,
+        // unlike the ~1000 payees): one query per key is enough.
         metadataKeyCounts = Dictionary(uniqueKeysWithValues: metadataKeys.map {
             ($0.id, metadataRepository.transactionIds(keyId: $0.id, value: nil).count)
         })
@@ -1175,9 +1170,9 @@ struct ReferenceDataView: View {
         recomputeFiltered(resetPaging: false)
     }
 
-    // MARK: Suppression
+    // MARK: Deletion
 
-    /// Nombre de transactions d'une catégorie, sous-catégories incluses.
+    /// Number of transactions in a category, sub-categories included.
     private func categoryTransactionCount(_ ids: [Int]) -> Int {
         ids.reduce(0) { $0 + (categoryCounts[$1] ?? 0) }
     }
@@ -1209,9 +1204,9 @@ struct ReferenceDataView: View {
             let nounKey: String
             switch target.tab {
             case .tags:     nounKey = "détaguée"
-            // ⚠️ Contrairement aux autres tabs, supprimer une métadonnée
-            // EFFACE la valeur (CASCADE) — pas "conservée", pour ne pas
-            // laisser croire à tort que les transactions gardent la valeur.
+            // ⚠️ Unlike the other tabs, deleting a metadata key
+            // ERASES the value (CASCADE) — not "kept", so as not to
+            // wrongly suggest transactions keep the value.
             case .metadata: nounKey = target.count > 1 ? "qui perdront cette métadonnée" : "qui perdra cette métadonnée"
             default:        nounKey = "conservée"
             }
@@ -1226,20 +1221,20 @@ struct ReferenceDataView: View {
         }
     }
 
-    /// Bouton de suppression (swipe leading = « glisser à droite »).
+    /// Delete button (leading swipe = "swipe right").
     private func deleteAction(_ target: DeleteTarget) -> RowAction {
         RowAction("Supprimer", systemImage: "trash", role: .destructive, tint: AppTheme.Colors.danger) {
             pendingDelete = target
         }
     }
 
-    // MARK: - Sélection multiple (Tiers / Tags)
+    // MARK: - Multi-select (Payees / Tags)
     //
-    // Deux onglets seulement (les autres — Comptes groupés, Catégories en
-    // arbre — n'ont pas la structure plate qu'un maj+clic/⌘A suppose). L'état
-    // reste séparé par onglet (`isSelectingTiers`/`isSelectingTags`…) ; ces
-    // helpers dispatchent juste sur `selectedTab` pour éviter de dupliquer
-    // les mêmes 4 branches dans la toolbar, la barre du bas et le dialogue.
+    // Only two tabs (the others — Accounts grouped, Categories as a
+    // tree — don't have the flat structure shift+click/⌘A assumes). State
+    // stays separate per tab (`isSelectingTiers`/`isSelectingTags`…); these
+    // helpers just dispatch on `selectedTab` to avoid duplicating
+    // the same 4 branches across the toolbar, the bottom bar and the dialog.
 
     private var isCurrentlySelecting: Bool {
         switch selectedTab {
@@ -1318,10 +1313,10 @@ struct ReferenceDataView: View {
         appState.dataRefreshToken = UUID()
     }
 
-    /// Fusionne `sourceIds` dans `target` (cf. `PayeeMergeTargetPicker`) et
-    /// nettoie tout état qui pourrait encore pointer vers un tiers qui vient
-    /// de disparaître — la sélection groupée notamment.
-    // MARK: - Panneau détail macOS (helpers)
+    /// Merges `sourceIds` into `target` (see `PayeeMergeTargetPicker`) and
+    /// clears any leftover state that might still point at a payee that just
+    /// disappeared — the group selection in particular.
+    // MARK: - macOS detail pane (helpers)
 
     private func countsFor(_ target: ReferenceDetailTarget) -> Int {
         switch target {
@@ -1334,8 +1329,8 @@ struct ReferenceDataView: View {
         }
     }
 
-    /// « Modifier » du panneau détail : remplit les drafts et ouvre la fiche
-    /// d'édition partagée — qui REMPLACE le panneau détail (slot unique).
+    /// "Edit" from the detail pane: fills the drafts and opens the shared
+    /// edit form — which REPLACES the detail pane (a single slot).
     private func startEditFor(_ target: ReferenceDetailTarget) {
         switch target {
         case .account(let a):
@@ -1345,7 +1340,7 @@ struct ReferenceDataView: View {
         case .paymentType(let p):
             startEdit(id: p.id, name: p.name)
         case .tag:
-            break   // Les tags n'ont pas d'édition (pas de rename en base).
+            break   // Tags have no editing (no rename in the database).
         }
     }
 
@@ -1367,9 +1362,9 @@ struct ReferenceDataView: View {
     }
 
 
-    /// Icône à afficher dans la preview de la sheet d'édition : reflète l'icône RÉELLE
-    /// utilisée à l'affichage (custom si définie, sinon fallback auto sur le nom).
-    /// Sous-titre d'un tier dans la liste : ville · pays · groupe (les champs vides sont skip).
+    /// Icon to show in the edit sheet's preview: reflects the ACTUAL icon
+    /// used for display (custom if set, otherwise the automatic fallback on the name).
+    /// A payee's subtitle in the list: city · country · group (empty fields are skipped).
     private func tierSubtitle(_ t: Tiers) -> String? {
         var parts: [String] = []
         if let c = t.city, !c.isEmpty { parts.append(c) }
@@ -1394,7 +1389,7 @@ struct ReferenceDataView: View {
 
     // MARK: - Category helpers
 
-    /// Ligne plate pour le mode recherche
+    /// Flat row for search mode
     @ViewBuilder
     private func flatCategoryRow(_ c: Category) -> some View {
         HStack(spacing: 10) {
@@ -1409,10 +1404,9 @@ struct ReferenceDataView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(c.name)
                     .fontWeight(c.parentId == nil ? .semibold : .regular)
-                // Le filtre aplatit l'arbre — un enfant peut apparaître sans
-                // son parent. Le nom du parent en sous-titre remplace l'ancien
-                // "↳" : la profondeur seule ne disait pas DE QUI c'est la
-                // sous-catégorie (retour d'usage).
+                // The filter flattens the tree — a child can show up without
+                // its parent. The parent's name as a subtitle replaces the old
+                // "↳": depth alone didn't say WHOSE sub-category it was.
                 if let parentId = c.parentId,
                    let parentName = categories.first(where: { $0.id == parentId })?.name {
                     Text(parentName)
@@ -1433,7 +1427,7 @@ struct ReferenceDataView: View {
         )
     }
 
-    /// Construit la cible de suppression d'une catégorie, en emportant ses sous-catégories.
+    /// Builds a category's deletion target, carrying along its sub-categories.
     private func deleteTargetForCategory(_ c: Category) -> DeleteTarget {
         let childIds = categories.filter { $0.parentId == c.id }.map(\.id)
         let allIds = [c.id] + childIds
@@ -1441,7 +1435,7 @@ struct ReferenceDataView: View {
                             count: categoryTransactionCount(allIds), childIds: childIds, blocked: false)
     }
 
-    /// Idem depuis un nœud de l'arbre (emporte toute la sous-arborescence).
+    /// Same, from a tree node (carries along the whole sub-tree).
     private func deleteTargetForNode(_ node: CategoryNode) -> DeleteTarget {
         let allIds = node.allIds()
         let childIds = Array(allIds.dropFirst())

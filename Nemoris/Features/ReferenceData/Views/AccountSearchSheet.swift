@@ -1,34 +1,34 @@
 import SwiftUI
 
-/// Sheet de sélection d'un compte bancaire, filtrable par recherche — remplace
-/// les `Picker` plats devenus illisibles avec beaucoup de comptes différés
-/// (un par mois de CB, cf. retour user). Même gabarit que `TiersSearchSheet`/
-/// `PayeePickerSheet` : `List` + `.paneSearchable` + `.macGroupedRow`.
+/// Sheet for picking a bank account, filterable by search — replaces the
+/// flat `Picker`s that became unreadable with many deferred-debit accounts
+/// (one per credit-card month). Same template as `TiersSearchSheet`/
+/// `PayeePickerSheet`: `List` + `.paneSearchable` + `.macGroupedRow`.
 ///
-/// Callback plutôt que `Binding<Int>` : certains appelants ont un effet de
-/// bord à poser en plus de l'id (ex. `AppState.selectedAccountName` dans
-/// `TransactionFiltersSheet`) — `onPick` leur laisse la main plutôt que de
-/// baker cette logique ici.
+/// A callback rather than `Binding<Int>`: some callers have a side
+/// effect to apply besides the id (e.g. `AppState.selectedAccountName` in
+/// `TransactionFiltersSheet`) — `onPick` leaves that to them instead of
+/// baking that logic in here.
 struct AccountSearchSheet: View {
-    // `\.paneDismiss`, PAS `\.dismiss` : cette sheet est ouverte depuis des
-    // contextes racine (Réglages, entonnoir d'import sur desktop) où elle
-    // atterrit en NIVEAU 1 de `.adaptivePane` (inspecteur macOS — pas une
-    // vraie `.sheet`). `\.dismiss` n'y trouve alors aucune présentation
-    // locale à fermer et remonte fermer LA FENÊTRE (retour d'usage
-    // 2026-09-10 : "Fermer" fermait l'app depuis le sélecteur de compte de
-    // l'import et du compte par défaut). `\.paneDismiss` est injecté par
-    // `.adaptivePane` dans les deux cas (inspecteur ET sheet), cf. le
-    // contrat documenté en tête d'`AdaptivePane.swift`.
+    // `\.paneDismiss`, NOT `\.dismiss`: this sheet is opened from root
+    // contexts (Settings, the desktop import funnel) where it
+    // lands at LEVEL 1 of `.adaptivePane` (the macOS inspector — not a
+    // real `.sheet`). `\.dismiss` then finds no local
+    // presentation to close and bubbles up to close THE WINDOW ("Close"
+    // used to close the whole app from the account picker of import
+    // and of the default account). `\.paneDismiss` is injected by
+    // `.adaptivePane` in both cases (inspector AND sheet), see the
+    // contract documented at the top of `AdaptivePane.swift`.
     @Environment(\.paneDismiss) private var dismiss
 
     let accounts: [Account]
-    /// Id actuellement sélectionné, pour la coche — `nil` si aucun ou si la
-    /// ligne spéciale est active.
+    /// Currently selected id, for the checkmark — `nil` if none or if the
+    /// special row is active.
     var selectedId: Int? = nil
     var title: String = "Choisir un compte"
-    /// Ligne fixe en tête de liste (ex. "Tous les comptes", "Aucun",
-    /// "Premier disponible") — jamais filtrée par la recherche. `onPick(nil)`
-    /// est appelé si elle est tapée. `nil` = pas de ligne spéciale.
+    /// A fixed row at the top of the list (e.g. "All accounts", "None",
+    /// "First available") — never filtered by search. `onPick(nil)`
+    /// is called if it's tapped. `nil` = no special row.
     var specialLabel: String? = nil
     var specialIcon: String = "rectangle.stack.fill"
     let onPick: (Account?) -> Void
@@ -53,11 +53,11 @@ struct AccountSearchSheet: View {
                 } label: {
                     HStack {
                         Image(systemName: specialIcon)
-                        // `specialLabel` est une `String` d'exécution, pas un
-                        // littéral : `Text(specialLabel)` resterait verbatim
-                        // (jamais localisé) sans ce wrap explicite — cf.
+                        // `specialLabel` is a runtime `String`, not a
+                        // literal: `Text(specialLabel)` would stay verbatim
+                        // (never localized) without this explicit wrap — see
                         // `Text(LocalizedStringKey(group.type.label))`
-                        // juste plus bas dans ce même fichier.
+                        // further down in this same file.
                         Text(LocalizedStringKey(specialLabel))
                         Spacer()
                         if selectedId == nil {
@@ -67,20 +67,18 @@ struct AccountSearchSheet: View {
                 }
                 .foregroundStyle(AppTheme.Colors.textSecondary)
                 .buttonStyle(.plain)
-                // Toujours `last: true` : contrairement à `TiersSearchSheet`/
-                // `RemboursementQuickPickSheet` (où la ligne spéciale et le
-                // `ForEach` qui suit forment UNE seule carte continue, sans
-                // rupture visuelle), ici les comptes qui suivent sont dans
-                // un `Section` avec un HEADER (le nom du groupe de comptes)
-                // — la continuité de carte est déjà rompue par ce header.
-                // `last: groups.isEmpty` faisait tomber le bas de cette ligne
-                // à angles droits dès qu'un compte existait, comme si elle
-                // se poursuivait dans la section suivante alors qu'aucune
-                // carte ne les relie réellement (retour d'usage macOS
-                // 2026-09-11, capture à l'appui : bord bas non arrondi collé
-                // au header "Checking"). Même raison que le `last: true`
-                // fixe de `CategoryQuickPickSheet.noneRow`, suivi lui aussi
-                // d'une structure qui n'est pas une carte continue (un arbre).
+                // Always `last: true`: unlike `TiersSearchSheet`/
+                // `RemboursementQuickPickSheet` (where the special row and the
+                // following `ForEach` form ONE continuous card, with no
+                // visual break), here the accounts that follow sit in
+                // a `Section` with a HEADER (the account group's name)
+                // — card continuity is already broken by that header.
+                // `last: groups.isEmpty` made this row's bottom edge
+                // square as soon as an account existed, as if it
+                // continued into the next section even though no
+                // card actually connects them. Same reason as the
+                // fixed `last: true` on `CategoryQuickPickSheet.noneRow`, also
+                // followed by a structure that isn't a continuous card (a tree).
                 .macGroupedRow(first: true, last: true)
             }
 

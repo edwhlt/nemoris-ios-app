@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Filtre structuré de l'onglet Tiers de `ReferenceDataView` — groupe /
-/// catégorie / ville / pays. Distinct de la recherche texte (nom/regex)
-/// déjà fournie par `.searchable` : les deux se combinent (ET), même
-/// principe que `TransactionFiltersSheet` (tiers + libellé).
+/// Structured filter for `ReferenceDataView`'s Payees tab — group /
+/// category / city / country. Distinct from the text search (name/regex)
+/// already provided by `.searchable`: the two combine (AND), the same
+/// principle as `TransactionFiltersSheet` (payee + label).
 struct TiersFilterSheet: View {
     @Environment(\.paneDismiss) private var paneDismiss
 
@@ -15,18 +15,18 @@ struct TiersFilterSheet: View {
     @Binding var country: String
     let onApply: () -> Void
 
-    // Copies locales — n'écrivent dans les bindings qu'à "Appliquer", pour ne
-    // pas refiltrer/re-trier ~1000 tiers à chaque caractère tapé (même raison
-    // que `localPayeeSearch`/`localLabelSearch` dans `TransactionFiltersSheet`).
+    // Local copies — only written to the bindings on "Apply", so as
+    // not to refilter/re-sort ~1000 payees on every character typed (same reason
+    // as `localPayeeSearch`/`localLabelSearch` in `TransactionFiltersSheet`).
     @State private var localGroupId: Int?
     @State private var localCategoryId: Int?
     @State private var localCity: String = ""
     @State private var localCountry: String = ""
 
-    /// Aplatie en pré-ordre avec indentation par profondeur — même pattern
-    /// que `TransactionFiltersSheet.categoryPickerEntries` (un `Picker` ne
-    /// rend pas un vrai arbre pliable, mais l'indentation transmet la
-    /// hiérarchie sans rien retirer : parent ET enfants restent sélectionnables).
+    /// Flattened in pre-order with depth-based indentation — the same pattern
+    /// as `TransactionFiltersSheet.categoryPickerEntries` (a `Picker` doesn't
+    /// render a real foldable tree, but indentation conveys the
+    /// hierarchy without removing anything: both a parent AND its children stay selectable).
     private var categoryPickerEntries: [(node: CategoryNode, depth: Int)] {
         CategoryNode.flattenedForest(CategoryNode.buildForest(from: allCategories))
     }
@@ -78,8 +78,8 @@ struct TiersFilterSheet: View {
             localCity       = city
             localCountry    = country
         }
-        // `.paneChrome` dessine ses propres barres sur macOS-sheet — même
-        // convention que `TransactionFiltersSheet`/`MetadataKeyManagerView`.
+        // `.paneChrome` draws its own bars on macOS-sheet — the same
+        // convention as `TransactionFiltersSheet`/`MetadataKeyManagerView`.
         .paneChrome(
             "Filtres",
             cancelLabel: "Fermer", onCancel: { paneDismiss() },

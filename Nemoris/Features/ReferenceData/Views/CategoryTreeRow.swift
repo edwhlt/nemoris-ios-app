@@ -1,37 +1,37 @@
 import SwiftUI
 import TipKit
 
-/// Row PLATE de l'arbre des catégories (Données → Catégories, mode normal).
+/// A FLAT row of the category tree (Data → Categories, normal mode).
 ///
-/// ⚠️ Pas de `DisclosureGroup` — retour d'usage : le rendu macOS ne
-/// correspondait pas à iOS (une simple `.macGroupedRow(first:last:)` posée
-/// niveau par niveau de récursion fabrique une carte PAR groupe de frères,
-/// donc un arbre fragmenté en mini-cartes séparées, alors qu'iOS ignore
-/// `first`/`last` et rend nativement UNE seule liste `.insetGrouped`
-/// continue pour tout l'onglet). Remède structurel, pas un correctif de
-/// `first`/`last` : l'arbre est aplati en amont (`ReferenceDataView.
-/// visibleCategoryRows`, sur le modèle de `SQLConsoleView.visibleRows` —
-/// même doctrine, "indentation manuelle + chevron séparé, pas de
-/// DisclosureGroup") en une liste PLATE des nœuds VISIBLES compte tenu du
-/// pli/dépli courant. `first`/`last` se calculent alors une seule fois, sur
-/// la position GLOBALE dans cette liste aplatie — exactement comme
-/// `flatCategoryRow`/`TierRow`/tout le reste de l'app — et macOS retrouve la
-/// même carte unique et continue qu'iOS.
+/// ⚠️ No `DisclosureGroup` — the macOS rendering didn't
+/// match iOS (a plain `.macGroupedRow(first:last:)` set at each level of
+/// recursion produces a card PER group of siblings, so the tree fragments
+/// into separate mini-cards, whereas iOS ignores
+/// `first`/`last` and natively renders ONE continuous `.insetGrouped`
+/// list for the whole tab). A structural fix, not a `first`/`last`
+/// patch: the tree is flattened upstream (`ReferenceDataView.
+/// visibleCategoryRows`, modeled on `SQLConsoleView.visibleRows` —
+/// the same doctrine: "manual indentation + a separate chevron, no
+/// DisclosureGroup") into a FLAT list of the currently VISIBLE nodes
+/// given the current fold/unfold state. `first`/`last` are then computed
+/// once, on the node's GLOBAL position in that flattened list —
+/// exactly like `flatCategoryRow`/`TierRow`/everything else in the
+/// app — and macOS gets back the same continuous, single card as iOS.
 struct CategoryTreeRow: View {
     let node: CategoryNode
-    /// Profondeur dans l'arbre (0 = racine) — pilote l'indentation manuelle,
-    /// l'automatique de `DisclosureGroup` ayant disparu avec lui.
+    /// Depth in the tree (0 = root) — drives manual indentation,
+    /// since `DisclosureGroup`'s automatic one is gone along with it.
     let depth: Int
-    /// nil pour une feuille (rien à plier/déplier).
+    /// nil for a leaf (nothing to fold/unfold).
     let isExpanded: Bool?
     let onToggleExpand: () -> Void
     let countFor: (Category) -> Int
     let onEdit: (Category) -> Void
     let onDelete: (CategoryNode) -> Void
-    /// Clic macOS sur une feuille → panneau détail (no-op iOS via macDetailTap).
+    /// A macOS click on a leaf → the detail pane (a no-op on iOS via macDetailTap).
     let onSelect: (Category) -> Void
-    /// Position dans la liste APLATIE et VISIBLE — pas parmi les seuls frères
-    /// (cf. commentaire de tête) : c'est ce qui donne UNE carte continue.
+    /// Position in the FLATTENED, VISIBLE list — not among siblings alone
+    /// (see the header comment): that's what gives ONE continuous card.
     var isFirst: Bool = true
     var isLast: Bool = true
 
@@ -55,12 +55,12 @@ struct CategoryTreeRow: View {
         }
     }
 
-    /// Ligne d'un parent — tap n'importe où = plier/déplier (comme
-    /// `DisclosureGroup` avant lui : un parent n'est pas sélectionnable dans
-    /// cet écran, seulement pliable/dépliable ou modifiable/supprimable par
-    /// swipe, donc aucun conflit de zone de tap à isoler ici — contrairement
-    /// au picker de catégorie d'une transaction où un parent EST
-    /// sélectionnable, cf. `CategoryPickerTreeRow` dans
+    /// A parent's row — tap anywhere = fold/unfold (like
+    /// `DisclosureGroup` before it: a parent isn't selectable in
+    /// this screen, only foldable/unfoldable or editable/deletable via
+    /// swipe, so there's no tap-zone conflict to isolate here — unlike
+    /// a transaction's category picker, where a parent IS
+    /// selectable, see `CategoryPickerTreeRow` in
     /// `CategoryQuickPickSheet.swift`).
     @ViewBuilder
     private func parentRow(_ node: CategoryNode) -> some View {
@@ -98,12 +98,12 @@ struct CategoryTreeRow: View {
     @ViewBuilder
     private func leafRow(_ category: Category, isRootLevel: Bool) -> some View {
         HStack(spacing: 10) {
-            // Réserve la largeur du chevron de `parentRow` (14pt) : une
-            // catégorie SANS enfant (donc rendue ici, jamais par
-            // `parentRow`) doit s'aligner avec une catégorie AVEC enfants du
-            // même niveau — sans ce spacer, l'icône/le nom d'une catégorie
-            // racine sans enfant démarrait 14pt plus à gauche qu'une
-            // catégorie racine avec enfants (retour d'usage).
+            // Reserves `parentRow`'s chevron width (14pt): a
+            // category WITH NO children (so rendered here, never by
+            // `parentRow`) must align with a category WITH children at the
+            // same level — without this spacer, a childless root category's
+            // icon/name started 14pt further left than a
+            // childless root category with children.
             Color.clear.frame(width: 14, height: 1)
             if isRootLevel {
                 ZStack {
@@ -136,10 +136,10 @@ struct CategoryTreeRow: View {
         .contentShape(Rectangle())
         .macDetailTap { onSelect(category) }
         .rowActions(
-            // `node` (propriété du struct, pas un paramètre local) EST déjà
-            // ce nœud feuille — `body` n'appelle `leafRow` que dans la
-            // branche `node.isLeaf`, `category` ci-dessus n'étant que
-            // `node.category` passé en paramètre.
+            // `node` (the struct's property, not a local parameter) IS already
+            // this leaf node — `body` only calls `leafRow` in the
+            // `node.isLeaf` branch, `category` above being just
+            // `node.category` passed as a parameter.
             leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { onEdit(category) }],
             trailing: [RowAction("Supprimer", systemImage: "trash", role: .destructive, tint: AppTheme.Colors.danger) { onDelete(node) }],
             leadingFullSwipe: false,

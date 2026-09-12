@@ -3,27 +3,27 @@ import Foundation
 import FoundationModels
 #endif
 
-/// Assistant IA pour construire des requêtes SQL en conversation multi-tours.
+/// AI assistant for building SQL queries in a multi-turn conversation.
 ///
-/// 100 % on-device via Apple Foundation Models (`LanguageModelSession`).
-/// Requiert iOS 26.0+ et Apple Intelligence activé. Sinon `isAvailable` est false
-/// et la UI affichera un état "Non disponible".
+/// 100% on-device via Apple Foundation Models (`LanguageModelSession`).
+/// Requires iOS 26.0+ and Apple Intelligence enabled. Otherwise `isAvailable` is false
+/// and the UI shows an "Unavailable" state.
 ///
-/// La session est stateful : chaque `respond(to:)` continue le contexte. C'est
-/// idéal pour le raffinement progressif d'une requête.
+/// The session is stateful: each `respond(to:)` continues the context. Ideal
+/// for progressively refining a query.
 @MainActor
 final class SQLAssistantService {
 
-    /// ⚠️ Respecte désormais le choix de l'utilisateur pour cette
-    /// fonctionnalité. Ce service appelait Foundation Models en DIRECT : un
-    /// « Désactivée » dans les Réglages ne le coupait pas.
+    /// ⚠️ Now respects the user's choice for this
+    /// feature. This service used to call Foundation Models DIRECTLY: a
+    /// "Disabled" setting had no effect on it.
     ///
-    /// Le moteur reste Foundation Models, et c'est ici une contrainte
-    /// technique, pas un oubli : l'assistant est MULTI-TOURS et s'appuie sur
-    /// l'état conservé par `LanguageModelSession` d'une question à l'autre. Le
-    /// porter sur un backend HTTP demanderait de gérer l'historique de
-    /// conversation nous-mêmes — un chantier à part, d'où la capacité
-    /// `.multiTurn` déclarée par `AIFeature.sqlAssistant`.
+    /// The engine stays Foundation Models, and that's a technical
+    /// constraint here, not an oversight: the assistant is MULTI-TURN and relies on
+    /// the state `LanguageModelSession` keeps from one question to the next. Porting
+    /// it to an HTTP backend would require managing the conversation
+    /// history ourselves — a separate undertaking, hence the
+    /// `.multiTurn` capability declared by `AIFeature.sqlAssistant`.
     var isAvailable: Bool {
         guard AIEnrichmentBackend.usesGuidedGeneration(for: .sqlAssistant) else { return false }
         #if canImport(FoundationModels)
@@ -34,13 +34,13 @@ final class SQLAssistantService {
         return false
     }
 
-    /// État de disponibilité détaillé pour l'UI.
+    /// Detailed availability state for the UI.
     enum Availability {
         case ready
         case notImplemented        // < iOS 26 — pas de Foundation Models
-        case appleIntelligenceOff  // iOS 26+ mais user n'a pas activé AI
+        case appleIntelligenceOff  // iOS 26+ but the user hasn't enabled Apple Intelligence
         case deviceNotEligible     // appareil pas compatible
-        case modelNotReady         // téléchargement en cours
+        case modelNotReady         // download in progress
     }
 
     var availability: Availability {
@@ -63,17 +63,17 @@ final class SQLAssistantService {
 
     // MARK: - Session (multi-turn)
     //
-    // `LanguageModelSession` n'existe qu'à partir d'iOS 26 → on ne peut pas
-    // annoter une stored property `@available`. Astuce : on stocke un `Any?`
-    // et on cast au moment de l'usage (sous `if #available`).
+    // `LanguageModelSession` only exists from iOS 26 onward → a stored property
+    // can't be annotated `@available`. Workaround: store an `Any?`
+    // and cast it at use time (under `if #available`).
     private var sessionStorage: Any?
 
-    /// Reset complet : la prochaine question repart d'une session vide.
+    /// Full reset: the next question starts from an empty session.
     func resetConversation() {
         sessionStorage = nil
     }
 
-    /// Envoie un message user au LLM. Renvoie la réponse complète (texte avec bloc SQL).
+    /// Sends a user message to the LLM. Returns the full response (text with an SQL block).
     func send(_ userMessage: String) async -> String? {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
@@ -100,10 +100,10 @@ final class SQLAssistantService {
 
     // MARK: - System prompt
 
-    /// Le schéma SQL injecté dans le prompt est généré dynamiquement depuis
-    /// `SchemaDoc.llmSchemaPrompt` — source de vérité unique avec la doc
-    /// utilisateur de `DatabaseSchemaView`. Si une migration ajoute une table,
-    /// mets à jour `SchemaDoc.domains` une seule fois et l'assistant suit.
+    /// The SQL schema injected into the prompt is generated dynamically from
+    /// `SchemaDoc.llmSchemaPrompt` — a single source of truth shared with the
+    /// user-facing docs in `DatabaseSchemaView`. If a migration adds a table,
+    /// update `SchemaDoc.domains` once and the assistant follows along.
     static var systemInstructions: String {
         Self.instructionsTemplate.replacingOccurrences(
             of: "{{SCHEMA}}",

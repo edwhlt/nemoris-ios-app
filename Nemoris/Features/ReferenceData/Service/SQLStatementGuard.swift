@@ -1,51 +1,51 @@
 import Foundation
 
-/// Classe une instruction SQL isolée par ce qu'elle ferait RÉELLEMENT à la base
-/// (lecture / écriture de lignes / modification du schéma) — c'est le garde-fou
-/// de la Console SQL et de l'assistant IA (les deux seuls chemins qui exécutent
-/// du SQL tapé/généré librement, cf. `TransactionRepository.executeSQL`).
+/// Classifies an isolated SQL statement by what it would ACTUALLY do to the
+/// database (read / write rows / change the schema) — this is the safety net
+/// for the SQL Console and the AI assistant (the only two paths that run
+/// freely typed/generated SQL, see `TransactionRepository.executeSQL`).
 ///
-/// Deux dangers distincts, traités différemment :
-/// - une modification de SCHÉMA (CREATE/ALTER/DROP…) désynchronise la base du
-///   schéma que l'app attend (`DatabaseManager.migrateIfNeeded`, dont le
-///   détecteur de drift traite déjà tout hand-edit "via la console SQL" comme
-///   LE risque à surveiller — cf. CLAUDE.md §AXE L). Ce n'est pas récupérable
-///   depuis l'app : bloqué, sans option de passage en force.
-/// - une modification de DONNÉES (INSERT/UPDATE/DELETE/REPLACE) reste une
-///   opération légitime d'un power user, mais irréversible depuis l'app —
-///   demande confirmation explicite, avec une sauvegarde proposée avant.
+/// Two distinct dangers, handled differently:
+/// - a SCHEMA change (CREATE/ALTER/DROP…) desynchronizes the database from
+///   the schema the app expects (`DatabaseManager.migrateIfNeeded`, whose
+///   drift detector already treats any hand-edit "via the SQL console" as
+///   THE risk to watch for). It isn't recoverable from within the app:
+///   blocked, with no override option.
+/// - a DATA change (INSERT/UPDATE/DELETE/REPLACE) remains a legitimate
+///   power-user operation, but irreversible from the app —
+///   requires explicit confirmation, with a backup offered beforehand.
 ///
-/// Moteur PUR (aucun accès SQLite/réseau, ne connaît que le TEXTE de la
-/// requête) — ne l'exécute jamais, se contente de la lire. Couvert par
-/// `Tests/check_purity.sh` et `NemorisTests/SQLStatementGuardTests.swift`.
+/// PURE engine (no SQLite/network access, only knows the TEXT of the
+/// query) — never runs it, only reads it. Covered by
+/// `Tests/check_purity.sh` and `NemorisTests/SQLStatementGuardTests.swift`.
 enum SQLStatementKind: Equatable {
     /// Lecture seule : SELECT, EXPLAIN, PRAGMA de lecture.
     case query
-    /// Écrit des LIGNES sans toucher au schéma : INSERT / UPDATE / DELETE / REPLACE.
+    /// Writes ROWS without touching the schema: INSERT / UPDATE / DELETE / REPLACE.
     case dataModification
-    /// Modifie la STRUCTURE de la base : CREATE / ALTER / DROP / ATTACH / DETACH,
-    /// ou un PRAGMA qui altère un réglage persistant (`user_version`,
-    /// `journal_mode`…) — `user_version` en particulier est ce que
-    /// `DatabaseManager` utilise pour savoir quelles migrations appliquer :
-    /// le modifier à la main revient à mentir à l'app sur son propre schéma.
+    /// Changes the database's STRUCTURE: CREATE / ALTER / DROP / ATTACH / DETACH,
+    /// or a PRAGMA that alters a persistent setting (`user_version`,
+    /// `journal_mode`…) — `user_version` in particular is what
+    /// `DatabaseManager` uses to know which migrations to apply:
+    /// changing it by hand amounts to lying to the app about its own schema.
     case schemaModification
-    /// BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE — contrôle transactionnel,
-    /// ni lecture ni écriture de contenu en soi.
+    /// BEGIN / COMMIT / ROLLBACK / SAVEPOINT / RELEASE — transaction control,
+    /// neither a read nor a write of content in itself.
     case transactionControl
-    /// VACUUM / ANALYZE / REINDEX — réécrit le fichier ou des statistiques
-    /// internes, mais ne change ni le schéma logique ni le contenu des tables.
+    /// VACUUM / ANALYZE / REINDEX — rewrites the file or internal
+    /// statistics, but changes neither the logical schema nor tables' content.
     case maintenance
-    /// Premier mot-clé non reconnu par ce classifieur. Jamais auto-approuvé :
-    /// une requête qu'on ne sait pas nommer n'est pas une requête dont on peut
-    /// garantir qu'elle ne modifie rien.
+    /// First keyword this classifier doesn't recognize. Never auto-approved:
+    /// a query we can't name isn't one we can guarantee
+    /// doesn't change anything.
     case unrecognized
 
-    /// Bloque l'exécution avant toute confirmation — casserait la compatibilité
-    /// de la base avec l'app, pas de bouton "quand même" dans la console.
+    /// Blocks execution before any confirmation — would break the
+    /// database's compatibility with the app, no "anyway" button in the console.
     var isBlockedBySchemaGuard: Bool { self == .schemaModification }
 
-    /// Demande une confirmation explicite (avec proposition de sauvegarde)
-    /// avant exécution — l'action reste possible, juste jamais silencieuse.
+    /// Asks for explicit confirmation (with a backup offered)
+    /// before running — the action stays possible, just never silent.
     var requiresDataModificationConfirmation: Bool {
         self == .dataModification || self == .unrecognized
     }
@@ -53,10 +53,10 @@ enum SQLStatementKind: Equatable {
 
 struct SQLStatementClassification: Equatable {
     let kind: SQLStatementKind
-    /// Premier mot-clé significatif détecté, en majuscules (ex. "DROP", "DELETE").
+    /// First significant keyword detected, uppercased (e.g. "DROP", "DELETE").
     let keyword: String
-    /// Cible détectée (nom de table/index/trigger) si le motif le permet —
-    /// purement informatif pour l'affichage, jamais utilisé pour décider.
+    /// Detected target (a table/index/trigger name) if the pattern allows it —
+    /// purely informational for display, never used to decide anything.
     let target: String?
 }
 
@@ -72,10 +72,10 @@ enum SQLStatementGuard {
         let upper = firstWord.uppercased()
 
         if upper == "WITH" {
-            // CTE : le verbe qui compte est celui qui suit `WITH x AS (...), y AS (...)`.
+            // CTE: the verb that matters is the one following `WITH x AS (...), y AS (...)`.
             guard let realKeyword = keywordAfterCTE(in: stripped) else {
-                // CTE sans verbe détectable après ses parenthèses balancées : on ne
-                // sait pas ce qui suit, donc on ne l'approuve pas silencieusement.
+                // A CTE with no detectable verb after its balanced parentheses: we
+                // don't know what follows, so we don't silently approve it.
                 return SQLStatementClassification(kind: .unrecognized, keyword: upper, target: nil)
             }
             return classification(forKeyword: realKeyword, in: stripped)
@@ -90,8 +90,8 @@ enum SQLStatementGuard {
 
     // MARK: - Batch assessment
 
-    /// Verdict sur un lot de statements (une console peut exécuter plusieurs
-    /// requêtes séparées par `;` en une passe) : le plus sévère l'emporte.
+    /// Verdict on a batch of statements (a console can run several
+    /// queries separated by `;` in one pass): the most severe one wins.
     struct BatchAssessment {
         let classifications: [SQLStatementClassification]
 
@@ -103,9 +103,9 @@ enum SQLStatementGuard {
         var statementsNeedingConfirmation: [SQLStatementClassification] {
             classifications.filter { $0.kind.requiresDataModificationConfirmation }
         }
-        /// Une confirmation n'a de sens que si RIEN n'est déjà bloquant — un lot
-        /// bloqué ne s'exécute pas du tout, la question de confirmer une autre
-        /// ligne du même lot ne se pose pas.
+        /// A confirmation only makes sense if NOTHING is already blocking — a
+        /// blocked batch doesn't run at all, so confirming another
+        /// line in the same batch is a moot question.
         var needsConfirmation: Bool { !isBlocked && !statementsNeedingConfirmation.isEmpty }
     }
 
@@ -131,9 +131,9 @@ enum SQLStatementGuard {
         "VACUUM", "ANALYZE", "REINDEX"
     ]
 
-    /// PRAGMA sans `=` mais dont l'appel a un effet de bord réel (pas une simple
-    /// lecture) — `wal_checkpoint`/`optimize`/`incremental_vacuum`/`shrink_memory`
-    /// écrivent sur disque même sans syntaxe d'affectation.
+    /// A PRAGMA with no `=` but whose call has a real side effect (not a plain
+    /// read) — `wal_checkpoint`/`optimize`/`incremental_vacuum`/`shrink_memory`
+    /// write to disk even with no assignment syntax.
     private static let sideEffectPragmasWithoutAssignment: Set<String> = [
         "WAL_CHECKPOINT", "OPTIMIZE", "INCREMENTAL_VACUUM", "SHRINK_MEMORY"
     ]
@@ -161,7 +161,7 @@ enum SQLStatementGuard {
     }
 
     private static func classifyPragma(_ stripped: String) -> SQLStatementClassification {
-        // Le nom du pragma est le premier mot après "PRAGMA".
+        // The pragma's name is the first word after "PRAGMA".
         let afterPragma = stripped.dropFirst("PRAGMA".count).trimmingCharacters(in: .whitespaces)
         let pragmaName = leadingKeyword(in: afterPragma)?.uppercased() ?? ""
         let hasAssignment = stripped.contains("=")
@@ -217,15 +217,15 @@ enum SQLStatementGuard {
 
     // MARK: - CTE handling
 
-    /// `WITH a AS (...), b AS (SELECT ...) DELETE FROM x WHERE ...` — le verbe
-    /// qui décide du danger est celui qui suit la dernière définition de CTE,
-    /// pas "WITH" lui-même. On avance caractère par caractère en comptant les
-    /// parenthèses pour sauter par-dessus les définitions, aussi imbriquées
-    /// soient-elles, puis on lit le premier mot-clé rencontré au niveau 0.
+    /// `WITH a AS (...), b AS (SELECT ...) DELETE FROM x WHERE ...` — the verb
+    /// that decides the danger is the one following the last CTE
+    /// definition, not "WITH" itself. We advance character by character counting
+    /// parentheses to skip over the definitions, however nested
+    /// they are, then read the first keyword found at depth 0.
     private static func keywordAfterCTE(in text: String) -> String? {
         var depth = 0
         var chars = Substring(text)
-        // Sauter "WITH" (et un éventuel "RECURSIVE").
+        // Skip "WITH" (and an optional "RECURSIVE").
         chars = chars.dropFirst(4).drop(while: { $0.isWhitespace })
         if chars.uppercased().hasPrefix("RECURSIVE") {
             chars = chars.dropFirst("RECURSIVE".count).drop(while: { $0.isWhitespace })
@@ -236,8 +236,8 @@ enum SQLStatementGuard {
             if c == "(" { depth += 1 }
             else if c == ")" { depth -= 1 }
             else if depth == 0, c.isLetter {
-                // Premier mot-clé rencontré hors de toute parenthèse : soit le nom
-                // d'une nouvelle CTE suivi de AS (à ignorer), soit le vrai verbe.
+                // First keyword found outside any parentheses: either the name
+                // of a new CTE followed by AS (to ignore), or the real verb.
                 let rest = chars[i...]
                 guard let word = leadingKeyword(in: String(rest)) else { break }
                 let upper = word.uppercased()
@@ -245,9 +245,9 @@ enum SQLStatementGuard {
                     i = chars.index(i, offsetBy: word.count)
                     continue
                 }
-                // Un identifiant de CTE suivi ailleurs d'un "(" (ses colonnes ou son
-                // corps) plutôt que d'un verbe connu = ce n'est pas encore le verbe
-                // final, on continue d'avancer.
+                // A CTE identifier followed elsewhere by a "(" (its columns or its
+                // body) rather than a known verb = this isn't yet the final
+                // verb, keep advancing.
                 if schemaKeywords.contains(upper) || dataKeywords.contains(upper) || queryKeywords.contains(upper) {
                     return upper
                 }
@@ -283,9 +283,9 @@ enum SQLStatementGuard {
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Premier token alphabétique (lettres/underscore) en tête de `text`
-    /// (après un éventuel espace initial). `nil` si `text` ne commence par
-    /// aucune lettre (parenthèse, chiffre, ponctuation, texte vide…).
+    /// First alphabetic token (letters/underscore) at the start of `text`
+    /// (after an optional leading space). `nil` if `text` doesn't start with
+    /// any letter (a parenthesis, a digit, punctuation, empty text…).
     private static func leadingKeyword(in text: String) -> String? {
         var word = ""
         for ch in text {
@@ -301,15 +301,15 @@ enum SQLStatementGuard {
     }
 }
 
-// MARK: - Messages partagés
+// MARK: - Shared messages
 
-/// Textes FR affichés par la Console SQL ET l'assistant IA (`SQLConsoleView`,
-/// `SQLAssistantSheet`) — un seul endroit pour éviter que les deux textes
-/// divergent au fil des retouches (les deux répondent à la même question :
-/// "que va faire cette requête et pourquoi c'est bloqué/à confirmer").
+/// FR text shown by both the SQL Console AND the AI assistant
+/// (`SQLConsoleView`, `SQLAssistantSheet`) — a single place so the two
+/// texts can't drift apart over successive tweaks (both answer the
+/// same question: "what will this query do and why is it blocked/needs confirmation").
 enum SQLGuardMessages {
 
-    /// Message de l'alerte de blocage (modification de schéma).
+    /// Message for the blocking alert (a schema change).
     static func blocked(_ statements: [SQLStatementClassification]) -> String {
         let items = statements.map { c -> String in
             let label = c.keyword.isEmpty ? "Instruction non reconnue" : c.keyword
@@ -325,7 +325,7 @@ enum SQLGuardMessages {
         """
     }
 
-    /// Message de la confirmation (modification de données).
+    /// Message for the confirmation (a data change).
     static func confirmation(_ statements: [SQLStatementClassification]) -> String {
         var byKeywordAndTarget: [String: Set<String>] = [:]
         var countsWithoutTarget: [String: Int] = [:]

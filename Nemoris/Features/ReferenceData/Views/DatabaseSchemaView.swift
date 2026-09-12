@@ -3,26 +3,26 @@ import SwiftUI
 import UIKit
 #endif
 
-/// Doc navigable du schéma SQLite, accessible depuis la Console SQL.
-/// Liste toutes les tables groupées par domaine avec leurs colonnes, relations,
-/// et quelques exemples de requêtes prêts à copier.
+/// Navigable SQLite schema docs, reachable from the SQL Console.
+/// Lists every table grouped by domain with its columns, relationships,
+/// and a few ready-to-copy example queries.
 ///
-/// ⚠️ Source statique : si tu ajoutes une migration qui change le schéma, mets à
-/// jour `SchemaDoc.domains` ci-dessous (cf. version courante du schéma dans
-/// `DatabaseManager.migrations` — v46 au moment de l'écriture).
+/// ⚠️ Static source: if you add a migration that changes the schema, update
+/// `SchemaDoc.domains` below (see the schema's current version in
+/// `DatabaseManager.migrations` — v46 at the time of writing).
 ///
-/// Cette doc alimente AUSSI le prompt de l'assistant SQL (`SQLAssistantService.
-/// systemInstructions` → `SchemaDoc.llmSchemaPrompt`) : une colonne listée ici
-/// mais absente en base fait halluciner l'assistant sur une colonne inexistante.
+/// This doc ALSO feeds the SQL assistant's prompt (`SQLAssistantService.
+/// systemInstructions` → `SchemaDoc.llmSchemaPrompt`): a column listed here
+/// but absent from the database makes the assistant hallucinate about a
+/// non-existent column.
 struct DatabaseSchemaView: View {
     @Environment(AppState.self) private var appState
     @State private var expandedTables: Set<String> = []
     @State private var copiedQuery: String? = nil
 
-    /// Ne montre pas le schéma d'un module que l'utilisateur a désactivé —
-    /// autant de tables qu'il ne verra jamais ailleurs dans l'app (retour
-    /// d'usage 2026-08-19). Les domaines transverses (Core, Import) n'ont pas
-    /// de `requiredModule` et restent toujours visibles.
+    /// Doesn't show the schema of a module the user disabled —
+    /// tables they'll never see anywhere else in the app. Cross-cutting
+    /// domains (Core, Import) have no `requiredModule` and stay always visible.
     private var visibleDomains: [SchemaDomain] {
         SchemaDoc.domains.filter { domain in
             guard let module = domain.requiredModule else { return true }
@@ -81,9 +81,9 @@ struct DatabaseSchemaView: View {
             }
         }
         #if os(macOS)
-        // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS celui du
-        // panneau hôte — sans ce modificateur, le bureau de l'utilisateur
-        // transparaît (retour d'usage 2026-08-19).
+        // `List` paints ITS OWN system background on macOS ON TOP OF the
+        // host pane's — without this modifier, the user's desktop
+        // shows through.
         .scrollContentBackground(.hidden)
         #endif
         .localizedNavigationTitle("Schéma de la base")
@@ -298,10 +298,10 @@ struct SchemaTable {
 struct SchemaDomain {
     let name: String
     let tables: [SchemaTable]
-    /// Module dont ce domaine dépend, s'il en dépend d'un — `nil` pour les
-    /// domaines transverses (Core, Import) toujours pertinents quel que soit
-    /// l'état des modules optionnels. Sert à masquer les schémas des modules
-    /// désactivés dans `DatabaseSchemaView` (retour d'usage 2026-08-19).
+    /// The module this domain depends on, if any — `nil` for
+    /// cross-cutting domains (Core, Import) always relevant regardless of
+    /// the state of optional modules. Used to hide the schemas of
+    /// disabled modules in `DatabaseSchemaView`.
     var requiredModule: MainTabItem? = nil
 }
 
@@ -311,7 +311,7 @@ struct SchemaRecipe {
     let sql: String
 }
 
-// MARK: - Schema data (source of truth pour la doc — à mettre à jour avec les migrations)
+// MARK: - Schema data (source of truth for the docs — update alongside migrations)
 
 enum SchemaDoc {
 
@@ -326,15 +326,15 @@ enum SchemaDoc {
         coachDomain
     ]
 
-    /// Toutes les tables aplaties (sans regroupement par domaine).
+    /// Every table flattened (with no grouping by domain).
     static var allTables: [SchemaTable] { domains.flatMap(\.tables) }
 
-    /// Rendu **ultra-compact** du schéma pour le prompt LLM. Format DDL-like
-    /// sans descriptions — seulement les noms de tables/colonnes, types et FK.
-    /// Doit rester sous ~1500 tokens pour tenir dans la fenêtre de contexte
-    /// limitée d'Apple Foundation Models (on-device, ~4k tokens max).
+    /// **Ultra-compact** rendering of the schema for the LLM prompt. A DDL-like
+    /// format with no descriptions — only table/column names, types, and FKs.
+    /// Must stay under ~1500 tokens to fit Apple Foundation Models' limited
+    /// on-device context window (~4k tokens max).
     ///
-    /// La doc détaillée reste dans `domains` pour `DatabaseSchemaView`.
+    /// The detailed docs stay in `domains`, for `DatabaseSchemaView`.
     static let llmSchemaPrompt: String = {
         var lines: [String] = []
         for domain in domains {
@@ -639,10 +639,10 @@ enum SchemaDoc {
                 relations: [],
                 example: nil
             ),
-            // enrichment_cache : DROPPED en v36. Le cache d'enrichissement (Sirene,
-            // MapKit, LLM) est maintenant dans `Library/Caches/nemoris/enrichment_cache.json`
-            // via `JSONFileCache`. Pas dans la DB user — ce sont des données récupérables
-            // via APIs externes.
+            // enrichment_cache: DROPPED in v36. The enrichment cache (Sirene,
+            // MapKit, LLM) now lives in `Library/Caches/nemoris/enrichment_cache.json`
+            // via `JSONFileCache`. Not in the user DB — this data is re-fetchable
+            // via external APIs.
             SchemaTable(
                 name: "pending_apple_pay_entries",
                 systemImage: "creditcard.and.123",
@@ -1012,7 +1012,7 @@ enum SchemaDoc {
                 )
             ),
         ],
-        // Les Objectifs vivent dans le module Patrimoine (pas d'onglet dédié).
+        // Goals live in the Patrimoine module (no dedicated tab).
         requiredModule: .patrimoine
     )
 

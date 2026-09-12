@@ -7,18 +7,18 @@ struct CategoryIconPicker: View {
     let isParent: Bool
     @Environment(\.dismiss) private var dismiss
 
-    /// Icône RÉELLEMENT utilisée (custom si définie, sinon fallback auto sur le nom).
+    /// Icon ACTUALLY used (custom if set, otherwise the automatic fallback on the name).
     private var effectiveIcon: String {
         Category(id: 0, name: categoryName, parentId: isParent ? nil : 1, icon: selectedIcon).displayIcon
     }
 
-    /// Filtre de recherche dans le catalogue (et saisie libre d'un nom SF Symbol).
+    /// Search filter in the catalog (and free-text entry of an SF Symbol name).
     @State private var searchText = ""
 
-    /// Existence d'un SF Symbol sur l'OS courant. Permet (a) d'accepter la
-    /// saisie libre de N'IMPORTE lequel des milliers de symboles Apple sans
-    /// embarquer la liste complète, et (b) de filtrer le catalogue pour ne
-    /// jamais afficher une case vide si un symbole n'existe pas sur cette version.
+    /// Whether an SF Symbol exists on the current OS. Lets us (a) accept
+    /// free-text entry of ANY of the thousands of Apple symbols without
+    /// bundling the full list, and (b) filter the catalog to never
+    /// show an empty box if a symbol doesn't exist on this OS version.
     nonisolated private static func symbolExists(_ name: String) -> Bool {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return false }
@@ -29,9 +29,9 @@ struct CategoryIconPicker: View {
         #endif
     }
 
-    /// Catalogue brut, largement étendu (~230 symboles) et thématisé.
-    /// Il ne prétend PAS couvrir les 5000+ SF Symbols : la saisie libre en haut
-    /// de la sheet donne accès à tout le reste.
+    /// The raw catalog, substantially expanded (~230 symbols) and themed.
+    /// It does NOT claim to cover the 5000+ SF Symbols: free-text entry at the
+    /// top of the sheet gives access to everything else.
     private static let rawGroups: [(title: String, icons: [String])] = [
         ("Alimentation", ["cart.fill", "basket.fill", "fork.knife", "cup.and.saucer.fill", "mug.fill",
                           "wineglass.fill", "birthday.cake.fill", "fish.fill", "carrot.fill",
@@ -89,14 +89,14 @@ struct CategoryIconPicker: View {
                           "infinity", "number"]),
     ]
 
-    /// Catalogue effectif : symboles réellement disponibles sur cet OS (calculé
-    /// une seule fois). Évite les cases vides si un symbole a été introduit dans
-    /// une version d'iOS/macOS plus récente que celle de l'appareil.
+    /// Effective catalog: symbols actually available on this OS (computed
+    /// once). Avoids empty boxes if a symbol was introduced in
+    /// an iOS/macOS version more recent than the device's.
     private static let groups: [(title: String, icons: [String])] = rawGroups
         .map { (title: $0.title, icons: $0.icons.filter(symbolExists)) }
         .filter { !$0.icons.isEmpty }
 
-    /// Catalogue filtré par la recherche (sur le nom du symbole ET le thème).
+    /// Catalog filtered by the search (on the symbol's name AND its theme).
     private var filteredGroups: [(title: String, icons: [String])] {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !q.isEmpty else { return Self.groups }
@@ -109,8 +109,8 @@ struct CategoryIconPicker: View {
             .filter { !$0.icons.isEmpty }
     }
 
-    /// Nom SF Symbol saisi à la main, valide et absent du catalogue → proposé
-    /// tel quel. C'est ce qui ouvre l'accès aux milliers de symboles Apple.
+    /// An SF Symbol name typed by hand, valid but absent from the catalog → offered
+    /// as-is. This is what opens access to the thousands of Apple symbols.
     private var customSymbolCandidate: String? {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, Self.symbolExists(q) else { return nil }
@@ -120,8 +120,8 @@ struct CategoryIconPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Current selection — affiche TOUJOURS l'icône réellement utilisée (custom
-            // ou fallback auto), pas un tag.fill générique.
+            // Current selection — ALWAYS shows the icon actually used (custom
+            // or automatic fallback), not a generic tag.fill.
             HStack(spacing: 10) {
                 ZStack {
                     Circle()
@@ -159,7 +159,7 @@ struct CategoryIconPicker: View {
 
             Divider()
 
-            // Recherche dans le catalogue + saisie libre d'un nom SF Symbol.
+            // Search within the catalog + free-text entry of an SF Symbol name.
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
@@ -188,7 +188,7 @@ struct CategoryIconPicker: View {
                     .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.7))
             }
 
-            // Symbole saisi à la main, valide et hors catalogue → utilisable directement.
+            // A symbol typed by hand, valid and outside the catalog → usable directly.
             if let custom = customSymbolCandidate {
                 Button {
                     selectedIcon = custom
@@ -218,7 +218,7 @@ struct CategoryIconPicker: View {
                 .buttonStyle(.plain)
             }
 
-            // Aucun résultat ET saisie non reconnue → message explicite.
+            // No results AND unrecognized entry → an explicit message.
             if filteredGroups.isEmpty && customSymbolCandidate == nil && !searchText.isEmpty {
                 HStack(spacing: 8) {
                     Image(systemName: "questionmark.circle")
