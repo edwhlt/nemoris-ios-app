@@ -8,20 +8,20 @@ import TipKit
 // MARK: - Document picker cross-platform
 
 #if os(macOS)
-/// Ouvre un `NSOpenPanel` DIRECTEMENT depuis une action (bouton), sans passer
-/// par une sheet.
+/// Opens an `NSOpenPanel` DIRECTLY from an action (a button), without going
+/// through a sheet.
 ///
-/// Sur Mac, choisir un fichier/dossier est une fenêtre système, pas une vue :
-/// la router via une `.sheet` qui lance `runModal()` dans son `onAppear`
-/// imbrique une boucle modale dans une présentation de sheet encore en cours —
-/// le panneau ne s'ouvrait pas (« Changer le dossier… » sans effet). Appelé
-/// depuis l'action, il n'y a plus de présentation concurrente.
+/// On Mac, picking a file/folder is a system window, not a view:
+/// routing it through a `.sheet` that fires `runModal()` in its `onAppear`
+/// nests a modal loop inside a presentation that's still in progress —
+/// the panel didn't open ("Change folder…" had no effect). Called
+/// from the action, there's no longer a concurrent presentation.
 @MainActor
 func presentOpenPanel(contentTypes: [UTType], onPick: @escaping (URL) -> Void) {
     let panel = NSOpenPanel()
     panel.allowsMultipleSelection = false
-    // Un dossier ne se choisit PAS via `allowedContentTypes = [.folder]` (le
-    // bouton « Ouvrir » reste désactivé) : il faut `canChooseDirectories`.
+    // A folder can NOT be picked via `allowedContentTypes = [.folder]` (the
+    // "Open" button stays disabled): `canChooseDirectories` is required.
     if contentTypes.contains(.folder) {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -30,10 +30,10 @@ func presentOpenPanel(contentTypes: [UTType], onPick: @escaping (URL) -> Void) {
         panel.canChooseFiles = true
         panel.allowedContentTypes = contentTypes
     }
-    // Présentation ASYNCHRONE attachée à la fenêtre plutôt que `runModal()` :
-    // lancer une boucle modale imbriquée depuis une action SwiftUI ne rendait
-    // pas la main (le panneau ne s'affichait pas — aucun signet n'était jamais
-    // enregistré). `beginSheetModal` rend immédiatement et rappelle au choix.
+    // An ASYNCHRONOUS presentation attached to the window rather than `runModal()`:
+    // launching a nested modal loop from a SwiftUI action didn't return
+    // control (the panel never showed — no bookmark was ever
+    // saved). `beginSheetModal` returns immediately and calls back on the choice.
     let handler: (NSApplication.ModalResponse) -> Void = { response in
         guard response == .OK, let url = panel.url else { return }
         onPick(url)
@@ -45,9 +45,9 @@ func presentOpenPanel(contentTypes: [UTType], onPick: @escaping (URL) -> Void) {
     }
 }
 
-/// macOS : NSOpenPanel natif — même API que le wrapper UIKit ci-dessous.
-/// ⚠️ Préférer `presentOpenPanel` (appel direct depuis l'action) : présenter ce
-/// wrapper en sheet imbrique une boucle modale dans une présentation en cours.
+/// macOS: a native NSOpenPanel — the same API as the UIKit wrapper below.
+/// ⚠️ Prefer `presentOpenPanel` (called directly from the action): presenting this
+/// wrapper as a sheet nests a modal loop inside an ongoing presentation.
 struct DocumentPickerView: View {
     let contentTypes: [UTType]
     let onPick: (URL) -> Void
@@ -59,10 +59,10 @@ struct DocumentPickerView: View {
             .onAppear {
                 let panel = NSOpenPanel()
                 panel.allowsMultipleSelection = false
-                // Un dossier ne se sélectionne PAS via allowedContentTypes = [.folder]
-                // (le bouton "Ouvrir" reste alors désactivé, d'où le "Changer le
-                // dossier" inopérant) : il faut canChooseDirectories = true. On
-                // adapte selon la nature demandée (dossier vs fichier).
+                // A folder can NOT be selected via allowedContentTypes = [.folder]
+                // (the "Open" button then stays disabled, hence "Change
+                // folder" doing nothing): canChooseDirectories = true is required. It
+                // adapts based on what's requested (a folder vs. a file).
                 if contentTypes.contains(.folder) {
                     panel.canChooseDirectories = true
                     panel.canChooseFiles = false
@@ -79,7 +79,7 @@ struct DocumentPickerView: View {
     }
 }
 #else
-// UIDocumentPickerViewController wrapper (fiable dans les sheets)
+// UIDocumentPickerViewController wrapper (reliable inside sheets)
 struct DocumentPickerView: UIViewControllerRepresentable {
     let contentTypes: [UTType]
     let onPick: (URL) -> Void
@@ -117,16 +117,16 @@ struct SettingsView: View {
     var isEmbedded: Bool = false
 
     #if os(macOS)
-    /// Sous-section ouverte, en navigation PAR ÉTAT (pas un push).
+    /// An open sub-section, via STATE-DRIVEN navigation (not a push).
     ///
-    /// Un `NavigationLink` empile la destination dans la `NavigationStack` du
-    /// module ; sur macOS cet empilement n'est pas défait quand on change de
-    /// module depuis la sidebar : on se retrouvait dans « Réglages › Avancé »
-    /// alors que la sidebar surlignait déjà « Données ». Même remède que pour
-    /// Investissements et Tricount : la sous-section REMPLACE le contenu du
-    /// module, avec son propre retour.
+    /// A `NavigationLink` stacks the destination onto the module's
+    /// `NavigationStack`; on macOS that stacking isn't undone when switching
+    /// modules from the sidebar: the app ended up stuck in "Settings › Advanced"
+    /// while the sidebar already highlighted "Data". The same fix as for
+    /// Investments and Tricount: the sub-section REPLACES the module's
+    /// content, with its own back button.
     @State private var pushedSection: SettingsSection?
-    /// Pour fermer le panneau en revenant à la liste des réglages.
+    /// To close the pane by returning to the settings list.
     @Environment(InspectorPaneCenter.self) private var paneCenter: InspectorPaneCenter?
     #endif
 
@@ -145,15 +145,15 @@ struct SettingsView: View {
     }
 
     #if os(macOS)
-    /// Une sous-section en pleine page + retour vers la liste des réglages.
+    /// A full-page sub-section + a way back to the settings list.
     ///
-    /// ⚠️ `.modules` et `.ai` sont des cas À PART : `ModulesSettingsView` et
-    /// `AISettingsView` ont chacune leur PROPRE navigation interne (liste →
-    /// sous-page), donc leur propre bouton retour. Leur superposer ICI un
-    /// second bouton retour générique produit deux chevrons empilés dans la
-    /// même barre — les deux `.toolbar` (celui-ci + celui de la sous-page)
-    /// fusionnent au lieu de se remplacer. Ces deux vues reçoivent donc
-    /// `onBack` et gèrent tout leur chrome elles-mêmes, exactement comme
+    /// ⚠️ `.modules` and `.ai` are SPECIAL cases: `ModulesSettingsView` and
+    /// `AISettingsView` each have their OWN internal navigation (list →
+    /// sub-page), so their own back button. Stacking a
+    /// second generic back button HERE on top produces two chevrons stacked in
+    /// the same bar — the two `.toolbar`s (this one + the sub-page's)
+    /// merge instead of replacing each other. These two views therefore receive
+    /// `onBack` and manage all of their own chrome, exactly like
     /// `DashboardCustomizeView`.
     @ViewBuilder
     private func settingsSectionPage(_ section: SettingsSection) -> some View {
@@ -169,10 +169,10 @@ struct SettingsView: View {
             })
         } else {
             section.destination
-                // ⚠️ Résolution explicite, jamais `LocalizedStringKey(...)` :
-                // `.navigationTitle` ponte vers la chrome native (barre de
-                // titre macOS), qui ne respecte pas fiablement `\.locale`
-                // forcé par l'app. Cf. CLAUDE.md §5.
+                // ⚠️ Explicit resolution, never `LocalizedStringKey(...)`:
+                // `.navigationTitle` bridges to native chrome (the macOS
+                // title bar), which doesn't reliably respect the app-forced
+                // `\.locale`. See CLAUDE.md §5.
                 .localizedNavigationTitle(section.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -192,9 +192,9 @@ struct SettingsView: View {
 
     #endif
 
-    /// Row menant à une sous-section : navigation par ÉTAT sur macOS (le push
-    /// y désynchronise la sidebar), `NavigationLink` classique sur iOS. Le
-    /// chevron est ajouté à la main côté macOS pour un rendu identique.
+    /// A row leading to a sub-section: state-driven navigation on macOS (a push
+    /// there desynchronizes the sidebar), a classic `NavigationLink` on iOS. The
+    /// chevron is added by hand on the macOS side for an identical look.
     @ViewBuilder
     private func settingsLink(_ section: SettingsSection, @ViewBuilder label: () -> some View) -> some View {
         #if os(macOS)
@@ -218,38 +218,38 @@ struct SettingsView: View {
 
     @ViewBuilder private var navBody: some View {
         @Bindable var appState = appState
-        // Fond appliqué via .background (borné par le Form) et non via un
-        // ZStack avec Color.ignoresSafeArea() gourmand : sur macOS ce dernier
-        // rendait le Form infiniment haut (fenêtre étirée + contenu invisible).
+        // The background applied via .background (bounded by the Form) rather than a
+        // ZStack with a greedy Color.ignoresSafeArea(): on macOS the latter
+        // made the Form infinitely tall (a stretched window + invisible content).
         Form {
                 // ── Abonnement ────────────────────────────────────────────
                 subscriptionSection
 
-                // ⚠️ Le compte par défaut ("Général" avant) a déménagé dans
-                // « Modules & navigation → Réglages de Transactions » : c'est
-                // un réglage propre au module Transactions, au même titre que
-                // le seuil budget ou la trésorerie des Investissements — pas
-                // de raison qu'il vive ailleurs.
+                // ⚠️ The default account (formerly "General") has moved into
+                // "Modules & navigation → Transactions settings": it's
+                // a setting specific to the Transactions module, on the same footing as
+                // the budget threshold or Investments' cash — no
+                // reason for it to live elsewhere.
 
-                // ── Sécurité (verrouillage Face ID / Touch ID / code) ────
+                // ── Security (Face ID / Touch ID / passcode lock) ────────
                 appLockSection
                 .listRowBackground(AppTheme.Colors.surface)
 
-                // ── Confidentialité (masquage des montants) ──────────────
+                // ── Privacy (amount masking) ──────────────────────────────
                 privacySection
                 .listRowBackground(AppTheme.Colors.surface)
 
                 // ── Modules ───────────────────────────────────────────────
-                // Activation, ordre ET réglages spécifiques d'un module sont
-                // regroupés dans UN SEUL écran dédié (`ModulesSettingsView`) —
-                // les trois questions ("ce module est-il actif", "où
-                // apparaît-il", "a-t-il un réglage propre") portent sur la
-                // même ligne, elles n'ont pas de raison de vivre à des endroits
-                // différents. C'est aussi ce qui répare le réordonnancement sur
-                // Mac : `ModulesSettingsView` reprend le `Form` isolé de
-                // `DashboardCustomizeView`, seul pattern de drag&drop validé sur
-                // macOS dans l'app — imbriqué parmi une douzaine d'autres
-                // sections comme avant, le glisser-déposer macOS n'amorçait pas.
+                // Enabling, ordering AND a module's specific settings are
+                // grouped in ONE SINGLE dedicated screen (`ModulesSettingsView`) —
+                // the three questions ("is this module active", "where
+                // does it appear", "does it have its own setting") apply to the
+                // same row, there's no reason for them to live in different
+                // places. It's also what fixes reordering on
+                // Mac: `ModulesSettingsView` reuses `DashboardCustomizeView`'s isolated
+                // `Form`, the only drag&drop pattern validated on
+                // macOS in the app — nested among a dozen other
+                // sections as before, macOS drag-and-drop never engaged.
                 Section {
                     settingsLink(.modules) {
                         Label("Modules & navigation", systemImage: "square.grid.2x2.fill")
@@ -280,39 +280,39 @@ struct SettingsView: View {
                 }
                 .listRowBackground(AppTheme.Colors.surface)
 
-                // ── Données ───────────────────────────────────────────────
-                // ⚠️ L'entrée « Importation » a été RETIRÉE d'ici : elle
-                // existait aussi dans la navigation principale, et deux chemins
-                // vers le même écran laissaient croire à deux imports
-                // différents. Un seul accès, celui du menu.
+                // ── Data ──────────────────────────────────────────────────
+                // ⚠️ The "Import" entry was REMOVED from here: it
+                // also existed in the main navigation, and two paths
+                // to the same screen made it look like two different
+                // imports. A single access point, the one in the menu.
                 Section("Données") {
                     settingsLink(.companySources) {
                         Label("Sources entreprises", systemImage: "globe.europe.africa.fill")
                     }
-                    // Réglage propre à l'automatisation Apple Pay (Raccourcis) :
-                    // installation du raccourci, seuil + période de l'alerte
-                    // "dépenses en attente", nettoyage des anciennes entrées.
+                    // A setting specific to the Apple Pay automation (Shortcuts):
+                    // installing the shortcut, the threshold + period of the
+                    // "pending expenses" alert, cleaning up old entries.
                     settingsLink(.applePay) {
                         Label("Alertes Apple Pay", systemImage: "bell.badge")
                     }
                 }
                 .listRowBackground(AppTheme.Colors.surface)
 
-                // ── Synchronisation ───────────────────────────────────────
-                // Synchronisation du fichier de base (iCloud Drive, OneDrive…).
-                // La sync des exchanges/wallets n'est PLUS ici depuis
-                // 2026-08-08 : ce n'est pas un réglage global, c'est propre au
-                // module Investissements — chaque lien est rattaché à un compte
-                // et se gère depuis SA fiche (toolbar "Lier un exchange /
-                // wallet" pour un nouveau compte, section "Synchronisation" de
-                // la fiche pour un compte existant).
+                // ── Sync ──────────────────────────────────────────────────
+                // Syncing the database file (iCloud Drive, OneDrive…).
+                // Syncing exchanges/wallets is NO LONGER here since
+                // 2026-08-08: it isn't a global setting, it's specific to
+                // the Investments module — each link is attached to an account
+                // and managed from ITS OWN sheet (a "Link an exchange /
+                // wallet" toolbar for a new account, a "Sync" section of
+                // an existing account's sheet).
                 Section("Sauvegarde & synchronisation") {
-                    // Filet de sécurité de base — gratuit, snapshots quotidiens iCloud
-                    // (recommandé pour tous les users).
+                    // Basic safety net — free, daily iCloud snapshots
+                    // (recommended for every user).
                     settingsLink(.backup) {
                         Label("Sauvegarde locale & iCloud", systemImage: "icloud.and.arrow.up.fill")
                     }
-                    // Sync CloudKit chiffrée multi-appareils.
+                    // Encrypted multi-device CloudKit sync.
                     settingsLink(.cloudSync) {
                         HStack {
                             Label("Synchronisation iCloud", systemImage: "arrow.trianglehead.2.clockwise.rotate.90.icloud")
@@ -322,15 +322,15 @@ struct SettingsView: View {
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
                         }
                     }
-                    // (Export continu vers dossier retiré 2026-07-26 — redondant
-                    //  avec les snapshots iCloud de BackupService, qui sont déjà
-                    //  des .sqlite bruts accessibles dans Fichiers et survivent à
-                    //  la désinstallation. Le multi-cloud viendra côté BackupService.)
+                    // (The continuous export to a folder was removed 2026-07-26 — redundant
+                    //  with BackupService's iCloud snapshots, which are already
+                    //  raw .sqlite files reachable in Files and survive
+                    //  uninstallation. Multi-cloud will come on the BackupService side.)
                 }
                 .listRowBackground(AppTheme.Colors.surface)
 
-                // ── Avancé ────────────────────────────────────────────────
-                // Regroupe : IA, confidentialité, base de données.
+                // ── Advanced ──────────────────────────────────────────────
+                // Groups: AI, privacy, database.
                 Section("Avancé") {
                     settingsLink(.ai) {
                         Label("Intelligence artificielle", systemImage: "sparkles")
@@ -338,8 +338,8 @@ struct SettingsView: View {
                     settingsLink(.privacy) {
                         Label("Données & vie privée", systemImage: "lock.shield")
                     }
-                    // Rapport fiscal présenté en sheet (pas un push) — c'est
-                    // un outil d'export ponctuel, pas un sous-réglage permanent.
+                    // The tax report is presented as a sheet (not a push) — it's
+                    // a one-off export tool, not a permanent sub-setting.
                     settingsLink(.taxReport) {
                         Label("Rapport fiscal France", systemImage: "doc.text.fill")
                     }
@@ -349,7 +349,7 @@ struct SettingsView: View {
                 }
                 .listRowBackground(AppTheme.Colors.surface)
 
-                // ── À propos ──────────────────────────────────────────────
+                // ── About ─────────────────────────────────────────────────
                 Section("À propos") {
                     LabeledContent("Version") {
                         Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
@@ -362,7 +362,7 @@ struct SettingsView: View {
                 }
                 .listRowBackground(AppTheme.Colors.surface)
 
-                // ── Développeur (DEBUG uniquement) ────────────────────────
+                // ── Developer (DEBUG only) ────────────────────────────────
                 #if DEBUG
                 Section {
                     @Bindable var store = store
@@ -394,9 +394,9 @@ struct SettingsView: View {
 
     // MARK: - App Lock Section
 
-    /// Section "Sécurité" : toggle de verrouillage adaptatif (Face ID / Touch ID
-    /// / code iOS selon disponibilité). Le label suit ce que le device propose
-    /// pour que l'utilisateur voie immédiatement ce qui sera utilisé.
+    /// "Security" section: an adaptive lock toggle (Face ID / Touch ID
+    /// / iOS passcode depending on availability). The label follows what the
+    /// device offers so the user immediately sees what will be used.
     @State private var lockEnabledMirror = UserDefaults.standard.bool(forKey: "appLockEnabled")
     @State private var lockBiometryType: AppLockService.BiometryType = .none
     @State private var showCurrencyConverter = false
@@ -406,8 +406,8 @@ struct SettingsView: View {
             Toggle(isOn: Binding(
                 get: { lockEnabledMirror },
                 set: { newValue in
-                    // L'auth doit réussir avant d'écrire le flag — sinon on revert
-                    // visuellement le toggle. La vue affiche la prompt iOS native.
+                    // Auth must succeed before the flag is written — otherwise the
+                    // toggle visually reverts. The view shows the native iOS prompt.
                     Task {
                         let ok = await AppLockService.shared.setEnabled(newValue)
                         if ok {
@@ -415,7 +415,7 @@ struct SettingsView: View {
                             appState.postToast(.success,
                                                newValue ? "Verrouillage activé" : "Verrouillage désactivé")
                         } else {
-                            // Auth échouée ou annulée → on resync l'état réel.
+                            // Auth failed or canceled → resync to the real state.
                             lockEnabledMirror = AppLockService.shared.isLockEnabled
                             if lockBiometryType == .none {
                                 appState.postToast(.warning, "Configurez un code d'accès iOS pour activer le verrouillage")
@@ -445,12 +445,12 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Privacy Section (masquage des montants)
+    // MARK: - Privacy Section (amount masking)
 
     @ViewBuilder private var privacySection: some View {
         Section {
-            // Toggle direct du masquage. Action immédiate visible partout dans l'app
-            // (heros, bandeaux, rows transactions qui utilisent `MoneyText`).
+            // A direct toggle for masking. The action is immediately visible
+            // everywhere in the app (heroes, banners, transaction rows using `MoneyText`).
             Toggle(isOn: Binding(
                 get: { appState.amountsHidden },
                 set: { appState.amountsHidden = $0 }
@@ -462,14 +462,14 @@ struct SettingsView: View {
             }
             .tint(AppTheme.Colors.accent)
 
-            // Mode automatique via détection de l'orientation. Active le
-            // `PrivacyMotionMonitor` qui surveille `gravity.z` à 4 Hz.
+            // Automatic mode via orientation detection. Activates the
+            // `PrivacyMotionMonitor`, which watches `gravity.z` at 4 Hz.
             Toggle(isOn: Binding(
                 get: { appState.hideAmountsOnFaceDown },
                 set: {
                     appState.hideAmountsOnFaceDown = $0
                     HapticService.shared.selection()
-                    // Synchronise immédiatement le monitor — start/stop selon le nouveau flag.
+                    // Syncs the monitor immediately — start/stop based on the new flag.
                     PrivacyMotionMonitor.shared.syncWithSetting()
                 }
             )) {
@@ -477,12 +477,12 @@ struct SettingsView: View {
             }
             .tint(AppTheme.Colors.accent)
 
-            // Toggle haptiques — Default ON, désactivable explicitement
+            // Haptics toggle — Default ON, can be explicitly disabled
             Toggle(isOn: Binding(
                 get: { appState.hapticsEnabled },
                 set: { newValue in
                     appState.hapticsEnabled = newValue
-                    // Donne un dernier tap pour confirmer le changement avant désactivation
+                    // Gives one last tap to confirm the change before disabling
                     if newValue { HapticService.shared.success() }
                 }
             )) {
@@ -550,12 +550,12 @@ struct SettingsView: View {
                     Spacer()
 
                     if store.accessLevel == .free {
-                        // Fond plein (pas de dégradé) : même recette que ProBadge et
-                        // tous les autres CTA capsule de l'app (accent.Colors.accent
-                        // seul). Un dégradé vers accentSecondary — cuivre volontairement
-                        // FIXE entre les thèmes (cf. AppTheme.swift) — se détachait mal
-                        // du vert accent qui, lui, devient beaucoup plus clair en dark
-                        // mode : le cuivre inchangé y lisait comme un marron terne.
+                        // A solid fill (no gradient): the same recipe as ProBadge and
+                        // every other capsule CTA in the app (accent.Colors.accent
+                        // alone). A gradient toward accentSecondary — copper deliberately
+                        // FIXED between themes (see AppTheme.swift) — clashed with
+                        // the accent green, which itself becomes much lighter in dark
+                        // mode: the unchanged copper read as a dull brown there.
                         Button("Passer Pro") { showPaywall = true }
                             .buttonStyle(.plain)
                             .font(.subheadline.weight(.semibold))
@@ -584,11 +584,11 @@ struct SettingsView: View {
                         .foregroundStyle(AppTheme.Colors.textPrimary)
                     }
                 } else {
-                    // "Changer de formule" ouvre le même Paywall que l'achat initial —
-                    // il s'adapte tout seul (formule actuelle marquée, mensuel ↔ annuel
-                    // via le crossgrade StoreKit natif, état dédié si Lifetime). "Gérer
-                    // l'abonnement" reste la sortie vers Apple pour résilier ou changer
-                    // de moyen de paiement, ce que StoreKit n'expose pas depuis l'app.
+                    // "Change plan" opens the same Paywall as the initial purchase —
+                    // it adapts on its own (the current plan marked, monthly ↔ yearly
+                    // via StoreKit's native crossgrade, a dedicated state if Lifetime). "Manage
+                    // subscription" stays the way out to Apple to cancel or change
+                    // the payment method, which StoreKit doesn't expose from within the app.
                     Button {
                         showPaywall = true
                     } label: {
@@ -620,10 +620,10 @@ struct SettingsView: View {
     
 }
 
-// (SyncSettingsView + SyncService retirés 2026-07-26 — l'export continu one-way
-//  vers un dossier était redondant avec les snapshots iCloud de BackupService
-//  et avait un piège de fausse sécurité : le bookmark du dossier vivait dans
-//  UserDefaults, effacé à la désinstallation → l'export s'arrêtait en silence.)
+// (SyncSettingsView + SyncService removed 2026-07-26 — the continuous one-way
+//  export to a folder was redundant with BackupService's iCloud snapshots
+//  and had a false-security trap: the folder's bookmark lived in
+//  UserDefaults, erased on uninstall → the export silently stopped.)
 
 // MARK: - AdvancedSettingsView
 
@@ -638,7 +638,7 @@ struct AdvancedSettingsView: View {
 
     var body: some View {
         Form {
-            // MARK: Base de données
+            // MARK: Database
             Section {
                 LabeledContent("Version du schéma") {
                     Text("v\(DatabaseManager.shared.schemaVersion)")
@@ -689,7 +689,7 @@ struct AdvancedSettingsView: View {
 
                 Button("Changer le dossier…") {
                     #if os(macOS)
-                    // Panneau système ouvert directement (cf. `presentOpenPanel`).
+                    // The system panel opened directly (see `presentOpenPanel`).
                     presentOpenPanel(contentTypes: [.folder]) { url in
                         applyPickedSQLFolder(url)
                     }
@@ -711,7 +711,7 @@ struct AdvancedSettingsView: View {
                 }
             }
 
-            // MARK: Aide
+            // MARK: Help
             Section {
                 Button {
                     try? Tips.resetDatastore()
@@ -734,8 +734,8 @@ struct AdvancedSettingsView: View {
         .nemorisFormStyle()
         .localizedNavigationTitle("Avancé")
         .navigationBarTitleDisplayMode(.large)
-        // iOS : picker en sheet (le contrôleur UIKit EST une vue). macOS : panneau
-        // système ouvert directement depuis l'action (cf. `presentOpenPanel`).
+        // iOS: the picker as a sheet (the UIKit controller IS a view). macOS: the
+        // system panel opened directly from the action (see `presentOpenPanel`).
         #if !os(macOS)
         .sheet(isPresented: $showSQLFolderPicker) {
             DocumentPickerView(contentTypes: [.folder]) { url in
@@ -747,7 +747,7 @@ struct AdvancedSettingsView: View {
         #endif
     }
 
-    /// Enregistre le dossier choisi (commun aux deux plateformes).
+    /// Saves the chosen folder (shared by both platforms).
     private func applyPickedSQLFolder(_ url: URL) {
         do {
             try SQLConsoleHelper.linkFolder(from: url)
@@ -763,8 +763,8 @@ struct AdvancedSettingsView: View {
 
 struct PrivacyView: View {
     var body: some View {
-        // Form (pas List) : contenu statique → boxes arrondies macOS via
-        // nemorisFormStyle(), rendu identique sur iOS.
+        // A Form (not a List): static content → native rounded macOS boxes via
+        // nemorisFormStyle(), rendered identically on iOS.
         Form {
             Section {
                 HStack(spacing: 16) {
@@ -834,11 +834,11 @@ struct PrivacyView: View {
     }
 }
 
-// MARK: - Sous-sections des réglages
+// MARK: - Settings sub-sections
 
-/// Destinations des réglages. Sur macOS elles REMPLACENT le contenu du module
-/// (cf. `SettingsView.pushedSection`) — un push n'y est pas défait au changement
-/// de module et désynchronise la sidebar. Sur iOS, push classique.
+/// Settings destinations. On macOS they REPLACE the module's content
+/// (see `SettingsView.pushedSection`) — a push there isn't undone when
+/// switching modules and desynchronizes the sidebar. On iOS, a classic push.
 enum SettingsSection: String, Identifiable, CaseIterable {
     case modules, importCSV, companySources, backup, cloudSync
     case ai, privacy, taxReport, advanced, applePay
@@ -871,10 +871,10 @@ enum SettingsSection: String, Identifiable, CaseIterable {
         case .privacy:         PrivacyView()
         case .taxReport:       TaxReportView()
         case .advanced:        AdvancedSettingsView()
-        // `isPane: false` : atteinte en navigation standard ici, pas en pane
-        // (cf. doc de `ApplePayAlertSettingsView`) — sans ça elle poserait
-        // son propre `.paneChrome` par-dessus le titre/retour déjà fournis
-        // par `settingsSectionPage`.
+        // `isPane: false`: reached via standard navigation here, not as a pane
+        // (see `ApplePayAlertSettingsView`'s docs) — without this it would set
+        // its own `.paneChrome` on top of the title/back button already provided
+        // by `settingsSectionPage`.
         case .applePay:        ApplePayAlertSettingsView(isPane: false)
         }
     }

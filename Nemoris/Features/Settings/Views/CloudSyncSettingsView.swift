@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// Couche L.1 : réglages de la synchronisation iCloud (CloudKit).
+/// Layer L.1: iCloud (CloudKit) sync settings.
 ///
-/// UI minimale de pilotage du `CloudSyncEngine` : toggle opt-in, état du
-/// compte iCloud, sync manuelle, dernier sync / erreurs. Le polish (progress
-/// détaillée, onboarding, reset du coffre) viendra en Couche L.4.
+/// A minimal UI to drive `CloudSyncEngine`: an opt-in toggle, iCloud
+/// account status, a manual sync, last sync / errors. Polish (detailed
+/// progress, onboarding, resetting the vault) will come in Layer L.4.
 struct CloudSyncSettingsView: View {
 
     @State private var status: CloudSyncEngine.Status?
@@ -13,11 +13,11 @@ struct CloudSyncSettingsView: View {
     @State private var showDisableConfirm = false
 
     var body: some View {
-        // Form (pas List) : écran de réglages statique → boxes arrondies
-        // natives sur macOS via nemorisFormStyle(), identique sur iOS.
-        // Pas de ZStack+Color (hauteur infinie sur macOS) : fond via .background.
+        // A Form (not a List): a static settings screen → native rounded
+        // boxes on macOS via nemorisFormStyle(), identical on iOS.
+        // No ZStack+Color (infinite height on macOS): the background is via .background.
         Form {
-            // ── État ──────────────────────────────────────────────────
+            // ── Status ────────────────────────────────────────────────
             Section {
                 HStack(spacing: AppTheme.Spacing.md) {
                     Image(systemName: statusIcon)
@@ -119,10 +119,10 @@ struct CloudSyncSettingsView: View {
         .background(AppTheme.Colors.background.ignoresSafeArea())
         .localizedNavigationTitle("Synchronisation iCloud")
         .navigationBarTitleDisplayMode(.inline)
-        // Rafraîchit en continu tant que l'écran est visible : les accusés de
-        // réception CloudKit (qui vident sync_pending) arrivent en tâche de fond
-        // APRÈS le retour de sendChanges() — sans ce poll, le compteur resterait
-        // figé sur une valeur transitoire. SwiftUI annule la task au disparaître.
+        // Refreshes continuously while the screen is visible: CloudKit
+        // acknowledgments (which drain sync_pending) arrive on a background task
+        // AFTER sendChanges() returns — without this poll, the counter would stay
+        // stuck on a transient value. SwiftUI cancels the task on disappear.
         .task {
             while !Task.isCancelled {
                 await refresh()
@@ -184,7 +184,7 @@ struct CloudSyncSettingsView: View {
         status = await CloudSyncEngine.shared.status()
     }
 
-    // MARK: - Présentation
+    // MARK: - Presentation
 
     private var statusTitle: String {
         guard let status else { return "Vérification…" }
@@ -230,8 +230,8 @@ struct CloudSyncSettingsView: View {
         let parser = ISO8601DateFormatter()
         parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         guard let date = parser.date(from: iso) else { return iso }
-        // Locale forcée fr_FR : méthode `static`, pas d'accès à l'environnement
-        // SwiftUI — cf. commentaire équivalent dans InsightEngine.swift.
+        // Locale forced to fr_FR: a `static` method, no access to the SwiftUI
+        // environment — see the equivalent comment in InsightEngine.swift.
         return date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(AppLocalization.locale))
     }
 }

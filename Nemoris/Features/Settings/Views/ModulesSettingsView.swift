@@ -2,43 +2,42 @@ import SwiftUI
 
 // MARK: - ModulesSettingsView
 //
-// Écran unique pour les 3 questions posées par chaque module : est-il actif,
-// où apparaît-il (ordre des onglets/sidebar), a-t-il un réglage propre.
-// Avant cet écran, ces 3 questions vivaient à 3 endroits différents dans le
-// Form géant de `SettingsView` ("Modules", section conditionnelle
-// "Investissements", "Ordre des onglets") — la même ligne (un module) se
-// modifiait à 3 endroits qu'il fallait garder cohérents.
+// A single screen for the 3 questions each module raises: is it active,
+// where does it appear (tab/sidebar order), does it have its own setting.
+// Before this screen, these 3 questions lived in 3 different places in
+// `SettingsView`'s giant Form ("Modules", the conditional
+// "Investments" section, "Tab order") — the same row (a module)
+// had to be edited in 3 places that had to be kept consistent.
 //
-// `Form`, editMode forcé sur iOS uniquement — même recette que
-// `DashboardCustomizeView`. Historique court (retour d'usage 2026-09, 3
-// allers-retours) :
+// A `Form`, editMode forced on iOS only — the same recipe as
+// `DashboardCustomizeView`. A short history (3 attempts):
 //
-// 1. À l'origine (avant ce dépôt) : `Form` + `.onMove`, réordonnancement
-//    macOS non fonctionnel (`.onMove` seul ne réordonne réellement qu'à
-//    l'intérieur d'une vraie `List`, backing natif NSTableView côté macOS —
-//    un `Form { }.formStyle(.grouped)` a l'air d'une liste mais n'en est
-//    pas une, le drag n'y fait rien quelle que soit l'imbrication).
-// 2. Migré vers `List` + `.macGroupedRow` + `macReorderable` (onDrag/onDrop
-//    bas niveau, cf. `ReorderableRow.swift`) pour de vrai le réordonnancement
-//    macOS. Ça a marché… mais avec un freeze de plusieurs secondes à chaque
-//    relâchement de drag, non résolu par les 2 tentatives suivantes
-//    (mutation live vs différée, `mainTabOrder` rendu Observable-tracké).
-// 3. Le point commun entre CE freeze (`ModulesSettingsView`, `List`) et
-//    l'ABSENCE de freeze sur `DashboardCustomizeView` (déjà revenu à `Form`
-//    pour une raison purement esthétique, cf. son propre historique) a
-//    fini par pointer vers l'INTERACTION `.onDrag`/`.onDrop` × `List`
-//    (NSTableView) elle-même sur macOS — pas vers la logique de
-//    réordonnancement en tant que telle, qui est restée identique entre les
-//    deux écrans. Revenu au `Form`, le freeze n'a plus de raison de se
-//    reproduire.
+// 1. Originally (before this repo): `Form` + `.onMove`, macOS
+//    reordering non-functional (`.onMove` alone only truly reorders
+//    inside a real `List`, backed natively by NSTableView on macOS —
+//    a `Form { }.formStyle(.grouped)` looks like a list but isn't
+//    one, drag does nothing there regardless of nesting).
+// 2. Migrated to `List` + `.macGroupedRow` + `macReorderable` (a low-level
+//    onDrag/onDrop, see `ReorderableRow.swift`) to get real macOS
+//    reordering. It worked… but with a multi-second freeze on every
+//    drag release, unresolved by the 2 following attempts
+//    (live vs. deferred mutation, `mainTabOrder` made Observable-tracked).
+// 3. What `List` on `ModulesSettingsView` (which froze) and `Form` on
+//    `DashboardCustomizeView` (which never froze, and had already
+//    reverted to `Form` for a purely aesthetic reason, see its own
+//    history) had in common ended up pointing to the `.onDrag`/`.onDrop`
+//    × `List` (NSTableView) INTERACTION itself on macOS — not to
+//    the reordering logic as such, which stayed identical between the
+//    two screens. Back on `Form`, the freeze has no reason to
+//    recur.
 //
-// `macReorderable` (`ReorderableRow.swift`) reste le mécanisme macOS : c'est
-// un modifier `onDrag`/`onDrop` générique, PAS lié à `List` — il fonctionne
-// aussi bien sur une row de `Form`. `.onMove` reste câblé, réservé à iOS
-// (poignée ☰ de l'edit mode).
+// `macReorderable` (`ReorderableRow.swift`) stays the macOS mechanism: it's
+// a generic `onDrag`/`onDrop` modifier, NOT tied to `List` — it works
+// just as well on a `Form` row. `.onMove` stays wired up, reserved for iOS
+// (the ☰ handle of edit mode).
 //
-// ⚠️ `.background(…)`, jamais `ZStack { Color.ignoresSafeArea(); Form }`
-// (piège documenté CLAUDE.md §N.1).
+// ⚠️ `.background(…)`, never `ZStack { Color.ignoresSafeArea(); Form }`
+// (the pitfall documented in CLAUDE.md §N.1).
 
 struct ModulesSettingsView: View {
     @Environment(AppState.self) private var appState
@@ -46,38 +45,38 @@ struct ModulesSettingsView: View {
     @AppStorage("nemoris.reimbursementsEnabled") private var reimbursementsEnabled = true
     @State private var showPaywall = false
     #if os(macOS)
-    /// Module actuellement glissé — cf. `macReorderable` (`ReorderableRow.swift`).
+    /// Module currently being dragged — see `macReorderable` (`ReorderableRow.swift`).
     @State private var draggedTab: MainTabItem?
     #endif
 
-    /// `nil` sur iOS (le `NavigationLink` qui pousse cet écran fournit déjà
-    /// son bouton retour natif). Sur macOS, fourni par l'appelant — cf.
-    /// `DashboardCustomizeView.onBack`, même doctrine : cet écran REMPLACE le
-    /// contenu du parent (pas un push), donc `dismiss()` seul n'a rien à
-    /// fermer.
+    /// `nil` on iOS (the `NavigationLink` that pushes this screen already
+    /// provides its own native back button). On macOS, provided by the
+    /// caller — see `DashboardCustomizeView.onBack`, the same doctrine: this
+    /// screen REPLACES the parent's content (not a push), so `dismiss()`
+    /// alone has nothing to close.
     var onBack: (() -> Void)? = nil
 
-    /// Modules avec un réglage propre au-delà du simple on/off — reçoivent un
-    /// lien "Réglages" quand ils sont actifs.
+    /// Modules with a setting of their own beyond a plain on/off — receive a
+    /// "Settings" link when they're active.
     private let configurableModules: Set<MainTabItem> = [.transactions, .investments, .budget]
 
     #if os(macOS)
-    /// Même doctrine que `SettingsView.pushedSection` : la sous-page REMPLACE
-    /// le contenu (pas un push) — cet écran est lui-même déjà atteint par un
-    /// remplacement d'état côté macOS, un vrai push ici retomberait dans le
-    /// piège documenté CLAUDE.md §N.1 (panneau/contenu masqué).
+    /// Same doctrine as `SettingsView.pushedSection`: the sub-page REPLACES
+    /// the content (not a push) — this screen is itself already reached by an
+    /// on macOS state replacement, a real push here would fall right back into
+    /// the pitfall documented in CLAUDE.md §N.1 (a masked pane/content).
     @State private var configuredModule: MainTabItem?
     #else
-    /// ⚠️ PAS un `NavigationLink` embarqué dans le row — `content` force
-    /// `\.editMode` à `.active` en permanence (pour le drag&drop sans bouton
-    /// "Modifier", cf. doc `content`) et un `List` en édition n'achemine PAS
-    /// le tap d'un `NavigationLink` nesté vers sa navigation (le row bascule
-    /// en mode "réordonner" à la place — la poignée ☰ le confirme visuellement).
-    /// Un `Button` classique, lui, reste interactif en edit mode (c'est déjà
-    /// ce qui fait marcher le `Toggle` du module juste au-dessus dans le même
-    /// row) : on pousse donc via `@State` + `.navigationDestination(item:)`
-    /// plutôt que de compter sur `NavigationLink`. retour d'usage 2026-08-12 :
-    /// le chevron dupliqué était bien réparé, mais le tap restait mort.
+    /// ⚠️ NOT a `NavigationLink` embedded in the row — `content` forces
+    /// `\.editMode` to `.active` permanently (for drag&drop with no "Edit"
+    /// button, see `content`'s docs) and a `List` in edit mode does NOT route
+    /// a nested `NavigationLink`'s tap to its navigation (the row switches
+    /// to "reorder" mode instead — the ☰ handle confirms it visually).
+    /// A plain `Button`, on the other hand, stays interactive in edit mode (it's
+    /// already what makes the module's `Toggle` right above it in the same
+    /// row work): a push is therefore done via `@State` + `.navigationDestination(item:)`
+    /// rather than relying on `NavigationLink`. The duplicated chevron had
+    /// indeed been fixed, but the tap itself stayed dead.
     @State private var pushedModuleConfig: MainTabItem?
     #endif
 
@@ -95,11 +94,11 @@ struct ModulesSettingsView: View {
 
     // MARK: - Contenu principal
 
-    // ⚠️ `$appState.mainTabOrder` directement, PAS de mirroir `@State` local
-    // (contrairement à une version antérieure de cet écran) : `mainTabOrder`
-    // est une propriété STOCKÉE côté `AppState` (2026-09, même doctrine que
-    // `dashboardLayout`) — un mirroir local ne ferait que retarder la
-    // propagation d'un cran vers la sidebar/`.onChange` de `MainTabView`.
+    // ⚠️ `$appState.mainTabOrder` directly, NO local `@State` mirror
+    // (unlike an earlier version of this screen): `mainTabOrder`
+    // is a STORED property on `AppState` (the same doctrine as
+    // `dashboardLayout`) — a local mirror would only delay
+    // propagation by one step to the sidebar/`MainTabView`'s `.onChange`.
     private var content: some View {
         @Bindable var appState = appState
         return Form {
@@ -119,14 +118,13 @@ struct ModulesSettingsView: View {
 
             Section {
                 HStack(spacing: AppTheme.Spacing.md) {
-                    // Icône colorée EXPLICITEMENT : un `Label` posé comme label
-                    // d'un `Toggle` sur macOS rend son icône dans l'accent
-                    // "contrôle" du système (bleu) plutôt que la couleur de
-                    // l'app, `.tint(...)` sur le `Toggle` ne s'y propageant pas
-                    // (retour d'usage 2026-09, capture à l'appui — icône bleue
-                    // alors que toutes les autres rows sont en vert accent).
-                    // Structure alignée sur `row(for:)` ci-dessous pour rester
-                    // visuellement cohérente avec la liste des modules.
+                    // The icon colored EXPLICITLY: a `Label` used as a `Toggle`'s
+                    // label on macOS renders its icon in the system's "control"
+                    // accent (blue) rather than the app's color,
+                    // `.tint(...)` on the `Toggle` not propagating to it
+                    // (a blue icon while every other row was in accent green). The
+                    // structure is aligned with `row(for:)` below to stay
+                    // visually consistent with the module list.
                     Image(systemName: "arrow.uturn.left.circle")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(AppTheme.Colors.accent)
@@ -151,15 +149,15 @@ struct ModulesSettingsView: View {
         .localizedNavigationTitle("Modules")
         .navigationBarTitleDisplayMode(.inline)
         #if os(iOS)
-        // Même choix que `DashboardCustomizeView` : le mode édition permanent
-        // évite un bouton « Modifier » pour une liste dont c'est la seule fonction.
+        // Same choice as `DashboardCustomizeView`: permanent edit mode
+        // avoids an "Edit" button for a list whose only function that is.
         .environment(\.editMode, .constant(.active))
         #else
-        // Sur macOS cet écran REMPLACE le contenu de `SettingsView` (pas un
-        // push) : c'est nous, pas l'appelant, qui devons fournir le bouton
-        // retour — sinon (cf. `SettingsView.settingsSectionPage`) les deux
-        // `.toolbar` fusionnent et deux chevrons s'affichent l'un à côté de
-        // l'autre.
+        // On macOS this screen REPLACES `SettingsView`'s content (not a
+        // push): it's on us, not the caller, to provide the back
+        // button — otherwise (see `SettingsView.settingsSectionPage`) the two
+        // `.toolbar`s merge and two chevrons show up next to each
+        // other.
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button { onBack?() } label: {
@@ -182,7 +180,7 @@ struct ModulesSettingsView: View {
         #endif
     }
 
-    // MARK: - Ligne d'un module
+    // MARK: - A module's row
 
     @ViewBuilder
     private func row(for tab: MainTabItem) -> some View {
@@ -230,19 +228,19 @@ struct ModulesSettingsView: View {
                 #endif
             }
 
-            // Lien vers le réglage propre du module — seulement quand il a du
-            // sens (module configurable ET actif ET débloqué).
+            // A link to the module's own setting — only shown when it makes
+            // sense (a configurable, active AND unlocked module).
             //
-            // ⚠️ Chevron manuel MACOS UNIQUEMENT : sur iOS, `configLink` est un
-            // vrai `NavigationLink` dans une `List`, qui ajoute DÉJÀ son propre
-            // chevron système — même nesté dans un `VStack`, pas seulement en
-            // contenu direct de row. En ajouter un second ici produisait deux
-            // flèches ET un tap-target étroit (le `HStack` manuel) plus petit
-            // que la zone réellement tappable que le système peint autour de
-            // son chevron — d'où les taps qui semblaient ne rien faire près du
-            // bord droit. Sur macOS `configLink` est un simple `Button`, qui
-            // n'a aucune indication automatique — le chevron manuel y reste
-            // nécessaire, même doctrine que `SettingsView.settingsLink`.
+            // ⚠️ Manual chevron, MACOS ONLY: on iOS, `configLink` is a
+            // real `NavigationLink` inside a `List`, which ALREADY adds its own
+            // system chevron — even nested in a `VStack`, not only as
+            // a row's direct content. Adding a second one here produced two
+            // arrows AND a tap target (the manual `HStack`) narrower
+            // than the actually tappable zone the system paints around
+            // its own chevron — hence taps near the right edge that
+            // seemed to do nothing. On macOS `configLink` is a plain `Button`, which
+            // has no automatic indicator at all — the manual chevron stays
+            // necessary there, the same doctrine as `SettingsView.settingsLink`.
             if configurableModules.contains(tab), isOn, !locked {
                 configLink(tab) {
                     HStack {
@@ -264,9 +262,9 @@ struct ModulesSettingsView: View {
         .opacity(isOn ? 1 : 0.7)
     }
 
-    /// Binding vers le flag `showXxx` du module, `nil` pour un onglet qui n'a
-    /// pas d'interrupteur propre (Dashboard toujours actif, Données qui suit
-    /// Transactions — cf. `AppState.availableTabsResolved`).
+    /// A binding to the module's `showXxx` flag, `nil` for a tab that has
+    /// no switch of its own (Dashboard always active, Data following
+    /// Transactions — see `AppState.availableTabsResolved`).
     private func flagBinding(for tab: MainTabItem) -> Binding<Bool>? {
         switch tab {
         case .transactions: return Binding(get: { appState.showTransactions }, set: { appState.showTransactions = $0 })
@@ -287,7 +285,7 @@ struct ModulesSettingsView: View {
         }
     }
 
-    // MARK: - Navigation vers la sous-page de réglages
+    // MARK: - Navigation to the settings sub-page
 
     @ViewBuilder
     private func configLink(_ tab: MainTabItem, @ViewBuilder label: () -> some View) -> some View {
@@ -339,12 +337,12 @@ struct ModulesSettingsView: View {
 
 // MARK: - TransactionsModuleSettingsView
 
-/// Compte par défaut — déplacé depuis l'ancienne section "Général" du Form de
-/// réglages, qui restait visible même quand le module Transactions était
-/// désactivé (le réglage n'a alors aucun effet observable : il ne fait que
-/// pré-remplir `AddTransactionSheet`, l'import et le raccourci Siri). Ici,
-/// comme pour Investissements et Budget, l'accès n'existe que si le module
-/// est actif.
+/// The default account — moved from the settings Form's old "General"
+/// section, which stayed visible even when the Transactions module was
+/// disabled (the setting then has no observable effect: it only
+/// pre-fills `AddTransactionSheet`, import, and the Siri shortcut). Here,
+/// as for Investments and Budget, access only exists if the module
+/// is active.
 struct TransactionsModuleSettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var accounts: [Account] = []
@@ -362,10 +360,10 @@ struct TransactionsModuleSettingsView: View {
                         HStack {
                             Text("Compte par défaut").foregroundStyle(AppTheme.Colors.textPrimary)
                             Spacer()
-                            // Wrap requis : le fallback est un littéral mais
-                            // l'expression entière est de type `String`
-                            // (coalescing avec `.name`) — `Text(String)`
-                            // reste verbatim sans ce wrap, cf. CLAUDE.md §5.
+                            // Wrap required: the fallback is a literal but
+                            // the whole expression is of type `String`
+                            // (coalescing with `.name`) — `Text(String)`
+                            // stays verbatim without this wrap, see CLAUDE.md §5.
                             Text(LocalizedStringKey(accounts.first(where: { $0.id == appState.defaultAccountId })?.name ?? "Premier disponible"))
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
                             Image(systemName: "chevron.right").font(.caption).foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.5))
@@ -404,10 +402,10 @@ struct TransactionsModuleSettingsView: View {
 
 // MARK: - InvestmentsModuleSettingsView
 
-/// Réglages propres au module Investissements — déplacés depuis l'ancienne
-/// section conditionnelle du Form de réglages (visible seulement quand
-/// `showInvestments` était actif). Ici l'accès lui-même est déjà conditionné
-/// par le module actif (le lien n'existe que si le module l'est).
+/// Settings specific to the Investments module — moved from the settings
+/// Form's old conditional section (visible only when
+/// `showInvestments` was active). Here access itself is already gated
+/// by the active module (the link only exists if the module is).
 struct InvestmentsModuleSettingsView: View {
     @Environment(AppState.self) private var appState
 
@@ -439,10 +437,10 @@ struct InvestmentsModuleSettingsView: View {
 
 // MARK: - BudgetModuleSettingsView
 
-/// Seuil d'alerte du module Budget — déplacé depuis l'ancienne section
-/// "Budget" du Form de réglages, qui n'était (à tort) pas conditionnée sur
-/// `showBudget`. Ici, comme pour Investissements, l'accès n'existe que si le
-/// module est actif.
+/// The Budget module's alert threshold — moved from the settings Form's
+/// old "Budget" section, which was (wrongly) not gated on
+/// `showBudget`. Here, as for Investments, access only exists if the
+/// module is active.
 struct BudgetModuleSettingsView: View {
     @AppStorage("nemoris.budgetRedOverPct") private var budgetRedOverPct = 20.0
 

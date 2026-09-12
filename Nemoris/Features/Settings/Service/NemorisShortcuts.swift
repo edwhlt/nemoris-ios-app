@@ -2,15 +2,15 @@ import AppIntents
 import Foundation
 import UniformTypeIdentifiers
 
-// (GetMonthlyBalanceIntent supprimé 2026-07-22 — doublon du widget Solde,
-//  jamais utilisé en vocal. Le widget lit toujours WidgetDataStore directement.)
+// (GetMonthlyBalanceIntent removed 2026-07-22 — a duplicate of the Balance widget,
+//  never used by voice. The widget still reads WidgetDataStore directly.)
 
 // MARK: - Import Transactions CSV
 
-/// Dépose un relevé bancaire CSV dans Nemoris via Siri, un raccourci ou la share
-/// extension. AUCUN import silencieux : le fichier part dans `PendingImportInbox`
-/// (kind `.transactions`) et l'app s'ouvre sur `ImportEntryView` pré-rempli —
-/// l'utilisateur confirme le compte cible puis passe par le mapping habituel.
+/// Drops a bank-statement CSV into Nemoris via Siri, a shortcut, or the share
+/// extension. NO silent import: the file goes into `PendingImportInbox`
+/// (kind `.transactions`) and the app opens on a pre-filled `ImportEntryView` —
+/// the user confirms the target account then goes through the usual mapping.
 struct ImportFileIntent: AppIntent {
     static let title: LocalizedStringResource = "Importer des transactions (CSV)"
     static let description = IntentDescription(
@@ -20,11 +20,11 @@ struct ImportFileIntent: AppIntent {
 
     @Parameter(title: "Fichiers") var files: [IntentFile]
 
-    // Expose le paramètre comme jeton inline dans l'éditeur Raccourcis :
-    // sans ça, le paramètre est résolu à l'exécution (= file picker Fichiers
-    // imposé) et on ne peut PAS y déposer une variable / l'entrée du raccourci.
-    // Avec le summary, le champ accepte une variable, un fichier partagé, la
-    // sortie d'une action précédente, ou l'entrée du raccourci.
+    // Exposes the parameter as an inline token in the Shortcuts editor:
+    // without this, the parameter is resolved at run time (= a Files
+    // picker is forced) and no variable / shortcut input can be dropped in.
+    // With the summary, the field accepts a variable, a shared file, the
+    // output of a previous action, or the shortcut's input.
     static var parameterSummary: some ParameterSummary {
         Summary("Importer les transactions des fichiers \(\.$files)")
     }
@@ -46,8 +46,8 @@ struct ImportFileIntent: AppIntent {
         return .result()
     }
 
-    /// Extension : depuis le nom de fichier, sinon depuis le type déclaré.
-    /// Elle n'est qu'indicative — la boîte de réception tranche sur les OCTETS.
+    /// Extension: from the file name, otherwise from the declared type.
+    /// It's purely indicative — the inbox decides based on the BYTES.
     static func fileExtension(of file: IntentFile, fallback: String) -> String {
         let fromName = (file.filename as NSString?)?.pathExtension ?? ""
         if !fromName.isEmpty { return fromName }
@@ -57,11 +57,11 @@ struct ImportFileIntent: AppIntent {
 
 // MARK: - Import Investment Document (PDF / image / CSV)
 
-/// Chantier D — dépose un document d'investissement (relevé PDF, capture d'écran
-/// de PEA/CTO, CSV) dans Nemoris via Siri ou un raccourci. Le fichier peut venir
-/// de n'importe quelle étape Raccourcis (capture d'écran, fichier partagé, sortie
-/// d'une action « Use Model » iOS 26). AUCUN import silencieux : l'app s'ouvre sur
-/// l'écran d'import intelligent pré-rempli pour relecture et validation manuelle.
+/// Drops an investment document (a PDF statement, a PEA/CTO screenshot,
+/// a CSV) into Nemoris via Siri or a shortcut. The file can come from
+/// any Shortcuts step (a screenshot, a shared file, the output of a
+/// "Use Model" action on iOS 26). NO silent import: the app opens on the
+/// pre-filled smart-import screen for review and manual confirmation.
 struct ImportInvestmentDocumentIntent: AppIntent {
     static let title: LocalizedStringResource = "Importer un document d'investissement"
     static let description = IntentDescription(
@@ -69,15 +69,15 @@ struct ImportInvestmentDocumentIntent: AppIntent {
     )
     static let openAppWhenRun: Bool = true
 
-    // Accepte tout fichier (PDF, image/capture, CSV) — le parser détecte le
-    // format. Comme `ImportFileIntent`, on n'impose pas de supportedContentTypes
-    // (l'API @Parameter ne l'accepte pas ici de façon fiable multiplateforme),
-    // ce qui laisse aussi le champ accepter n'importe quel type de variable.
+    // Accepts any file (PDF, image/screenshot, CSV) — the parser detects the
+    // format. As with `ImportFileIntent`, no supportedContentTypes is imposed
+    // (the @Parameter API doesn't reliably accept it here across platforms),
+    // which also lets the field accept any variable type.
     @Parameter(title: "Documents")
     var files: [IntentFile]
 
-    // Rend le paramètre fillable par une variable / l'entrée du raccourci
-    // dans l'éditeur Raccourcis (cf. commentaire détaillé sur ImportFileIntent).
+    // Makes the parameter fillable by a variable / the shortcut's input
+    // in the Shortcuts editor (see the detailed comment on ImportFileIntent).
     static var parameterSummary: some ParameterSummary {
         Summary("Importer les documents d'investissement \(\.$files)")
     }
@@ -100,16 +100,16 @@ struct ImportInvestmentDocumentIntent: AppIntent {
 
 // MARK: - Import Apple Pay Transactions
 
-/// Dépose une dépense Apple Pay dans le tampon `pending_apple_pay_entries`
-/// (migration v49), via l'automatisation personnelle Raccourcis « Apple Pay ».
+/// Drops an Apple Pay expense into the `pending_apple_pay_entries` buffer
+/// (migration v49), via the personal "Apple Pay" Shortcuts automation.
 ///
-/// `openAppWhenRun = false` : s'exécute en arrière-plan, l'app n'apparaît
-/// JAMAIS au premier plan — c'est la seule condition qui rend l'automatisation
-/// réellement invisible pour l'utilisateur (Apple ne notifie pas les apps
-/// tierces des paiements Apple Pay, ce déclencheur Raccourcis est la seule
-/// voie disponible). AUCUN commit dans `transactions` ici : l'entrée reste en
-/// attente, affichée à part, jusqu'à sa résolution (ouverture de l'app) ou son
-/// rapprochement avec la transaction bancaire réelle à l'import du relevé.
+/// `openAppWhenRun = false`: runs in the background, the app NEVER
+/// comes to the foreground — that's the only condition that makes the
+/// automation truly invisible to the user (Apple doesn't notify third-party
+/// apps of Apple Pay payments, this Shortcuts trigger is the only
+/// available path). NO commit into `transactions` here: the entry stays
+/// pending, shown separately, until it's either resolved (opening the app)
+/// or matched against the real bank transaction when the statement is imported.
 struct ImportTransactionApplePayEntityIntent: AppIntent {
     static let title: LocalizedStringResource = "Importer une transaction Apple Pay"
     static let description = IntentDescription(
@@ -120,56 +120,56 @@ struct ImportTransactionApplePayEntityIntent: AppIntent {
     @Parameter(title: "Carte")
     var card: String
 
-    // Optionnel à dessein : sur certaines transactions (sans contact avec
-    // pré-autorisation, transport en commun, pourboire ajouté après coup…),
-    // Apple Pay ne connaît pas encore le montant final au moment où le
-    // déclencheur se déclenche — la variable "Amount" arrive vide côté
-    // Raccourcis. Avec un `Double` obligatoire, Raccourcis n'a pas d'autre
-    // choix que d'INTERROMPRE l'automatisation pour demander une saisie
-    // manuelle — exactement ce que `openAppWhenRun = false` est censé éviter.
-    // En optionnel, une valeur absente est légitime : Raccourcis passe `nil`
-    // sans jamais solliciter l'utilisateur. `perform()` stocke alors 0 —
-    // l'entrée reste visible, à corriger à la main (cf. `PendingApplePayListView`).
+    // Deliberately optional: on some transactions (no contact with
+    // pre-authorization, public transit, a tip added afterward…),
+    // Apple Pay doesn't yet know the final amount when the
+    // trigger fires — the "Amount" variable arrives empty on the
+    // Shortcuts side. With a required `Double`, Shortcuts has no
+    // choice but to INTERRUPT the automation to ask for
+    // manual entry — exactly what `openAppWhenRun = false` is meant to avoid.
+    // As an optional, a missing value is legitimate: Shortcuts passes `nil`
+    // without ever prompting the user. `perform()` then stores 0 —
+    // the entry stays visible, to fix by hand (see `PendingApplePayListView`).
     @Parameter(title: "Montant")
     var amount: Double?
 
     @Parameter(title: "Marchand")
     var merchant: String
 
-    // Le déclencheur Raccourcis « Apple Pay » peut fournir un nom distinct du
-    // marchand (ex. libellé de carte) selon la configuration de l'automatisation
-    // côté utilisateur. On ne le stocke pas séparément (pas de colonne dédiée,
-    // usage encore incertain) : simple repli si `merchant` est vide.
+    // The "Apple Pay" Shortcuts trigger can supply a name distinct from the
+    // merchant's (e.g. a card label) depending on the user's automation
+    // configuration. It isn't stored separately (no dedicated column, usage
+    // still uncertain): just a fallback if `merchant` is empty.
     @Parameter(title: "Name")
     var name: String
 
-    // Sans ça, chaque paramètre est résolu "à l'exécution" (saisie manuelle
-    // imposée) au lieu d'être exposé comme jeton dans l'éditeur Raccourcis —
-    // impossible d'y déposer une variable comme "Amount" issue de "Get
-    // Transaction". Même correctif que `ImportFileIntent`/
-    // `ImportInvestmentDocumentIntent` (cf. leurs commentaires).
+    // Without this, every parameter is resolved "at run time" (manual entry
+    // forced) instead of being exposed as a token in the Shortcuts
+    // editor — impossible to drop in a variable like "Amount" from
+    // "Get Transaction". The same fix as `ImportFileIntent`/
+    // `ImportInvestmentDocumentIntent` (see their comments).
     static var parameterSummary: some ParameterSummary {
         Summary("Enregistrer \(\.$amount) € chez \(\.$merchant) avec la carte \(\.$card) (\(\.$name))")
     }
 
     func perform() async throws -> some IntentResult {
-        // Montant absent (transaction sans montant connu à cet instant) :
-        // stocké à 0 plutôt que perdu ou redemandé — `PendingApplePayListView`
-        // repère ces entrées et propose de corriger le montant à la main.
+        // A missing amount (a transaction with no known amount at this
+        // point): stored as 0 rather than lost or re-requested — `PendingApplePayListView`
+        // spots these entries and offers to fix the amount by hand.
         let resolvedAmount = amount ?? 0
 
         let label = merchant.isEmpty ? name : merchant
-        // Pas de `MainActor.run` ici : contrairement à `PendingImportInbox`
-        // (@MainActor, fichiers App Group), `PendingApplePayRepository` est
-        // stateless et ouvre sa propre connexion SQLite — sans affinité de thread.
+        // No `MainActor.run` here: unlike `PendingImportInbox`
+        // (@MainActor, App Group files), `PendingApplePayRepository` is
+        // stateless and opens its own SQLite connection — no thread affinity.
         let ok = PendingApplePayRepository().addEntry(card: card, amount: resolvedAmount, merchant: label)
         guard ok else {
             throw $amount.needsValueError("Impossible d'enregistrer la dépense Apple Pay dans Nemoris.")
         }
-        // Vérifie tout de suite si le seuil configuré est franchi sur la
-        // période en cours — c'est le seul moment où ça a du sens ici : cet
-        // intent tourne sans jamais ouvrir l'app (`openAppWhenRun = false`),
-        // la notification est donc le seul signal que l'utilisateur reçoit.
+        // Checks right away whether the configured threshold is crossed over
+        // the current period — that's the only moment it makes sense here: this
+        // intent runs without ever opening the app (`openAppWhenRun = false`),
+        // so the notification is the only signal the user gets.
         await ApplePayAlertService.checkAndNotifyIfNeeded()
         return .result()
     }

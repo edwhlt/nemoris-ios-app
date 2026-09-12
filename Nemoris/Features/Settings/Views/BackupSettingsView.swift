@@ -2,17 +2,17 @@ import SwiftUI
 
 // MARK: - BackupSettingsView
 //
-// Vue Settings dédiée aux snapshots locaux + iCloud. On parle ici de **points de
-// restauration** : snapshots discrets (auto quotidien + manuels), rotation 30
-// derniers, restore explicite avec sauvegarde de sécurité avant écrasement.
+// A Settings view dedicated to local + iCloud snapshots. This is about
+// **restore points**: discrete snapshots (automatic daily + manual), a rotation
+// of the last 30, an explicit restore with a safety backup taken before overwriting.
 //
-// C'est le filet de sécurité de base (gratuit, pour tout le monde) : si l'iPhone
-// est perdu/cassé/restauré/réinstallé, on récupère la dernière sauvegarde iCloud
-// (elle survit à la désinstallation, contrairement au sandbox local).
+// This is the basic safety net (free, for everyone): if the iPhone
+// is lost/broken/restored/reinstalled, the last iCloud backup can be recovered
+// (it survives uninstallation, unlike the local sandbox).
 //
-// Complémentaire de `CloudSyncSettingsView` (sync CloudKit multi-appareils temps
-// réel). L'ancien `SyncSettingsView` (export continu one-way vers un dossier) a
-// été retiré 2026-07-26 (redondant + bookmark perdu à la désinstallation).
+// Complementary to `CloudSyncSettingsView` (real-time multi-device CloudKit
+// sync). The old `SyncSettingsView` (a continuous one-way export to a folder) was
+// removed 2026-07-26 (redundant + its bookmark was lost on uninstall).
 
 struct BackupSettingsView: View {
     @Environment(AppState.self) private var appState
@@ -29,7 +29,7 @@ struct BackupSettingsView: View {
 
     var body: some View {
         Form {
-            // ── État iCloud ─────────────────────────────────────────
+            // ── iCloud status ───────────────────────────────────────
             Section {
                 HStack {
                     Image(systemName: iCloudAvailable ? "icloud.fill" : "icloud.slash.fill")
@@ -55,7 +55,7 @@ struct BackupSettingsView: View {
                 }
             }
 
-            // ── Auto-backup + dernière sauvegarde ───────────────────
+            // ── Auto-backup + last backup ───────────────────────────
             Section {
                 Toggle("Sauvegarde automatique quotidienne", isOn: $autoEnabled)
                     .tint(AppTheme.Colors.accent)
@@ -95,7 +95,7 @@ struct BackupSettingsView: View {
                     .font(AppTheme.Typography.bodySmall)
             }
 
-            // ── Liste des snapshots disponibles ─────────────────────
+            // ── List of available snapshots ─────────────────────────
             Section {
                 if snapshots.isEmpty {
                     Text("Aucune sauvegarde disponible.")
@@ -218,7 +218,7 @@ struct BackupSettingsView: View {
         defer { isWorking = false }
         do {
             try BackupService.shared.restore(snapshot: snap)
-            // Invalide tous les VMs — ils vont recharger depuis la DB restaurée.
+            // Invalidates every VM — they'll reload from the restored database.
             appState.dataRefreshToken = UUID()
             HapticService.shared.success()
             appState.postToast(.success, "Sauvegarde restaurée — données rechargées")

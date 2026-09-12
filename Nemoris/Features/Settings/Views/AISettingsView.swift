@@ -4,21 +4,21 @@ import UniformTypeIdentifiers
 import FoundationModels
 #endif
 
-/// Réglages IA : une ligne PAR FONCTIONNALITÉ, plus la configuration des
-/// backends qu'elles se partagent.
+/// AI settings: one row PER FEATURE, plus configuring the
+/// backends they share.
 ///
-/// ⚠️ Un backend se configure UNE fois (adresse du serveur local, clé API d'un
-/// fournisseur) et sert ensuite à autant de fonctionnalités qu'on veut. C'est ce
-/// qui rend le réglage par fonctionnalité praticable : sans ça, il faudrait
-/// ressaisir la même clé cinq fois.
+/// ⚠️ A backend is configured ONCE (a local server's address, a
+/// provider's API key) and then serves as many features as needed. That's
+/// what makes per-feature settings workable: without it, the same
+/// key would have to be re-entered five times.
 ///
-/// ⚠️ **Piège de localisation** (déjà rencontré ailleurs) :
-/// `Text(uneVariable)` / `Label(String, ...)` ne consultent JAMAIS
-/// `Localizable.strings` — seuls `Text("littéral")` et
-/// `Label(LocalizedStringKey, ...)` le font. Tous les libellés dynamiques de cet
-/// écran (noms de backends, de fonctionnalités) doivent donc être enveloppés
-/// dans `LocalizedStringKey(...)`, sinon ils restent en français sur un appareil
-/// en anglais.
+/// ⚠️ **Localization pitfall** (already hit elsewhere):
+/// `Text(aVariable)` / `Label(String, ...)` NEVER consult
+/// `Localizable.strings` — only `Text("literal")` and
+/// `Label(LocalizedStringKey, ...)` do. Every dynamic label on this
+/// screen (backend names, feature names) must therefore be wrapped
+/// in `LocalizedStringKey(...)`, otherwise it stays in French on a device
+/// set to English.
 struct AISettingsView: View {
 
     @State private var choices: [AIFeature: AIBackendChoice] = [:]
@@ -30,27 +30,27 @@ struct AISettingsView: View {
     @State private var localAPIKey = ""
     @State private var localDisableThinking = false
 
-    // Modèle embarqué (téléchargé depuis Hugging Face, exécuté dans l'app)
+    // Embedded model (downloaded from Hugging Face, run inside the app)
     @State private var embeddedModels: [EmbeddedModelInfo] = []
     @State private var embeddedActiveID: String?
     @State private var embeddedInput = ""
     @State private var embeddedCandidates: [EmbeddedModelCandidate] = []
     @State private var mlxRepoCandidate: EmbeddedMLXRepoCandidate?
     @State private var embeddedWarnings: [String: String] = [:]
-    /// Avertissement RAM affiché APRÈS coup — import ou activation d'un
-    /// modèle déjà en place, où il n'y a pas de candidat/ligne dédiée pour
-    /// porter `embeddedWarnings` comme lors d'un téléchargement.
+    /// RAM warning shown AFTER the fact — importing or activating a
+    /// model already in place, where there's no dedicated candidate/row to
+    /// carry `embeddedWarnings` the way a download does.
     @State private var embeddedActionWarning: String?
     @State private var embeddedAnalyzeError: String?
     @State private var isAnalyzingEmbedded = false
-    // Progression du téléchargement en cours : lue DIRECTEMENT depuis
-    // `EmbeddedModelDownloadStatus.shared` partout où c'est affiché, sans
-    // wrapper — c'est un singleton `@Observable` externe à cette vue (même
-    // convention que `EmbeddedModelManager.shared` juste en dessous), pas un
-    // état que la vue possède. `@Observable` abonne automatiquement tout
-    // `body` qui LIT une de ses propriétés ; c'est précisément ce qui permet
-    // à l'indication de survivre à la fermeture/réouverture de l'écran (le
-    // téléchargement lui-même continue déjà en coulisses).
+    // Progress of an ongoing download: read DIRECTLY from
+    // `EmbeddedModelDownloadStatus.shared` everywhere it's shown, with no
+    // wrapper — it's an `@Observable` singleton external to this view (the same
+    // convention as `EmbeddedModelManager.shared` just below), not
+    // state this view owns. `@Observable` automatically subscribes any
+    // `body` that READS one of its properties; that's precisely what lets
+    // the indicator survive the screen being closed and reopened (the
+    // download itself is already continuing behind the scenes).
     @State private var downloadError: String?
     @State private var renamingModelID: String?
     @State private var renameText = ""
@@ -67,31 +67,31 @@ struct AISettingsView: View {
     @State private var testError: String?
     @State private var isTesting = false
 
-    /// `nil` sur iOS (le `NavigationLink` qui pousse cet écran fournit déjà
-    /// son bouton retour natif). Sur macOS, fourni par l'appelant
-    /// (`SettingsView.settingsSectionPage`) — cet écran REMPLACE le contenu
-    /// du parent (pas un push), donc `dismiss()` seul n'a rien à fermer.
-    /// Même doctrine que `ModulesSettingsView.onBack` : superposer ICI un
-    /// second bouton retour générique en plus de celui-ci fusionnait les deux
-    /// `.toolbar` en deux chevrons empilés.
+    /// `nil` on iOS (the `NavigationLink` that pushes this screen already
+    /// provides its own native back button). On macOS, provided by the
+    /// caller (`SettingsView.settingsSectionPage`) — this screen REPLACES
+    /// the parent's content (not a push), so `dismiss()` alone has nothing to close.
+    /// Same doctrine as `ModulesSettingsView.onBack`: stacking a
+    /// second generic back button HERE on top of this one merged the two
+    /// `.toolbar`s into two stacked chevrons.
     var onBack: (() -> Void)? = nil
 
-    /// Écran « Sources avancées » ouvert par-dessus la liste par fonctionnalité.
+    /// "Advanced sources" screen opened on top of the per-feature list.
     ///
-    /// ⚠️ Navigation DIFFÉRENTE selon la plateforme, et c'est voulu ici — pas
-    /// une divergence à unifier. Sur macOS, `AISettingsView` est atteinte par
-    /// REMPLACEMENT de contenu depuis `SettingsView` (`pushedSection`), sans
-    /// `NavigationStack` à cet endroit : un vrai push n'aurait aucune pile où
-    /// s'empiler. Sur iOS en revanche, `AISettingsView` EST poussée via un
-    /// vrai `NavigationLink` depuis `SettingsView` — une pile existe donc
-    /// réellement ici, et un second push interne (`.navigationDestination`)
-    /// y fonctionne nativement. Un ancien essai avait volontairement gardé le
-    /// même mécanisme (état + bouton manuel) sur les deux plateformes « pour
-    /// ne pas diverger » — mais sur iOS ce bouton manuel s'AJOUTAIT au bouton
-    /// retour automatique du push plutôt que de le remplacer (les deux
-    /// vivent au même niveau de pile), d'où deux chevrons empilés dans la
-    /// barre (retour d'usage, capture à l'appui). Diverger ICI est donc le
-    /// bon choix, pas une entorse à la doctrine.
+    /// ⚠️ DIFFERENT navigation per platform, and it's intentional here — not
+    /// a divergence to unify. On macOS, `AISettingsView` is reached by
+    /// REPLACING content from `SettingsView` (`pushedSection`), with no
+    /// `NavigationStack` at this point: a real push would have no stack to
+    /// land on. On iOS, on the other hand, `AISettingsView` IS pushed via a
+    /// real `NavigationLink` from `SettingsView` — a stack genuinely
+    /// exists here, and a second internal push (`.navigationDestination`)
+    /// works natively there. An earlier attempt deliberately kept the
+    /// same mechanism (state + a manual button) on both platforms "so as
+    /// not to diverge" — but on iOS that manual button was ADDED to the
+    /// push's automatic back button rather than replacing it (both
+    /// live at the same stack level), producing two stacked chevrons in
+    /// the bar. Diverging HERE is therefore the right call, not a
+    /// departure from doctrine.
     @State private var showAdvanced = false
 
     var body: some View {
@@ -109,15 +109,15 @@ struct AISettingsView: View {
         .onAppear(perform: load)
     }
 
-    /// Écran principal : les cinq réglages par fonctionnalité seulement — la
-    /// configuration des sources qu'elles partagent (Apple Intelligence,
-    /// serveur local, clés cloud) vit derrière « Sources avancées », pour ne
-    /// pas noyer le choix simple (Automatique/Désactivée) sous des champs que
-    /// la plupart des utilisateurs n'ouvriront jamais.
+    /// Main screen: only the five per-feature settings — configuring the
+    /// sources they share (Apple Intelligence, a local server, cloud
+    /// keys) lives behind "Advanced sources", so as not to
+    /// bury the simple choice (Automatic/Disabled) under fields
+    /// most users will never open.
     private var mainBody: some View {
-        // Form (pas List) : contenu statique de type réglages → rendu identique
-        // sur iOS et boxes arrondies natives sur macOS via nemorisFormStyle().
-        // Pas de ZStack+Color (hauteur infinie sur macOS) : fond via .background.
+        // A Form (not a List): static, settings-like content → rendered identically
+        // on iOS and as native rounded boxes on macOS via nemorisFormStyle().
+        // No ZStack+Color (infinite height on macOS): the background is via .background.
         Form {
             featuresSection
             advancedLinkSection
@@ -141,17 +141,17 @@ struct AISettingsView: View {
             }
         }
         #else
-        // Vrai push : le bouton retour AUTOMATIQUE de ce niveau de pile
-        // suffit alors dans `advancedBody` (natif, un seul chevron) — cf.
-        // le commentaire de `showAdvanced` ci-dessus.
+        // A real push: the AUTOMATIC back button at this stack level is
+        // then enough in `advancedBody` (native, a single chevron) — see
+        // the comment on `showAdvanced` above.
         .navigationDestination(isPresented: $showAdvanced) { advancedBody }
         #endif
     }
 
-    /// Statut Apple Intelligence, configuration du serveur local, clés des
-    /// fournisseurs cloud, test de connexion — tout ce qui se configure UNE
-    /// fois et sert à plusieurs fonctionnalités, regroupé pour ne pas répéter
-    /// ces champs cinq fois ni les afficher à plat sur l'écran principal.
+    /// Apple Intelligence status, local-server configuration, cloud
+    /// provider keys, a connection test — everything configured ONCE
+    /// and serving several features, grouped so as not to repeat
+    /// these fields five times or show them flat on the main screen.
     private var advancedBody: some View {
         Form {
             appleSection
@@ -169,9 +169,9 @@ struct AISettingsView: View {
         .localizedNavigationTitle("Sources avancées")
         .navigationBarTitleDisplayMode(.inline)
         #if os(macOS)
-        // Sur macOS, `advancedBody` REMPLACE `mainBody` par état (pas de
-        // push) : aucun bouton retour automatique n'existe à cet endroit, le
-        // bouton manuel reste nécessaire ici.
+        // On macOS, `advancedBody` REPLACES `mainBody` via state (not a
+        // push): no automatic back button exists at this point, the
+        // manual button stays necessary here.
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -184,15 +184,15 @@ struct AISettingsView: View {
             }
         }
         #endif
-        // Sur iOS, `advancedBody` est un vrai push (`.navigationDestination`
-        // sur `mainBody`) : le bouton retour automatique de la pile revient
-        // déjà nativement à `mainBody`. Un second bouton manuel ici
-        // s'AJOUTERAIT à celui-là (même niveau de pile) plutôt que de le
-        // remplacer, d'où le double chevron corrigé (retour d'usage).
+        // On iOS, `advancedBody` is a real push (`.navigationDestination`
+        // on `mainBody`): the stack's automatic back button already
+        // natively returns to `mainBody`. A second manual button here
+        // would be ADDED to that one (the same stack level) rather than
+        // replacing it, hence the double chevron that was fixed.
     }
 
-    /// Ligne d'accès à « Sources avancées », même style que les liens de
-    /// `SettingsView.settingsLink`.
+    /// Row linking to "Advanced sources", the same style as
+    /// `SettingsView.settingsLink`'s links.
     private var advancedLinkSection: some View {
         Section {
             Button {
@@ -213,15 +213,15 @@ struct AISettingsView: View {
         }
     }
 
-    // MARK: - Fonctionnalités
+    // MARK: - Features
 
-    /// ⚠️ Sélecteur INLINE, pas un écran poussé par fonctionnalité.
+    /// ⚠️ An INLINE selector, not a screen pushed per feature.
     ///
-    /// Deux raisons : cinq allers-retours pour régler cinq lignes est pénible,
-    /// et surtout empiler un écran depuis les Réglages est le motif à risque
-    /// documenté sur macOS (§N.1 : panneau peint sous le contenu poussé, gels
-    /// AutoLayout). Tout tient donc dans la ligne, y compris ce qui justifie le
-    /// choix.
+    /// Two reasons: five round trips to set five rows is tedious,
+    /// and above all stacking a screen from Settings is the documented risky
+    /// pattern on macOS (§N.1: pane painted under pushed content, AutoLayout
+    /// freezes). Everything therefore fits in the row, including what
+    /// justifies the choice.
     private var featuresSection: some View {
         Section {
             ForEach(AIFeature.allCases) { feature in
@@ -242,9 +242,9 @@ struct AISettingsView: View {
                     }
                     .pickerStyle(.menu)
 
-                    // Ce qui sera RÉELLEMENT utilisé, plus l'avertissement s'il
-                    // y a lieu — l'information qui manquerait si le détail
-                    // vivait derrière un push.
+                    // What will ACTUALLY be used, plus the warning if
+                    // there is one — the information that would be missing if the
+                    // detail lived behind a push.
                     statusLine(for: feature)
                         .font(.caption)
                         .foregroundStyle(effectiveColor(for: feature))
@@ -271,40 +271,40 @@ struct AISettingsView: View {
         }
     }
 
-    /// La ligne d'état sous le sélecteur : d'abord le problème s'il y en a un,
-    /// sinon le backend effectif — et le rappel que les données sortent quand
-    /// c'est le cas.
+    /// The status line below the picker: first the problem if there is one,
+    /// otherwise the effective backend — and the reminder that data leaves
+    /// the device when that's the case.
     ///
-    /// ⚠️ Renvoie un `Text` COMPOSÉ (concaténation de fragments `Text` littéraux),
-    /// jamais une `String` assemblée puis passée à un seul `Text` : un
-    /// `Text(LocalizedStringKey(uneStringDéjàRésolue))` fige la clé sur le texte
-    /// déjà traduit — le picker de langue des Réglages ne le rafraîchit alors
-    /// plus jamais (`Text(LocalizedStringKey)`/`Text(LocalizedStringResource)`
-    /// se ré-résolvent contre `\.locale` au rendu, une `String` figée non). Même
-    /// motif que `PatrimoineView.goalSubtitle`.
+    /// ⚠️ Returns a COMPOSED `Text` (a concatenation of literal `Text`
+    /// fragments), never an assembled `String` passed to a single `Text`: a
+    /// `Text(LocalizedStringKey(anAlreadyResolvedString))` freezes the key on the
+    /// already-translated text — the Settings language picker then never
+    /// refreshes it again (`Text(LocalizedStringKey)`/`Text(LocalizedStringResource)`
+    /// re-resolve against `\.locale` at render time, a frozen `String` doesn't). The same
+    /// pattern as `PatrimoineView.goalSubtitle`.
     private func statusLine(for feature: AIFeature) -> Text {
         if let reason = AIEnrichmentBackend.unavailabilityReason(for: feature) {
             return Text(LocalizedStringKey(reason))
         }
         var line = effectiveLabel(for: feature)
-        // ⚠️ Sur le backend RÉSOLU, pas le choix brut : « Automatique » qui
-        // retombe sur le cloud fait sortir les données tout autant qu'un choix
-        // `.cloud` explicite — `(choices[feature] ?? .automatic).leavesDevice`
-        // valait toujours `false` pour `.automatic` et ratait ce cas.
+        // ⚠️ On the RESOLVED backend, not the raw choice: "Automatic"
+        // falling back to the cloud makes data leave just as much as an explicit
+        // `.cloud` choice — `(choices[feature] ?? .automatic).leavesDevice`
+        // always evaluated to `false` for `.automatic` and missed this case.
         if AIEnrichmentBackend.resolved(for: feature)?.leavesDevice == true {
             line = line + Text(" · ⚠️ les données quittent l'appareil")
         }
         if feature.benefitsFromImage, !AIEnrichmentBackend.supportsImageInput(for: feature) {
-            // Pas une erreur : l'import fonctionne, mais en océrisant la
-            // capture — donc en perdant la mise en page, qui porte du sens.
+            // Not an error: import still works, but by OCR-ing the
+            // screenshot — so losing the layout, which carries meaning.
             line = line + Text(" · captures océrisées (pas de lecture d'image)")
         }
         return line
     }
 
-    /// Vrai quand le backend résolu n'est pas 100 % sur l'appareil — c'est là
-    /// que la consommation (réseau, calcul, facture API) devient pertinente à
-    /// signaler. Apple Intelligence et « aucune IA » n'affichent rien.
+    /// True when the resolved backend isn't 100% on-device — that's
+    /// when reporting consumption (network, compute, an API bill) becomes
+    /// relevant. Apple Intelligence and "no AI" show nothing.
     private func showsConsumptionHint(for feature: AIFeature) -> Bool {
         switch AIEnrichmentBackend.resolved(for: feature) {
         case .localServer, .cloud: return true
@@ -312,11 +312,11 @@ struct AISettingsView: View {
         }
     }
 
-    /// Ce qui sera RÉELLEMENT utilisé, pas seulement ce qui est demandé.
+    /// What will ACTUALLY be used, not just what's requested.
     ///
-    /// ⚠️ La distinction compte : « Automatique » sur un appareil où rien n'est
-    /// configuré veut dire « aucune IA », et l'utilisateur doit le voir ici
-    /// plutôt que de le découvrir devant un bouton grisé.
+    /// ⚠️ The distinction matters: "Automatic" on a device where nothing is
+    /// configured means "no AI at all", and the user needs to see that here
+    /// rather than discovering it in front of a grayed-out button.
     private func effectiveLabel(for feature: AIFeature) -> Text {
         let asked = choices[feature] ?? .automatic
         guard let resolved = AIEnrichmentBackend.resolved(for: feature) else {
@@ -335,9 +335,9 @@ struct AISettingsView: View {
         guard let resolved = AIEnrichmentBackend.resolved(for: feature) else {
             return AppTheme.Colors.warning
         }
-        // Orange aussi quand ça marche mais que les données sortent : ce n'est
-        // pas une erreur, c'est un choix qui mérite d'être visible en un coup
-        // d'œil dans la liste.
+        // Orange also when it works but data leaves the device: it's
+        // not an error, it's a choice that deserves to be visible at a
+        // glance in the list.
         return resolved.leavesDevice ? AppTheme.Colors.warning : AppTheme.Colors.success
     }
 
@@ -364,20 +364,20 @@ struct AISettingsView: View {
         }
     }
 
-    // MARK: - Modèle embarqué
+    // MARK: - Embedded model
 
-    /// Pas de marketplace : un champ pour coller un lien/repo Hugging Face, un
-    /// bouton pour analyser (taille + avertissement RAM/stockage AVANT tout
-    /// octet téléchargé), et la liste des modèles déjà téléchargés
-    /// (renommer/activer/supprimer). Un seul actif à la fois — cf.
+    /// No marketplace: a field to paste a Hugging Face link/repo, a
+    /// button to analyze it (size + a RAM/storage warning BEFORE any
+    /// byte is downloaded), and the list of models already downloaded
+    /// (rename/activate/delete). Only one active at a time — see
     /// `EmbeddedModelService`.
     private var embeddedModelSection: some View {
         Section {
-            // EN PREMIER, et INDÉPENDANT de `embeddedCandidates`/`mlxRepoCandidate`
-            // (qui, eux, sont perdus si on quitte l'écran puis qu'on y revient) :
-            // c'est précisément ce qui rend un téléchargement en cours visible
-            // après une navigation, alors que le téléchargement lui-même n'a
-            // jamais été interrompu — cf. `EmbeddedModelDownloadStatus`.
+            // FIRST, and INDEPENDENT of `embeddedCandidates`/`mlxRepoCandidate`
+            // (which, themselves, are lost if the screen is left then
+            // reopened): this is precisely what keeps an ongoing download visible
+            // after navigating away, even though the download itself was
+            // never interrupted — see `EmbeddedModelDownloadStatus`.
             if let inFlight = EmbeddedModelDownloadStatus.shared.inFlight {
                 inFlightDownloadBanner(inFlight)
             }
@@ -412,9 +412,9 @@ struct AISettingsView: View {
                 mlxRepoCandidateRow(mlxRepoCandidate)
             }
 
-            // Chemin PRINCIPAL, pas seulement un repli : n'importe quel
-            // fichier/dossier déjà présent sur l'appareil, quelle que soit son
-            // origine — pas seulement Hugging Face.
+            // The MAIN path, not just a fallback: any
+            // file/folder already present on the device, whatever its
+            // origin — not just Hugging Face.
             Button {
                 #if os(macOS)
                 presentOpenPanel(contentTypes: [UTType(filenameExtension: "gguf") ?? .data]) { url in
@@ -481,9 +481,9 @@ struct AISettingsView: View {
         #endif
     }
 
-    /// Visible que l'écran vienne d'ouvrir ou soit resté ouvert depuis le
-    /// début du téléchargement — c'est tout l'intérêt de lire
-    /// `EmbeddedModelDownloadStatus.shared` plutôt qu'un `@State` local.
+    /// Visible whether the screen just opened or has stayed open since
+    /// the download started — that's the whole point of reading
+    /// `EmbeddedModelDownloadStatus.shared` rather than a local `@State`.
     private func inFlightDownloadBanner(_ inFlight: EmbeddedModelDownloadStatus.InFlight) -> some View {
         HStack(spacing: 10) {
             if let progress = inFlight.progress {
@@ -544,9 +544,9 @@ struct AISettingsView: View {
         .padding(.vertical, 2)
     }
 
-    /// Un modèle MLX est TOUJOURS plusieurs fichiers — rien à désambiguïser
-    /// comme pour les quantizations GGUF, donc UNE seule ligne pour tout le
-    /// repo plutôt qu'une liste par fichier.
+    /// An MLX model is ALWAYS several files — nothing to disambiguate
+    /// like GGUF quantizations, so ONE row for the whole
+    /// repo rather than a per-file list.
     private func mlxRepoCandidateRow(_ candidate: EmbeddedMLXRepoCandidate) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -738,9 +738,9 @@ struct AISettingsView: View {
         await loadEmbeddedModels()
     }
 
-    /// Import direct — n'importe quelle source, aucune dépendance au réseau
-    /// ni à Hugging Face. Copie synchrone (rapide, même conteneur de l'app),
-    /// pas de barre de progression nécessaire contrairement au téléchargement.
+    /// Direct import — any source, no dependency on the network
+    /// or on Hugging Face. A synchronous copy (fast, same app container),
+    /// no progress bar needed unlike a download.
     private func importGGUFFile(_ url: URL) async {
         downloadError = nil
         embeddedActionWarning = nil
@@ -857,9 +857,9 @@ struct AISettingsView: View {
         }
     }
 
-    /// Teste TOUS les backends configurés, pas seulement le dernier saisi :
-    /// avec un réglage par fonctionnalité, plusieurs peuvent servir en même
-    /// temps, et savoir lequel des deux est cassé est l'information utile.
+    /// Tests EVERY configured backend, not just the last one entered:
+    /// with a per-feature setting, several can be in use at the
+    /// same time, and knowing which of the two is broken is the useful information.
     private func runTest() async {
         isTesting = true
         testSuccess = nil
@@ -902,7 +902,7 @@ struct AISettingsView: View {
         testError = failures.isEmpty ? nil : failures.joined(separator: "\n")
     }
 
-    // MARK: - Chargement
+    // MARK: - Loading
 
     private func load() {
         for feature in AIFeature.allCases {
@@ -914,9 +914,9 @@ struct AISettingsView: View {
         localAPIKey = LocalLLMKeychain.load(id: LocalLLMKeychain.apiKeyID) ?? ""
         for provider in AICloudProvider.allCases {
             cloudKeys[provider] = CloudLLMKeychain.load(provider) ?? ""
-            // Volontairement la valeur BRUTE (et non `CloudLLMService.model`,
-            // qui substitue le défaut) : le champ doit rester vide tant que
-            // l'utilisateur n'a rien saisi, pour que le prompt s'affiche.
+            // Deliberately the RAW value (not `CloudLLMService.model`,
+            // which substitutes the default): the field must stay empty until
+            // the user has typed something, so the placeholder shows.
             cloudModels[provider] = UserDefaults.standard
                 .string(forKey: "ai.cloud.\(provider.rawValue).model") ?? ""
         }
