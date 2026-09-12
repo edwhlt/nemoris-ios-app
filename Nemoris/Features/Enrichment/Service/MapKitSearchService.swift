@@ -1,21 +1,21 @@
 import Foundation
 import MapKit
 
-/// Wrapper léger autour de `MKLocalSearch` pour récupérer adresse / coords / POI.
-/// Pas de clé API requise. Limites Apple : pas documenté, mais raisonnable.
+/// Thin wrapper around `MKLocalSearch` to fetch an address / coordinates / POI.
+/// No API key required. Apple's limits: undocumented, but reasonable.
 ///
-/// Toujours appelé depuis `Task.detached` (la complétion peut être lente, ~500ms-2s).
+/// Always called from `Task.detached` (the completion can be slow, ~500ms-2s).
 struct MapKitSearchService {
 
-    /// Renvoie le meilleur match POI pour `query` ± `region` (ville).
-    /// `nil` si rien trouvé ou si offline. Utilisé par l'orchestrateur batch (1 résultat).
+    /// Returns the best POI match for `query` ± `region` (a city).
+    /// `nil` if nothing found or offline. Used by the batch orchestrator (1 result).
     static func search(query: String, near city: String?) async -> MerchantEnrichment? {
         await searchAll(query: query, near: city, limit: 1).first
     }
 
-    /// Renvoie jusqu'à `limit` POI distincts pour `query` ± `city`.
-    /// Utilisé par `EnrichmentSheetView` pour laisser l'utilisateur choisir parmi
-    /// plusieurs candidats (ex. plusieurs Boulangerie X à Lyon).
+    /// Returns up to `limit` distinct POIs for `query` ± `city`.
+    /// Used by `EnrichmentSheetView` to let the user pick among
+    /// several candidates (e.g. several "Bakery X" in Lyon).
     static func searchAll(query: String, near city: String?, limit: Int = 8) async -> [MerchantEnrichment] {
         let request = MKLocalSearch.Request()
         let fullQuery = [query, city].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " ")
@@ -25,8 +25,8 @@ struct MapKitSearchService {
         let search = MKLocalSearch(request: request)
         do {
             let response = try await search.start()
-            // Dédup par (name + adresse) — MapKit renvoie parfois 2 fois le même POI
-            // sous des coordonnées légèrement différentes.
+            // Dedup by (name + address) — MapKit sometimes returns the same POI twice
+            // under slightly different coordinates.
             var seen: Set<String> = []
             var out: [MerchantEnrichment] = []
             for item in response.mapItems {
@@ -46,7 +46,7 @@ struct MapKitSearchService {
         let placemark = item.placemark
         let coords = item.placemark.coordinate
         let address: String? = {
-            // Construire une adresse compacte
+            // Build a compact address
             var parts: [String] = []
             if let s = placemark.thoroughfare { parts.append(s) }
             if let p = placemark.postalCode { parts.append(p) }
@@ -65,7 +65,7 @@ struct MapKitSearchService {
             phone: item.phoneNumber,
             siret: nil, nafCode: nil,
             source: .mapkit,
-            // MapKit ne renvoie pas de score ; on attribue 0.6 par défaut (signal moyen).
+            // MapKit doesn't return a score; we assign 0.6 by default (a middling signal).
             confidence: 0.6,
             enrichedAt: Date()
         )

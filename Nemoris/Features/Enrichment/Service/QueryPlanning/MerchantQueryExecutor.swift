@@ -1,14 +1,14 @@
 import Foundation
 
-/// Exécute la cascade planifiée par `MerchantQueryPlanner`.
+/// Runs the cascade planned by `MerchantQueryPlanner`.
 ///
-/// Chaîne complète, une seule direction, aucun cycle :
+/// A full chain, one direction, no cycles:
 ///
-///     extract (pur) → resolve (async, caché) → plan (pur) → execute → rank (pur)
+///     extract (pure) → resolve (async, cached) → plan (pure) → execute → rank (pure)
 ///
-/// L'exécuteur ne DÉCIDE de rien : le plan dit quoi tenter et dans quel ordre, le budget
-/// dit quand s'arrêter, le ranker dit qui gagne. Ici on ne fait qu'appeler et compter.
-/// C'est ce qui rend la logique testable sans réseau.
+/// The executor DECIDES nothing: the plan says what to try and in what order, the budget
+/// says when to stop, the ranker says who wins. Here we only call and count.
+/// That's what makes the logic testable without a network.
 actor MerchantQueryExecutor {
 
     static let shared = MerchantQueryExecutor()
@@ -18,16 +18,16 @@ actor MerchantQueryExecutor {
 
     // MARK: - API
 
-    /// Planifie puis exécute. `knownNafPrefixes` est passé en donnée pour que le ranker
-    /// reste pur (il n'a pas accès au bundle NAF).
+    /// Plans then executes. `knownNafPrefixes` is passed as data so the ranker
+    /// stays pure (it has no access to the NAF bundle).
     func search(input: MerchantQueryPlanner.Input,
                 budget: SearchBudget = .interactive,
                 knownNafPrefixes: Set<String> = []) async -> MerchantSearchResult {
         let started = Date()
         let extraction = MerchantQueryPlanner.extract(input)
 
-        // Résolution de la commune AVANT la planification : le plan doit connaître ses
-        // filtres pour exister (cf. l'argumentaire de `LocalityResolver`).
+        // Resolving the commune BEFORE planning: the plan needs to know its
+        // filters to exist (see `LocalityResolver`'s rationale).
         var usage = SearchBudget.Usage()
         var locality: ResolvedLocality?
         if !extraction.localityTokens.isEmpty, !extraction.degenerate,
@@ -59,8 +59,8 @@ actor MerchantQueryExecutor {
         }
 
         var outcomes: [SearchAttemptOutcome] = []
-        // Accumulateur dédupliqué par SIREN sur TOUTES les tentatives : le classement se
-        // fait sur l'union finale, jamais sur « le premier arrivé ».
+        // Accumulator deduplicated by SIREN across ALL attempts: ranking
+        // happens on the final union, never on "first one in".
         var pool: [String: CompanyMatch] = [:]
 
         for attempt in plan.attempts {
@@ -74,15 +74,15 @@ actor MerchantQueryExecutor {
                                       resultCount: 0, elapsed: 0))
                 continue
             }
-            // Court-circuit 1→2→3 : si le filtre commune a donné, inutile de retenter avec
-            // un filtre plus large — on aurait les mêmes résultats en moins précis.
+            // Short-circuit 1→2→3: if the commune filter already returned something, no
+            // point retrying with a broader filter — we'd get the same results, less precise.
             if shouldSkipBroaderGeo(attempt, pool: pool, plan: plan) {
                 outcomes.append(.init(attemptId: attempt.id,
                                       status: .skipped("filtre plus précis déjà concluant"),
                                       resultCount: 0, elapsed: 0))
                 continue
             }
-            // Proximité et entreprises fermées : dernier recours seulement.
+            // Proximity and closed companies: last resort only.
             if isLastResort(attempt), !pool.isEmpty {
                 outcomes.append(.init(attemptId: attempt.id,
                                       status: .skipped("des candidats ont déjà été trouvés"),
@@ -90,9 +90,9 @@ actor MerchantQueryExecutor {
                 continue
             }
 
-            // La recherche cartographique est portée par la vue (MapKit a besoin du main
-            // actor). L'exécuteur la laisse dans le plan pour que l'UI sache quoi lancer,
-            // mais ne la compte pas comme une requête : elle ne part pas d'ici.
+            // The map search is driven by the view (MapKit needs the main
+            // actor). The executor leaves it in the plan so the UI knows what to run,
+            // but doesn't count it as a request: it doesn't fire from here.
             if case .placeText = attempt.kind {
                 outcomes.append(.init(attemptId: attempt.id,
                                       status: .skipped("déléguée à la carte"),
@@ -109,8 +109,8 @@ actor MerchantQueryExecutor {
                                       resultCount: found.count,
                                       elapsed: Date().timeIntervalSince(attemptStart)))
 
-                // Court-circuit sur la qualité : un candidat très bon ET géographiquement
-                // confirmé rend les tentatives suivantes inutiles.
+                // Quality short-circuit: a very good candidate AND geographically
+                // confirmed makes the remaining attempts pointless.
                 if isGoodEnough(pool: pool, context: context) { break }
             } catch {
                 usage.requests += 1
@@ -127,7 +127,7 @@ actor MerchantQueryExecutor {
                                     companies: ranked, budgetUsed: usage)
     }
 
-    // MARK: - Exécution d'une tentative
+    // MARK: - Running one attempt
 
     private func run(_ attempt: SearchAttempt) async throws -> [CompanyMatch] {
         switch attempt.kind {
@@ -137,20 +137,20 @@ actor MerchantQueryExecutor {
             return try await registry.searchNearPoint(latitude: lat, longitude: lon,
                                                       radiusKm: radius, perPage: perPage)
         case .placeText:
-            // La recherche cartographique est portée par MapKit côté UI (elle a besoin du
-            // main actor et de son propre modèle de résultat). L'exécuteur ne traite que
-            // les registres d'entreprises.
+            // The map search is driven by MapKit on the UI side (it needs the
+            // main actor and its own result model). The executor only handles
+            // company registries.
             return []
         }
     }
 
-    // MARK: - Règles de court-circuit
+    // MARK: - Short-circuit rules
 
     private func shouldSkipBroaderGeo(_ attempt: SearchAttempt,
                                       pool: [String: CompanyMatch],
                                       plan: MerchantQueryPlan) -> Bool {
         guard !pool.isEmpty, case .companyRegistry(let query) = attempt.kind else { return false }
-        // Un filtre plus large que celui qui a déjà donné n'apporte rien.
+        // A filter broader than one that already returned something adds nothing.
         let isBroader = query.codePostal != nil || query.departement != nil
         return isBroader && plan.locality?.inseeCode != nil
     }
@@ -160,22 +160,22 @@ actor MerchantQueryExecutor {
         case .companyRegistryNearPoint:
             return true
         case .companyRegistry(let query):
-            return query.etatAdministratif == nil   // rejeu incluant les fermées
+            return query.etatAdministratif == nil   // a replay including closed ones
         case .placeText:
             return false
         }
     }
 
-    /// Un candidat suffisamment bon ET géographiquement confirmé arrête la cascade.
-    /// Seuils volontairement élevés : continuer coûte une requête, s'arrêter trop tôt
-    /// coûte le bon résultat.
+    /// A candidate good enough AND geographically confirmed stops the cascade.
+    /// Thresholds deliberately high: continuing costs a request, stopping too soon
+    /// costs the right result.
     private func isGoodEnough(pool: [String: CompanyMatch], context: RankingContext) -> Bool {
         let ranked = rank(pool: Array(pool.values), context: context)
         guard let best = ranked.first, let top = best.rankedEstablishments.first else { return false }
         return top.score >= 0.80 && top.breakdown.localityMatch >= 0.9
     }
 
-    // MARK: - Classement
+    // MARK: - Ranking
 
     private func rank(pool: [CompanyMatch], context: RankingContext) -> [RankedCompany] {
         let query = context.nameTokens
@@ -187,8 +187,8 @@ actor MerchantQueryExecutor {
                             companyNames: companyNames)
             }
             let rankedEstablishments = CandidateRanker.rank(candidates, context: context)
-            // Le score d'une entreprise est celui de son MEILLEUR établissement : c'est la
-            // bonne boutique qu'on cherche, pas le siège social.
+            // A company's score is that of its BEST establishment: we're
+            // after the right storefront, not the head office.
             let companyScore = rankedEstablishments.first?.score
                 ?? CandidateRanker.score(
                     RankableCandidate(id: match.siren, names: match.searchableNames),
@@ -197,8 +197,8 @@ actor MerchantQueryExecutor {
             return RankedCompany(match: match, score: companyScore,
                                  rankedEstablishments: rankedEstablishments)
         }
-        // Ordre TOTAL, comme pour les établissements : jamais d'égalité résiduelle, donc
-        // jamais de dépendance à l'ordre d'arrivée réseau.
+        // A TOTAL order, as with establishments: never a residual tie, so
+        // never a dependency on network arrival order.
         return ranked.sorted { lhs, rhs in
             if lhs.score != rhs.score { return lhs.score > rhs.score }
             if lhs.match.isActive != rhs.match.isActive { return lhs.match.isActive }
@@ -207,7 +207,7 @@ actor MerchantQueryExecutor {
     }
 }
 
-// MARK: - Résultat
+// MARK: - Result
 
 struct SearchAttemptOutcome: Sendable, Identifiable {
     enum Status: Sendable, Equatable {
@@ -215,7 +215,7 @@ struct SearchAttemptOutcome: Sendable, Identifiable {
         case skipped(String)
         case failed(String)
 
-        /// Libellé FR affiché dans « Détails de la recherche ».
+        /// FR wording shown in "Search details".
         var label: String {
             switch self {
             case .ok: return "exécutée"
@@ -240,15 +240,15 @@ struct RankedCompany: Sendable, Identifiable {
 
     var id: String { match.siren }
 
-    /// L'établissement le plus plausible pour ce libellé.
+    /// The most plausible establishment for this label.
     var bestEstablishment: Establishment? {
         guard let top = rankedEstablishments.first else { return match.headquarters }
         return match.allEstablishments.first { $0.id == top.candidate.id }
     }
 }
 
-/// Tout ce que l'UI a besoin de savoir : le plan (donc les tentatives et les jetons
-/// retirés), ce qui a réellement tourné, et les résultats classés.
+/// Everything the UI needs to know: the plan (so the attempts and the removed
+/// tokens), what actually ran, and the ranked results.
 struct MerchantSearchResult: Sendable {
     let plan: MerchantQueryPlan
     let outcomes: [SearchAttemptOutcome]
@@ -257,7 +257,7 @@ struct MerchantSearchResult: Sendable {
 
     var isEmpty: Bool { companies.isEmpty }
 
-    /// Résumé de coût affichable : « 3 requêtes · 0,8 s ».
+    /// Displayable cost summary: "3 requests · 0.8s".
     var costSummary: String {
         let requests = budgetUsed.requests
         let seconds = String(format: "%.1f", budgetUsed.elapsed)

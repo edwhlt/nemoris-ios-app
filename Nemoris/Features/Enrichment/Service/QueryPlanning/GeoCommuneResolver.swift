@@ -1,49 +1,48 @@
 import Foundation
 
-/// Résout un fragment de libellé en commune française via `geo.api.gouv.fr`.
-/// Sans clé, sans compte.
+/// Resolves a label fragment into a French commune via `geo.api.gouv.fr`.
+/// No key, no account needed.
 ///
-/// POURQUOI UNE API PLUTÔT QU'UNE LISTE EN DUR
+/// WHY AN API RATHER THAN A HARDCODED LIST
 ///
-/// Le champ localité des relevés bancaires est TRONQUÉ en largeur fixe (~13 caractères).
-/// Aucune correspondance exacte sur un dictionnaire ne peut le reconnaître. L'API, si —
-/// vérifié :
+/// The locality field of bank statements is TRUNCATED at a fixed width (~13 characters).
+/// No exact-match dictionary can recognize it. The API can — verified:
 ///
 ///     GIF-SUR-YVETT → Gif-sur-Yvette          insee 91272 · dep 91 · cp 91190
-///     MONT SUR LOIR → Gif-sur-Yvette          (tirets ou espaces indifférents)
+///     MONT SUR LOIR → Gif-sur-Yvette          (dashes or spaces, either works)
 ///     ISSY LES      → Issy-les-Moulineaux     insee 92040 · dep 92 · cp 92130
 ///     CORMEILLES EN → Cormeilles-en-Parisis   insee 95176 · dep 95
 ///     PERROGNEY LES → Perrogney-les-Fontaines insee 52384 · dep 52
 ///     ROSIERES PRES → Rosières-près-Troyes    insee 10325 · dep 10
-///     FLANCHES      → []   ← oracle NÉGATIF, tout aussi utile
+///     FLANCHES      → []   ← a NEGATIVE oracle answer, just as useful
 ///
-/// Elle désambiguïse aussi par population (`boost=population`) : « NIMES » existe en
-/// Essonne et en Seine-Maritime, on veut la première.
+/// It also disambiguates by population (`boost=population`): "NIMES" exists in
+/// Essonne and in Seine-Maritime, we want the first one.
 ///
-/// Un échec de résolution n'est PAS un échec de la recherche : le fragment reste utilisé
-/// comme texte de tri sur les adresses des candidats (`RankingContext.freeLocalityText`).
-/// C'est ce qui rend le correctif SROM/FLANCHES indépendant de cet oracle.
+/// A resolution failure is NOT a search failure: the fragment is still used
+/// as sort text against candidates' addresses (`RankingContext.freeLocalityText`).
+/// That's what keeps the SROM/FLANCHES fix independent of this oracle.
 actor GeoCommuneResolver: LocalityResolver {
 
     static let shared = GeoCommuneResolver()
 
     private let baseURL = URL(string: "https://geo.api.gouv.fr/communes")!
 
-    /// `nil` en valeur = réponse négative mémorisée (« ce n'est pas une commune »).
+    /// `nil` value = a memoized negative answer ("this isn't a commune").
     private var cache: [String: ResolvedLocality?] = [:]
     private var negativeTimestamps: [String: Date] = [:]
 
-    /// Les réponses positives ne périment pas : les communes ne bougent quasiment jamais.
-    /// Les négatives, si — une graphie tronquée peut devenir résoluble si l'API s'améliore.
+    /// Positive answers never expire: communes almost never change.
+    /// Negative ones do — a truncated spelling may become resolvable if the API improves.
     private static let negativeTTL: TimeInterval = 30 * 24 * 3600
 
     // MARK: - LocalityResolver
 
     func resolve(_ tokens: [LocalityToken], countryHint: String?) async -> ResolvedLocality? {
-        // Hors de France, cet oracle n'a rien à dire.
+        // Outside France, this oracle has nothing to say.
         if let countryHint, countryHint != "FR" { return nil }
 
-        // 1) Un code postal explicite suffit à contraindre la recherche, même sans commune.
+        // 1) An explicit postal code alone is enough to constrain the search, even with no commune.
         if let postal = tokens.first(where: { $0.kind == .postalCode })?.raw {
             if let hit = await lookupPostalCode(postal) { return hit }
             return ResolvedLocality(
@@ -53,8 +52,8 @@ actor GeoCommuneResolver: LocalityResolver {
             )
         }
 
-        // 2) Fragments de ville, par confiance décroissante (le créneau d'un gabarit
-        //    bancaire vaut mieux qu'une devinette de fin de libellé).
+        // 2) City fragments, in decreasing confidence order (a bank template's
+        //    slot is worth more than a trailing-label guess).
         let cityTokens = tokens
             .filter { $0.kind == .cityName }
             .sorted { $0.confidence > $1.confidence }
@@ -77,7 +76,7 @@ actor GeoCommuneResolver: LocalityResolver {
 
         if let cached = cache[key] {
             if let hit = cached { return hit }
-            // Négatif mémorisé : on ne réinterroge qu'après expiration.
+            // A memoized negative: only re-query once it has expired.
             if let at = negativeTimestamps[key], Date().timeIntervalSince(at) < Self.negativeTTL {
                 return nil
             }
@@ -88,7 +87,7 @@ actor GeoCommuneResolver: LocalityResolver {
             .init(name: "nom", value: key),
             .init(name: "fields", value: "nom,code,codeDepartement,codesPostaux,population,centre"),
             .init(name: "limit", value: "3"),
-            // Départage « Massy » (Essonne, 91 377 hab.) de « Massy » (Seine-Maritime).
+            // Disambiguates "Massy" (Essonne, 91,377 inhabitants) from "Massy" (Seine-Maritime).
             .init(name: "boost", value: "population")
         ]
         guard let url = components.url else { return nil }
@@ -105,8 +104,8 @@ actor GeoCommuneResolver: LocalityResolver {
             cache[key] = resolved
             return resolved
         } catch {
-            // Panne réseau : ne RIEN mémoriser. Cacher un négatif ici gèlerait une
-            // commune parfaitement valide pendant 30 jours à cause d'un métro sans réseau.
+            // Network failure: memoize NOTHING. Caching a negative here would freeze a
+            // perfectly valid commune for 30 days because of a subway with no network.
             print("[GeoCommuneResolver] « \(key) » : \(error.localizedDescription)")
             return nil
         }
@@ -128,8 +127,8 @@ actor GeoCommuneResolver: LocalityResolver {
             let data = try await ResilientHTTP.get(url, provider: .geoGouv, timeout: 8)
             let communes = try JSONDecoder().decode([GeoCommune].self, from: data)
             guard let best = communes.first else { return nil }
-            // On garde le code postal du libellé : c'est LUI qui filtrera, pas la liste
-            // complète de la commune (Paris en a vingt).
+            // We keep the label's postal code: it's what will filter, not the
+            // full list of the commune's codes (Paris has twenty of them).
             var resolved = best.asResolvedLocality()
             resolved = ResolvedLocality(
                 displayName: resolved.displayName, inseeCode: resolved.inseeCode,
@@ -144,9 +143,9 @@ actor GeoCommuneResolver: LocalityResolver {
         }
     }
 
-    /// Les fragments arrivent en minuscules sans diacritiques, séparateurs variables
-    /// (« GIF-SUR-YVETT » ou « MONT SUR LOIR »). L'API accepte les deux : on normalise
-    /// simplement les espaces.
+    /// Fragments arrive lowercase with no diacritics, with varying separators
+    /// ("GIF-SUR-YVETT" or "MONT SUR LOIR"). The API accepts both: we simply
+    /// normalize the spaces.
     private func normalize(_ raw: String) -> String {
         raw.folding(options: .diacriticInsensitive, locale: Locale(identifier: "fr_FR"))
             .lowercased()
@@ -156,7 +155,7 @@ actor GeoCommuneResolver: LocalityResolver {
     }
 }
 
-// MARK: - Décodage
+// MARK: - Decoding
 
 private struct GeoCommune: Decodable {
     let nom: String

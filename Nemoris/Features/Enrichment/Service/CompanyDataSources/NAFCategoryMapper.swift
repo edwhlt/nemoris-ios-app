@@ -1,10 +1,10 @@
 import Foundation
 
-/// Mappe un code NAF (ex "10.71C") vers une catégorie Nemoris affichable.
-/// Tolère les variations de format (avec ou sans point : "1071C" / "10.71C").
+/// Maps a NAF code (e.g. "10.71C") to a displayable Nemoris category.
+/// Tolerates format variations (with or without a dot: "1071C" / "10.71C").
 struct NAFCategory: Codable, Hashable {
     let label: String     // ex "Cuisson de produits de boulangerie"
-    let category: String  // ex "Alimentation" — match les catégories Nemoris
+    let category: String  // e.g. "Groceries" — matches Nemoris categories
     let icon: String      // SF Symbol
 }
 
@@ -24,13 +24,13 @@ final class NAFCategoryMapper: Sendable {
         self.mapping = parsed
     }
 
-    /// Retourne la catégorie associée à un code NAF, en essayant plusieurs formats.
-    /// Ex: "1071C", "10.71C", "10.71 C" → toutes matchent la même entrée.
-    /// Tous les codes NAF connus du référentiel.
+    /// Returns the category associated with a NAF code, trying several formats.
+    /// E.g.: "1071C", "10.71C", "10.71 C" → all match the same entry.
+    /// Every NAF code known to the reference data.
     ///
-    /// Exposé pour que `CandidateRanker` reste PUR : il a besoin de savoir si un code NAF
-    /// est reconnu (petit bonus de score), mais il ne doit pas lire le bundle. On lui passe
-    /// donc l'ensemble en donnée plutôt que ce mapper en dépendance.
+    /// Exposed so `CandidateRanker` stays PURE: it needs to know whether a NAF code
+    /// is recognized (a small score bonus), but it must not read the bundle. So we
+    /// pass it the set as plain data rather than this mapper as a dependency.
     var knownPrefixes: Set<String> { Set(mapping.keys) }
 
     func lookup(_ nafCode: String?) -> NAFCategory? {
@@ -40,7 +40,7 @@ final class NAFCategoryMapper: Sendable {
         // Essai 1 : tel quel
         if let direct = mapping[raw] { return direct }
 
-        // Essai 2 : insérer un point après les 2 premiers chiffres si absent
+        // Attempt 2: insert a dot after the first 2 digits if missing
         let digitsAndLetters = raw.filter { $0.isLetter || $0.isNumber }
         if digitsAndLetters.count >= 5 {
             let idx = digitsAndLetters.index(digitsAndLetters.startIndex, offsetBy: 2)
@@ -48,14 +48,14 @@ final class NAFCategoryMapper: Sendable {
             if let viaDot = mapping[String(dotted)] { return viaDot }
         }
 
-        // Essai 3 : retirer tout point
+        // Attempt 3: strip every dot
         let stripped = raw.replacingOccurrences(of: ".", with: "")
         if let viaStripped = mapping[stripped] { return viaStripped }
 
         return nil
     }
 
-    /// Catégorie par défaut quand on n'a pas de NAF ou pas de mapping connu.
+    /// Default category when there's no NAF or no known mapping.
     func fallback() -> NAFCategory {
         NAFCategory(label: "Non classé", category: "Autre", icon: "questionmark.circle")
     }

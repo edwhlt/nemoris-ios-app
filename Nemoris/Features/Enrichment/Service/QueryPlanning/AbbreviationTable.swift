@@ -1,22 +1,22 @@
 import Foundation
 
-// Abréviations et marqueurs des libellés bancaires.
-// ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
+// Abbreviations and markers of bank labels.
+// ⚠️ PURE FILE: `import Foundation` ONLY.
 //
-// Ce savoir vivait jusqu'ici dans la chaîne de caractères `EnrichmentLLMService.instructions`
-// (un prompt d'une centaine de lignes). Il y était : non testable, indisponible quand
-// Apple Intelligence est absent (donc sur tout iOS 18), et re-dérivé probabilistiquement
-// à chaque libellé. Ici il est déterministe, partagé par le chemin IA et le chemin sans IA,
-// et couvert par `run_query_planner_tests.sh`.
+// This knowledge used to live in the `EnrichmentLLMService.instructions` string
+// (a prompt about a hundred lines long). There, it was: untestable, unavailable when
+// Apple Intelligence is absent (so on every iOS 18), and probabilistically re-derived
+// on every label. Here it's deterministic, shared by the AI path and the no-AI path,
+// and covered by `run_query_planner_tests.sh`.
 
 enum AbbreviationTable {
 
-    /// Abréviations de type de commerce → mot développé, injecté dans la requête
-    /// cartographique (« BOULANG MARIE » → « boulangerie marie »).
-    /// Le registre d'entreprises, lui, reçoit le nom tel quel : « BOULANG » peut faire
-    /// partie de la raison sociale.
+    /// Business-type abbreviation → expanded word, injected into the map
+    /// search ("BOULANG MARIE" → "boulangerie marie").
+    /// The company registry, on the other hand, gets the name as-is: "BOULANG" may be
+    /// part of the actual company name.
     static let merchantTypes: [String: String] = [
-        // Français
+        // French
         "res": "restaurant",
         "resto": "restaurant",
         "rest": "restaurant",
@@ -33,7 +33,7 @@ enum AbbreviationTable {
         "coif": "coiffeur",
         "tab": "tabac",
         "libr": "librairie",
-        // Vietnamien — libellés VNPAY fréquents
+        // Vietnamese — VNPAY labels are common
         "nha hang": "restaurant",
         "nh": "restaurant",
         "quan": "restaurant",
@@ -45,38 +45,38 @@ enum AbbreviationTable {
         "acv": "aeroport"
     ]
 
-    /// Processeurs de paiement. Le marchand est ce qui SUIT — jamais le processeur.
+    /// Payment processors. The merchant is what FOLLOWS — never the processor.
     static let paymentProcessors: Set<String> = [
         "paypal", "stripe", "sumup", "adyen", "square", "klarna", "revolut",
         "vnpay", "alipay", "wechat", "payu", "mollie", "checkout", "shopify",
         "applepay", "googlepay", "samsungpay", "lydia", "wero", "paylib"
     ]
 
-    /// Préfixes d'opération bancaire française. Purement structurels, jamais un marchand.
+    /// French bank operation prefixes. Purely structural, never a merchant.
     static let bankPrefixes: Set<String> = [
         "paiement", "cb", "carte", "vir", "virement", "prlv", "prelevement", "prelvt",
         "sepa", "inst", "recu", "emis", "retrait", "dab", "frais", "ech", "echeance",
         "achat", "facture", "fact", "pmt", "pos", "remise", "cheque", "chq", "avoir"
     ]
 
-    /// Marqueurs qui TERMINENT le créneau marchand dans les relevés à champs fixes.
-    /// « … AUCHAN NIMES **CARTE** 1042 GIR0100794… » : tout ce qui suit est structurel.
+    /// Markers that END the merchant slot in fixed-field statements.
+    /// "… AUCHAN NIMES **CARTE** 1042 GIR0100794…": everything after is structural.
     static let cardTerminators: Set<String> = ["carte", "payweb", "paywebc"]
 
-    /// Codes de référence sans valeur d'identification, à retirer partout.
+    /// Reference codes with no identifying value, to strip everywhere.
     static let referenceMarkers: Set<String> = ["psc", "ref", "gir", "gip", "payli", "no", "num"]
 
-    /// Développe les abréviations connues d'une liste de tokens.
-    /// Traite d'abord les expressions multi-mots (« nha hang », « cong ty tnhh »),
-    /// puis les tokens isolés. Sans le passage multi-mots, « NHA HANG RAU M » perdrait
-    /// le sens de l'expression et « nha » seul ne veut rien dire.
+    /// Expands known abbreviations in a list of tokens.
+    /// Handles multi-word expressions first ("nha hang", "cong ty tnhh"),
+    /// then isolated tokens. Without the multi-word pass, "NHA HANG RAU M" would lose
+    /// the expression's meaning and "nha" alone means nothing.
     static func expand(_ tokens: [String]) -> [String] {
         guard !tokens.isEmpty else { return [] }
         var out: [String] = []
         var i = 0
         while i < tokens.count {
             var matched = false
-            // Expressions de 3 puis 2 mots.
+            // 3-word then 2-word expressions.
             for span in stride(from: min(3, tokens.count - i), through: 2, by: -1) {
                 let phrase = tokens[i..<(i + span)].joined(separator: " ")
                 if let expanded = merchantTypes[phrase] {
@@ -101,8 +101,8 @@ enum AbbreviationTable {
         bankPrefixes.contains(token)
     }
 
-    /// « PAYLI2469 », « GIR012607803713662 », « PAYWEB1042 » : un marqueur connu
-    /// immédiatement suivi de chiffres.
+    /// "PAYLI2469", "GIR012607803713662", "PAYWEB1042": a known marker
+    /// immediately followed by digits.
     static func isReferenceWithDigits(_ token: String) -> Bool {
         for marker in referenceMarkers.union(cardTerminators) where token.hasPrefix(marker) {
             let tail = token.dropFirst(marker.count)

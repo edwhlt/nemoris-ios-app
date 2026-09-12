@@ -4,31 +4,31 @@ import MLXLLM
 import MLXLMCommon
 import Tokenizers
 
-/// Backend IA « modèle embarqué » — un modèle exécuté DANS l'app, sans
-/// serveur externe ni Apple Intelligence. Deux formats : **GGUF** (via
-/// `SwiftLlama`/llama.cpp, tourne sur tout appareil) et **MLX** (via
-/// `mlx-swift-lm`, Apple Silicon seulement — plus rapide sur ce matériel).
+/// "Embedded model" AI backend — a model run INSIDE the app, with no
+/// external server and no Apple Intelligence. Two formats: **GGUF** (via
+/// `SwiftLlama`/llama.cpp, runs on any device) and **MLX** (via
+/// `mlx-swift-lm`, Apple Silicon only — faster on that hardware).
 ///
-/// Pas de marketplace, et pas limité à Hugging Face : coller un lien HF reste
-/// un raccourci (GGUF uniquement, résolu via l'API HF), mais le chemin
-/// principal est l'IMPORT d'un fichier `.gguf` ou d'un dossier MLX déjà
-/// présent sur l'appareil (Fichiers/iCloud Drive/Mac) — n'importe quelle
-/// source, aucune limite. Cf. `EmbeddedModelManager.importFile`/`importFolder`.
+/// No marketplace, and not limited to Hugging Face: pasting an HF link is
+/// still a shortcut (GGUF only, resolved via the HF API), but the
+/// main path is IMPORTING a `.gguf` file or an MLX folder already
+/// present on the device (Files/iCloud Drive/Mac) — any
+/// source, no limit. See `EmbeddedModelManager.importFile`/`importFolder`.
 ///
-/// Stockage : `Application Support/LocalModels/` (pas `Caches` — l'OS peut
-/// purger `Caches` sous pression de stockage, ce qui perdrait un téléchargement
-/// de plusieurs centaines de Mo sans prévenir). Exclu de la sauvegarde iCloud
-/// (`isExcludedFromBackup`) : regénérable depuis Hugging Face, ne doit pas
-/// gonfler une sauvegarde device.
+/// Storage: `Application Support/LocalModels/` (not `Caches` — the OS can
+/// purge `Caches` under storage pressure, which would silently lose a
+/// download of several hundred MB). Excluded from iCloud backup
+/// (`isExcludedFromBackup`): re-downloadable from Hugging Face, shouldn't
+/// bloat a device backup.
 ///
-/// Visible automatiquement dans Réglages → Général → Stockage iPhone → Nemoris
-/// (contenu du conteneur de l'app) — rien à coder de spécial pour ça.
+/// Automatically visible in Settings → General → iPhone Storage → Nemoris
+/// (the app container's content) — nothing special to code for that.
 
-// MARK: - Modèle téléchargé/importé (persisté dans manifest.json)
+// MARK: - Downloaded/imported model (persisted in manifest.json)
 
-/// GGUF : un seul fichier. MLX : un dossier entier (poids `.safetensors` +
-/// `config.json` + tokenizer) — deux moteurs d'inférence distincts derrière
-/// `EmbeddedModelManager`, jamais mélangés.
+/// GGUF: a single file. MLX: a whole folder (`.safetensors` weights +
+/// `config.json` + tokenizer) — two distinct inference engines behind
+/// `EmbeddedModelManager`, never mixed.
 enum EmbeddedModelFormat: String, Codable, Sendable {
     case gguf
     case mlx
@@ -38,18 +38,18 @@ struct EmbeddedModelInfo: Codable, Identifiable, Hashable, Sendable {
     let id: String
     var displayName: String
     let format: EmbeddedModelFormat
-    /// Provenance, INFORMATIVE seulement (jamais de logique dessus) — par ex.
-    /// "Hugging Face — org/repo", "Importé — nom_du_fichier.gguf", "Importé —
-    /// nom_du_dossier". Remplace un ancien champ `hfRepo` non optionnel qui
-    /// supposait à tort que Hugging Face était la seule source possible.
+    /// Provenance, INFORMATIONAL only (never any logic on it) — e.g.
+    /// "Hugging Face — org/repo", "Imported — file_name.gguf", "Imported —
+    /// folder_name". Replaces an older non-optional `hfRepo` field that
+    /// wrongly assumed Hugging Face was the only possible source.
     var sourceDescription: String
-    /// Nom du fichier GGUF — ignoré si `format == .mlx` (le dossier entier
-    /// EST le modèle, pas un fichier nommé dedans).
+    /// GGUF file name — ignored if `format == .mlx` (the whole folder
+    /// IS the model, not a named file inside it).
     let fileName: String
     var sizeBytes: Int64
     let downloadedAt: Date
 
-    /// GGUF : chemin du fichier unique. MLX : le dossier du modèle lui-même.
+    /// GGUF: path to the single file. MLX: the model's folder itself.
     var modelPathURL: URL {
         let dir = EmbeddedModelManager.modelDirectory(id: id)
         return format == .gguf ? dir.appendingPathComponent(fileName) : dir
@@ -60,40 +60,40 @@ private struct EmbeddedModelManifest: Codable {
     var models: [EmbeddedModelInfo] = []
 }
 
-// MARK: - Résultat de l'analyse d'un lien/repo
+// MARK: - Result of analyzing a link/repo
 
-/// Un fichier `.gguf` précis, prêt à être téléchargé. Plusieurs candidats
-/// possibles pour UN SEUL repo (plusieurs quantizations) — ce n'est pas un
-/// catalogue suggéré, c'est la désambiguïsation de la ressource que
-/// l'utilisateur a lui-même désignée.
+/// A specific `.gguf` file, ready to be downloaded. Several candidates
+/// are possible for A SINGLE repo (several quantizations) — this isn't a
+/// suggested catalog, it's disambiguating the resource the
+/// user pointed to themselves.
 struct EmbeddedModelCandidate: Identifiable, Hashable, Sendable {
     var id: String { sourceLabel + "/" + fileName }
-    /// Provenance déjà formée pour l'affichage — "Hugging Face — org/repo"
-    /// pour le raccourci HF, l'hôte nu pour tout autre lien direct.
+    /// Provenance already formatted for display — "Hugging Face — org/repo"
+    /// for the HF shortcut, the bare host for any other direct link.
     let sourceLabel: String
     let fileName: String
     let sizeBytes: Int64?
     let downloadURL: URL
 }
 
-/// Un fichier distant, avec sa taille si connue — brique commune à un repo
-/// MLX (toujours plusieurs fichiers, contrairement à un GGUF).
+/// A remote file, with its size if known — a building block shared by an MLX
+/// repo (always several files, unlike a GGUF).
 struct EmbeddedRemoteFile: Hashable, Sendable {
     let fileName: String
     let url: URL
     let sizeBytes: Int64?
 }
 
-/// Un repo MLX entier (poids `.safetensors` + `config.json` + tokenizer),
-/// prêt à être téléchargé EN UNE FOIS — un modèle MLX est TOUJOURS plusieurs
-/// fichiers, jamais un seul comme un GGUF.
+/// A whole MLX repo (`.safetensors` weights + `config.json` + tokenizer),
+/// ready to be downloaded ALL AT ONCE — an MLX model is ALWAYS several
+/// files, never a single one like a GGUF.
 struct EmbeddedMLXRepoCandidate: Identifiable, Hashable, Sendable {
     var id: String { "mlx/" + repo }
     let repo: String
     let files: [EmbeddedRemoteFile]
 
-    /// `nil` si la taille d'AU MOINS UN fichier est inconnue — on ne prétend
-    /// pas à un total qu'on n'a pas réellement.
+    /// `nil` if the size of AT LEAST ONE file is unknown — we don't claim
+    /// a total we don't actually have.
     var totalSizeBytes: Int64? {
         let sizes = files.map(\.sizeBytes)
         guard sizes.allSatisfy({ $0 != nil }) else { return nil }
@@ -101,9 +101,9 @@ struct EmbeddedMLXRepoCandidate: Identifiable, Hashable, Sendable {
     }
 }
 
-/// Résultat de `analyze(_:)` — GGUF (un ou plusieurs fichiers candidats,
-/// l'utilisateur choisit lequel) ou un repo MLX entier (un seul candidat, il
-/// n'y a rien à désambiguïser : c'est le repo entier ou rien).
+/// Result of `analyze(_:)` — GGUF (one or several candidate files,
+/// the user picks which) or a whole MLX repo (a single candidate, there's
+/// nothing to disambiguate: it's the whole repo or nothing).
 enum EmbeddedModelAnalysis: Sendable {
     case ggufFiles([EmbeddedModelCandidate])
     case mlxRepo(EmbeddedMLXRepoCandidate)
@@ -149,7 +149,7 @@ enum EmbeddedModelError: Error, LocalizedError, Sendable {
     }
 }
 
-// MARK: - Gestionnaire : manifeste, téléchargement, modèle chargé
+// MARK: - Manager: manifest, download, loaded model
 
 actor EmbeddedModelManager {
     static let shared = EmbeddedModelManager()
@@ -157,16 +157,16 @@ actor EmbeddedModelManager {
     private var manifest = EmbeddedModelManifest()
     private var manifestLoaded = false
 
-    // Le modèle GGUF chargé en mémoire. Un seul à la fois — le charger est
-    // coûteux, et `LlamaService` fige son fichier à l'init (pas de mutation en
-    // place pour changer de modèle).
+    // The GGUF model loaded in memory. Only one at a time — loading it is
+    // costly, and `LlamaService` fixes its file at init (no in-place
+    // mutation to switch models).
     private var loadedService: LlamaService?
     private var loadedModelID: String?
 
-    // Le conteneur MLX chargé — équivalent MLX de `loadedService`. Un seul
-    // format actif à la fois (GGUF OU MLX), mais gardés dans des slots
-    // distincts plutôt qu'un type "either" : la logique de chargement des
-    // deux moteurs ne se ressemble pas assez pour partager une abstraction.
+    // The loaded MLX container — the MLX equivalent of `loadedService`. Only
+    // one format active at a time (GGUF OR MLX), but kept in separate
+    // slots rather than an "either" type: the two engines' loading logic
+    // isn't similar enough to share an abstraction.
     private var loadedMLXContainer: ModelContainer?
     private var loadedMLXModelID: String?
 
@@ -185,8 +185,8 @@ actor EmbeddedModelManager {
 
     private static var manifestURL: URL { rootDirectory.appendingPathComponent("manifest.json") }
 
-    /// Pointeur vers le modèle actif — `UserDefaults.standard`, comme
-    /// `LocalLLMService.baseURL` : propre à l'appareil, jamais synchronisé.
+    /// Pointer to the active model — `UserDefaults.standard`, like
+    /// `LocalLLMService.baseURL`: device-specific, never synced.
     static var activeModelID: String? {
         get { UserDefaults.standard.string(forKey: activeModelIDKey) }
         set { UserDefaults.standard.set(newValue, forKey: activeModelIDKey) }
@@ -194,12 +194,12 @@ actor EmbeddedModelManager {
 
     static var hasConfiguration: Bool { activeModelID != nil }
 
-    /// MLX exige de l'Apple Silicon réel. Sur plateformes Apple, `mlx-swift`
-    /// compile TOUJOURS avec Metal (pas de repli CPU comme sur Linux) — il
-    /// n'y a donc pas de "MLX.isAvailable" à interroger au runtime, la vraie
-    /// question est l'architecture, pas une capacité du framework. Le
-    /// Simulator est exclu : Metal n'y est pas fiable pour du calcul lourd
-    /// (même convention que l'offload GPU GGUF ci-dessous).
+    /// MLX requires actual Apple Silicon. On Apple platforms, `mlx-swift`
+    /// ALWAYS builds with Metal (no CPU fallback like on Linux) — so there
+    /// is no "MLX.isAvailable" to query at runtime, the real
+    /// question is the architecture, not a framework capability. The
+    /// Simulator is excluded: Metal isn't reliable there for heavy compute
+    /// (same convention as the GGUF GPU offload below).
     static var mlxSupported: Bool {
         #if arch(arm64) && !targetEnvironment(simulator)
         true
@@ -229,18 +229,18 @@ actor EmbeddedModelManager {
         return manifest.models.sorted { $0.downloadedAt > $1.downloadedAt }
     }
 
-    // MARK: Analyse d'un lien / repo Hugging Face
+    // MARK: Analyzing a Hugging Face link / repo
 
-    /// Accepte un lien direct vers un `.gguf` sur N'IMPORTE QUEL hôte (pas
-    /// seulement Hugging Face) ou un `owner/repo` HF nu. Pour un repo, l'API
-    /// Hugging Face liste ses fichiers, et le FORMAT est détecté depuis leur
-    /// contenu — sans champ à cocher : présence de `.gguf` → fichiers GGUF au
-    /// choix (une quantization par fichier, en général) ; sinon présence de
-    /// `config.json` + poids `.safetensors` → repo MLX entier (un modèle MLX
-    /// est toujours plusieurs fichiers, il n'y a rien à désambiguïser). Le
-    /// raccourci `owner/repo` reste une convenance propre à HF ; le lien
-    /// direct, lui, n'a jamais été limité à un hôte en particulier après
-    /// cette généralisation.
+    /// Accepts a direct link to a `.gguf` on ANY host (not just
+    /// Hugging Face) or a bare HF `owner/repo`. For a repo, the Hugging Face
+    /// API lists its files, and the FORMAT is detected from their
+    /// content — with no checkbox: presence of `.gguf` → pick from GGUF
+    /// files (usually one quantization per file); otherwise presence of
+    /// `config.json` + `.safetensors` weights → a whole MLX repo (an MLX model
+    /// is always several files, there's nothing to disambiguate). The
+    /// `owner/repo` shortcut stays an HF-specific convenience; the direct
+    /// link, on the other hand, was never limited to any particular host after
+    /// this generalization.
     func analyze(_ input: String) async throws -> EmbeddedModelAnalysis {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw EmbeddedModelError.invalidInput }
@@ -267,8 +267,8 @@ actor EmbeddedModelManager {
             return .ggufFiles(candidates)
         }
 
-        // Pas de GGUF : est-ce un repo MLX ? Mêmes motifs de fichiers que
-        // mlx-swift-lm utilise pour son PROPRE téléchargeur interne (poids +
+        // No GGUF: is it an MLX repo? Same file patterns
+        // mlx-swift-lm uses for its OWN internal downloader (weights +
         // config + tokenizer) — `*.safetensors` + `*.json` + `*.jinja`.
         let hasConfig = siblings.contains { $0.lowercased() == "config.json" }
         let mlxFiles = siblings.filter { name in
@@ -325,11 +325,11 @@ actor EmbeddedModelManager {
         return length
     }
 
-    /// Lien direct vers un `.gguf`, N'IMPORTE QUEL hôte (GitHub Releases, un
-    /// serveur perso, etc. — pas seulement Hugging Face). La forme HF
-    /// (`…/resolve/<rev>/xxx.gguf`) est reconnue spécifiquement pour en tirer
-    /// un libellé "Hugging Face — org/repo" ; tout autre hôte retombe sur un
-    /// libellé générique basé sur son nom.
+    /// A direct link to a `.gguf`, ANY host (GitHub Releases, a
+    /// personal server, etc. — not just Hugging Face). The HF form
+    /// (`…/resolve/<rev>/xxx.gguf`) is recognized specifically to derive
+    /// a "Hugging Face — org/repo" label; any other host falls back to a
+    /// generic label based on its name.
     private static func parseDirectFileURL(_ input: String) -> (url: URL, sourceLabel: String, fileName: String)? {
         guard let url = URL(string: input), let host = url.host,
               url.pathExtension.lowercased() == "gguf" else { return nil }
@@ -358,24 +358,24 @@ actor EmbeddedModelManager {
         return parts.count == 2 && parts.allSatisfy { !$0.isEmpty }
     }
 
-    // MARK: Garde-fou RAM / stockage — INFORMATIF, jamais bloquant
+    // MARK: RAM / storage safety net — INFORMATIONAL, never blocking
 
-    /// `nil` si rien à signaler. Le tap de confirmation reste toujours possible
-    /// même avec un avertissement — l'utilisateur décide, l'app prévient.
-    /// Limite jetsam ESTIMÉE d'un appareil — Apple ne publie AUCUN chiffre
-    /// officiel (elle varie par appareil, version d'OS, et pression mémoire
-    /// au moment T ; le seul levier documenté pour l'augmenter,
-    /// l'entitlement `com.apple.developer.kernel.increased-memory-limit`,
-    /// n'est PAS activé dans ce projet). Calibré sur des mesures
-    /// communautaires réelles plutôt qu'une doc Apple qui n'existe pas :
-    /// iPhone SE 2020/2022 (3 Go de RAM totale) tolère environ 900 Mo pour
-    /// une app au premier plan (~29 %) ; iPhone 16 Pro (8 Go) tolère environ
-    /// 4 000 Mo (~50 %). La part disponible pour UNE app croît avec la RAM
-    /// totale — l'OS se réserve une part de plus en plus GRANDE en absolu,
-    /// mais de moins en moins en proportion, à mesure que le total grandit.
-    /// ⚠️ Seuils délibérément PAR PALIER (pas une formule continue) : au-delà
-    /// d'une poignée de points de mesure réels, une interpolation lisse
-    /// donnerait une fausse précision.
+    /// `nil` if there's nothing to report. Tapping confirm is always possible
+    /// even with a warning — the user decides, the app warns.
+    /// ESTIMATED device jetsam limit — Apple publishes NO
+    /// official figure (it varies by device, OS version, and memory
+    /// pressure at time T; the only documented lever to raise it,
+    /// the `com.apple.developer.kernel.increased-memory-limit`
+    /// entitlement, is NOT enabled in this project). Calibrated on real
+    /// community measurements rather than an Apple doc that doesn't exist:
+    /// an iPhone SE 2020/2022 (3 GB total RAM) tolerates about 900 MB for
+    /// a foreground app (~29%); an iPhone 16 Pro (8 GB) tolerates about
+    /// 4,000 MB (~50%). The share available to ONE app grows with total
+    /// RAM — the OS reserves an ever-LARGER share in absolute terms,
+    /// but a smaller and smaller proportion, as the total grows.
+    /// ⚠️ Thresholds deliberately STEPPED (not a continuous formula): beyond
+    /// a handful of real measurement points, a smooth interpolation
+    /// would give a false sense of precision.
     private static func estimatedJetsamLimitBytes(physicalMemoryBytes: Int64) -> Int64 {
         let gb = Double(physicalMemoryBytes) / 1_073_741_824
         let fraction: Double
@@ -388,14 +388,14 @@ actor EmbeddedModelManager {
         return Int64(Double(physicalMemoryBytes) * fraction)
     }
 
-    /// `nil` si rien à signaler. Non bloquant PAR CONCEPTION — un modèle qui
-    /// dépasse la limite estimée peut malgré tout tenir sur un appareil réel
-    /// (l'estimation reste une estimation), et l'utilisateur reste seul juge.
-    /// Deux paliers : franchement au-delà de la limite estimée (quasi
-    /// certain de faire fermer l'app), ou dans la zone risquée en-dessous
-    /// (le reste de Nemoris — SQLite, UI, moteur d'identification ONNX —
-    /// occupe déjà une partie de cette même limite, d'où la marge de 65 %
-    /// plutôt que 100 %).
+    /// `nil` if there's nothing to report. Non-blocking BY DESIGN — a model
+    /// that exceeds the estimated limit may still run fine on a real device
+    /// (the estimate remains an estimate), and the user is the sole judge.
+    /// Two tiers: clearly beyond the estimated limit (almost
+    /// certain to get the app killed), or in the risky zone below it
+    /// (the rest of Nemoris — SQLite, UI, the ONNX identification engine —
+    /// already occupies part of that same limit, hence the 65% margin
+    /// rather than 100%).
     func sizeWarning(forBytes sizeBytes: Int64) -> String? {
         let physicalMemory = Int64(ProcessInfo.processInfo.physicalMemory)
         guard physicalMemory > 0 else { return nil }
@@ -424,7 +424,7 @@ actor EmbeddedModelManager {
         return capacity
     }
 
-    // MARK: Stockage partagé (téléchargement + import)
+    // MARK: Shared storage (download + import)
 
     private func ensureExcludedFromBackup() throws {
         try FileManager.default.createDirectory(at: Self.rootDirectory, withIntermediateDirectories: true)
@@ -434,9 +434,9 @@ actor EmbeddedModelManager {
         try? rootURL.setResourceValues(rootValues)
     }
 
-    /// Ajoute un modèle déjà en place sur le disque au manifeste, et l'active
-    /// automatiquement si c'est le tout premier — commun aux trois façons
-    /// d'obtenir un modèle (téléchargement HF, import fichier, import dossier).
+    /// Adds a model already present on disk to the manifest, and activates
+    /// it automatically if it's the very first one — shared by all three ways
+    /// of obtaining a model (HF download, file import, folder import).
     private func registerNewModel(_ info: EmbeddedModelInfo) {
         ensureManifestLoaded()
         manifest.models.append(info)
@@ -464,11 +464,11 @@ actor EmbeddedModelManager {
         return total
     }
 
-    // MARK: Téléchargement (Hugging Face, ou tout lien direct vers un .gguf)
+    // MARK: Download (Hugging Face, or any direct link to a .gguf)
 
-    /// Télécharge, place le fichier dans son dossier définitif, enregistre
-    /// l'entrée dans le manifeste. Devient le modèle ACTIF s'il s'agit du tout
-    /// premier téléchargé (sinon l'utilisateur active explicitement).
+    /// Downloads, places the file in its final folder, records
+    /// the entry in the manifest. Becomes the ACTIVE model if it's the very
+    /// first one downloaded (otherwise the user activates it explicitly).
     func download(candidate: EmbeddedModelCandidate,
                   onProgress: @escaping @Sendable (Double?) -> Void) async throws -> EmbeddedModelInfo {
         try ensureExcludedFromBackup()
@@ -505,20 +505,20 @@ actor EmbeddedModelManager {
         return info
     }
 
-    /// Télécharge TOUS les fichiers d'un repo MLX dans le même dossier, en
-    /// séquence (un repo MLX a peu de fichiers — quelques shards
-    /// `.safetensors` + une poignée de `.json`/`.jinja` — pas besoin de
-    /// parallélisme).
+    /// Downloads ALL of an MLX repo's files into the same folder, in
+    /// sequence (an MLX repo has few files — a handful of `.safetensors`
+    /// shards + a handful of `.json`/`.jinja` — no need for
+    /// parallelism).
     ///
-    /// ⚠️ Progression par NOMBRE DE FICHIERS, pas par octets agrégés. Une
-    /// première version pondérait par taille (`file.sizeBytes` par fichier,
-    /// sommés) — mais un total agrégé tombe en indéterminé dès qu'UN SEUL
-    /// fichier sur N n'a pas de taille exploitable (HEAD sans
-    /// `Content-Length`, fréquent sur les petits `.json`/`.jinja`), ce qui
-    /// rendait TOUT le téléchargement indéterminé alors que 10 fichiers sur
-    /// 11 avaient une taille connue (retour d'usage réel, 2026-09-01). Compter
-    /// les fichiers est TOUJOURS disponible et avance de façon monotone,
-    /// affiné par la fraction du fichier COURANT quand sa taille est connue.
+    /// ⚠️ Progress by NUMBER OF FILES, not aggregated bytes. An
+    /// earlier version weighted by size (`file.sizeBytes` per file,
+    /// summed) — but an aggregate total becomes indeterminate as soon as A
+    /// SINGLE file out of N has no usable size (a HEAD with no
+    /// `Content-Length`, common on small `.json`/`.jinja` files), which
+    /// made the WHOLE download indeterminate even though 10 files out of
+    /// 11 had a known size (observed in real usage, 2026-09-01). Counting
+    /// files is ALWAYS available and advances monotonically,
+    /// refined by the CURRENT file's fraction when its size is known.
     func downloadMLXRepo(candidate: EmbeddedMLXRepoCandidate,
                          onProgress: @escaping @Sendable (Double?) -> Void) async throws -> EmbeddedModelInfo {
         try ensureExcludedFromBackup()
@@ -567,12 +567,12 @@ actor EmbeddedModelManager {
 
     // MARK: Import local — n'importe quelle source, aucune limite
 
-    /// Importe un fichier `.gguf` déjà présent sur l'appareil (Fichiers,
-    /// iCloud Drive, Mac…), quelle que soit son origine. `pickerURL` vient
-    /// d'un document picker — accès security-scoped le temps de la copie,
-    /// même précédent que `DatabaseManager.linkExternalFile`. COPIE le
-    /// fichier (jamais `Data(contentsOf:)`, qui chargerait plusieurs Go en
-    /// RAM d'un coup).
+    /// Imports a `.gguf` file already present on the device (Files,
+    /// iCloud Drive, Mac…), whatever its origin. `pickerURL` comes
+    /// from a document picker — security-scoped access for the duration of the
+    /// copy, same precedent as `DatabaseManager.linkExternalFile`. COPIES the
+    /// file (never `Data(contentsOf:)`, which would load several GB into
+    /// RAM at once).
     func importFile(from pickerURL: URL) throws -> (info: EmbeddedModelInfo, warning: String?) {
         guard pickerURL.pathExtension.lowercased() == "gguf" else {
             throw EmbeddedModelError.notAGGUFFile
@@ -601,13 +601,13 @@ actor EmbeddedModelManager {
         return (info, sizeWarning(forBytes: sizeBytes))
     }
 
-    /// Importe un dossier de modèle MLX déjà présent (repo récupéré par
-    /// n'importe quel moyen — Safari, un Mac, une autre app — puis importé
-    /// tel quel). Vérifie la présence d'un `config.json` à la racine : signal
-    /// minimal qu'il s'agit bien d'un repo MLX, pas n'importe quel dossier
-    /// choisi par erreur. `copyItem` copie le dossier ENTIER récursivement —
-    /// `dir` ne doit PAS être pré-créé, `copyItem` le crée lui-même comme
-    /// destination de la copie (il échoue si la destination existe déjà).
+    /// Imports an MLX model folder already present (a repo obtained by
+    /// any means — Safari, a Mac, another app — then imported
+    /// as-is). Checks for a `config.json` at the root: a
+    /// minimal signal that it really is an MLX repo, not just any folder
+    /// picked by mistake. `copyItem` copies the WHOLE folder recursively —
+    /// `dir` must NOT be pre-created, `copyItem` creates it itself as the
+    /// copy destination (it fails if the destination already exists).
     func importFolder(from pickerURL: URL) throws -> (info: EmbeddedModelInfo, warning: String?) {
         let hasAccess = pickerURL.startAccessingSecurityScopedResource()
         defer { if hasAccess { pickerURL.stopAccessingSecurityScopedResource() } }
@@ -666,11 +666,11 @@ actor EmbeddedModelManager {
         saveManifest()
     }
 
-    /// Réévalue l'avertissement RAM au moment de l'ACTIVATION, pas
-    /// seulement au téléchargement/import — l'utilisateur peut activer un
-    /// modèle téléchargé il y a longtemps, ou switcher entre plusieurs
-    /// modèles déjà en place, et c'est CE moment-là qui compte vraiment
-    /// (celui où le modèle sera réellement chargé en mémoire).
+    /// Re-evaluates the RAM warning at ACTIVATION time, not
+    /// only on download/import — the user can activate a
+    /// model downloaded a long time ago, or switch between several
+    /// models already in place, and it's THAT moment that really matters
+    /// (the moment the model will actually be loaded into memory).
     @discardableResult
     func setActive(id: String?) -> String? {
         EmbeddedModelManager.activeModelID = id
@@ -680,7 +680,7 @@ actor EmbeddedModelManager {
         return sizeWarning(forBytes: info.sizeBytes)
     }
 
-    // MARK: Inférence — dispatch par format
+    // MARK: Inference — dispatch by format
 
     private func activeModelInfo() throws -> EmbeddedModelInfo {
         guard let activeID = EmbeddedModelManager.activeModelID else { throw EmbeddedModelError.notConfigured }
@@ -690,8 +690,8 @@ actor EmbeddedModelManager {
         return info
     }
 
-    /// Complétion texte via le modèle actif — GGUF ou MLX selon son format,
-    /// totalement transparent pour l'appelant (`EmbeddedModelService`).
+    /// Text completion via the active model — GGUF or MLX depending on its
+    /// format, entirely transparent to the caller (`EmbeddedModelService`).
     func complete(systemPrompt: String, userPrompt: String, maxTokens: Int) async throws -> String {
         let info = try activeModelInfo()
         switch info.format {
@@ -702,19 +702,19 @@ actor EmbeddedModelManager {
         }
     }
 
-    // MARK: Inférence GGUF (SwiftLlama)
+    // MARK: GGUF inference (SwiftLlama)
 
     private func ggufService(for info: EmbeddedModelInfo) -> LlamaService {
         if let loadedService, loadedModelID == info.id {
             return loadedService
         }
-        // Modèle différent (ou premier chargement) : nouvelle instance —
-        // `LlamaService` fige son `modelUrl` à l'init, aucune mutation en place
-        // possible pour changer de fichier.
+        // Different model (or first load): a new instance —
+        // `LlamaService` fixes its `modelUrl` at init, no in-place
+        // mutation possible to switch files.
         #if targetEnvironment(simulator)
-        // llama.cpp/Metal indisponible en Simulator — reste fonctionnel en CPU
-        // pur, juste plus lent (même convention que le reste de l'app pour
-        // l'offload Metal).
+        // llama.cpp/Metal unavailable in the Simulator — stays functional in pure
+        // CPU mode, just slower (same convention as the rest of the app for
+        // Metal offload).
         let useGPU = false
         #else
         let useGPU = true
@@ -726,11 +726,11 @@ actor EmbeddedModelManager {
         return service
     }
 
-    /// `LlamaService` n'expose pas de paramètre « nombre de tokens de
-    /// SORTIE », seulement une taille de CONTEXTE totale
-    /// (`LlamaConfig.maxTokenCount`) — le cap `maxTokens` est donc appliqué en
-    /// tronquant le flux dès que l'estimation (~4 caractères/token) est
-    /// dépassée, puis en annulant la génération via `stopCompletion()`.
+    /// `LlamaService` doesn't expose an "output token count" parameter,
+    /// only a total CONTEXT size
+    /// (`LlamaConfig.maxTokenCount`) — the `maxTokens` cap is therefore applied by
+    /// truncating the stream as soon as the estimate (~4 characters/token) is
+    /// exceeded, then canceling generation via `stopCompletion()`.
     private func completeGGUF(info: EmbeddedModelInfo, systemPrompt: String, userPrompt: String, maxTokens: Int) async throws -> String {
         let service = ggufService(for: info)
         let messages = [
@@ -756,13 +756,13 @@ actor EmbeddedModelManager {
         }
     }
 
-    // MARK: Inférence MLX (mlx-swift-lm)
+    // MARK: MLX inference (mlx-swift-lm)
 
-    /// Charge (ou réutilise) le `ModelContainer` — les poids, coûteux à
-    /// charger, mis en cache. Le tokenizer est lu DIRECTEMENT depuis le
-    /// dossier local (`LocalTokenizerLoader`), sans passer par un
-    /// téléchargeur : `Downloader` n'est requis QUE pour des poids distants,
-    /// jamais pour des poids déjà sur le disque (doc officielle mlx-swift-lm).
+    /// Loads (or reuses) the `ModelContainer` — the weights, costly to
+    /// load, are cached. The tokenizer is read DIRECTLY from the
+    /// local folder (`LocalTokenizerLoader`), without going through a
+    /// downloader: `Downloader` is ONLY required for remote weights,
+    /// never for weights already on disk (per the official mlx-swift-lm docs).
     private func mlxContainer(for info: EmbeddedModelInfo) async throws -> ModelContainer {
         if let loadedMLXContainer, loadedMLXModelID == info.id {
             return loadedMLXContainer
@@ -774,13 +774,13 @@ actor EmbeddedModelManager {
         return container
     }
 
-    /// Contrairement à `LlamaService`, une `ChatSession` MLX accumule un
-    /// historique de conversation entre deux appels à `respond(to:)` — notre
-    /// contrat est sans état PAR APPEL (chaque `complete()` peut avoir un
-    /// `systemPrompt` complètement différent : identification marchand, coach,
-    /// assistant SQL…). Une session est donc reconstruite à CHAQUE appel, avec
-    /// les instructions de CET appel — seul le `ModelContainer` (les poids
-    /// chargés) est mis en cache, la session elle-même est bon marché.
+    /// Unlike `LlamaService`, an MLX `ChatSession` accumulates a
+    /// conversation history between two calls to `respond(to:)` — our
+    /// contract is stateless PER CALL (each `complete()` can have a
+    /// completely different `systemPrompt`: merchant identification, coach,
+    /// SQL assistant…). A session is therefore rebuilt on EVERY call, with
+    /// THAT call's instructions — only the `ModelContainer` (the loaded
+    /// weights) is cached, the session itself is cheap.
     private func completeMLX(info: EmbeddedModelInfo, systemPrompt: String, userPrompt: String, maxTokens: Int) async throws -> String {
         do {
             let container = try await mlxContainer(for: info)
@@ -794,13 +794,13 @@ actor EmbeddedModelManager {
         }
     }
 
-    /// `nil` si non configuré ou en cas d'échec — même contrat de silence que
+    /// `nil` if not configured or on failure — same silent-failure contract as
     /// `LocalLLMService.identify`/`EnrichmentLLMService.identify`.
     func identify(context: MerchantEnrichmentContext) async -> MerchantEnrichment? {
         guard EmbeddedModelManager.hasConfiguration else { return nil }
         do {
-            // `EnrichmentLLMService` est `@MainActor` — le `await` gère le hop
-            // d'acteur pour ses membres statiques partagés, comme dans
+            // `EnrichmentLLMService` is `@MainActor` — the `await` handles the actor
+            // hop for its shared static members, as in
             // `LocalLLMService.identify`.
             let userPrompt = await EnrichmentLLMService.buildPrompt(context: context)
             let content = try await complete(
@@ -810,11 +810,11 @@ actor EmbeddedModelManager {
             guard var result = await EnrichmentLLMService.parseJSONResponse(content, context: context) else {
                 return nil
             }
-            // Réutilise `.localLLM` plutôt qu'un nouveau cas de
-            // `MerchantEnrichmentSource` : le badge « LOCAL »/icône
-            // `server.rack`/couleur `.teal` déjà en place décrivent aussi bien
-            // « inférence locale via un serveur » que « inférence locale
-            // embarquée » — les deux ne quittent jamais l'appareil.
+            // Reuses `.localLLM` rather than a new `MerchantEnrichmentSource`
+            // case: the "LOCAL" badge / `server.rack` icon / `.teal` color already
+            // in place describe "local inference via a server" just as well as
+            // "local embedded inference" — neither ever leaves the
+            // device.
             result.source = .localLLM
             return result
         } catch {
@@ -826,14 +826,14 @@ actor EmbeddedModelManager {
 
 // MARK: - Pont tokenizer local (MLX) — swift-transformers → MLXLMCommon
 
-/// `MLXLMCommon.Tokenizer` (protocole attendu par `ChatSession`) et
-/// `Tokenizers.Tokenizer` (implémentation concrète de swift-transformers,
-/// celle que `AutoTokenizer.from(modelFolder:)` sait charger depuis un
-/// dossier local sans réseau) sont deux types DIFFÉRENTS portant le même nom
-/// — mlx-swift-lm ne fournit d'adaptateur tout fait que dans son module
-/// `MLXHuggingFace` (macros liées au téléchargement HF, volontairement pas
-/// une dépendance ici). Petit pont écrit à la main, comme suggéré par la doc
-/// mlx-swift-lm elle-même pour toute intégration hors macro.
+/// `MLXLMCommon.Tokenizer` (the protocol `ChatSession` expects) and
+/// `Tokenizers.Tokenizer` (swift-transformers's concrete implementation,
+/// the one `AutoTokenizer.from(modelFolder:)` can load from a
+/// local folder with no network) are two DIFFERENT types sharing the same
+/// name — mlx-swift-lm only ships a ready-made adapter in its
+/// `MLXHuggingFace` module (macros tied to HF downloading, deliberately not
+/// a dependency here). A small hand-written bridge, as suggested by
+/// mlx-swift-lm's own docs for any integration outside the macro.
 private struct MLXTokenizerAdapter: MLXLMCommon.Tokenizer {
     let wrapped: any Tokenizers.Tokenizer
 
@@ -858,10 +858,10 @@ private struct MLXTokenizerAdapter: MLXLMCommon.Tokenizer {
     }
 }
 
-/// Charge le tokenizer DEPUIS UN DOSSIER LOCAL — `AutoTokenizer.from(modelFolder:)`
-/// lit `tokenizer.json`/`tokenizer_config.json` sur le disque, aucun appel
-/// réseau (le paramètre `hubApi` de cette surcharge n'est pas utilisé pour le
-/// chargement local, per la doc de swift-transformers).
+/// Loads the tokenizer FROM A LOCAL FOLDER — `AutoTokenizer.from(modelFolder:)`
+/// reads `tokenizer.json`/`tokenizer_config.json` from disk, no
+/// network call (this overload's `hubApi` parameter isn't used for
+/// local loading, per swift-transformers' docs).
 private struct LocalTokenizerLoader: MLXLMCommon.TokenizerLoader {
     func load(from directory: URL) async throws -> any MLXLMCommon.Tokenizer {
         let tokenizer = try await Tokenizers.AutoTokenizer.from(modelFolder: directory)
@@ -869,13 +869,13 @@ private struct LocalTokenizerLoader: MLXLMCommon.TokenizerLoader {
     }
 }
 
-// MARK: - Téléchargement avec progression (pont delegate → async/await)
+// MARK: - Download with progress (delegate → async/await bridge)
 
-/// `URLSession.shared.download(for:)` n'expose aucune progression, et
-/// `URLSession.shared.bytes(for:)` itère octet par octet — inadapté à un
-/// fichier de plusieurs centaines de Mo à plusieurs Go. Le delegate reste donc
-/// la bonne primitive Foundation pour ce cas précis (aucun précédent existant
-/// dans ce repo à réutiliser).
+/// `URLSession.shared.download(for:)` exposes no progress at all, and
+/// `URLSession.shared.bytes(for:)` iterates byte by byte — unsuited to a
+/// file of several hundred MB to several GB. The delegate remains the
+/// right Foundation primitive for this exact case (no existing precedent
+/// in this repo to reuse).
 private enum EmbeddedModelDownloader {
     static func download(url: URL, onProgress: @escaping @Sendable (Double?) -> Void) async throws -> (URL, URLResponse) {
         try await withCheckedThrowingContinuation { continuation in
@@ -889,10 +889,10 @@ private enum EmbeddedModelDownloader {
         }
     }
 
-    /// `@unchecked Sendable` : classe `NSObject`/delegate imposée par
-    /// l'API Objective-C d'URLSession, dont l'état n'est mutable QUE depuis la
-    /// file delegate série d'URLSession (mono-usage, un seul téléchargement par
-    /// instance) — jamais depuis notre propre code en parallèle.
+    /// `@unchecked Sendable`: an `NSObject`/delegate class required by
+    /// URLSession's Objective-C API, whose state is mutable ONLY from
+    /// URLSession's serial delegate queue (single-use, one download per
+    /// instance) — never from our own code concurrently.
     private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
         private let onProgress: @Sendable (Double?) -> Void
         private let onFinished: (Result<(URL, URLResponse), Error>) -> Void
@@ -919,10 +919,11 @@ private enum EmbeddedModelDownloader {
 
         func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                         didFinishDownloadingTo location: URL) {
-            // Le fichier temporaire d'URLSession est supprimé dès que ce
-            // callback rend la main — on le déplace IMMÉDIATEMENT vers un
-            // second temporaire qu'on contrôle, avant de rendre la main à
-            // `didCompleteWithError` (appelé juste après, succès compris).
+            // URLSession's temporary file is deleted as soon as this
+            // callback returns — we IMMEDIATELY move it to a
+            // second temporary file we control, before returning
+            // control to `didCompleteWithError` (called right after, success
+            // included).
             let safe = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString)
             safeTempURL = (try? FileManager.default.moveItem(at: location, to: safe)) != nil ? safe : nil
@@ -943,11 +944,11 @@ private enum EmbeddedModelDownloader {
     }
 }
 
-// MARK: - Façade de dispatch (même contrat que `LocalLLMService`/`CloudLLMService`)
+// MARK: - Dispatch facade (same contract as `LocalLLMService`/`CloudLLMService`)
 
-/// `Sendable` sans état propre — l'état réel (manifeste, modèle chargé) vit
-/// dans l'acteur `EmbeddedModelManager`. Cette façade est ce que
-/// `AIEnrichmentBackend` appelle, symétriquement aux deux autres backends.
+/// `Sendable` with no state of its own — the real state (manifest, loaded
+/// model) lives in the `EmbeddedModelManager` actor. This facade is what
+/// `AIEnrichmentBackend` calls, symmetrically to the other two backends.
 struct EmbeddedModelService: Sendable {
     static let shared = EmbeddedModelService()
 
@@ -961,8 +962,8 @@ struct EmbeddedModelService: Sendable {
         try await EmbeddedModelManager.shared.complete(systemPrompt: systemPrompt, userPrompt: userPrompt, maxTokens: maxTokens)
     }
 
-    /// Jette une erreur typée (contrairement à `identify`, qui avale tout en
-    /// silence) — le bouton « Tester » des Réglages veut un message précis.
+    /// Throws a typed error (unlike `identify`, which swallows everything
+    /// silently) — the "Test" button in Settings wants a precise message.
     func testConnection() async throws -> String {
         guard Self.hasConfiguration else { throw EmbeddedModelError.notConfigured }
         let content = try await complete(systemPrompt: "Réponds uniquement par le mot OK.",
@@ -972,17 +973,17 @@ struct EmbeddedModelService: Sendable {
     }
 }
 
-// MARK: - État du téléchargement en cours (survit à la navigation)
+// MARK: - In-flight download state (survives navigation)
 
-/// Le téléchargement lui-même (`Task {}` créée dans l'action du bouton, pas
-/// `.task {}`) survit déjà à la fermeture de l'écran — rien à changer côté
-/// réseau/fichiers pour ça. Ce qui manquait : l'INDICATION, qui vivait dans
-/// des `@State` de `AISettingsView` — remis à zéro à chaque fois que la vue
-/// est recréée (on quitte Réglages puis on y revient = nouvelle instance).
-/// Un singleton `@MainActor @Observable`, indépendant de toute vue, corrige
-/// ça : une vue qui lit `inFlight` dans son `body` s'y abonne automatiquement
-/// (mécanique native d'`@Observable`), qu'elle vienne d'apparaître ou non —
-/// pas de plomberie `onAppear` à écrire pour "rattraper" l'état.
+/// The download itself (a `Task {}` created in the button's action, not
+/// `.task {}`) already survives closing the screen — nothing to change on
+/// the network/file side for that. What was missing: the INDICATOR, which
+/// lived in `AISettingsView`'s `@State` — reset every time the view
+/// is recreated (leaving Settings then coming back = a new instance).
+/// A `@MainActor @Observable` singleton, independent of any view, fixes
+/// this: a view reading `inFlight` in its `body` subscribes to it automatically
+/// (native `@Observable` mechanics), whether it just appeared or not —
+/// no `onAppear` plumbing needed to "catch up" on the state.
 @MainActor
 @Observable
 final class EmbeddedModelDownloadStatus {

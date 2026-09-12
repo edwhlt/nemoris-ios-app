@@ -1,7 +1,7 @@
 import Foundation
 
-/// Adapter conformant `SireneClient` au protocol `CompanyDataSource`.
-/// L'implémentation est inchangée — on délègue tout au client existant.
+/// Adapter conforming `SireneClient` to the `CompanyDataSource` protocol.
+/// The implementation is unchanged — everything is delegated to the existing client.
 struct SireneDataSource: CompanyDataSource {
     let id = "sirene_fr"
     let displayName = "Sirene (entreprises FR)"
@@ -23,7 +23,7 @@ struct SireneDataSource: CompanyDataSource {
             return MerchantEnrichment(
                 displayName: est.displayName.titleCased,
                 domain: nil,
-                categoryId: nil, // mapping fait dans la View qui a accès à allCategories
+                categoryId: nil, // mapping done in the View, which has access to allCategories
                 address: est.address,
                 city: est.city,
                 country: "FR",

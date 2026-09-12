@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// Settings de gestion des sources d'identification d'entreprise.
+/// Settings screen for managing company-identification sources.
 ///
-/// L'utilisateur peut :
-///   - Activer/désactiver chaque source (toggle)
-///   - Saisir une clé API si requise (champ SecureField, persistée en UserDefaults)
-///   - Voir le pays couvert (badge ISO)
-///   - Voir l'état "Bientôt" pour les placeholders pas encore implémentés
-///   - Ouvrir le lien d'inscription (apiKeyHelpURL) pour obtenir une clé
+/// The user can:
+///   - enable/disable each source (toggle)
+///   - enter an API key if required (SecureField, persisted in UserDefaults)
+///   - see the covered country (ISO badge)
+///   - see the "Coming soon" state for placeholders not yet implemented
+///   - open the sign-up link (apiKeyHelpURL) to get a key
 struct CompanyDataSourcesSettingsView: View {
     @Bindable private var registry = CompanyDataSourcesRegistry.shared
     @State private var revealedKeys: Set<String> = []

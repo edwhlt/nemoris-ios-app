@@ -1,61 +1,61 @@
 import Foundation
 
-// Reconnaissance des gabarits de libellés bancaires à champs fixes.
-// ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
+// Recognition of fixed-field bank label templates.
+// ⚠️ PURE FILE: `import Foundation` ONLY.
 //
-// POURQUOI CE FICHIER EXISTE
+// WHY THIS FILE EXISTS
 //
-// L'analyse de 975 libellés réels a montré que 492 des 538 libellés « PAIEMENT » (91 %)
-// suivent un gabarit STRICT :
+// Analysis of 975 real labels showed that 492 of the 538 "PAIEMENT" labels (91%)
+// follow a STRICT template:
 //
-//     PAIEMENT (PSC|CB) DDMM [DEP] <LOCALITÉ> <MARCHAND> (CARTE|PAYWEB) NNNN [GIR/GIP<id>]
+//     PAIEMENT (PSC|CB) DDMM [DEP] <LOCALITY> <MERCHANT> (CARTE|PAYWEB) NNNN [GIR/GIP<id>]
 //
-// Trois conséquences que rien d'autre dans la chaîne ne sait traiter :
+// Three consequences that nothing else in the chain knows how to handle:
 //
-//  1. LA LOCALITÉ EST AVANT LE MARCHAND. Or `NemorisEngine.NormalizerPipeline` ne tague
-//     une ville que si elle est le dernier ou l'avant-dernier token. Sur ce format, il ne
-//     la voit jamais — elle part donc dans `q=` et fait échouer la recherche.
+//  1. THE LOCALITY COMES BEFORE THE MERCHANT. But `NemorisEngine.NormalizerPipeline`
+//     only tags a city if it's the last or second-to-last token. On this format, it
+//     never sees it — so it ends up in `q=` and makes the search fail.
 //
-//  2. LE CHAMP LOCALITÉ EST TRONQUÉ à ~13 caractères : « GIF-SUR-YVETT », « PARIS LA DEFE »,
-//     « CORMEILLES EN », « PERROGNEY LES », « ROSIERES PRES », « ISSY LES ». Aucun
-//     dictionnaire en correspondance exacte ne peut les reconnaître. C'est `geo.api.gouv.fr`
-//     qui les résout (vérifié : « ISSY LES » → Issy-les-Moulineaux, insee 92040).
+//  2. THE LOCALITY FIELD IS TRUNCATED at ~13 characters: "GIF-SUR-YVETT", "PARIS LA DEFE",
+//     "CORMEILLES EN", "PERROGNEY LES", "ROSIERES PRES", "ISSY LES". No exact-match
+//     dictionary can recognize them. It's `geo.api.gouv.fr` that
+//     resolves them (verified: "ISSY LES" → Issy-les-Moulineaux, insee 92040).
 //
-//  3. LE MARCHAND EST TRONQUÉ AUSSI : « SC-PHIE NIMES V », « APPLE COM/BILL »,
-//     « SOUNDCLOUD MONTH ». D'où le bonus de préfixe de `MerchantTokenSimilarity`.
+//  3. THE MERCHANT IS TRUNCATED TOO: "SC-PHIE NIMES V", "APPLE COM/BILL",
+//     "SOUNDCLOUD MONTH". Hence `MerchantTokenSimilarity`'s prefix bonus.
 //
-// Un gabarit est une DONNÉE pure et testable : ajouter le format d'une autre banque,
-// c'est une entrée dans `all` et un scénario de test — jamais une modification du
-// planificateur.
+// A template is pure, testable DATA: adding another bank's format is
+// an entry in `all` and a test scenario — never a change to the
+// planner.
 
-/// Créneaux repérés dans un libellé par un gabarit.
+/// Slots spotted in a label by a template.
 struct TemplateSlots: Hashable, Sendable {
-    /// Indices des tokens formant la localité. nil si le gabarit dit qu'il n'y en a pas
-    /// (paiement web) ou s'il n'a pas su la situer.
+    /// Indices of the tokens forming the locality. nil if the template says there
+    /// isn't one (a web payment) or if it couldn't locate it.
     let localityRange: Range<Int>?
-    /// Indices des tokens formant le nom du marchand.
+    /// Indices of the tokens forming the merchant's name.
     let merchantRange: Range<Int>
-    /// Code département à 2 chiffres, quand le libellé le porte explicitement
-    /// (« 35 RENNES ») — filtre gratuit et non ambigu.
+    /// 2-digit department code, when the label carries it explicitly
+    /// ("35 RENNES") — a free, unambiguous filter.
     let departmentCode: String?
-    /// Paiement web : pas de localité physique, donc pas de filtre géo ni de recherche
-    /// par proximité.
+    /// A web payment: no physical locality, so no geo filter or
+    /// proximity search.
     let isOnlinePayment: Bool
-    /// Tout ce que le gabarit a écarté, avec la raison.
+    /// Everything the template discarded, with the reason.
     let dropped: [DroppedToken]
 }
 
 struct BankLabelTemplate: Sendable {
     let id: String
-    /// Nom lisible, affiché dans « Détails de la recherche ».
+    /// Readable name, shown in "Search details".
     let displayName: String
-    /// Tente de découper `tokens`. Renvoie nil si le gabarit ne s'applique pas.
+    /// Tries to split `tokens`. Returns nil if the template doesn't apply.
     let slots: @Sendable (_ tokens: [String]) -> TemplateSlots?
 
-    /// Gabarits connus, essayés dans l'ordre. Le premier qui répond gagne.
+    /// Known templates, tried in order. The first one that matches wins.
     static let all: [BankLabelTemplate] = [.cardPaymentFixedField]
 
-    /// Premier gabarit qui reconnaît ce libellé.
+    /// First template that recognizes this label.
     static func match(_ tokens: [String]) -> (template: BankLabelTemplate, slots: TemplateSlots)? {
         for template in all {
             if let slots = template.slots(tokens) {
@@ -66,14 +66,14 @@ struct BankLabelTemplate: Sendable {
     }
 }
 
-// MARK: - Gabarit « paiement carte à champs fixes »
+// MARK: - "Fixed-field card payment" template
 
 extension BankLabelTemplate {
 
-    /// `PAIEMENT (PSC|CB) DDMM [DEP] <LOCALITÉ> <MARCHAND> (CARTE|PAYWEB) NNNN [GIR/GIP<id>]`
+    /// `PAIEMENT (PSC|CB) DDMM [DEP] <LOCALITY> <MERCHANT> (CARTE|PAYWEB) NNNN [GIR/GIP<id>]`
     ///
-    /// Observé sur les relevés Crédit Mutuel / CIC. Couvre 91 % des libellés « PAIEMENT »
-    /// du corpus de référence.
+    /// Observed on Crédit Mutuel / CIC statements. Covers 91% of the "PAIEMENT"
+    /// labels in the reference corpus.
     static let cardPaymentFixedField = BankLabelTemplate(
         id: "card_payment_fixed_field",
         displayName: "Paiement carte (champs fixes)"
@@ -90,27 +90,27 @@ extension BankLabelTemplate {
         ]
         var cursor = 3
 
-        // --- Queue : identifiants de transaction GIR/GIP…, en partant de la fin.
+        // --- Tail: GIR/GIP… transaction identifiers, starting from the end.
         var end = tokens.count
         while end > cursor, isTransactionId(tokens[end - 1]) {
             dropped.append(DroppedToken(value: tokens[end - 1], reason: .transactionId))
             end -= 1
         }
 
-        // --- Terminateur : CARTE NNNN  |  PAYWEB NNNN  |  PAYWEB1042 (collé)
+        // --- Terminator: CARTE NNNN  |  PAYWEB NNNN  |  PAYWEB1042 (glued)
         var isOnline = false
         if end > cursor {
             let last = tokens[end - 1]
             if last.allSatisfy(\.isNumber), end - 1 > cursor,
                AbbreviationTable.cardTerminators.contains(tokens[end - 2]) {
-                // « CARTE 1042 » / « PAYWEB 1042 »
+                // "CARTE 1042" / "PAYWEB 1042"
                 isOnline = tokens[end - 2].hasPrefix("payweb")
                 dropped.append(DroppedToken(value: tokens[end - 2], reason: .cardMarker))
                 dropped.append(DroppedToken(value: last, reason: .cardMarker))
                 end -= 2
             } else if AbbreviationTable.cardTerminators.contains(where: { last.hasPrefix($0) }),
                       AbbreviationTable.isReferenceWithDigits(last) {
-                // « PAYWEB1042 » collé
+                // "PAYWEB1042" glued together
                 isOnline = last.hasPrefix("payweb")
                 dropped.append(DroppedToken(value: last, reason: .cardMarker))
                 end -= 1
@@ -118,7 +118,7 @@ extension BankLabelTemplate {
         }
         guard end > cursor else { return nil }
 
-        // --- Département explicite : « 35 RENNES », « 91 GIF-SUR-YV »
+        // --- Explicit department: "35 RENNES", "91 GIF-SUR-YV"
         var departmentCode: String? = nil
         if cursor < end, tokens[cursor].count == 2, tokens[cursor].allSatisfy(\.isNumber),
            cursor + 1 < end {
@@ -127,8 +127,8 @@ extension BankLabelTemplate {
             cursor += 1
         }
 
-        // --- Référence de paiement en ligne dans le créneau localité : « PAYLI2469 »
-        // Ce n'est pas une ville, et sa présence signe un paiement web (pas de lieu).
+        // --- Online payment reference in the locality slot: "PAYLI2469"
+        // It's not a city, and its presence signals a web payment (no place).
         if cursor < end, tokens[cursor].hasPrefix("payli") {
             dropped.append(DroppedToken(value: tokens[cursor], reason: .paymentReference))
             cursor += 1
@@ -136,8 +136,8 @@ extension BankLabelTemplate {
         }
         guard cursor < end else { return nil }
 
-        // --- Découpe localité / marchand.
-        // Un paiement web n'a pas de localité : tout le reste est le marchand.
+        // --- Splitting locality / merchant.
+        // A web payment has no locality: everything else is the merchant.
         if isOnline {
             return TemplateSlots(
                 localityRange: nil,
@@ -148,12 +148,12 @@ extension BankLabelTemplate {
             )
         }
 
-        // Sinon, la localité occupe la TÊTE du créneau et le marchand la suite.
-        // Contrainte dure : il doit TOUJOURS rester au moins un token pour le marchand,
-        // sinon on aurait un `q=` vide — le pire résultat possible.
+        // Otherwise, the locality occupies the HEAD of the slot and the merchant the rest.
+        // Hard constraint: at least one token must always remain for the merchant,
+        // otherwise we'd get an empty `q=` — the worst possible result.
         let available = end - cursor
         guard available >= 2 else {
-            // Un seul token : c'est le marchand, pas la ville. « q » vide ne sert à rien.
+            // A single token: that's the merchant, not the city. An empty "q" is useless.
             return TemplateSlots(
                 localityRange: nil,
                 merchantRange: cursor..<end,
@@ -172,30 +172,31 @@ extension BankLabelTemplate {
         )
     }
 
-    /// Combien de tokens la localité occupe réellement en tête du créneau.
+    /// How many tokens the locality actually occupies at the head of the slot.
     ///
-    /// ⚠️ Surtout PAS le maximum disponible. La très grande majorité des communes tiennent
-    /// en UN mot (LYON, NIMES, OULLINS, ROUBAIX, CORK, BERLIN) ; prendre gloutonnement
-    /// trois tokens transformait « AMSTERDAM DOTT SCOOTER RID » en localité
-    /// « amsterdam dott scooter » et marchand « rid » — le marchand était mangé par la ville.
+    /// ⚠️ DEFINITELY NOT the maximum available. The vast majority of communes fit
+    /// in ONE word (LYON, NIMES, OULLINS, ROUBAIX, CORK, BERLIN); greedily taking
+    /// three tokens turned "AMSTERDAM DOTT SCOOTER RID" into the locality
+    /// "amsterdam dott scooter" and the merchant "rid" — the merchant was eaten by the
+    /// city.
     ///
-    /// On étend donc à partir de 1, et uniquement sur un signal EXPLICITE :
-    ///   • une particule toponymique  → « GIF **SUR** YVETT », « ISSY **LES** »,
-    ///     « CORMEILLES **EN** », « ROSIERES **PRES** », « PARIS **LA** DEFE »
-    ///   • un numéro d'arrondissement → « PARIS **6** »
-    /// Sans signal, la localité fait un seul mot.
+    /// So we grow from 1, and only on an EXPLICIT signal:
+    ///   • a toponymic particle  → "GIF **SUR** YVETT", "ISSY **LES**",
+    ///     "CORMEILLES **EN**", "ROSIERES **PRES**", "PARIS **LA** DEFE"
+    ///   • an arrondissement number → "PARIS **6**"
+    /// With no signal, the locality is a single word.
     static func localityTokenCount(_ tokens: [String], from start: Int, limit: Int) -> Int {
         guard limit >= 1 else { return 0 }
         var span = 1
         while span < min(limit, maxLocalityTokens) {
             let next = tokens[start + span]
             if toponymParticles.contains(next) {
-                // Une particule appelle le mot qui la suit (« sur » + « yvett »).
+                // A particle calls for the word that follows it ("sur" + "yvett").
                 span += 1
                 if span < min(limit, maxLocalityTokens) { span += 1 }
                 continue
             }
-            // Arrondissement : « PARIS 6 », « MARSEILLE 2 ».
+            // Arrondissement: "PARIS 6", "MARSEILLE 2".
             if span == 1, next.count <= 2, next.allSatisfy(\.isNumber) {
                 span += 1
                 continue
@@ -205,28 +206,28 @@ extension BankLabelTemplate {
         return min(span, limit)
     }
 
-    /// Le champ localité des relevés fait ~13 caractères, ce qui plafonne en pratique
-    /// à 3 mots (« MONT SUR LOIR », « PARIS LA DEFE », « CORMEILLES EN »).
+    /// The locality field on statements is ~13 characters, which caps it in
+    /// practice at 3 words ("MONT SUR LOIR", "PARIS LA DEFE", "CORMEILLES EN").
     private static let maxLocalityTokens = 3
 
-    /// Particules qui prolongent un nom de commune français.
+    /// Particles that extend a French commune name.
     static let toponymParticles: Set<String> = [
         "sur", "sous", "en", "les", "le", "la", "lez", "de", "du", "des", "aux", "au",
         "pres", "saint", "st", "sainte", "ste", "mont", "val", "sr", "d", "l"
     ]
 
-    /// « 1803 » = 18 mars. Quatre chiffres formant un jour et un mois valides.
+    /// "1803" = March 18th. Four digits forming a valid day and month.
     static func isDayMonth(_ token: String) -> Bool {
         guard token.count == 4, token.allSatisfy(\.isNumber) else { return false }
         guard let day = Int(token.prefix(2)), let month = Int(token.suffix(2)) else { return false }
         return (1...31).contains(day) && (1...12).contains(month)
     }
 
-    /// « GIR012607803713662 », « GIP010079487221556 », « CG3W26063M200769 ».
+    /// "GIR012607803713662", "GIP010079487221556", "CG3W26063M200769".
     static func isTransactionId(_ token: String) -> Bool {
         if AbbreviationTable.isReferenceWithDigits(token),
            token.hasPrefix("gir") || token.hasPrefix("gip") { return true }
-        // Chaîne longue mélangeant lettres et chiffres, sans voyelle exploitable.
+        // A long string mixing letters and digits, with no usable vowel.
         guard token.count >= 10 else { return false }
         let hasDigit = token.contains(where: \.isNumber)
         let hasLetter = token.contains(where: \.isLetter)

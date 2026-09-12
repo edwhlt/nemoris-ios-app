@@ -1,46 +1,46 @@
 import Foundation
 
-// Modèles de la planification de requêtes marchand.
+// Models for merchant query planning.
 //
-// ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
-// Pas de NemorisEngine (c'est un package SwiftPM, le harness swiftc devrait le compiler
-// en entier), pas de MapKit, pas de FoundationModels, pas de CoreLocation, pas de SwiftUI.
-// Le garde-fou est `Tests/run_query_planner_tests.sh` : un import interdit le casse.
+// ⚠️ PURE FILE: `import Foundation` ONLY.
+// No NemorisEngine (it's a SwiftPM package, the swiftc harness would have to compile it
+// in full), no MapKit, no FoundationModels, no CoreLocation, no SwiftUI.
+// The safety net is `Tests/run_query_planner_tests.sh`: a forbidden import breaks it.
 //
-// Pourquoi tout ça existe : l'API recherche-entreprises.api.gouv.fr matche `q` contre la
-// raison sociale ET les enseignes, JAMAIS contre l'adresse. Mettre la ville dans `q` ne
-// restreint pas la recherche, il la fait échouer :
+// Why all of this exists: the recherche-entreprises.api.gouv.fr API matches `q` against the
+// company name AND trade names, NEVER against the address. Putting the city in `q`
+// doesn't restrict the search, it makes it fail:
 //
-//     q=carrefour market flanches  →  0 résultat
-//     q=carrefour market           →  1907 résultats
+//     q=carrefour market flanches  →  0 results
+//     q=carrefour market           →  1907 results
 //
-// La localité doit donc devenir un FILTRE (`code_commune` / `code_postal` / `departement`)
-// ou un SIGNAL DE TRI, jamais un mot de la requête. C'est tout l'objet de ce module.
+// The locality must therefore become a FILTER (`code_commune` / `code_postal` / `departement`)
+// or a SORT SIGNAL, never a word in the query. That's the whole point of this module.
 
-// MARK: - Localité
+// MARK: - Locality
 
-/// Nature d'un fragment géographique repéré dans un libellé.
+/// Nature of a geographic fragment spotted in a label.
 enum LocalityKind: String, Codable, Sendable, Hashable {
-    /// Nom de commune, éventuellement TRONQUÉ par la banque ("GIF-SUR-YVETT", "ISSY LES").
+    /// Commune name, possibly TRUNCATED by the bank ("GIF-SUR-YVETT", "ISSY LES").
     case cityName
-    /// Code postal français à 5 chiffres.
+    /// French 5-digit postal code.
     case postalCode
-    /// Code département à 2 chiffres, tel que le préfixe "78" dans « 35 RENNES ».
+    /// 2-digit department code, like the "78" prefix in "35 RENNES".
     case departmentCode
     /// Code pays ISO 3166-1 alpha-2.
     case countryCode
 }
 
-/// Un fragment géographique extrait du libellé, avant toute résolution.
+/// A geographic fragment extracted from the label, before any resolution.
 struct LocalityToken: Hashable, Sendable, Codable {
-    /// Valeur normalisée (minuscules, sans diacritiques), telle qu'elle sera envoyée
-    /// à l'oracle de communes. Peut être tronquée — c'est justement l'oracle qui sait
-    /// résoudre "issy les" → Issy-les-Moulineaux.
+    /// Normalized value (lowercase, no diacritics), as it will be sent
+    /// to the commune oracle. May be truncated — that's exactly what the oracle
+    /// can resolve, "issy les" → Issy-les-Moulineaux.
     let raw: String
     let kind: LocalityKind
-    /// À quel point on croit que c'en est vraiment une.
-    /// 1.0 = créneau d'un gabarit bancaire reconnu, ou confirmée par le moteur.
-    /// 0.6 = n-gram deviné en fin de libellé, non confirmé.
+    /// How much we believe it really is one.
+    /// 1.0 = a recognized bank template's slot, or confirmed by the engine.
+    /// 0.6 = a guessed trailing n-gram, unconfirmed.
     let confidence: Double
 
     init(raw: String, kind: LocalityKind, confidence: Double) {
@@ -50,7 +50,7 @@ struct LocalityToken: Hashable, Sendable, Codable {
     }
 }
 
-/// Localité après résolution par un `LocalityResolver`.
+/// A locality after resolution by a `LocalityResolver`.
 struct ResolvedLocality: Hashable, Sendable, Codable {
     let displayName: String        // "Gif-sur-Yvette"
     let inseeCode: String?         // "91272"
@@ -64,15 +64,15 @@ struct ResolvedLocality: Hashable, Sendable, Codable {
 
     enum Source: String, Codable, Sendable {
         case geoAPI          // geo.api.gouv.fr
-        case seedTable       // communes_seed.json embarqué
-        case postalCodeOnly  // on n'a que le code postal, pas la commune
-        case userProvided    // saisi dans le formulaire
+        case seedTable       // embedded communes_seed.json
+        case postalCodeOnly  // we only have the postal code, not the commune
+        case userProvided    // entered in the form
         case foreignTable    // ForeignLocalityTable (hors France)
     }
 
-    /// Le seul code postal, s'il n'y en a qu'un. Une commune à plusieurs codes postaux
-    /// (Lyon : 69001…69009) ne peut pas être filtrée par `code_postal` sans arbitraire —
-    /// on utilise `code_commune` dans ce cas.
+    /// The single postal code, if there's only one. A commune with several postal
+    /// codes (Lyon: 69001…69009) can't be filtered by `code_postal` without an
+    /// arbitrary choice — we use `code_commune` in that case.
     var unambiguousPostalCode: String? {
         postalCodes.count == 1 ? postalCodes[0] : nil
     }
@@ -80,8 +80,8 @@ struct ResolvedLocality: Hashable, Sendable, Codable {
 
 // MARK: - Extraction
 
-/// Pourquoi un token a été retiré du nom. Alimente les puces « Retiré du nom » de l'UI,
-/// qui permettent à l'utilisateur de réinjecter un token mal classé.
+/// Why a token was removed from the name. Feeds the UI's "Removed from name"
+/// chips, which let the user re-inject a misclassified token.
 enum DropReason: String, Codable, Sendable, Hashable {
     case processorPrefix    // PAIEMENT, CB, PSC, VIR, PRLV, SUMUP, VNPAY…
     case cardMarker         // CARTE 1042, PAYWEB1042
@@ -93,9 +93,9 @@ enum DropReason: String, Codable, Sendable, Hashable {
     case departmentCode     // 78
     case paymentReference   // PAYLI2469, PSC
     case countryCode        // VN, FR
-    case noise              // tokens trop courts / purement numériques
+    case noise              // tokens too short / purely numeric
 
-    /// Libellé FR affiché dans la puce.
+    /// FR wording shown in the chip.
     var displayLabel: String {
         switch self {
         case .processorPrefix:  return "préfixe"
@@ -118,45 +118,45 @@ struct DroppedToken: Hashable, Sendable, Codable {
     let reason: DropReason
 }
 
-/// Résultat de l'analyse d'un libellé brut, avant résolution de la localité.
+/// Result of parsing a raw label, before resolving the locality.
 struct MerchantLabelExtraction: Hashable, Sendable, Codable {
     let rawLabel: String
-    /// Identifiant du gabarit bancaire reconnu, nil si repli heuristique.
+    /// Id of the recognized bank template, nil on a heuristic fallback.
     let templateId: String?
-    /// Processeur de paiement détecté (sumup, vnpay, paypal…).
+    /// Detected payment processor (sumup, vnpay, paypal…).
     let processorId: String?
-    /// **La seule chose qui a le droit d'aller dans `q=`.**
+    /// **The only thing allowed to go into `q=`.**
     let nameTokens: [String]
     let localityTokens: [LocalityToken]
     /// Code pays ISO-2 en MAJUSCULES.
     let countryHint: String?
-    /// Code département déduit sans ambiguïté (préfixe « 35 RENNES »).
+    /// Department code inferred unambiguously (the "35 RENNES" prefix).
     let departmentHint: String?
     let droppedTokens: [DroppedToken]
-    /// Virement nominatif : on n'interroge JAMAIS un registre d'entreprises pour un
-    /// particulier — vie privée, et ça ne donne rien de toute façon.
+    /// A named transfer: we NEVER query a company registry for a
+    /// private individual — privacy, and it wouldn't return anything anyway.
     let isPersonNotBusiness: Bool
-    /// Paiement web (PAYWEB / PAYLI) : pas de localité physique, donc pas de filtre géo
-    /// et pas de recherche par proximité.
+    /// A web payment (PAYWEB / PAYLI): no physical locality, so no geo filter
+    /// and no proximity search.
     let isOnlinePayment: Bool
 
     var nameQuery: String { nameTokens.joined(separator: " ") }
 
-    /// Rien d'exploitable : `q` vide, uniquement des chiffres, ou un seul token trop court
-    /// pour discriminer. Un plan dégénéré ne produit AUCUNE tentative — on ne lance pas de
-    /// requête réseau pour « *** », « A » ou « 0000000 ».
+    /// Nothing usable: an empty `q`, only digits, or a single token too short
+    /// to discriminate. A degenerate plan produces NO attempt at all — we don't
+    /// fire a network request for "***", "A" or "0000000".
     var degenerate: Bool {
         let joined = nameQuery.trimmingCharacters(in: .whitespaces)
         if joined.isEmpty { return true }
-        // Un nom sans la moindre lettre n'identifie rien : `q=0000000` interroge le
-        // registre pour rien. Les identifiants résiduels tombent tous dans ce cas.
+        // A name with not a single letter identifies nothing: `q=0000000` queries
+        // the registry for nothing. Residual identifiers all fall into this case.
         if !joined.contains(where: \.isLetter) { return true }
         if nameTokens.count == 1 && joined.count < 3 { return true }
         return false
     }
 
-    /// Le premier fragment de localité exploitable comme texte (pour la résolution
-    /// et, à défaut, pour le tri sur les adresses).
+    /// The first locality fragment usable as text (for resolution
+    /// and, failing that, for sorting on addresses).
     var primaryLocalityText: String? {
         localityTokens.first(where: { $0.kind == .cityName })?.raw
     }
@@ -166,21 +166,21 @@ struct MerchantLabelExtraction: Hashable, Sendable, Codable {
     }
 }
 
-// MARK: - Requêtes
+// MARK: - Requests
 
-/// Une requête vers un registre d'entreprises (Sirene et assimilés).
+/// A request to a company registry (Sirene and the like).
 ///
-/// `minimal=true` et `include=siege,matching_etablissements` ne sont PAS des options :
-/// ce sont des invariants de tout appel, posés par le client. Vérifié à l'API :
-/// `include` sans `minimal=true` renvoie une erreur.
+/// `minimal=true` and `include=siege,matching_etablissements` are NOT options:
+/// they are invariants of every call, set by the client. Verified against the API:
+/// `include` without `minimal=true` returns an error.
 struct CompanyRegistryQuery: Hashable, Sendable, Codable {
-    /// Nom du marchand SEUL. Jamais de ville, jamais de code postal, jamais de référence.
+    /// Merchant name ONLY. Never a city, never a postal code, never a reference.
     let q: String
     let codeCommune: String?
     let codePostal: String?
     let departement: String?
     let perPage: Int
-    /// "A" = établissements actifs seulement. nil = inclure les fermés (dernier recours).
+    /// "A" = active establishments only. nil = include closed ones (last resort).
     let etatAdministratif: String?
     let limiteMatchingEtablissements: Int
 
@@ -200,9 +200,9 @@ struct CompanyRegistryQuery: Hashable, Sendable, Codable {
         self.limiteMatchingEtablissements = limiteMatchingEtablissements
     }
 
-    /// Sérialisation canonique (paramètres triés) — clé de cache stable.
-    /// Volontairement PAS du texte libre : deux requêtes identiques à l'ordre des
-    /// paramètres près doivent partager leur entrée de cache.
+    /// Canonical serialization (sorted parameters) — a stable cache key.
+    /// Deliberately NOT free text: two identical requests that only differ
+    /// in parameter order must share their cache entry.
     var canonicalKey: String {
         var parts = ["q=\(q)", "per_page=\(perPage)", "lme=\(limiteMatchingEtablissements)"]
         if let c = codeCommune { parts.append("code_commune=\(c)") }
@@ -212,17 +212,17 @@ struct CompanyRegistryQuery: Hashable, Sendable, Codable {
         return parts.sorted().joined(separator: "&")
     }
 
-    /// A-t-elle au moins une contrainte géographique ?
+    /// Does it have at least one geographic constraint?
     var hasGeoFilter: Bool {
         codeCommune != nil || codePostal != nil || departement != nil
     }
 }
 
-/// Requête cartographique (MapKit aujourd'hui, éventuellement d'autres demain).
+/// A map search (MapKit today, possibly others tomorrow).
 ///
-/// ⚠️ `text` est construit depuis `MerchantLabelExtraction.nameQuery` + le libellé de
-/// localité, JAMAIS depuis le libellé bancaire brut : celui-ci contient des références
-/// de transaction et des numéros de carte qui n'ont rien à faire chez un tiers.
+/// ⚠️ `text` is built from `MerchantLabelExtraction.nameQuery` + the locality
+/// text, NEVER from the raw bank label: the latter carries transaction
+/// references and card numbers that have no business reaching a third party.
 struct PlaceTextQuery: Hashable, Sendable, Codable {
     let text: String
     let localityLabel: String?
@@ -243,7 +243,7 @@ enum SearchAttemptKind: Hashable, Sendable, Codable {
     case companyRegistryNearPoint(latitude: Double, longitude: Double, radiusKm: Double, perPage: Int)
     case placeText(PlaceTextQuery)
 
-    /// Identifiant court et stable, utilisé par les assertions du corpus.
+    /// Short, stable identifier, used by the corpus assertions.
     var shortName: String {
         switch self {
         case .companyRegistry(let q):
@@ -260,32 +260,32 @@ enum SearchAttemptKind: Hashable, Sendable, Codable {
 }
 
 struct SearchAttempt: Hashable, Sendable, Codable, Identifiable {
-    /// Ordinal 1-based, stable → les tests assertent par index.
+    /// 1-based ordinal, stable → tests assert by index.
     let id: Int
     let kind: SearchAttemptKind
-    /// Justification en français, affichée dans « Détails de la recherche ».
+    /// FR justification, shown in "Search details".
     let rationale: String
-    /// Précision attendue a priori (sert à ordonner, pas à filtrer).
+    /// A priori expected precision (used for ordering, not filtering).
     let expectedPrecision: Double
 }
 
-// MARK: - Contexte de classement
+// MARK: - Ranking context
 
-/// Tout ce dont `CandidateRanker` a besoin, sans aucune dépendance réseau ni base.
+/// Everything `CandidateRanker` needs, with no network or database dependency at all.
 struct RankingContext: Hashable, Sendable, Codable {
     let nameTokens: [String]
-    /// Texte de localité NON résolu (l'oracle n'a pas reconnu de commune).
-    /// On le cherche alors directement dans l'adresse des candidats : un lieu-dit ou
-    /// un hameau inconnu de geo.api.gouv.fr apparaît très souvent tel quel dans
-    /// l'`adresse` du bon établissement. C'est ce qui fait que le correctif
-    /// SROM/FLANCHES ne dépend PAS de la réussite de l'oracle.
+    /// UNRESOLVED locality text (the oracle didn't recognize a commune).
+    /// We then look for it directly in candidates' addresses: a place name or
+    /// hamlet unknown to geo.api.gouv.fr very often shows up as-is in the
+    /// right establishment's `adresse`. That's what keeps the SROM/FLANCHES
+    /// fix from depending on the oracle succeeding.
     let freeLocalityText: String?
     let inseeCode: String?
     let postalCodes: [String]
     let departmentCode: String?
     let cityLabel: String?
-    /// Préfixes NAF connus du référentiel, passés en donnée pour que le ranker
-    /// reste pur (pas d'accès à NAFCategoryMapper, qui lit le bundle).
+    /// NAF prefixes known to the reference data, passed in as plain data so the
+    /// ranker stays pure (no access to NAFCategoryMapper, which reads the bundle).
     let knownNafPrefixes: Set<String>
 
     init(nameTokens: [String],
@@ -304,9 +304,9 @@ struct RankingContext: Hashable, Sendable, Codable {
         self.knownNafPrefixes = knownNafPrefixes
     }
 
-    /// Aucune information de lieu : le score de localité doit être NEUTRE (0.5),
-    /// ni récompense ni pénalité. Sans ça, tout candidat serait puni pour une
-    /// information que le libellé ne contenait pas.
+    /// No location information at all: the locality score must be NEUTRAL (0.5),
+    /// neither a reward nor a penalty. Without this, every candidate would be
+    /// punished for information the label never carried.
     var hasNoLocalityInfo: Bool {
         freeLocalityText == nil && inseeCode == nil && postalCodes.isEmpty
             && departmentCode == nil && cityLabel == nil
@@ -321,8 +321,8 @@ struct MerchantQueryPlan: Hashable, Sendable, Codable {
     let attempts: [SearchAttempt]
     let ranking: RankingContext
 
-    /// Clé de déduplication pour l'import batch. Deux libellés qui ne diffèrent que par
-    /// leur identifiant de transaction produisent le MÊME plan, donc une seule requête.
+    /// Deduplication key for batch import. Two labels that only differ by their
+    /// transaction identifier produce the SAME plan, so a single request.
     var cacheKey: String {
         let name = extraction.nameQuery
         let loc = locality?.inseeCode

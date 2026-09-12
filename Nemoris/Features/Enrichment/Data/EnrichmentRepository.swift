@@ -1,39 +1,39 @@
 import Foundation
 
-/// Persistance du cache d'enrichissement (Sirene / MapKit / LLM / merged).
+/// Persistence for the enrichment cache (Sirene / MapKit / LLM / merged).
 ///
-/// Depuis v36, ce cache vit sur disque (`Library/Caches/nemoris/enrichment_cache.json`)
-/// via `JSONFileCache`, plus dans SQLite. Raison :
-///   - Ces données viennent d'APIs externes (Sirene, MapKit, Apple Foundation Models)
-///     → toujours récupérables, donc pas de valeur "user data".
-///   - La base SQLite de l'utilisateur ne doit contenir QUE ses données saisies
-///     ou importées (transactions, payees, accounts, etc.).
-///   - Le cache peut être purgé par iOS sans risque.
-///   - Backup user / sync iCloud plus léger.
+/// Since v36, this cache has lived on disk (`Library/Caches/nemoris/enrichment_cache.json`)
+/// via `JSONFileCache`, not in SQLite. Reason:
+///   - This data comes from external APIs (Sirene, MapKit, Apple Foundation Models)
+///     → always re-fetchable, so no "user data" value.
+///   - The user's SQLite database must contain ONLY data they entered
+///     or imported (transactions, payees, accounts, etc.).
+///   - The cache can be purged by iOS with no risk.
+///   - Lighter user backup / iCloud sync.
 ///
-/// Le store est `@MainActor` (cf. `JSONFileCache`), donc les méthodes sont async :
-/// l'orchestrator (actor) `await` pour faire un hop vers MainActor.
+/// The store is `@MainActor` (see `JSONFileCache`), so the methods are async:
+/// the orchestrator (an actor) `await`s to hop to the MainActor.
 struct EnrichmentRepository {
 
-    /// ⚠️ Ce dépôt ne touche PAS la base de l'utilisateur : son contenu est un
-    /// cache d'APIs externes, toujours récupérable, et volontairement tenu hors
-    /// des données saisies (cf. l'explication ci-dessus). Il n'a donc aucune
-    /// connexion SQLite à recevoir, contrairement aux autres dépôts.
+    /// ⚠️ This repository does NOT touch the user's database: its content is a
+    /// cache of external APIs, always re-fetchable, and deliberately kept out
+    /// of entered data (see the explanation above). It therefore has no
+    /// SQLite connection to receive, unlike the other repositories.
     @MainActor private static let store = JSONFileCache<MerchantEnrichment>(name: "enrichment_cache")
 
     func fetch(cacheKey: String) async -> MerchantEnrichment? {
         await Self.store.get(cacheKey)
     }
 
-    /// Sémantique UPSERT identique à l'ancien SQL (COALESCE par champ, MAX(confidence)) :
-    /// les valeurs non-nil du nouveau résultat écrasent l'existant, sinon on garde l'ancien.
-    /// La confidence stockée est le max des deux.
+    /// Same UPSERT semantics as the old SQL (per-field COALESCE, MAX(confidence)):
+    /// non-nil values from the new result overwrite the existing ones, otherwise the old
+    /// value is kept. The stored confidence is the max of the two.
     ///
-    /// ⚠️ Écrit par **overlay sur l'existant**, pas en ré-énumérant chaque champ dans un
-    /// initialiseur. La version précédente reconstruisait un `MerchantEnrichment` champ par
-    /// champ et avait donc silencieusement perdu `searchHint` le jour où il a été ajouté.
-    /// Avec l'overlay, un nouveau champ optionnel est conservé par défaut : il n'y a plus
-    /// de liste à tenir à jour, donc plus rien à oublier.
+    /// ⚠️ Written as an **overlay onto the existing value**, not by re-listing each
+    /// field in an initializer. The previous version rebuilt a `MerchantEnrichment` field by
+    /// field and had therefore silently lost `searchHint` the day it was added.
+    /// With the overlay, a new optional field is kept by default: there's no
+    /// list to maintain anymore, so nothing left to forget.
     @discardableResult
     func save(cacheKey: String, result: MerchantEnrichment) async -> Bool {
         await MainActor.run {

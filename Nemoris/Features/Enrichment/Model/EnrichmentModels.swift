@@ -1,9 +1,9 @@
 import Foundation
 
 extension String {
-    /// "carrefour market" → "Carrefour Market". Quelques acronymes connus restent
-    /// tout en majuscules (SNCF, RATP, BNP, AWS, KFC…).
-    /// Utilisé pour normaliser les `canonicalName` du moteur avant affichage.
+    /// "carrefour market" → "Carrefour Market". A few known acronyms stay
+    /// all uppercase (SNCF, RATP, BNP, AWS, KFC…).
+    /// Used to normalize the engine's `canonicalName` before display.
     var titleCased: String {
         let known: Set<String> = [
             "sncf", "ratp", "ratpc", "ratpd", "bnp", "lcl", "cic",
@@ -24,24 +24,24 @@ extension String {
     }
 }
 
-/// Résultat d'un enrichissement (Sirene + Apple Foundation Models + MapKit).
+/// Result of an enrichment (Sirene + Apple Foundation Models + MapKit).
 ///
-/// Un seul `MerchantEnrichment` représente la fusion (ou la sortie d'une source unique)
-/// des signaux collectés pour un libellé bancaire ou un merchant_id donné.
+/// A single `MerchantEnrichment` represents the merge (or the raw output of a single source)
+/// of the signals collected for a given bank label or merchant_id.
 
 enum MerchantEnrichmentSource: String, Codable, CaseIterable {
     case sirene
     case llm        // Apple Foundation Models
-    case localLLM   // serveur HTTP compatible OpenAI configuré par l'utilisateur (LM Studio, Ollama…)
-    /// Fournisseur cloud avec la clé API de l'utilisateur (Claude, OpenAI).
-    /// ⚠️ Le SEUL cas où le libellé a quitté l'appareil — d'où un cas distinct
-    /// plutôt qu'un partage avec `.llm` : `enrichment_cache.source` doit rester
-    /// honnête sur la provenance, et le compilateur force la mise à jour de
-    /// tous les affichages.
+    case localLLM   // OpenAI-compatible HTTP server configured by the user (LM Studio, Ollama…)
+    /// Cloud provider with the user's own API key (Claude, OpenAI).
+    /// ⚠️ The ONLY case where the label left the device — hence a distinct
+    /// case rather than sharing one with `.llm`: `enrichment_cache.source` must
+    /// stay honest about the provenance, and the compiler forces every
+    /// display site to be updated.
     case cloudLLM
     case mapkit
-    case merged     // vote pondéré entre plusieurs sources
-    case manual     // saisi par l'utilisateur
+    case merged     // weighted vote among several sources
+    case manual     // entered by the user
 }
 
 struct MerchantEnrichment: Codable, Hashable {
@@ -57,50 +57,50 @@ struct MerchantEnrichment: Codable, Hashable {
     var siret: String?
     var nafCode: String?
     var source: MerchantEnrichmentSource
-    /// 0..1. Mélange "qualité de match" × "confiance source". Voir EnrichmentOrchestrator.
+    /// 0..1. A mix of "match quality" × "source confidence". See EnrichmentOrchestrator.
     var confidence: Double
     var enrichedAt: Date
-    /// Requête nettoyée que le LLM propose pour relancer une recherche Maps/Sirene
-    /// (ex. "Hung Restaurant Ha Giang" extrait depuis "VNPAY HUNG RES PSC VN P HA GIANG").
-    /// Nil pour les sources non-LLM.
+    /// Cleaned-up query the LLM proposes to re-run a Maps/Sirene search
+    /// (e.g. "Hung Restaurant Ha Giang" extracted from "VNPAY HUNG RES PSC VN P HA GIANG").
+    /// Nil for non-LLM sources.
     var searchHint: String? = nil
 
-    // Champs additifs. Tous `var x: T? = nil` → `decodeIfPresent` synthétisé,
-    // donc les fichiers de cache écrits par les versions précédentes se décodent inchangés.
-    // Ne jamais transformer l'un d'eux en non-optionnel sans versionner le cache.
+    // Additive fields. All `var x: T? = nil` → synthesized `decodeIfPresent`,
+    // so cache files written by previous versions decode unchanged.
+    // Never turn one of these into a non-optional without versioning the cache.
 
-    /// SIREN de l'entreprise (9 chiffres). Le `siret` identifie l'établissement,
-    /// le `siren` identifie la personne morale qui le porte — c'est lui qui permet
-    /// de retrouver les autres établissements de la même enseigne.
+    /// The company's SIREN (9 digits). The `siret` identifies the establishment,
+    /// the `siren` identifies the legal entity behind it — it's what lets us
+    /// find the other establishments of the same chain.
     var siren: String? = nil
-    /// Code postal de l'établissement, extrait séparément de `address` pour servir
-    /// de filtre de recherche (`code_postal`) et de signal de tri.
+    /// The establishment's postal code, extracted separately from `address` to serve
+    /// as a search filter (`code_postal`) and a ranking signal.
     var postalCode: String? = nil
-    /// Nom de catégorie proposé par une source qui ne connaît pas les ids Nemoris
-    /// (le LLM renvoie "Alimentation", pas `category_id = 7`). Résolu en `categoryId`
-    /// par `EnrichmentOrchestrator.findCategoryId(byName:)`, qui a accès au référentiel.
+    /// Category name proposed by a source that doesn't know Nemoris's ids
+    /// (the LLM returns "Groceries", not `category_id = 7`). Resolved into `categoryId`
+    /// by `EnrichmentOrchestrator.findCategoryId(byName:)`, which has access to the reference data.
     var categoryHint: String? = nil
 
     static let empty = MerchantEnrichment(source: .merged, confidence: 0, enrichedAt: Date())
 
-    /// Vérifie qu'on a au moins un signal exploitable.
+    /// Checks that we have at least one usable signal.
     var hasContent: Bool {
         displayName != nil || domain != nil || siret != nil ||
         (latitude != nil && longitude != nil)
     }
 }
 
-/// Contexte passé à l'orchestrateur pour enrichir une transaction.
+/// Context passed to the orchestrator to enrich a transaction.
 struct MerchantEnrichmentContext: Hashable {
     let rawLabel: String
     let canonicalName: String?
     let amount: Double?
     let city: String?
     let country: String?
-    /// Pour cache uniquement : merchant_id canonique si déjà connu (ex via engine).
+    /// For cache purposes only: canonical merchant_id if already known (e.g. via the engine).
     let engineMerchantId: String?
 
-    /// Clé de cache stable : engine_merchant_id si dispo, sinon canonical name lowercased + city.
+    /// Stable cache key: engine_merchant_id if available, otherwise the lowercased canonical name + city.
     var cacheKey: String {
         if let id = engineMerchantId, !id.isEmpty { return id }
         let name = (canonicalName ?? rawLabel)

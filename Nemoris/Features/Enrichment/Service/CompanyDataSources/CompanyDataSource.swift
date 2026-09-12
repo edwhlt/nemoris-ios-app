@@ -1,45 +1,45 @@
 import Foundation
 
-/// Protocole commun pour toutes les sources d'identification d'entreprise.
-/// Chaque pays a typiquement sa propre source (Sirene pour FR, Companies House pour UK, etc.)
-/// + des sources globales (OpenCorporates).
+/// Common protocol for every company-identification source.
+/// Each country typically has its own source (Sirene for FR, Companies House for UK, etc.)
+/// plus global sources (OpenCorporates).
 ///
-/// **Pour ajouter une nouvelle source** :
-///   1. Créer un `struct MaSourceDataSource: CompanyDataSource`
-///   2. Implémenter `search(...)` qui renvoie `[MerchantEnrichment]` avec `source = .sirene`
-///      (on garde `.sirene` comme catégorie générique "registre entreprises" — la
-///      distinction se fait via `id` et `displayName`)
-///   3. L'ajouter à `CompanyDataSourcesRegistry.allKnownSources`
-///   4. (Optionnel) Pré-configurer dans `defaultEnabledIds` si gratuit + utile par défaut
+/// **To add a new source**:
+///   1. Create a `struct MySourceDataSource: CompanyDataSource`
+///   2. Implement `search(...)`, returning `[MerchantEnrichment]` with `source = .sirene`
+///      (we keep `.sirene` as the generic "company registry" category — the
+///      distinction is made via `id` and `displayName`)
+///   3. Add it to `CompanyDataSourcesRegistry.allKnownSources`
+///   4. (Optional) Pre-configure it in `defaultEnabledIds` if it's free + useful by default
 protocol CompanyDataSource: Sendable {
-    /// Identifiant stable, ex. "sirene_fr", "companies_house_uk". Utilisé pour la persistance
-    /// du toggle ON/OFF et de la clé API.
+    /// Stable identifier, e.g. "sirene_fr", "companies_house_uk". Used to persist
+    /// the ON/OFF toggle and the API key.
     var id: String { get }
 
-    /// Nom affiché en UI, ex. "Sirene (entreprises FR)".
+    /// Name shown in the UI, e.g. "Sirene (FR companies)".
     var displayName: String { get }
 
-    /// Pays couvert au format ISO 3166-1 alpha-2 (ex. "FR"). Nil = source globale.
-    /// Le registry filtre automatiquement par pays au moment de la recherche.
+    /// Country covered, ISO 3166-1 alpha-2 (e.g. "FR"). Nil = a global source.
+    /// The registry filters by country automatically at search time.
     var country: String? { get }
 
-    /// Si true, la source nécessite une clé API que l'utilisateur doit configurer dans
-    /// les paramètres avant de pouvoir l'utiliser. Si false, marche sans config.
+    /// If true, the source needs an API key the user must configure in
+    /// Settings before it can be used. If false, it works with no config.
     var requiresAPIKey: Bool { get }
 
-    /// URL d'inscription / d'obtention de la clé API. Utilisée pour ouvrir le navigateur
-    /// depuis l'UI settings. Nil si pas pertinent.
+    /// Sign-up / API key URL. Used to open the browser
+    /// from the settings UI. Nil if not relevant.
     var apiKeyHelpURL: URL? { get }
 
-    /// État implémentation : true = réellement fonctionnelle, false = placeholder (UI
-    /// affiche un badge "Bientôt"). Permet de lister les sources prévues sans casser
-    /// l'UX si l'utilisateur en active un placeholder.
+    /// Implementation state: true = actually functional, false = a placeholder (the UI
+    /// shows a "Coming soon" badge). Lets us list planned sources without breaking
+    /// the UX if the user enables a placeholder one.
     var isImplemented: Bool { get }
 
-    /// Lance une recherche d'entreprise. Le `country` du contexte sert au routing (le
-    /// registry n'appelle cette source que si son pays match ou si elle est globale).
-    /// `apiKey` est passée si l'utilisateur en a configuré une.
-    /// Renvoie [] si pas de résultat ou si la source est indisponible (offline / 4xx / 5xx).
+    /// Runs a company search. The context's `country` is used for routing (the
+    /// registry only calls this source if its country matches or it's global).
+    /// `apiKey` is passed if the user has configured one.
+    /// Returns [] on no result or if the source is unavailable (offline / 4xx / 5xx).
     func search(query: String,
                 postalCode: String?,
                 apiKey: String?) async -> [MerchantEnrichment]

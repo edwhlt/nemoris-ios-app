@@ -4,21 +4,21 @@ import CoreGraphics
 import FoundationModels
 #endif
 
-/// Wrapper Apple Foundation Models (`LanguageModelSession`) pour l'enrichissement
-/// de libellés bancaires. 100% on-device, gratuit, pas de clé API. iOS 26.0+.
+/// Wrapper around Apple Foundation Models (`LanguageModelSession`) for enriching
+/// bank labels. 100% on-device, free, no API key. iOS 26.0+.
 ///
-/// Si le framework n'est pas disponible (iOS < 26.0) ou si le modèle n'est pas dispo
-/// sur l'appareil, `identify(...)` renvoie nil — `AIEnrichmentBackend` (le point de
-/// dispatch partagé) bascule alors vers `LocalLLMService` si l'utilisateur en a
-/// configuré un, ou continue simplement avec Sirene + MapKit.
+/// If the framework isn't available (iOS < 26.0) or the model isn't available
+/// on the device, `identify(...)` returns nil — `AIEnrichmentBackend` (the shared
+/// dispatch point) then falls back to `LocalLLMService` if the user configured
+/// one, or simply continues with Sirene + MapKit.
 ///
-/// Privacy : aucun appel réseau, aucune télémétrie. Cohérent avec le projet privacy-first.
+/// Privacy: no network calls, no telemetry. Consistent with the project's privacy-first stance.
 @MainActor
 final class EnrichmentLLMService {
 
     static let shared = EnrichmentLLMService()
 
-    /// Indique si le framework Foundation Models est disponible ET prêt sur cet appareil.
+    /// Indicates whether the Foundation Models framework is available AND ready on this device.
     var isAvailable: Bool {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
@@ -28,8 +28,8 @@ final class EnrichmentLLMService {
         return false
     }
 
-    /// Tente d'identifier un marchand à partir du libellé brut + contexte transaction.
-    /// Renvoie un `MerchantEnrichment` avec source=.llm si succès, nil sinon.
+    /// Tries to identify a merchant from the raw label + transaction context.
+    /// Returns a `MerchantEnrichment` with source=.llm on success, nil otherwise.
     func identify(context: MerchantEnrichmentContext) async -> MerchantEnrichment? {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
@@ -55,11 +55,11 @@ final class EnrichmentLLMService {
     }
     #endif
 
-    /// Complétion texte générique via Foundation Models. `nil` si le framework
-    /// est indisponible ou si la génération échoue — même contrat de silence
-    /// qu'`identify`. Utilisée par `AIEnrichmentBackend.completeText` pour les
-    /// tâches qui ne sont pas de l'identification de marchand (extraction de
-    /// relevés, notamment).
+    /// Generic text completion via Foundation Models. `nil` if the framework
+    /// is unavailable or generation fails — same silent-failure contract
+    /// as `identify`. Used by `AIEnrichmentBackend.completeText` for
+    /// tasks other than merchant identification (statement extraction,
+    /// notably).
     func complete(system: String, user: String) async -> String? {
         #if canImport(FoundationModels)
         if #available(iOS 26.0, macOS 26.0, *) {
@@ -76,24 +76,24 @@ final class EnrichmentLLMService {
         return nil
     }
 
-    /// Vrai si le modèle Apple embarqué accepte une IMAGE en entrée.
+    /// True if the embedded Apple model accepts an IMAGE as input.
     ///
-    /// ⚠️ `FoundationModels.Attachment` / `ImageAttachmentContent` sont
-    /// `@available(iOS 27.0, macOS 27.0)` — un cran APRÈS le reste du framework
-    /// (iOS 26). Vérifié dans le SDK, pas déduit.
+    /// ⚠️ `FoundationModels.Attachment` / `ImageAttachmentContent` are
+    /// `@available(iOS 27.0, macOS 27.0)` — one step AFTER the rest of the framework
+    /// (iOS 26). Verified in the SDK, not inferred.
     ///
-    /// ⚠️ **`@available` ne suffit pas ici** : le SDK d'Xcode 26 (Swift 6.3,
-    /// iOS 26) ne DÉCLARE MÊME PAS `Attachment` — ce n'est pas juste marqué
-    /// indisponible, le symbole n'existe pas du tout dans ce SDK. `#if
-    /// canImport(FoundationModels)` passe quand même (le MODULE existe depuis
-    /// iOS 26), donc `if #available` seul laisse le compilateur essayer de
-    /// résoudre `Attachment` et échouer avec « Cannot find 'Attachment' in
-    /// scope » — sur Xcode 26 précisément, pas sur Xcode 27 (Swift 6.4, SDK
-    /// iOS 27, où le type existe). D'où le garde de COMPILATION `#if
-    /// compiler(>=6.4)` en plus du garde d'exécution : il retire le bloc du
-    /// programme AVANT que le type-checker n'ait à résoudre `Attachment`.
-    /// Seuil vérifié empiriquement (`xcrun swift --version` de chaque
-    /// toolchain) : Xcode 26.6 → Swift 6.3.3, Xcode 27.0 → Swift 6.4.
+    /// ⚠️ **`@available` isn't enough here**: Xcode 26's SDK (Swift 6.3,
+    /// iOS 26) doesn't even DECLARE `Attachment` — it's not just marked
+    /// unavailable, the symbol doesn't exist at all in this SDK. `#if
+    /// canImport(FoundationModels)` still passes (the MODULE has existed since
+    /// iOS 26), so `if #available` alone lets the compiler try to
+    /// resolve `Attachment` and fail with "Cannot find 'Attachment' in
+    /// scope" — on Xcode 26 specifically, not on Xcode 27 (Swift 6.4, SDK
+    /// iOS 27, where the type exists). Hence the COMPILE-TIME guard `#if
+    /// compiler(>=6.4)` in addition to the runtime guard: it strips the block
+    /// out of the program BEFORE the type-checker has to resolve `Attachment`.
+    /// Threshold verified empirically (`xcrun swift --version` for each
+    /// toolchain): Xcode 26.6 → Swift 6.3.3, Xcode 27.0 → Swift 6.4.
     var supportsImageInput: Bool {
         #if compiler(>=6.4) && canImport(FoundationModels)
         if #available(iOS 27.0, macOS 27.0, *) {
@@ -103,17 +103,17 @@ final class EnrichmentLLMService {
         return false
     }
 
-    /// Complétion à partir d'une IMAGE : le modèle lit la capture lui-même.
+    /// Completion from an IMAGE: the model reads the screenshot itself.
     ///
-    /// C'est la voie de loin la plus robuste — la mise en page (colonnes,
-    /// regroupements par date, sous-titres de catégorie) porte du sens que le
-    /// texte OCR aplati détruit, et qu'aucune heuristique d'ordre de lignes ne
-    /// reconstitue de façon générale.
+    /// This is by far the more robust path — the layout (columns,
+    /// grouping by date, category subtitles) carries meaning that flattened
+    /// OCR text destroys, and that no line-ordering heuristic
+    /// reconstructs in a general way.
     ///
-    /// ⚠️ Même garde `#if compiler(>=6.4)` que `supportsImageInput` ci-dessus —
-    /// `Attachment` n'existe pas dans le SDK d'Xcode 26. Sur ce toolchain,
-    /// cette fonction se réduit à `return nil` : `supportsImageInput` vaut déjà
-    /// `false` à cet endroit, donc aucun appelant ne devrait l'atteindre.
+    /// ⚠️ Same `#if compiler(>=6.4)` guard as `supportsImageInput` above —
+    /// `Attachment` doesn't exist in Xcode 26's SDK. On that toolchain,
+    /// this function reduces to `return nil`: `supportsImageInput` is already
+    /// `false` there, so no caller should ever reach it.
     func complete(system: String, user: String, image: CGImage) async -> String? {
         #if compiler(>=6.4) && canImport(FoundationModels)
         if #available(iOS 27.0, macOS 27.0, *) {
@@ -251,9 +251,9 @@ final class EnrichmentLLMService {
     """
 
     static func buildPrompt(context: MerchantEnrichmentContext) -> String {
-        // On donne TOUJOURS le libellé brut original au LLM — c'est lui qui contient
-        // les indices géographiques (codes pays, noms de villes) que le canonical aurait
-        // perdu en route.
+        // We ALWAYS give the LLM the original raw label — it's what carries
+        // the geographic clues (country codes, city names) that the canonical form may have
+        // lost along the way.
         var lines = ["Libellé bancaire brut : \(context.rawLabel)"]
         if let canonical = context.canonicalName,
            !canonical.isEmpty,
@@ -289,7 +289,7 @@ final class EnrichmentLLMService {
     // MARK: - Parser
 
     static func parseJSONResponse(_ raw: String, context: MerchantEnrichmentContext) -> MerchantEnrichment? {
-        // Strip code fences si le modèle en a mis quand même
+        // Strip code fences if the model added them anyway
         var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if cleaned.hasPrefix("```") {
             if let firstNewline = cleaned.firstIndex(of: "\n") {
@@ -299,7 +299,7 @@ final class EnrichmentLLMService {
                 cleaned = String(cleaned.dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines)
             }
         }
-        // Trouve le premier { et le dernier }
+        // Find the first { and the last }
         guard let start = cleaned.firstIndex(of: "{"),
               let end = cleaned.lastIndex(of: "}")
         else { return nil }
@@ -309,10 +309,10 @@ final class EnrichmentLLMService {
               let payload = try? JSONDecoder().decode(LLMPayload.self, from: data)
         else { return nil }
 
-        // On laisse l'orchestrateur faire le mapping category text → category_id Nemoris
-        // (il a accès au repo). Ici on stocke juste les champs bruts : le nom de catégorie
-        // part dans `categoryHint`, que `EnrichmentOrchestrator.resolvingCategoryHint`
-        // convertit en `categoryId`. Avant, il était décodé puis jeté.
+        // We let the orchestrator do the category text → Nemoris category_id mapping
+        // (it has access to the repo). Here we just store the raw fields: the category name
+        // goes into `categoryHint`, which `EnrichmentOrchestrator.resolvingCategoryHint`
+        // converts into `categoryId`. It used to be decoded then discarded.
         var result = MerchantEnrichment(
             displayName: payload.name,
             domain: payload.domain,

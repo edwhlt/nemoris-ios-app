@@ -1,10 +1,10 @@
 import Foundation
 
-/// Client de l'API publique recherche-entreprises.api.gouv.fr.
-/// Pas de clé, pas d'auth, ~7 req/sec selon docs gov.
+/// Client for the public recherche-entreprises.api.gouv.fr API.
+/// No key, no auth, ~7 req/sec per the gov docs.
 ///
-/// Privacy : seul le query string (nom du commerce ± code postal) sort de l'appareil.
-/// Aucune donnée transaction n'est envoyée.
+/// Privacy: only the query string (business name ± postal code) leaves the device.
+/// No transaction data is sent at all.
 actor SireneClient {
 
     static let shared = SireneClient()
@@ -12,20 +12,20 @@ actor SireneClient {
     private let baseURL = URL(string: "https://recherche-entreprises.api.gouv.fr/search")!
     private let session: URLSession
 
-    /// Cache en mémoire : query → résultats. Évite les double appels dans une même session.
-    /// Pas de persistance disque dans cette V1 — on peut ajouter une table SQLite plus tard.
+    /// In-memory cache: query → results. Avoids double calls within the same session.
+    /// No disk persistence in this V1 — a SQLite table could be added later.
     private var cache: [String: [SireneEstablishment]] = [:]
 
     init(session: URLSession = .shared) {
         self.session = session
     }
 
-    /// Recherche des entreprises matchant `query`. Optionnellement filtre par code postal.
+    /// Searches for companies matching `query`. Optionally filters by postal code.
     /// - Parameters:
-    ///   - query: nom du commerce (raison sociale ou enseigne)
-    ///   - postalCode: code postal (5 chiffres) pour réduire le nombre de résultats
-    ///   - limit: nombre maximum de résultats (1-25, défaut 10)
-    /// - Returns: liste de SireneEstablishment ; vide si rien trouvé
+    ///   - query: business name (legal or trade name)
+    ///   - postalCode: postal code (5 digits) to reduce the number of results
+    ///   - limit: max number of results (1-25, default 10)
+    /// - Returns: a list of SireneEstablishment; empty if nothing found
     func search(query: String, postalCode: String? = nil, limit: Int = 10) async throws -> [SireneEstablishment] {
         let normalized = query
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -40,9 +40,9 @@ actor SireneClient {
             .init(name: "q", value: normalized),
             .init(name: "per_page", value: String(min(max(limit, 1), 25))),
             .init(name: "minimal", value: String(true)),
-            // Privilégier les établissements ACTIFS (etat_administratif=A)
+            // Prefer ACTIVE establishments (etat_administratif=A)
             .init(name: "etat_administratif", value: "A"),
-            // Inclure les coordonnées GPS dans la réponse (sinon parfois absentes)
+            // Include GPS coordinates in the response (sometimes absent otherwise)
             .init(name: "include", value: "siege")
         ]
         if let pc = postalCode, pc.count == 5 {

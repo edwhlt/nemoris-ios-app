@@ -1,26 +1,26 @@
 import Foundation
 
-// Le planificateur de requêtes marchand.
-// ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
+// The merchant query planner.
+// ⚠️ PURE FILE: `import Foundation` ONLY.
 //
-// Deux fonctions pures totales :
-//   extract(_:)                   → analyse le libellé (nom / localité / bruit)
-//   plan(extraction:locality:…)   → cascade ordonnée de tentatives concrètes
+// Two total pure functions:
+//   extract(_:)                   → parses the label (name / locality / noise)
+//   plan(extraction:locality:…)   → an ordered cascade of concrete attempts
 //
-// Entre les deux, l'exécuteur intercale la résolution asynchrone de la localité. Voir
-// `LocalityResolver` pour la justification de ce découpage.
+// Between the two, the executor interleaves the asynchronous locality
+// resolution. See `LocalityResolver` for why the split is done this way.
 //
-// RÈGLE CARDINALE, vérifiée par t1 : la localité ne finit JAMAIS dans `q=`.
-// L'API matche `q` contre la raison sociale et les enseignes, jamais contre l'adresse ;
-// y mettre la ville ne restreint pas la recherche, il la fait échouer.
+// CARDINAL RULE, verified by t1: the locality NEVER ends up in `q=`.
+// The API matches `q` against the company name and trade names, never against
+// the address; putting the city in doesn't restrict the search, it makes it fail.
 
 enum MerchantQueryPlanner {
 
-    // MARK: - Entrée
+    // MARK: - Input
 
-    /// Miroir de `NemorisEngine.TokenTag`, recopié par `rawValue`.
-    /// Le planificateur ne peut pas importer `NemorisEngine` : c'est un package SwiftPM,
-    /// et le harness `swiftc` devrait alors le compiler en entier.
+    /// Mirror of `NemorisEngine.TokenTag`, copied by `rawValue`.
+    /// The planner can't import `NemorisEngine`: it's a SwiftPM package,
+    /// and the `swiftc` harness would then have to compile it in full.
     struct Token: Hashable, Sendable {
         enum Tag: String, Sendable, Hashable {
             case merchant, processor, date, city, country, direction, identifier, noise
@@ -36,17 +36,17 @@ enum MerchantQueryPlanner {
 
     struct Input: Hashable, Sendable {
         let rawLabel: String
-        /// Sortie de `NormalizerPipeline` — consommée, jamais recalculée.
+        /// Output of `NormalizerPipeline` — consumed, never recomputed.
         var engineMerchantCandidate: String?
         var engineCityCandidate: String?
         var engineCountryCandidate: String?
         var engineProcessorId: String?
         var engineTokens: [Token]
-        /// Champs du formulaire : ils PRIMENT sur toute déduction.
+        /// Form fields: they TAKE PRIORITY over any inference.
         var userCountry: String?
         var userPostalCode: String?
         var userQueryOverride: String?
-        /// nil ⇒ chemin déterministe seul, toujours valide.
+        /// nil ⇒ deterministic path only, always valid.
         var refinement: LLMQueryRefinement?
 
         init(rawLabel: String,
@@ -104,7 +104,7 @@ enum MerchantQueryPlanner {
     // MARK: - Extraction
 
     static func extract(_ input: Input) -> MerchantLabelExtraction {
-        // L'utilisateur a tapé sa propre requête : elle fait autorité, on ne redécoupe rien.
+        // The user typed their own query: it's authoritative, we don't re-split anything.
         if let override = input.userQueryOverride?.trimmingCharacters(in: .whitespacesAndNewlines),
            !override.isEmpty {
             return overrideExtraction(input, override: override)
@@ -117,13 +117,13 @@ enum MerchantQueryPlanner {
             rawLabel: input.rawLabel, tokens: tokens
         )
 
-        // --- 1. Gabarit bancaire à champs fixes (91 % des libellés « PAIEMENT »).
+        // --- 1. Fixed-field bank template (91% of "PAIEMENT" labels).
         if let (template, slots) = BankLabelTemplate.match(tokens) {
             return templateExtraction(input, tokens: tokens, template: template,
                                       slots: slots, refinement: refinement)
         }
 
-        // --- 2. Repli heuristique : nettoyage + localité en fin de libellé.
+        // --- 2. Heuristic fallback: cleanup + locality at the end of the label.
         return heuristicExtraction(input, tokens: tokens, refinement: refinement)
     }
 
@@ -142,23 +142,23 @@ enum MerchantQueryPlanner {
         )
     }
 
-    /// Raccourci : extraction + plan, pour les tests et les appelants sans localité résolue.
+    /// Shortcut: extraction + plan, for tests and callers with no resolved locality.
     static func plan(_ input: Input,
                      locality: ResolvedLocality? = nil,
                      options: Options = .interactive) -> MerchantQueryPlan {
         plan(extraction: extract(input), locality: locality, options: options)
     }
 
-    // MARK: - Construction des tentatives
+    // MARK: - Building attempts
 
     private static func buildAttempts(extraction: MerchantLabelExtraction,
                                       locality: ResolvedLocality?,
                                       options: Options) -> [SearchAttempt] {
-        // Aucune tentative pour un particulier : on n'envoie JAMAIS le nom d'une personne
-        // physique à un registre d'entreprises. Vie privée, et ça ne donne rien.
+        // No attempt for a private individual: we NEVER send a real person's
+        // name to a company registry. Privacy, and it wouldn't return anything anyway.
         guard !extraction.isPersonNotBusiness else { return [] }
-        // Ni pour un libellé dont il ne reste rien d'exploitable : pas de requête réseau
-        // pour « *** » ou « A ».
+        // Nor for a label with nothing usable left: no network request
+        // for "***" or "A".
         guard !extraction.degenerate else { return [] }
 
         let name = extraction.nameQuery
@@ -184,13 +184,13 @@ enum MerchantQueryPlanner {
             )
         }
 
-        // Le registre d'entreprises n'est interrogé que pour la France. Un libellé
-        // vietnamien ne produit qu'une recherche cartographique — inutile de dépenser
-        // une requête chez Sirene pour un restaurant de Da Nang.
+        // The company registry is only queried for France. A Vietnamese
+        // label only produces a map search — no point spending a
+        // Sirene request on a restaurant in Da Nang.
         let isFrench = (country == nil || country == "FR")
 
         if isFrench {
-            // 1 — commune INSEE : le filtre le plus précis.
+            // 1 — INSEE commune: the most precise filter.
             if let insee = locality?.inseeCode, !extraction.isOnlinePayment {
                 add(.companyRegistry(registryQuery(name, commune: insee)),
                     "nom seul + commune INSEE \(insee)", 0.95)
@@ -202,34 +202,34 @@ enum MerchantQueryPlanner {
                 add(.companyRegistry(registryQuery(name, postal: postal)),
                     "nom seul + code postal \(postal)", 0.9)
             }
-            // 3 — département.
+            // 3 — department.
             if let dep = extraction.departmentHint ?? (extraction.isOnlinePayment ? nil : locality?.departmentCode) {
                 add(.companyRegistry(registryQuery(name, departement: dep)),
                     "nom seul + département \(dep)", 0.75)
             }
-            // 4 — nom nu. TOUJOURS présent : c'est le correctif du bug d'origine.
-            // « q=srom flanches » rendait 0, « q=srom » rend 13 résultats parmi lesquels
-            // le classement par proximité du lieu retrouve le bon.
+            // 4 — bare name. ALWAYS present: it's the fix for the original bug.
+            // "q=srom flanches" returned 0, "q=srom" returns 13 results among which
+            // ranking by proximity to the location finds the right one.
             add(.companyRegistry(registryQuery(name)),
                 locality == nil && extraction.primaryLocalityText != nil
                     ? "nom seul, tri par proximité du lieu"
                     : "nom seul",
                 0.6)
-            // 5 — nom raccourci : les enseignes sont tronquées en largeur fixe dans les
-            // relevés (« SC-PHIE NIMES V »), le dernier token est souvent coupé.
+            // 5 — shortened name: chain names are truncated at a fixed width in
+            // statements ("SC-PHIE NIMES V"), the last token is often cut off.
             //
-            // ⚠️ Pas de tentative « nom + localité » ici, même quand la commune n'est pas
-            // résolue et que le fragment est ambigu (« SROM **FLANCHES** » est un lieu-dit
-            // mais « FOURNIL **PLIQUE** » est le nom du boulanger). Ce serait rouvrir la
-            // porte au bug d'origine. Et c'est inutile : `q=fournil` trouve déjà la
-            // boulangerie — le registre matche les noms partiels, et `CandidateRanker`
-            // fait remonter « FOURNIL PLIQUE » sur le recouvrement de tokens. La règle
-            // cardinale reste absolue : la localité ne va JAMAIS dans `q=`.
+            // ⚠️ No "name + locality" attempt here, even when the commune isn't
+            // resolved and the fragment is ambiguous ("SROM **FLANCHES**" is a place
+            // name but "FOURNIL **PLIQUE**" is the baker's own name). That would reopen
+            // the door to the original bug. And it's unnecessary: `q=fournil` already
+            // finds the bakery — the registry matches partial names, and `CandidateRanker`
+            // promotes "FOURNIL PLIQUE" based on token overlap. The cardinal rule
+            // stays absolute: the locality NEVER goes into `q=`.
             if extraction.nameTokens.count >= 3 {
                 let shortened = extraction.nameTokens.dropLast().joined(separator: " ")
                 add(.companyRegistry(registryQuery(shortened)), "nom raccourci", 0.45)
             }
-            // 6 — proximité géographique, dernier recours si tout le reste est vide.
+            // 6 — geographic proximity, last resort if everything else is empty.
             if let lat = locality?.latitude, let lon = locality?.longitude,
                !extraction.isOnlinePayment {
                 add(.companyRegistryNearPoint(latitude: lat, longitude: lon,
@@ -252,8 +252,8 @@ enum MerchantQueryPlanner {
             )), "recherche cartographique", 0.5)
         }
 
-        // 8 — rejeu en incluant les entreprises fermées. Interactif seulement : en batch,
-        // un établissement fermé est presque toujours un faux positif.
+        // 8 — replay including closed companies. Interactive only: in batch,
+        // a closed establishment is almost always a false positive.
         if isFrench, options.includeCeased {
             add(.companyRegistry(registryQuery(name, ceased: true)),
                 "en incluant les entreprises fermées", 0.25)
@@ -262,14 +262,15 @@ enum MerchantQueryPlanner {
         return attempts
     }
 
-    // MARK: - Contexte de classement
+    // MARK: - Ranking context
 
     private static func rankingContext(extraction: MerchantLabelExtraction,
                                        locality: ResolvedLocality?) -> RankingContext {
-        // Si l'oracle n'a pas reconnu de commune, le texte de localité n'est PAS perdu :
-        // il devient un signal de tri cherché dans l'adresse des candidats. Un lieu-dit
-        // inconnu de geo.api.gouv.fr apparaît très souvent tel quel dans l'adresse du bon
-        // établissement. C'est ce qui rend le correctif indépendant de l'oracle.
+        // If the oracle didn't recognize a commune, the locality text is NOT lost:
+        // it becomes a sort signal looked for in candidates' addresses. A place
+        // name unknown to geo.api.gouv.fr very often shows up as-is in the
+        // right establishment's address. That's what makes the fix independent of
+        // the oracle.
         let freeText = locality == nil ? extraction.primaryLocalityText : nil
         return RankingContext(
             nameTokens: extraction.nameTokens,
@@ -317,8 +318,9 @@ enum MerchantQueryPlanner {
         var dropped = slots.dropped
         var localityTokens = localityTokensFromUser(input)
 
-        // La localité vient du CRÉNEAU du gabarit — position fixe, avant le marchand,
-        // et tronquée. Confiance 1.0 : ce n'est pas une devinette, c'est la structure.
+        // The locality comes from the template's SLOT — a fixed position, before
+        // the merchant, and truncated. Confidence 1.0: it's not a guess, it's the
+        // structure.
         if let range = slots.localityRange {
             let text = tokens[range].joined(separator: " ")
             if !text.isEmpty {
@@ -328,12 +330,12 @@ enum MerchantQueryPlanner {
         }
 
         var nameTokens = Array(tokens[slots.merchantRange])
-        // Le créneau marchand peut encore contenir un code postal ou un code pays isolé.
+        // The merchant slot can still contain an isolated postal code or country code.
         nameTokens = stripGeoNoise(from: nameTokens, into: &localityTokens, dropped: &dropped)
-        // La ville se répète très souvent dans le nom de l'enseigne : « NIMES AUCHAN NIMES »,
-        // « LYON CITADIUM LYON », « PARIS VELIZE JD PARIS VELIZE ». La laisser dans `q=`
-        // reproduit exactement le bug que cet axe corrige — `q=auchan` + filtre commune
-        // trouve, `q=auchan nimes` ne trouve rien.
+        // The city very often repeats in the chain's name: "NIMES AUCHAN NIMES",
+        // "LYON CITADIUM LYON", "PARIS VELIZE JD PARIS VELIZE". Leaving it in `q=`
+        // reproduces exactly the bug this feature fixes — `q=auchan` + a commune
+        // filter finds it, `q=auchan nimes` finds nothing.
         nameTokens = stripRepeatedLocality(from: nameTokens, localityTokens: localityTokens,
                                            dropped: &dropped)
         nameTokens = joinSpelledAcronyms(nameTokens)
@@ -342,7 +344,7 @@ enum MerchantQueryPlanner {
             ?? refinement.countryCode
             ?? input.engineCountryCandidate?.uppercased()
         if country == nil, localityTokens.contains(where: { $0.kind == .postalCode }) { country = "FR" }
-        // Un gabarit bancaire français implique la France dès qu'un lieu est présent.
+        // A French bank template implies France as soon as a place is present.
         if country == nil, slots.localityRange != nil || slots.departmentCode != nil { country = "FR" }
 
         return MerchantLabelExtraction(
@@ -366,7 +368,7 @@ enum MerchantQueryPlanner {
         var localityTokens = localityTokensFromUser(input)
         var working: [String] = []
 
-        // 1. Retrait des préfixes bancaires en TÊTE, des processeurs et des références.
+        // 1. Stripping LEADING bank prefixes, processors and references.
         var leadingPrefix = true
         for token in tokens {
             if leadingPrefix, AbbreviationTable.isBankPrefix(token) {
@@ -385,9 +387,9 @@ enum MerchantQueryPlanner {
             if BankLabelTemplate.isDayMonth(token) {
                 dropped.append(DroppedToken(value: token, reason: .date)); continue
             }
-            // Suite de chiffres trop longue pour être un code postal : c'est une référence
-            // de mandat ou de contrat (« IDFM 332747815 2980171 786180 »). Les laisser
-            // passer produisait des `q=` entièrement composés d'identifiants.
+            // A run of digits too long to be a postal code: it's a mandate or contract
+            // reference ("IDFM 332747815 2980171 786180"). Letting them through
+            // produced `q=`s made entirely of identifiers.
             if token.count >= 6, token.allSatisfy(\.isNumber) {
                 dropped.append(DroppedToken(value: token, reason: .transactionId)); continue
             }
@@ -395,7 +397,7 @@ enum MerchantQueryPlanner {
             working.append(token)
         }
 
-        // 2. Ville étrangère connue, n'importe où.
+        // 2. A known foreign city, anywhere.
         var countryFromCity: String? = nil
         if let hit = ForeignLocalityTable.findCity(in: working) {
             localityTokens.append(LocalityToken(raw: hit.name, kind: .cityName, confidence: 1.0))
@@ -404,7 +406,7 @@ enum MerchantQueryPlanner {
             working.removeSubrange(hit.range)
         }
 
-        // 3. Code pays isolé en fin de libellé (jamais ailleurs — « CB » n'est pas Cuba).
+        // 3. An isolated country code at the end of the label (never elsewhere — "CB" isn't Cuba).
         var countryFromCode: String? = nil
         if let last = working.last, last.count == 2, last.allSatisfy(\.isLetter),
            ForeignLocalityTable.countryCodes.contains(last), working.count > 1 {
@@ -413,11 +415,11 @@ enum MerchantQueryPlanner {
             working.removeLast()
         }
 
-        // 4. Code postal / bruit géographique résiduel.
+        // 4. Residual postal code / geographic noise.
         working = stripGeoNoise(from: working, into: &localityTokens, dropped: &dropped)
 
-        // 5. Ville confirmée par le moteur (son set fermé de 153 communes) : elle est
-        //    fiable quand elle répond, mais elle rate tout le reste — d'où l'étape 6.
+        // 5. A city confirmed by the engine (its closed set of 153 communes): reliable
+        //    when it answers, but it misses everything else — hence step 6.
         if let engineCity = input.engineCityCandidate?.lowercased(),
            !engineCity.isEmpty,
            let index = working.firstIndex(of: engineCity) {
@@ -426,13 +428,14 @@ enum MerchantQueryPlanner {
             working.remove(at: index)
         }
 
-        // 6. Sinon, n-gram de fin agrandi vers la gauche à travers les particules
-        //    toponymiques françaises (« saint didier au mont d or », « aix en provence »).
-        //    Deviné, donc confiance 0.6 — et il reste TOUJOURS au moins un token de nom.
+        // 6. Otherwise, a trailing n-gram grown leftward across French toponymic
+        //    particles ("saint didier au mont d or", "aix en provence").
+        //    A guess, hence confidence 0.6 — and at least one name token always
+        //    remains.
         //
-        //    ⚠️ Jamais sur un virement ou un prélèvement : il n'y a pas de point de vente,
-        //    donc pas de ville à deviner. Sans cette garde, « VIR INST PAUL ANDRE » voyait
-        //    « andre » comme une commune et l'arrachait au nom.
+        //    ⚠️ Never on a transfer or a direct debit: there's no point of sale,
+        //    so no city to guess. Without this guard, "VIR INST PAUL ANDRE" saw
+        //    "andre" as a commune and tore it off the name.
         let isTransfer = tokens.contains { $0 == "vir" || $0 == "virement" || $0 == "prlv" }
         if !isTransfer,
            !localityTokens.contains(where: { $0.kind == .cityName }), working.count >= 2 {
@@ -445,7 +448,7 @@ enum MerchantQueryPlanner {
             }
         }
 
-        // 7. Le raffinement peut proposer une localité que rien n'a vue.
+        // 7. Refinement may propose a locality that nothing else saw.
         if !localityTokens.contains(where: { $0.kind == .cityName }),
            let hinted = refinement.localityName, !hinted.isEmpty {
             localityTokens.append(LocalityToken(raw: hinted, kind: .cityName, confidence: 0.5))
@@ -474,46 +477,47 @@ enum MerchantQueryPlanner {
 
     // MARK: - Aides
 
-    /// Particules toponymiques françaises. Un nom de commune ne s'arrête jamais dessus,
-    /// donc on continue de grandir vers la gauche tant qu'on en croise une.
+    /// French toponymic particles. A commune name never stops on one of these,
+    /// so we keep growing leftward as long as we hit one.
     private static let toponymParticles: Set<String> = [
         "saint", "st", "sainte", "ste", "sur", "sous", "en", "les", "le", "la", "lez",
         "de", "du", "des", "aux", "au", "d", "l", "mont", "val", "pres", "sr"
     ]
 
-    /// Fragments qui terminent souvent un libellé sans être des lieux.
+    /// Fragments that often end a label without being places.
     private static let nonLocalityTrailers: Set<String> = [
         "com", "net", "org", "www", "app", "bill", "shop", "store", "online", "web",
         "sarl", "sas", "sasu", "eurl", "sci", "inc", "ltd", "gmbh", "bv", "nv", "plc"
     ]
 
-    /// Combien de tokens de fin forment plausiblement une commune multi-mots.
-    /// Renvoie 0 si le dernier token est manifestement autre chose.
+    /// How many trailing tokens plausibly form a multi-word commune name.
+    /// Returns 0 if the last token is clearly something else.
     ///
-    /// ⚠️ Volontairement CONSERVATEUR (seuil à 4 caractères) : une localité devinée à tort
-    /// RETIRE un mot du `q=`, ce qui est destructeur. Le seuil bas d'origine transformait
-    /// « APPLE COM/BILL » en ville « com », « ON AIR » en ville « on » et « Cat Ba » en
-    /// ville « ba ». Rater une ville coûte une requête de plus ; en inventer une coûte le
-    /// bon résultat. Les communes courtes légitimes (Hué, Gif) arrivent par le gabarit
-    /// bancaire ou la table étrangère, pas par cette devinette.
+    /// ⚠️ Deliberately CONSERVATIVE (4-character threshold): a wrongly-guessed
+    /// locality REMOVES a word from `q=`, which is destructive. The original
+    /// low threshold turned "APPLE COM/BILL" into the city "com", "ON AIR" into
+    /// the city "on", and "Cat Ba" into the city "ba". Missing a city costs one
+    /// more request; inventing one costs the right result. Legitimate short
+    /// commune names (Hué, Gif) arrive via the bank template or the foreign
+    /// locality table, not through this guess.
     private static func trailingLocalitySpan(_ tokens: [String]) -> Int {
         guard let last = tokens.last, last.allSatisfy(\.isLetter),
               !nonLocalityTrailers.contains(last) else { return 0 }
 
-        // Amorce. Un mot d'au moins 4 lettres peut porter une commune à lui seul.
-        // Un mot court ne le peut QUE s'il termine un nom composé, ce que signale la
-        // particule qui le précède : « Saint-Didier-au-Mont-**d'Or** », « …-sur-**Mer** ».
+        // Seed. A word of at least 4 letters can carry a commune name on its own.
+        // A short word can ONLY do so if it ends a compound name, which the
+        // particle before it signals: "Saint-Didier-au-Mont-**d'Or**", "…-sur-**Mer**".
         let precededByParticle = tokens.count >= 2
             && toponymParticles.contains(tokens[tokens.count - 2])
         guard last.count >= 4 || precededByParticle else { return 0 }
 
         var span = 1
-        // Grandit tant que le token immédiatement à gauche est une particule.
+        // Grows as long as the token immediately to the left is a particle.
         while span < tokens.count - 1, span < 7 {
             let candidate = tokens[tokens.count - 1 - span]
             guard toponymParticles.contains(candidate) else { break }
             span += 1
-            // Une particule est forcément suivie (à gauche) d'un mot qui fait partie du nom.
+            // A particle is necessarily followed (to its left) by a word that's part of the name.
             if span < tokens.count - 1 {
                 span += 1
             } else {
@@ -523,11 +527,11 @@ enum MerchantQueryPlanner {
         return span
     }
 
-    /// Retire les codes postaux et codes pays restés dans le nom, en les versant
-    /// dans les tokens de localité. C'est le correctif du bug « 75011 dans q= » :
-    /// `NormalizerPipeline.isPureNumericNoise` ne jette un token numérique que s'il fait
-    /// ≤ 4 caractères ET qu'il est en dernier — un code postal à 5 chiffres survit donc
-    /// toujours et finit dans `merchantCandidate`.
+    /// Strips postal codes and country codes still stuck in the name, moving
+    /// them into the locality tokens. This is the fix for the "75011 in q=" bug:
+    /// `NormalizerPipeline.isPureNumericNoise` only drops a numeric token if it's
+    /// ≤ 4 characters AND it's the last one — a 5-digit postal code therefore always
+    /// survives and ends up in `merchantCandidate`.
     private static func stripGeoNoise(from tokens: [String],
                                       into localityTokens: inout [LocalityToken],
                                       dropped: inout [DroppedToken]) -> [String] {
@@ -542,14 +546,15 @@ enum MerchantQueryPlanner {
             }
             out.append(token)
         }
-        // Ne jamais vider complètement le nom : mieux vaut un `q` bruité qu'un `q` vide.
+        // Never empty the name completely: a noisy `q` is better than an empty `q`.
         return out.isEmpty ? tokens : out
     }
 
-    /// Recolle les sigles épelés lettre par lettre : « C P A M TROYES » → « cpam troyes »,
-    /// « B B HOTEL » → « bb hotel ». Les relevés espacent fréquemment les sigles, et un
-    /// registre d'entreprises ne trouve rien avec `q=c p a m` alors que `q=cpam` trouve.
-    /// Seules les séries d'AU MOINS deux lettres isolées consécutives sont recollées.
+    /// Stitches back together acronyms spelled letter by letter: "C P A M TROYES" →
+    /// "cpam troyes", "B B HOTEL" → "bb hotel". Statements frequently space out
+    /// acronyms, and a company registry finds nothing with `q=c p a m` while
+    /// `q=cpam` finds it. Only runs of AT LEAST two consecutive single letters
+    /// are stitched together.
     static func joinSpelledAcronyms(_ tokens: [String]) -> [String] {
         var out: [String] = []
         var run: [String] = []
@@ -569,9 +574,9 @@ enum MerchantQueryPlanner {
         return out
     }
 
-    /// Retire du nom les mots qui répètent la localité déjà isolée.
-    /// Ne vide JAMAIS le nom : si l'enseigne n'est QUE le nom de la ville, on la garde
-    /// (« PAIEMENT PSC 1001 LYON LYON » vaut mieux que `q=` vide).
+    /// Removes from the name any words that repeat the already-isolated locality.
+    /// NEVER empties the name: if the chain's name IS the city name, we keep it
+    /// ("PAIEMENT PSC 1001 LYON LYON" is better than an empty `q=`).
     private static func stripRepeatedLocality(from tokens: [String],
                                               localityTokens: [LocalityToken],
                                               dropped: inout [DroppedToken]) -> [String] {
@@ -593,10 +598,11 @@ enum MerchantQueryPlanner {
         return [LocalityToken(raw: pc, kind: .postalCode, confidence: 1.0)]
     }
 
-    /// Tokens de travail. Utilise ceux du moteur quand ils sont là (en écartant ce qu'il
-    /// a déjà classé comme bruit structurel), sinon retombe sur une tokenisation locale.
-    /// Ce repli sert pendant le démarrage à froid du moteur (1 à 15 s pour charger ONNX) :
-    /// ce n'est PAS une seconde implémentation de la normalisation, juste un découpage.
+    /// Working tokens. Uses the engine's own when they're there (discarding what
+    /// it has already classified as structural noise), otherwise falls back to a
+    /// local tokenization. This fallback serves during the engine's cold start
+    /// (1 to 15s to load ONNX): it's NOT a second implementation of
+    /// normalization, just a split.
     static func tokenizeForPlanning(_ input: Input) -> [String] {
         if !input.engineTokens.isEmpty {
             let kept = input.engineTokens

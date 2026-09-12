@@ -1,23 +1,23 @@
 import Foundation
 
-// Villes et pays HORS FRANCE.
-// ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
+// Cities and countries OUTSIDE FRANCE.
+// ⚠️ PURE FILE: `import Foundation` ONLY.
 //
-// Périmètre volontairement restreint au non-français. Les communes FRANÇAISES ne sont
-// PAS listées ici : elles sont résolues par `geo.api.gouv.fr` (via `GeoCommuneResolver`),
-// qui connaît les 35 000 communes, gère la troncature en largeur fixe des relevés
-// (« GIF-SUR-YVETT » → Gif-sur-Yvette, « ISSY LES » → Issy-les-Moulineaux) et désambiguïse
-// par population. Aucune liste en dur ne peut faire ça — c'est pour cette raison précise
-// que la liste FR de l'ancien `LocationExtractor` n'est pas reprise ici.
+// Scope deliberately restricted to non-French places. FRENCH communes are
+// NOT listed here: they're resolved by `geo.api.gouv.fr` (via `GeoCommuneResolver`),
+// which knows all 35,000 communes, handles statements' fixed-width truncation
+// ("GIF-SUR-YVETT" → Gif-sur-Yvette, "ISSY LES" → Issy-les-Moulineaux) and disambiguates
+// by population. No hardcoded list can do that — that's the exact reason
+// the old `LocationExtractor`'s FR list isn't reused here.
 //
-// Ce qui reste en dur, c'est ce que l'oracle FR ne couvre pas : l'étranger.
+// What remains hardcoded is what the FR oracle doesn't cover: everywhere else.
 
 enum ForeignLocalityTable {
 
-    /// Ville étrangère (normalisée : minuscules, sans diacritiques) → code pays ISO-2.
-    /// Multi-mots acceptés — la recherche essaie les n-grams les plus longs d'abord.
+    /// Foreign city (normalized: lowercase, no diacritics) → ISO-2 country code.
+    /// Multi-word entries accepted — the lookup tries the longest n-grams first.
     static let cities: [String: String] = [
-        // Vietnam — les libellés VNPAY sont fréquents dans les relevés de voyage
+        // Vietnam — VNPAY labels are common on travel statements
         "ha noi": "VN", "hanoi": "VN", "ho chi minh": "VN", "saigon": "VN",
         "da nang": "VN", "danang": "VN", "hue": "VN", "hai phong": "VN",
         "nha trang": "VN", "da lat": "VN", "dalat": "VN", "hoi an": "VN",
@@ -64,7 +64,7 @@ enum ForeignLocalityTable {
         "ljubljana": "SI", "sofia": "BG", "beograd": "RS", "belgrade": "RS",
         "luxembourg": "LU", "monaco": "MC", "andorra": "AD", "andorre": "AD",
         "valletta": "MT", "malte": "MT",
-        // Amériques
+        // Americas
         "new york": "US", "los angeles": "US", "san francisco": "US",
         "chicago": "US", "miami": "US", "boston": "US", "seattle": "US",
         "las vegas": "US", "washington": "US", "austin": "US", "denver": "US",
@@ -73,7 +73,7 @@ enum ForeignLocalityTable {
         "mexico": "MX", "cancun": "MX", "guadalajara": "MX",
         "sao paulo": "BR", "rio de janeiro": "BR", "brasilia": "BR",
         "buenos aires": "AR", "santiago": "CL", "lima": "PE", "bogota": "CO",
-        // Afrique / Océanie
+        // Africa / Oceania
         "marrakech": "MA", "casablanca": "MA", "rabat": "MA", "tanger": "MA",
         "tunis": "TN", "djerba": "TN", "alger": "DZ", "le caire": "EG", "cairo": "EG",
         "dakar": "SN", "abidjan": "CI", "nairobi": "KE",
@@ -82,10 +82,10 @@ enum ForeignLocalityTable {
         "auckland": "NZ", "wellington": "NZ"
     ]
 
-    /// Codes pays ISO-2 acceptés comme jeton isolé dans un libellé.
-    /// ⚠️ `FR` en fait partie mais un token de 2 lettres n'est PROMU en code pays que
-    /// s'il est en position finale — sans quoi « CB CARREFOUR » verrait « cb » comme
-    /// un code pays, et surtout « SC-X2M » ou « JD » deviendraient des pays.
+    /// ISO-2 country codes accepted as an isolated token in a label.
+    /// ⚠️ "FR" is among them, but a 2-letter token is only PROMOTED to a country code if
+    /// it's in the final position — otherwise "CB CARREFOUR" would see "cb" as
+    /// a country code, and especially "SC-X2M" or "JD" would turn into countries.
     static let countryCodes: Set<String> = [
         "fr", "gb", "uk", "de", "es", "it", "nl", "be", "ch", "at", "pt", "ie",
         "lu", "mc", "ad", "mt", "cz", "pl", "hu", "ro", "gr", "se", "no", "dk",
@@ -97,8 +97,8 @@ enum ForeignLocalityTable {
         "au", "nz"
     ]
 
-    /// Cherche une ville étrangère parmi les tokens : n-grams de 3 mots, puis 2, puis 1.
-    /// Renvoie l'intervalle consommé + le code pays.
+    /// Looks for a foreign city among the tokens: 3-word n-grams, then 2, then 1.
+    /// Returns the consumed range + the country code.
     static func findCity(in tokens: [String]) -> (range: Range<Int>, countryCode: String, name: String)? {
         guard !tokens.isEmpty else { return nil }
         for span in stride(from: min(3, tokens.count), through: 1, by: -1) {

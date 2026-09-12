@@ -1,17 +1,17 @@
 import Foundation
 
-/// Orchestrateur qui lance Sirene + Apple Foundation Models + MapKit en parallèle
-/// et fusionne les résultats par vote pondéré (confidence × source_weight).
+/// Orchestrator that runs Sirene + Apple Foundation Models + MapKit in parallel
+/// and merges the results by weighted vote (confidence × source_weight).
 ///
-/// Stratégie cache :
-///   1. Lookup `enrichment_cache` par cacheKey → return immédiat si présent.
-///   2. Sinon, lance les 3 sources en parallèle (`async let`), fusionne, persiste.
+/// Cache strategy:
+///   1. Look up `enrichment_cache` by cacheKey → return immediately if present.
+///   2. Otherwise, run the 3 sources in parallel (`async let`), merge, persist.
 ///
-/// Limites :
-///   - Sirene : ~7 req/s côté API (gov.fr). Le caller est responsable du rate-limiting
-///     pour les imports en batch (`Task.sleep(150ms)` entre appels).
-///   - MapKit : lent (500ms-2s par requête). Limites Apple non documentées.
-///   - LLM : seulement iOS 18.1+ avec Foundation Models. Sinon no-op.
+/// Limits:
+///   - Sirene: ~7 req/s on the API side (gov.fr). The caller is responsible for rate-limiting
+///     on batch imports (`Task.sleep(150ms)` between calls).
+///   - MapKit: slow (500ms-2s per request). Apple's limits are undocumented.
+///   - LLM: only iOS 18.1+ with Foundation Models. Otherwise a no-op.
 actor EnrichmentOrchestrator {
 
     static let shared = EnrichmentOrchestrator()
@@ -21,24 +21,24 @@ actor EnrichmentOrchestrator {
     private let txRepository = TransactionRepository()
     private var categoryCache: [String: Int]? = nil  // categoryName lowercased → category_id
 
-    /// Pondération par source pour le vote (somme libre, on normalise pas).
+    /// Per-source weighting for the vote (a free sum, not normalized).
     private static let weights: [MerchantEnrichmentSource: Double] = [
-        .sirene:   1.0,   // données officielles, fiables
-        .mapkit:   0.7,   // bon pour POI physiques mais bruité
-        .llm:      0.6,   // utile pour catégoriser mais peut halluciner
-        .localLLM: 0.6,   // même niveau de confiance que .llm — une IA a deviné, peut halluciner
+        .sirene:   1.0,   // official data, reliable
+        .mapkit:   0.7,   // good for physical POIs but noisy
+        .llm:      0.6,   // useful for categorizing but can hallucinate
+        .localLLM: 0.6,   // same confidence level as .llm — an AI guessed, can hallucinate
         .merged:   1.0,
-        .manual:   2.0    // user prime sur tout
+        .manual:   2.0    // user always wins over everything
     ]
 
     // MARK: - Public API
 
-    /// Enrichit un contexte. Cache-first, sinon lance les sources et persiste le résultat fusionné.
-    /// Renvoie `nil` si aucune source n'a produit de signal exploitable.
+    /// Enriches a context. Cache-first, otherwise runs the sources and persists the merged result.
+    /// Returns `nil` if no source produced a usable signal.
     func enrich(_ context: MerchantEnrichmentContext) async -> MerchantEnrichment? {
         let key = context.cacheKey
-        // Le cache vit côté MainActor (`Library/Caches` via JSONFileCache),
-        // d'où le hop d'actor pour fetch/save.
+        // The cache lives on the MainActor (`Library/Caches` via JSONFileCache),
+        // hence the actor hop to fetch/save.
         if let cached = await repository.fetch(cacheKey: key), cached.hasContent {
             return cached
         }
@@ -59,18 +59,18 @@ actor EnrichmentOrchestrator {
     // MARK: - Source branches
 
     private func enrichViaSirene(_ context: MerchantEnrichmentContext) async -> MerchantEnrichment? {
-        // passe par le planificateur + l'exécuteur de cascade au lieu d'envoyer le
-        // libellé entier dans `q=`.
+        // goes through the planner + the cascade executor instead of sending the
+        // whole label in `q=`.
         //
-        // Avant : `q = canonicalName ?? rawLabel`, c'est-à-dire nom + ville + bruit mélangés.
-        // Or l'API matche `q` contre la raison sociale et les enseignes, JAMAIS contre
-        // l'adresse : mettre la ville dedans ne restreint pas la recherche, elle la fait
-        // échouer (`q=carrefour market flanches` → 0 ; `q=carrefour market` → 1907).
+        // Before: `q = canonicalName ?? rawLabel`, i.e. name + city + noise mixed
+        // together. But the API matches `q` against the company name and trade names, NEVER against
+        // the address: putting the city in doesn't restrict the search, it makes it
+        // fail (`q=carrefour market flanches` → 0; `q=carrefour market` → 1907).
         //
-        // Et le résultat était `results.first` d'une concaténation de `withTaskGroup` :
-        // « premier » y désignait l'ordre d'ACHÈVEMENT des tâches réseau, sans la moindre
-        // vérification que le candidat correspondait au lieu du libellé. Le classement est
-        // désormais un ordre TOTAL sur des critères explicites.
+        // And the result used to be `results.first` of a `withTaskGroup`
+        // concatenation: "first" there meant the COMPLETION order of the network
+        // tasks, with no check at all that the candidate matched the label's
+        // location. Ranking is now a TOTAL order on explicit criteria.
         let input = MerchantQueryPlanner.Input(
             rawLabel: context.rawLabel,
             engineMerchantCandidate: context.canonicalName,
@@ -84,34 +84,34 @@ actor EnrichmentOrchestrator {
             knownNafPrefixes: nafMapper.knownPrefixes
         )
         guard let top = result.companies.first else { return nil }
-        // Conversion par le chemin UNIQUE partagé avec l'UI (cf. `CompanyMatch.enrichment`).
+        // Conversion through the SINGLE path shared with the UI (see `CompanyMatch.enrichment`).
         return top.enrichment(fallbackCity: context.city) { [self] naf in
             nafMapper.lookup(naf).flatMap { findCategoryId(byName: $0.category) }
         }
     }
 
     private func enrichViaLLM(_ context: MerchantEnrichmentContext) async -> MerchantEnrichment? {
-        // AIEnrichmentBackend est @MainActor — le `await` gère le hop d'actor. C'est le
-        // point de dispatch unique (Foundation Models vs serveur local configuré par
-        // l'utilisateur) partagé avec EnrichmentSheetView et PayeeCreationFormSheet —
-        // ne pas revenir à un appel direct à EnrichmentLLMService.shared ici, ça
-        // recréerait la divergence que AIEnrichmentBackend existe pour éliminer.
+        // AIEnrichmentBackend is @MainActor — the `await` handles the actor hop. It's the
+        // single dispatch point (Foundation Models vs. a local server configured by
+        // the user) shared with EnrichmentSheetView and PayeeCreationFormSheet —
+        // don't go back to calling EnrichmentLLMService.shared directly here, that
+        // would recreate the divergence AIEnrichmentBackend exists to eliminate.
         await AIEnrichmentBackend.identify(context: context)
     }
 
     private func enrichViaMapKit(_ context: MerchantEnrichmentContext) async -> MerchantEnrichment? {
-        // MapKit ne sert que si on a au moins un nom + idéalement une ville.
+        // MapKit is only useful if we have at least a name + ideally a city.
         let query = context.canonicalName ?? context.rawLabel
         guard !query.isEmpty else { return nil }
         return await MapKitSearchService.search(query: query, near: context.city)
     }
 
-    // MARK: - Merge (vote pondéré)
+    // MARK: - Merge (weighted vote)
 
     private func merge(candidates: [MerchantEnrichment]) -> MerchantEnrichment {
-        // Stratégie simple : pour chaque champ, on prend la valeur du candidat avec
-        // le plus haut score (confidence × weight). Source du merged = .merged
-        // sauf si un seul candidat → garde sa source.
+        // Simple strategy: for each field, take the value of the candidate with
+        // the highest score (confidence × weight). The merged result's source = .merged
+        // unless there's only one candidate → keeps its source.
         if candidates.count == 1, let only = candidates.first {
             return resolvingCategoryHint(only)
         }
@@ -139,10 +139,10 @@ actor EnrichmentOrchestrator {
             confidence: min(1.0, topConfidence),
             enrichedAt: Date()
         )
-        // Champs qui ne sont pas dans l'initialiseur mémberwise (valeurs par défaut).
-        // Les oublier ici les fait disparaître dès qu'il y a plus d'un candidat —
-        // c'est précisément ce qui arrivait à `searchHint`, la seule information
-        // exploitable produite par le LLM quand il ne reconnaît pas le marchand.
+        // Fields not in the memberwise initializer (default values).
+        // Forgetting them here makes them disappear as soon as there's more than one candidate —
+        // that's exactly what used to happen to `searchHint`, the only usable
+        // information the LLM produces when it doesn't recognize the merchant.
         merged.searchHint   = best(\.searchHint)
         merged.siren        = best(\.siren)
         merged.postalCode   = best(\.postalCode)
@@ -150,11 +150,11 @@ actor EnrichmentOrchestrator {
         return resolvingCategoryHint(merged)
     }
 
-    /// Une source sans accès au référentiel (le LLM) ne peut proposer qu'un NOM de
-    /// catégorie — "Alimentation", pas `category_id = 7`. On le résout ici, où le repo
-    /// est disponible. Sans ça la catégorie devinée par l'IA était décodée puis jetée.
-    /// Appliqué sur les DEUX chemins de `merge` : un LLM seul candidat est justement
-    /// le cas où sa catégorie est la seule qu'on ait.
+    /// A source with no access to the reference data (the LLM) can only propose a category
+    /// NAME — "Groceries", not `category_id = 7`. We resolve it here, where the repo
+    /// is available. Without this, the category the AI guessed was decoded then discarded.
+    /// Applied on BOTH paths of `merge`: a single LLM candidate is exactly
+    /// the case where its category is the only one we have.
     private func resolvingCategoryHint(_ result: MerchantEnrichment) -> MerchantEnrichment {
         guard result.categoryId == nil, let hint = result.categoryHint else { return result }
         var out = result
@@ -171,7 +171,7 @@ actor EnrichmentOrchestrator {
     private func findCategoryId(byName name: String) -> Int? {
         let cache = ensureCategoryCache()
         let normalized = name.lowercased().folding(options: .diacriticInsensitive, locale: .current)
-        // Match exact, sinon contains
+        // Exact match, otherwise contains
         if let id = cache[normalized] { return id }
         for (key, id) in cache where key.contains(normalized) || normalized.contains(key) {
             return id

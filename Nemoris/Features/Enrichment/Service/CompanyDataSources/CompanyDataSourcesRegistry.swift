@@ -1,34 +1,34 @@
 import Foundation
 import Observation
 
-/// Registry singleton qui agrège toutes les sources d'identification d'entreprise.
-/// Gère :
-///   - Liste statique de toutes les sources connues (Sirene, Companies House, Zefix, …)
-///   - État `enabled` persisté en UserDefaults
-///   - Clés API persistées en UserDefaults
-///   - Méthode `search(query:country:postalCode:)` qui dispatch sur les sources actives
-///     **filtrant par pays quand un pays est connu** : si le tier est en VN, on ne tape pas
-///     Companies House (UK). Si le pays est inconnu (`nil`), on interroge TOUTES les
-///     sources actives — cf. `activeSources(forCountry:)`.
+/// Singleton registry that aggregates every company-identification source.
+/// Handles:
+///   - a static list of every known source (Sirene, Companies House, Zefix, …)
+///   - `enabled` state persisted in UserDefaults
+///   - API keys persisted in UserDefaults
+///   - the `search(query:country:postalCode:)` method, which dispatches to active
+///     sources **filtering by country when a country is known**: if the payee is in VN,
+///     we don't hit Companies House (UK). If the country is unknown (`nil`), every
+///     active source is queried — see `activeSources(forCountry:)`.
 ///
-/// Pour ajouter une source : voir `CompanyDataSource.swift`.
+/// To add a source: see `CompanyDataSource.swift`.
 @MainActor
 @Observable
 final class CompanyDataSourcesRegistry {
 
     static let shared = CompanyDataSourcesRegistry()
 
-    /// Toutes les sources connues, dans l'ordre d'affichage settings.
+    /// Every known source, in the order shown in Settings.
     let allKnownSources: [any CompanyDataSource] = [
         SireneDataSource(),
         CompaniesHouseDataSource(),
         ZefixDataSource()
     ]
 
-    /// IDs activés par défaut (sources gratuites + sans clé API).
+    /// IDs enabled by default (free sources + no API key required).
     private static let defaultEnabledIds: Set<String> = ["sirene_fr", "zefix_ch"]
 
-    /// Préfixes UserDefaults pour la persistance.
+    /// UserDefaults key prefixes for persistence.
     private static let enabledKey = "companyDataSources.enabled"
     private static let apiKeyPrefix = "companyDataSources.apiKey."
 
@@ -38,7 +38,7 @@ final class CompanyDataSourcesRegistry {
     private(set) var apiKeys: [String: String]
 
     private init() {
-        // Charge l'état persisté
+        // Loads the persisted state
         let defaults = UserDefaults.standard
         if let raw = defaults.array(forKey: Self.enabledKey) as? [String] {
             self.enabledIds = Set(raw)
@@ -83,30 +83,30 @@ final class CompanyDataSourcesRegistry {
         enabledIds.contains(source.id) && source.isImplemented
     }
 
-    /// Sources actives pour ce pays. Filtre les placeholders non-implémentés et celles
-    /// qui ont `requiresAPIKey = true` mais pas de clé saisie.
+    /// Sources active for this country. Filters out unimplemented placeholders and
+    /// those that have `requiresAPIKey = true` but no key entered.
     ///
-    /// **Sémantique de `country`** :
-    ///   - non-nil → contrainte stricte : seules les sources globales (`source.country == nil`)
-    ///     et celles dont le pays correspond exactement sont interrogées.
-    ///   - **nil → AUCUNE contrainte** : toutes les sources actives sont interrogées.
+    /// **Semantics of `country`**:
+    ///   - non-nil → a strict constraint: only global sources (`source.country == nil`)
+    ///     and those whose country matches exactly are queried.
+    ///   - **nil → NO constraint at all**: every active source is queried.
     ///
-    /// ⚠️ `nil` signifiait auparavant l'inverse — il faisait échouer le `guard let normalized`
-    /// et excluait donc *toutes* les sources déclarant un pays, c'est-à-dire les trois qui
-    /// existent (Sirene FR, Companies House GB, Zefix CH). Les écrans qui passaient `nil`
-    /// (`EnrichmentSheetView`, `EnrichmentMapFullscreenSheet`) ne recevaient donc jamais le
-    /// moindre résultat d'entreprise : leur toggle « Sources entreprises » était inerte,
-    /// silencieusement, sans erreur ni liste vide distinguable d'une recherche infructueuse.
+    /// ⚠️ `nil` used to mean the opposite — it made the `guard let normalized` fail
+    /// and therefore excluded *every* source declaring a country, i.e. the three that
+    /// exist (Sirene FR, Companies House GB, Zefix CH). The screens passing `nil`
+    /// (`EnrichmentSheetView`, `EnrichmentMapFullscreenSheet`) therefore never received the
+    /// slightest company result: their "Company sources" toggle was inert,
+    /// silently, with no error and no empty list distinguishable from an unsuccessful search.
     ///
-    /// « Pays inconnu » veut dire « cherche partout », jamais « ne cherche nulle part » :
-    /// une recherche manuelle sur un libellé étranger ne doit pas être condamnée d'avance.
+    /// "Unknown country" means "search everywhere", never "search nowhere":
+    /// a manual search on a foreign label must not be doomed from the start.
     func activeSources(forCountry country: String?) -> [any CompanyDataSource] {
         let normalized = country?.uppercased()
         return allKnownSources.filter { source in
             guard isEnabled(source) else { return false }
-            // Filtre par pays — seulement si un pays est demandé.
+            // Filter by country — only if a country is requested.
             if let normalized, let src = source.country, src != normalized { return false }
-            // Si clé API requise, vérifier qu'on en a une
+            // If an API key is required, check that we have one
             if source.requiresAPIKey {
                 guard let key = apiKeys[source.id], !key.isEmpty else { return false }
             }
@@ -116,12 +116,12 @@ final class CompanyDataSourcesRegistry {
 
     // MARK: - Search dispatch
 
-    /// Interroge en parallèle toutes les sources actives matchant le pays donné.
-    /// Si `country == nil`, toutes les sources actives sont interrogées (aucune contrainte).
-    /// Concatène les résultats (pas de dédup — l'appelant peut le faire).
-    /// ⚠️ L'ordre de sortie est celui d'ACHÈVEMENT des tâches, donc non déterministe :
-    /// ne jamais prendre `.first` comme « meilleur résultat ». Le classement est la
-    /// responsabilité de l'appelant.
+    /// Queries every active source matching the given country in parallel.
+    /// If `country == nil`, every active source is queried (no constraint at all).
+    /// Concatenates the results (no dedup — the caller can do that).
+    /// ⚠️ The output order is the tasks' COMPLETION order, so non-deterministic:
+    /// never take `.first` as the "best result". Ranking is the
+    /// caller's responsibility.
     func search(query: String,
                 country: String?,
                 postalCode: String? = nil) async -> [MerchantEnrichment] {

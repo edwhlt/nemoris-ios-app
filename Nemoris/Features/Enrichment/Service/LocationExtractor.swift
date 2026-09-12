@@ -1,13 +1,13 @@
 import Foundation
 
-/// Extraction déterministe (sans LLM) du pays + de la ville depuis un libellé bancaire.
+/// Deterministic (no-LLM) extraction of the country + city from a bank label.
 ///
-/// Utilisé pour pré-remplir le formulaire de création de tier **dès l'ouverture**, sans
-/// attendre une réponse IA. Les patterns vietnamiens et français les plus courants y sont
-/// couverts en dur.
+/// Used to pre-fill the payee-creation form **as soon as it opens**, without
+/// waiting for an AI response. The most common Vietnamese and French patterns are
+/// hardcoded here.
 ///
-/// Exemples :
-///   - "ACV NOI BAI PSC VN HA NOI"        → (VN, Hanoi)   — NOI BAI = aéroport Hanoi
+/// Examples:
+///   - "ACV NOI BAI PSC VN HA NOI"        → (VN, Hanoi)   — NOI BAI = Hanoi airport
 ///   - "VNPAY NH AN HO PSC VN DA NANG"    → (VN, Da Nang)
 ///   - "VNPAY HUNG RES PSC VN P HA GIANG" → (VN, Ha Giang)
 ///   - "CB CARREFOUR MARKET 75011 PARIS"  → (FR, Paris)
@@ -24,18 +24,18 @@ enum LocationExtractor {
             .folding(options: .diacriticInsensitive, locale: .current)
             .uppercased()
 
-        // 1) Détecte les villes connues (multi-mots) AVANT le pays car certaines villes
-        //    sont aussi des codes ISO (HUE = ville VN, pas un pays ; PARIS ≠ code pays).
+        // 1) Detects known (multi-word) cities BEFORE the country, since some cities
+        //    are also ISO codes (HUE = a VN city, not a country; PARIS ≠ a country code).
         if let cityHit = matchCity(in: folded) {
             return Hit(country: cityHit.country, city: cityHit.canonical)
         }
 
-        // 2) Détecte le pays seul (code ISO 2 lettres comme token isolé)
+        // 2) Detects a country alone (a 2-letter ISO code as an isolated token)
         if let country = detectCountryCode(in: folded) {
             return Hit(country: country, city: nil)
         }
 
-        // 3) Code postal français (5 chiffres) ⇒ FR (sans ville déduite)
+        // 3) French postal code (5 digits) ⇒ FR (with no city inferred)
         if let _ = detectFrenchPostalCode(in: folded) {
             return Hit(country: "FR", city: nil)
         }
@@ -45,11 +45,11 @@ enum LocationExtractor {
 
     // MARK: - City matching
 
-    /// Tables des villes connues (uppercased, sans accent). Multi-mots supportés.
-    /// On match avec des séparateurs de mots autour pour éviter "PARIS" qui matche "PARISIEN".
+    /// Table of known cities (uppercased, no accents). Multi-word entries supported.
+    /// Matched with word boundaries around them to avoid "PARIS" matching "PARISIEN".
     private struct CityEntry {
-        let pattern: String       // forme uppercased sans accent
-        let canonical: String     // forme propre à stocker (Title Case + accents)
+        let pattern: String       // uppercased form with no accent
+        let canonical: String     // the clean form to store (Title Case + accents)
         let country: String       // ISO 2 lettres
     }
 
@@ -142,7 +142,7 @@ enum LocationExtractor {
         .init(pattern: "LISBONNE",          canonical: "Lisboa",            country: "PT"),
         .init(pattern: "PORTO",             canonical: "Porto",             country: "PT"),
 
-        // ASIE / AMÉRIQUE
+        // ASIA / AMERICA
         .init(pattern: "BANGKOK",           canonical: "Bangkok",           country: "TH"),
         .init(pattern: "PHUKET",            canonical: "Phuket",            country: "TH"),
         .init(pattern: "CHIANG MAI",        canonical: "Chiang Mai",        country: "TH"),
@@ -169,8 +169,8 @@ enum LocationExtractor {
         .init(pattern: "TORONTO",           canonical: "Toronto",           country: "CA"),
     ]
 
-    /// Cherche la première ville matchant. Compare avec des "frontières de mots"
-    /// (espace ou début/fin de chaîne) pour éviter les faux positifs (PARIS dans PARISIEN).
+    /// Looks for the first matching city. Compared using "word boundaries"
+    /// (a space or the start/end of the string) to avoid false positives (PARIS inside PARISIEN).
     private static func matchCity(in folded: String) -> CityEntry? {
         for entry in cities {
             if containsAsWord(haystack: folded, needle: entry.pattern) {
@@ -180,9 +180,9 @@ enum LocationExtractor {
         return nil
     }
 
-    /// Vérifie que `needle` apparaît dans `haystack` entouré de séparateurs (espace, début/fin).
-    /// Ex. "HA NOI" matche dans "ACV NOI BAI PSC VN HA NOI" ✓ mais pas dans "HANOIENNE".
-    /// (En pratique on uppercase et on cherche les bornes — heuristique simple mais efficace.)
+    /// Checks that `needle` appears in `haystack` surrounded by separators (space, start/end).
+    /// E.g. "HA NOI" matches in "ACV NOI BAI PSC VN HA NOI" ✓ but not in "HANOIENNE".
+    /// (In practice we uppercase and look for boundaries — a simple but effective heuristic.)
     private static func containsAsWord(haystack: String, needle: String) -> Bool {
         guard !needle.isEmpty else { return false }
         let h = haystack as NSString
@@ -194,7 +194,7 @@ enum LocationExtractor {
             let afterIdx = range.location + range.length
             let afterOK = afterIdx >= h.length || isWordBoundary(h.character(at: afterIdx))
             if beforeOK && afterOK { return true }
-            // Avance la fenêtre pour chercher une occurrence suivante (pas de match propre ici)
+            // Advances the window to look for a following occurrence (no clean match here)
             let next = range.location + 1
             searchRange = NSRange(location: next, length: h.length - next)
         }
@@ -217,10 +217,10 @@ enum LocationExtractor {
         "SE", "NO", "FI", "PL", "CZ", "AT", "HU", "GR", "RO", "BG"
     ]
 
-    /// Cherche un code ISO 2 lettres comme token isolé.
-    /// "VN P" → VN ✓ ; "WSJ" → pas de match (3 lettres) ; "VNPAY" → pas de match (collé).
+    /// Looks for a 2-letter ISO code as an isolated token.
+    /// "VN P" → VN ✓; "WSJ" → no match (3 letters); "VNPAY" → no match (glued).
     private static func detectCountryCode(in folded: String) -> String? {
-        // Cherche les tokens 2 lettres entre word-boundaries
+        // Looks for 2-letter tokens between word boundaries
         let pattern = "\\b([A-Z]{2})\\b"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(folded.startIndex..., in: folded)
@@ -234,7 +234,7 @@ enum LocationExtractor {
         return nil
     }
 
-    /// Détecte un code postal français (5 chiffres) comme token isolé.
+    /// Detects a French postal code (5 digits) as an isolated token.
     private static func detectFrenchPostalCode(in folded: String) -> String? {
         let pattern = "\\b(\\d{5})\\b"
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }

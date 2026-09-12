@@ -1,31 +1,31 @@
 import Foundation
 
-// Similarité entre deux noms commerciaux.
-// ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
+// Similarity between two business names.
+// ⚠️ PURE FILE: `import Foundation` ONLY.
 //
-// ⚠️ Ce n'est PAS un doublon de `NemorisEngine.JaroWinkler`, et il ne faut pas les fusionner :
-// les deux répondent à des questions différentes.
-//   • Jaro-Winkler  : « est-ce une faute de frappe de l'autre ? »  (distance d'édition)
-//   • F1 d'ensembles: « ces deux raisons sociales multi-mots se recouvrent-elles ? »
+// ⚠️ This is NOT a duplicate of `NemorisEngine.JaroWinkler`, and they must not be merged:
+// the two answer different questions.
+//   • Jaro-Winkler  : "is this a typo of the other?" (edit distance)
+//   • Set F1        : "do these two multi-word company names overlap?"
 //
-// Ici la question est la seconde. « BOULANGERIE PRALUS » vs « PRALUS LA BOULANGERIE » sont
-// le même commerce dans le désordre — leur F1 d'ensembles vaut 0,8, leur Jaro-Winkler est
-// médiocre parce que les chaînes commencent différemment. Inversement « SROM » et « SRAM »
-// ont un excellent Jaro-Winkler et ne partagent aucun token : ce sont deux entreprises.
+// Here the question is the second one. "BOULANGERIE PRALUS" vs "PRALUS LA BOULANGERIE" are
+// the same shop in a different word order — their set F1 is 0.8, their Jaro-Winkler is
+// mediocre because the strings start differently. Conversely "SROM" and "SRAM"
+// have an excellent Jaro-Winkler and share no token at all: they're two companies.
 //
-// Si on veut un jour de la tolérance à la faute de frappe ICI, la bonne manœuvre est de
-// promouvoir l'implémentation du moteur, pas d'en recopier une seconde.
+// If typo tolerance is ever needed HERE, the right move is to
+// promote the engine's implementation, not to copy a second one.
 
 enum MerchantTokenSimilarity {
 
-    /// F1 sur les ensembles de tokens, avec un bonus de préfixe.
-    /// Renvoie 0…1. Symétrique.
+    /// F1 over token sets, with a prefix bonus.
+    /// Returns 0…1. Symmetric.
     ///
-    /// Le bonus de préfixe (jusqu'à +15 %) traite le cas central des relevés bancaires :
-    /// les noms y sont TRONQUÉS en largeur fixe (`SC-PHIE NIMES V`, `APPLE COM/BILL`,
-    /// `SOUNDCLOUD MONTH`). Un token du libellé qui est un préfixe d'un token du candidat
-    /// compte comme une correspondance partielle, sans quoi toute enseigne coupée en deux
-    /// serait mécaniquement mal classée.
+    /// The prefix bonus (up to +15%) handles the central case of bank statements:
+    /// names there are TRUNCATED at a fixed width (`SC-PHIE NIMES V`, `APPLE COM/BILL`,
+    /// `SOUNDCLOUD MONTH`). A label token that is a prefix of a candidate token
+    /// counts as a partial match, otherwise any chain name cut in half
+    /// would be mechanically misranked.
     static func score(_ a: [String], _ b: [String]) -> Double {
         let left = normalize(a)
         let right = normalize(b)
@@ -35,8 +35,8 @@ enum MerchantTokenSimilarity {
         let rightSet = Set(right)
         let exact = leftSet.intersection(rightSet)
 
-        // Correspondances par préfixe, sur les tokens non appariés exactement.
-        // On apparie au plus une fois de chaque côté (pas de double comptage).
+        // Prefix matches, on tokens not exactly matched.
+        // Each side is matched at most once (no double counting).
         var remainingLeft = leftSet.subtracting(exact)
         var remainingRight = rightSet.subtracting(exact)
         var prefixMatches = 0.0
@@ -47,7 +47,7 @@ enum MerchantTokenSimilarity {
             prefixMatches += 1
         }
 
-        // Un appariement par préfixe vaut moins qu'un appariement exact.
+        // A prefix match is worth less than an exact match.
         let matched = Double(exact.count) + prefixMatches * 0.75
         guard matched > 0 else { return 0 }
 
@@ -55,7 +55,7 @@ enum MerchantTokenSimilarity {
         let recall = matched / Double(rightSet.count)
         let f1 = 2 * precision * recall / (precision + recall)
 
-        // Bonus si les deux chaînes démarrent pareil (enseigne en tête).
+        // A bonus if both strings start the same way (chain name up front).
         let bonus = (left[0] == right[0] || isPrefixMatch(left[0], right[0])) ? 0.15 : 0.0
         return min(1, f1 * (1 + bonus))
     }
@@ -71,7 +71,7 @@ enum MerchantTokenSimilarity {
         return best
     }
 
-    /// Découpe + normalisation identiques partout dans le module.
+    /// Splitting + normalization, identical everywhere in the module.
     static func tokenize(_ s: String) -> [String] {
         s.folding(options: .diacriticInsensitive, locale: Locale(identifier: "fr_FR"))
             .lowercased()
@@ -88,16 +88,16 @@ enum MerchantTokenSimilarity {
             .filter { !$0.isEmpty && !StopWords.all.contains($0) }
     }
 
-    /// Un token tronqué correspond s'il est un préfixe d'au moins 3 caractères de l'autre.
-    /// Le seuil de 3 évite que "de"/"la" apparient n'importe quoi.
+    /// A truncated token matches if it's a prefix of at least 3 characters of the other.
+    /// The threshold of 3 keeps "de"/"la" from matching anything at all.
     private static func isPrefixMatch(_ a: String, _ b: String) -> Bool {
         let (short, long) = a.count <= b.count ? (a, b) : (b, a)
         guard short.count >= 3, short.count < long.count else { return false }
         return long.hasPrefix(short)
     }
 
-    /// Mots vides des raisons sociales françaises. Les garder ferait apparier
-    /// « SARL DUPONT » et « SARL MARTIN » sur le seul « sarl ».
+    /// Stop words of French company names. Keeping them would match
+    /// "SARL DUPONT" and "SARL MARTIN" on "sarl" alone.
     enum StopWords {
         static let all: Set<String> = [
             "sarl", "sas", "sasu", "eurl", "sa", "sci", "snc", "scop", "scm", "selarl",

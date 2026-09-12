@@ -1,68 +1,68 @@
 import Foundation
 
-// MARK: - Le réglage IA devient PAR FONCTIONNALITÉ
+// MARK: - The AI setting becomes PER FEATURE
 //
-// ─── Pourquoi un réglage global ne suffit plus ─────────────────────────────
+// ─── Why a global setting isn't enough anymore ─────────────────────────────
 //
-// Une version antérieure livrait une préférence unique par appareil (Automatique / Serveur local
-// / Désactivée). C'était suffisant tant qu'une seule capacité était en jeu : du
-// texte.
+// An earlier version shipped a single per-device preference (Automatic / Local server
+// / Disabled). That was enough as long as a single capability was in play: plain
+// text.
 //
-// Ça ne l'est plus. Foundation Models sait lire du TEXTE depuis iOS 26, mais des
-// IMAGES seulement depuis iOS 27. Un réglage global ne peut donc pas exprimer
-// « sur cet iPhone en iOS 26, Foundation Models pour l'identification des
-// marchands (texte), mais un serveur local pour l'import de captures (image,
-// que FM ne sait pas lire ici) ». Il faut choisir entre priver une
-// fonctionnalité d'IA, ou envoyer toutes les autres vers le réseau.
+// It isn't anymore. Foundation Models can read TEXT since iOS 26, but
+// IMAGES only since iOS 27. A global setting therefore can't express
+// "on this iPhone running iOS 26, Foundation Models for merchant
+// identification (text), but a local server for screenshot import (image,
+// which FM can't read here)". You'd have to choose between depriving a
+// feature of AI, or sending everything else to the network.
 //
-// D'où : une préférence PAR fonctionnalité, chacune déclarant ce qu'elle demande
-// réellement au modèle.
+// Hence: a preference PER feature, each declaring what it actually
+// needs from the model.
 
-// MARK: - Capacités
+// MARK: - Capabilities
 
-/// Ce qu'une fonctionnalité demande au moteur d'inférence.
+/// What a feature asks of the inference engine.
 struct AICapabilities: OptionSet, Sendable, Hashable {
     let rawValue: Int
     init(rawValue: Int) { self.rawValue = rawValue }
 
-    /// Complétion texte — le minimum, requis par tout le monde.
+    /// Text completion — the baseline, required by everyone.
     static let text       = AICapabilities(rawValue: 1 << 0)
-    /// Lecture d'une image telle quelle (pas son OCR).
+    /// Reading an image as-is (not its OCR).
     static let image      = AICapabilities(rawValue: 1 << 1)
-    /// Génération guidée par schéma (`@Generable`) — propre à Foundation Models.
+    /// Schema-guided generation (`@Generable`) — specific to Foundation Models.
     static let structured = AICapabilities(rawValue: 1 << 2)
-    /// Conversation multi-tours avec état conservé entre les questions.
+    /// Multi-turn conversation with state kept between questions.
     static let multiTurn  = AICapabilities(rawValue: 1 << 3)
 }
 
-// MARK: - Fonctionnalités
+// MARK: - Features
 
-/// Les endroits de l'app qui peuvent parler à un modèle.
+/// The places in the app that can talk to a model.
 ///
-/// ⚠️ Cette liste est la SOURCE DE VÉRITÉ. Toute nouvelle fonctionnalité IA
-/// doit y entrer plutôt qu'appeler un service d'inférence en direct : deux
-/// d'entre elles le faisaient (le coach financier et l'assistant SQL), et
-/// ignoraient donc totalement le réglage de l'utilisateur — un « Désactivée »
-/// ou un « Serveur local » choisi dans les Réglages n'avait aucun effet sur
-/// elles.
+/// ⚠️ This list is the SOURCE OF TRUTH. Any new AI feature must
+/// be added here rather than calling an inference service directly: two
+/// features used to do that (the financial coach and the SQL assistant),
+/// so they completely ignored the user's setting — a "Disabled"
+/// or "Local server" choice made in Settings had no effect on
+/// them at all.
 enum AIFeature: String, CaseIterable, Identifiable, Sendable {
-    /// Identification des marchands (enrichissement des tiers).
+    /// Merchant identification (payee enrichment).
     case merchantEnrichment
-    /// Extraction d'opérations depuis un relevé bancaire ou une capture.
+    /// Extracting operations from a bank statement or a screenshot.
     case transactionImport
-    /// Extraction d'ordres et de positions depuis un avis d'opéré ou un portefeuille.
+    /// Extracting orders and positions from a trade confirmation or a portfolio.
     case investmentImport
-    /// Coach dépenses : analyse du budget et des habitudes.
+    /// Spending coach: analyzes budget and habits.
     ///
-    /// ⚠️ Le `rawValue` reste « insights » alors que la fonctionnalité a
-    /// changé de nature (elle ne reformule plus des analyses statistiques,
-    /// elle les PRODUIT). C'est délibéré : c'est la clé sous laquelle le choix
-    /// de backend est déjà persisté (`ai.backend.insights`). La renommer
-    /// remettrait tous les utilisateurs en « Automatique » sans le leur dire.
+    /// ⚠️ The `rawValue` stays "insights" even though the feature has
+    /// changed in nature (it no longer rephrases statistical analyses,
+    /// it PRODUCES them). That's deliberate: it's the key under which the
+    /// backend choice is already persisted (`ai.backend.insights`). Renaming it
+    /// would silently reset every user to "Automatic" without telling them.
     case insights
-    /// Coach investissement : analyse du portefeuille.
+    /// Investment coach: portfolio analysis.
     case investmentCoach
-    /// Assistant de rédaction SQL de la console.
+    /// SQL-writing assistant for the console.
     case sqlAssistant
 
     var id: String { rawValue }
@@ -89,7 +89,7 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Ce que l'IA apporte ici, et ce qui se passe sans elle.
+    /// What AI brings here, and what happens without it.
     var explanation: String {
         switch self {
         case .merchantEnrichment:
@@ -107,7 +107,7 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Capacités INDISPENSABLES : un backend qui ne les a pas est inutilisable ici.
+    /// REQUIRED capabilities: a backend that lacks them is unusable here.
     var requiredCapabilities: AICapabilities {
         switch self {
         case .sqlAssistant: return [.text, .multiTurn]
@@ -115,13 +115,13 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Capacités qui AMÉLIORENT le résultat sans être nécessaires.
+    /// Capabilities that IMPROVE the result without being necessary.
     ///
-    /// ⚠️ La distinction n'est pas cosmétique : l'import de documents marche
-    /// sans lecture d'image (il océrise alors la capture), donc exiger `.image`
-    /// priverait d'IA les appareils en iOS 26 alors qu'ils font très bien le
-    /// travail sur du texte. C'est exactement le compromis que le réglage
-    /// global ne savait pas exprimer.
+    /// ⚠️ The distinction isn't cosmetic: document import works
+    /// fine without image reading (it OCRs the screenshot then), so requiring
+    /// `.image` would deprive iOS 26 devices of AI even though they do
+    /// perfectly well on text. That's exactly the tradeoff the
+    /// global setting couldn't express.
     var optionalCapabilities: AICapabilities {
         switch self {
         case .transactionImport, .investmentImport: return [.image, .structured]
@@ -129,44 +129,44 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Vrai si cette fonctionnalité tire un vrai bénéfice de la lecture d'image.
+    /// True if this feature gets a real benefit from reading an image.
     var benefitsFromImage: Bool { optionalCapabilities.contains(.image) }
 
-    /// Budget de SORTIE, en tokens.
+    /// OUTPUT budget, in tokens.
     ///
-    /// ⚠️ Indispensable, et longtemps absent côté serveur local : sans
-    /// `max_tokens` dans la requête, un serveur compatible OpenAI (LM Studio,
-    /// Ollama) applique SA propre limite par défaut, souvent quelques
-    /// centaines de tokens. La réponse est alors coupée net quelle que soit la
-    /// taille du contexte — c'est ce qui tronquait les analyses du coach en
-    /// plein milieu de leur préambule (retour d'usage 2026-08-28).
+    /// ⚠️ Essential, and missing on the local-server side for a long time: without
+    /// `max_tokens` in the request, an OpenAI-compatible server (LM Studio,
+    /// Ollama) applies its own default limit, often a few
+    /// hundred tokens. The response is then cut off outright regardless of
+    /// context size — which is what truncated coach analyses in
+    /// the middle of their preamble (observed in real usage, 2026-08-28).
     ///
-    /// Les valeurs ne sont pas uniformes parce que les besoins ne le sont pas :
-    /// identifier un marchand tient en trois lignes, une analyse de coach
-    /// développe N recommandations argumentées.
+    /// The values aren't uniform because the needs aren't either:
+    /// identifying a merchant fits in three lines, a coach analysis
+    /// develops N argued recommendations.
     var maxOutputTokens: Int {
         switch self {
         case .merchantEnrichment:                 return 512
         case .transactionImport, .investmentImport: return 4_096
-        // ⚠️ Un modèle "thinking" (Qwen3, DeepSeek-R1…) consomme une partie de
-        // CE budget pour son raisonnement interne AVANT d'écrire la réponse
-        // finale — vu en usage réel : 3 527 tokens dépensés en réflexion sur un
-        // budget de 4 096, `content` resté vide. Une valeur plus large ne
-        // corrige pas un modèle qui s'arrête sans avoir conclu (ça reste un
-        // défaut du modèle/serveur, cf. `LocalLLMService.reasoning_content`),
-        // mais réduit le risque qu'un dossier plus volumineux fasse déborder
-        // un raisonnement par ailleurs complet sur le budget lui-même.
+        // ⚠️ A "thinking" model (Qwen3, DeepSeek-R1…) spends part of
+        // THIS budget on its internal reasoning BEFORE writing the
+        // final answer — seen in real usage: 3,527 tokens spent on
+        // reasoning out of a 4,096 budget, `content` left empty. A larger value
+        // doesn't fix a model that stops without ever concluding (that stays
+        // a model/server flaw, see `LocalLLMService.reasoning_content`),
+        // but it reduces the risk of a larger document making an
+        // otherwise complete reasoning pass overflow the budget itself.
         case .insights, .investmentCoach:         return 8_192
         case .sqlAssistant:                       return 2_048
         }
     }
 
-    /// Ordre de grandeur de ce qui part au modèle, affiché dans les Réglages
-    /// quand le backend résolu n'est PAS 100 % sur l'appareil (serveur local ou
-    /// cloud) — pour que l'utilisateur sache à quoi s'attendre avant que ça
-    /// consomme du réseau, du temps de calcul, ou une facture API. Volontairement
-    /// SANS chiffre de coût en euros (les tarifs des fournisseurs bougent plus
-    /// vite que l'app) : un ordre de grandeur en tokens reste vrai plus longtemps.
+    /// Order of magnitude of what goes to the model, shown in Settings
+    /// when the resolved backend is NOT 100% on-device (local server or
+    /// cloud) — so the user knows what to expect before it
+    /// consumes network, compute time, or an API bill. Deliberately
+    /// WITHOUT a cost figure in euros (providers' rates move faster
+    /// than the app): an order of magnitude in tokens stays true longer.
     var consumptionHint: String {
         switch self {
         case .merchantEnrichment:
@@ -174,10 +174,10 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
         case .transactionImport, .investmentImport:
             return "Le document entier part au modèle : plusieurs milliers de tokens par page, davantage encore si elle est transmise en image plutôt qu'en texte."
         case .insights, .investmentCoach:
-            // ⚠️ Corrigé : ce n'était plus vrai. Le coach n'envoie plus « un
-            // prompt court à chaque ouverture du tableau de bord » — il envoie
-            // un DOSSIER agrégé (~1 000 tokens) et n'est relancé qu'à la
-            // demande, ou automatiquement une fois l'analyse périmée (7 jours).
+            // ⚠️ Fixed: this was no longer true. The coach no longer sends "a
+            // short prompt on every dashboard load" — it sends
+            // an aggregated BRIEF (~1,000 tokens) and only re-runs on
+            // demand, or automatically once the analysis goes stale (7 days).
             return "Un dossier agrégé de ta situation, environ un millier de tokens, à chaque analyse — à la demande ou une fois par semaine au plus."
         case .sqlAssistant:
             return "Conversation multi-tours : le contexte s'accumule au fil des questions, donc la consommation augmente avec l'échange."
@@ -187,11 +187,11 @@ enum AIFeature: String, CaseIterable, Identifiable, Sendable {
 
 // MARK: - Choix de backend
 
-/// Fournisseurs cloud proposés.
+/// Cloud providers offered.
 ///
-/// ⚠️ Les données de la fonctionnalité concernée QUITTENT l'appareil. C'est le
-/// seul backend dans ce cas, et l'UI doit le dire explicitement — le reste de
-/// l'app (Sirene mis à part) est conçu pour rester local.
+/// ⚠️ The data for the feature involved LEAVES the device. It's the
+/// only backend in that case, and the UI must say so explicitly — the rest
+/// of the app (Sirene aside) is designed to stay local.
 enum AICloudProvider: String, Codable, CaseIterable, Sendable {
     case claude
     case openAI
@@ -203,8 +203,8 @@ enum AICloudProvider: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    /// Modèle proposé par défaut. Modifiable par l'utilisateur : les catalogues
-    /// évoluent plus vite que l'app.
+    /// Default suggested model. Editable by the user: catalogs
+    /// evolve faster than the app.
     var defaultModel: String {
         switch self {
         case .claude: return "claude-sonnet-5"
@@ -215,22 +215,22 @@ enum AICloudProvider: String, Codable, CaseIterable, Sendable {
     var supportsImages: Bool { true }
 }
 
-/// Ce que l'utilisateur a choisi pour UNE fonctionnalité.
+/// What the user chose for ONE feature.
 enum AIBackendChoice: Codable, Hashable, Sendable {
-    /// Foundation Models si la capacité requise est là, sinon le premier
-    /// backend configuré qui l'a, sinon rien — silencieusement.
+    /// Foundation Models if the required capability is there, otherwise the
+    /// first configured backend that has it, otherwise nothing — silently.
     case automatic
-    /// Foundation Models imposé. Erreur explicite si la capacité manque, plutôt
-    /// qu'un repli muet : c'est ce qui permet de diagnostiquer.
+    /// Foundation Models forced. An explicit error if the capability is
+    /// missing, rather than a silent fallback — that's what makes it diagnosable.
     case foundationModels
     /// Serveur HTTP compatible OpenAI (LM Studio, Ollama…).
     case localServer
-    /// Modèle GGUF téléchargé depuis Hugging Face et exécuté DANS l'app
-    /// (`SwiftLlama`/llama.cpp) — aucun serveur externe, aucune dépendance à
-    /// Apple Intelligence. Cf. `EmbeddedModelService`.
+    /// A GGUF model downloaded from Hugging Face and run INSIDE the app
+    /// (`SwiftLlama`/llama.cpp) — no external server, no dependency on
+    /// Apple Intelligence. See `EmbeddedModelService`.
     case embeddedModel
     case cloud(AICloudProvider)
-    /// Aucun appel, jamais.
+    /// No call, ever.
     case off
 
     var displayName: String {
@@ -255,13 +255,13 @@ enum AIBackendChoice: Codable, Hashable, Sendable {
         }
     }
 
-    /// Vrai si ce choix fait sortir les données de l'appareil.
+    /// True if this choice makes data leave the device.
     var leavesDevice: Bool {
         if case .cloud = self { return true }
         return false
     }
 
-    /// Options proposées dans le sélecteur, dans l'ordre d'affichage.
+    /// Options offered in the picker, in display order.
     static var allChoices: [AIBackendChoice] {
         [.automatic, .foundationModels, .embeddedModel, .localServer]
             + AICloudProvider.allCases.map { .cloud($0) }
@@ -269,9 +269,9 @@ enum AIBackendChoice: Codable, Hashable, Sendable {
     }
 }
 
-// MARK: - Résolution du backend effectif
+// MARK: - Resolving the effective backend
 
-/// Ce qu'un appareil sait faire, à un instant donné.
+/// What a device can actually do, at a given point in time.
 struct AIBackendAvailability: Sendable, Hashable {
     var foundationModels = false
     var foundationModelsReadsImages = false
@@ -292,15 +292,15 @@ struct AIBackendAvailability: Sendable, Hashable {
     }
 }
 
-/// Confronte le choix de l'utilisateur à ce que l'appareil sait réellement faire.
+/// Confronts the user's choice against what the device can actually do.
 ///
-/// Moteur PUR — il ne connaît ni Foundation Models, ni le réseau, ni les
-/// Réglages : on lui DONNE l'état. C'est ce qui le rend testable
-/// (`run_ai_backend_tests.sh`), là où la vraie résolution dépend d'APIs
-/// disponibles seulement à partir d'iOS 26 et d'un trousseau.
+/// PURE engine — it knows neither Foundation Models, nor the network, nor
+/// Settings: the state is GIVEN to it. That's what makes it testable
+/// (`run_ai_backend_tests.sh`), whereas real resolution depends on APIs
+/// only available from iOS 26 onward and on a keychain.
 enum AIBackendResolver {
 
-    /// Le backend à utiliser, ou `nil` s'il n'y en a aucun.
+    /// The backend to use, or `nil` if there is none.
     static func resolve(choice: AIBackendChoice,
                         feature: AIFeature,
                         availability: AIBackendAvailability) -> AIBackendChoice? {
@@ -309,8 +309,8 @@ enum AIBackendResolver {
             return nil
 
         case .foundationModels:
-            // Imposé : AUCUN repli. C'est tout l'intérêt de ce choix — voir que
-            // ça ne marche pas, plutôt que d'être basculé en silence ailleurs.
+            // Forced: NO fallback at all. That's the whole point of this choice —
+            // seeing that it doesn't work, rather than being silently switched elsewhere.
             return supportsFoundationModels(feature, availability) ? .foundationModels : nil
 
         case .localServer:
@@ -323,11 +323,11 @@ enum AIBackendResolver {
             return availability.configuredCloudProviders.contains(provider) ? .cloud(provider) : nil
 
         case .automatic:
-            // Ordre de préférence : le plus privé d'abord. Le modèle embarqué
-            // passe AVANT le serveur local : il ne dépend d'aucune autre
-            // machine et ne quitte jamais l'appareil, alors qu'un serveur
-            // externe suppose une IP à joindre. On ne bascule vers le réseau
-            // que faute de mieux, et vers le cloud qu'en dernier.
+            // Preference order: the most private first. The embedded model
+            // comes BEFORE the local server: it depends on no other
+            // machine and never leaves the device, whereas an external
+            // server assumes an IP to reach. We only switch to the network
+            // for lack of anything better, and to the cloud only as a last resort.
             if supportsFoundationModels(feature, availability) { return .foundationModels }
             if availability.embeddedModel { return .embeddedModel }
             if availability.localServer { return .localServer }
@@ -336,10 +336,10 @@ enum AIBackendResolver {
         }
     }
 
-    /// ⚠️ Sur les capacités REQUISES seulement. L'import de documents gagne à
-    /// lire les images mais s'en passe (il océrise) : exiger `.image` le
-    /// priverait d'Apple Intelligence sur tout appareil en iOS 26, alors qu'il
-    /// y travaille très bien sur du texte.
+    /// ⚠️ On REQUIRED capabilities only. Document import benefits from
+    /// reading images but can do without (it OCRs then): requiring
+    /// `.image` would deprive Apple Intelligence of any iOS 26 device, even
+    /// though it works very well there on text.
     private static func supportsFoundationModels(_ feature: AIFeature,
                                                  _ availability: AIBackendAvailability) -> Bool {
         guard availability.foundationModels else { return false }
@@ -348,16 +348,16 @@ enum AIBackendResolver {
         return true
     }
 
-    /// Le backend retenu sait-il lire une image ?
+    /// Can the chosen backend read an image?
     static func readsImages(_ resolved: AIBackendChoice?,
                             availability: AIBackendAvailability) -> Bool {
         switch resolved {
         case .foundationModels: return availability.foundationModelsReadsImages
-        // Le modèle chargé décide : un modèle purement textuel répondra une
-        // erreur, et l'appelant retombera sur l'OCR.
+        // The loaded model decides: a purely text-only model will answer with
+        // an error, and the caller will fall back to OCR.
         case .localServer:      return true
-        // Scope v1 : texte seulement. Un GGUF multimodal (mmproj séparé) est
-        // un pipeline distinct, non couvert — cf. `EmbeddedModelService`.
+        // v1 scope: text only. A multimodal GGUF (a separate mmproj) is
+        // a distinct, uncovered pipeline — see `EmbeddedModelService`.
         case .embeddedModel:    return false
         case .cloud(let p):     return p.supportsImages
         case .automatic, .off, .none: return false
@@ -367,20 +367,20 @@ enum AIBackendResolver {
 
 // MARK: - Persistance
 
-/// Le choix de backend de chaque fonctionnalité.
+/// Each feature's backend choice.
 ///
-/// ⚠️ `UserDefaults.standard`, donc PROPRE À L'APPAREIL par construction :
-/// jamais touché par la sync CloudKit (`SyncSchema.syncedTables` ne liste
-/// aucune table de réglages) ni par le magasin clé-valeur iCloud (jamais
-/// utilisé dans ce projet, entitlement absent). Un Mac peut donc rester sur
-/// Apple Intelligence pendant qu'un iPhone pointe vers un serveur local — c'est
-/// le but.
+/// ⚠️ `UserDefaults.standard`, so DEVICE-SPECIFIC by construction:
+/// never touched by CloudKit sync (`SyncSchema.syncedTables` lists no
+/// settings table) nor by the iCloud key-value store (never
+/// used in this project, entitlement absent). A Mac can therefore stay on
+/// Apple Intelligence while an iPhone points at a local server — that's
+/// the goal.
 enum AIFeatureSettings {
 
     private static func key(_ feature: AIFeature) -> String { "ai.backend.\(feature.rawValue)" }
 
-    /// Ancienne clé globale, lue une seule fois pour reprendre le choix
-    /// existant plutôt que de le perdre silencieusement à la mise à jour.
+    /// Old global key, read once to carry over the existing choice
+    /// rather than silently losing it.
     private static let legacyGlobalKey = "ai.backendPreference"
     private static let migrationDoneKey = "ai.backend.migratedToPerFeature"
 
@@ -399,11 +399,11 @@ enum AIFeatureSettings {
         UserDefaults.standard.set(data, forKey: key(feature))
     }
 
-    /// Reprend le réglage global antérieur sur TOUTES les fonctionnalités.
+    /// Carries over the previous global setting to EVERY feature.
     ///
-    /// Un utilisateur qui avait configuré un serveur local doit le retrouver
-    /// partout après la mise à jour, pas revenir à « Automatique » sans le
-    /// savoir.
+    /// A user who had configured a local server must find it
+    /// everywhere after the update, not fall back to "Automatic" without
+    /// knowing it.
     private static func migrateLegacyIfNeeded() {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: migrationDoneKey) else { return }
@@ -414,7 +414,7 @@ enum AIFeatureSettings {
         switch legacy {
         case "localServer": migrated = .localServer
         case "off":         migrated = .off
-        default:            return          // « automatic » = déjà le défaut
+        default:            return          // "automatic" = already the default
         }
         guard let data = try? JSONEncoder().encode(migrated) else { return }
         for feature in AIFeature.allCases {

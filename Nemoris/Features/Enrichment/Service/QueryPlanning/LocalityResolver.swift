@@ -1,22 +1,22 @@
 import Foundation
 
-// Contrat de résolution d'une localité.
-// ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
+// Contract for resolving a locality.
+// ⚠️ PURE FILE: `import Foundation` ONLY.
 //
-// Pourquoi le planificateur reçoit une localité DÉJÀ RÉSOLUE plutôt qu'un résolveur :
+// Why the planner receives an ALREADY RESOLVED locality rather than a resolver:
 //
-// `MerchantQueryPlanner.extract` et `.plan` doivent rester des fonctions pures totales,
-// testables sans mock ni témoin de protocole. Si le plan portait une localité qu'un
-// résolveur remplissait ensuite, `attempts` — précisément ce que les tests doivent
-// affirmer — n'existerait qu'après une entrée/sortie réseau, et le plan deviendrait un
-// objet mutable en deux temps dont l'ordre de cascade ne serait observable qu'à travers
-// un bouchon réseau. C'est exactement la forme intestable qu'on fuit.
+// `MerchantQueryPlanner.extract` and `.plan` must stay total pure functions,
+// testable with no mock and no protocol stub. If the plan carried a locality a
+// resolver later filled in, `attempts` — precisely what the tests need to
+// assert — would only exist after a network round trip, and the plan would become a
+// two-stage mutable object whose cascade order would only be observable through
+// a network stub. That's exactly the untestable shape we're avoiding.
 //
-// L'ordre d'appel est donc, chez l'exécuteur : extract → resolve → plan → execute.
-// Une seule direction, aucun cycle.
+// The call order is therefore, on the executor's side: extract → resolve → plan → execute.
+// One direction, no cycles.
 protocol LocalityResolver: Sendable {
-    /// Résout le premier fragment reconnaissable parmi `tokens`.
-    /// Renvoie nil si aucun n'est une commune connue — ce n'est PAS un échec :
-    /// le fragment reste utilisé comme texte de tri sur les adresses des candidats.
+    /// Resolves the first recognizable fragment among `tokens`.
+    /// Returns nil if none is a known commune — that is NOT a failure:
+    /// the fragment is still used as sort text against candidates' addresses.
     func resolve(_ tokens: [LocalityToken], countryHint: String?) async -> ResolvedLocality?
 }

@@ -1,22 +1,22 @@
 import Foundation
 
-// Entreprise et établissements, indépendamment du registre qui les a fournis.
+// A company and its establishments, independent of the registry that provided them.
 //
-// POURQUOI CES TYPES N'ENTRENT PAS DANS `MerchantEnrichment`
+// WHY THESE TYPES AREN'T PART OF `MerchantEnrichment`
 //
-// `MerchantEnrichment` est une projection PLATE, à une seule adresse, fusionnable champ par
-// champ. C'est toute la sémantique de `EnrichmentOrchestrator.merge()` (argmax de
-// `confidence × poids` pour CHAQUE champ) — un argmax sur un tableau d'établissements ne
-// veut rien dire. C'est aussi le payload de `enrichment_cache.json`, une entrée par
-// libellé : y imbriquer 20 branches gonflerait un cache qui n'a ni TTL ni éviction.
+// `MerchantEnrichment` is a FLAT projection, a single address, mergeable field by
+// field. That's the whole semantics of `EnrichmentOrchestrator.merge()` (argmax of
+// `confidence × weight` for EACH field) — an argmax over an array of establishments
+// means nothing. It's also the `enrichment_cache.json` payload, one entry per
+// label: nesting 20 branches in there would bloat a cache that has neither a TTL nor eviction.
 //
-// La liste d'établissements n'a d'intérêt que pendant la session interactive, le temps que
-// l'utilisateur choisisse la bonne boutique. Elle vit donc dans `MerchantSearchResult`,
-// jamais en cache long terme.
+// The list of establishments only matters during the interactive session, while
+// the user picks the right storefront. It therefore lives in `MerchantSearchResult`,
+// never in the long-term cache.
 
-/// Un établissement : une adresse physique rattachée à une personne morale.
+/// An establishment: a physical address tied to a legal entity.
 struct Establishment: Hashable, Sendable, Identifiable {
-    /// SIRET en France, identifiant local du fournisseur ailleurs.
+    /// SIRET in France, the provider's local identifier elsewhere.
     let id: String
     let address: String?
     let postalCode: String?
@@ -30,19 +30,19 @@ struct Establishment: Hashable, Sendable, Identifiable {
     let latitude: Double?
     let longitude: Double?
 
-    /// Nom le plus parlant : l'enseigne commerciale prime sur tout.
+    /// Most telling name: the trade name takes priority over everything.
     var displayName: String? {
         enseignes.first(where: { !$0.isEmpty }) ?? nomCommercial
     }
 
-    /// Tous les noms sous lesquels cet établissement peut matcher.
+    /// Every name this establishment can match under.
     var searchableNames: [String] {
         var names = enseignes.filter { !$0.isEmpty }
         if let nc = nomCommercial, !nc.isEmpty { names.append(nc) }
         return names
     }
 
-    /// Ligne d'adresse compacte pour l'UI.
+    /// Compact address line for the UI.
     var addressLine: String? {
         let parts = [address, [postalCode, city].compactMap { $0 }.joined(separator: " ")]
             .compactMap { $0 }
@@ -51,7 +51,7 @@ struct Establishment: Hashable, Sendable, Identifiable {
     }
 }
 
-/// Une personne morale et les établissements qui matchent la recherche.
+/// A legal entity and the establishments that match the search.
 struct CompanyMatch: Hashable, Sendable, Identifiable {
     let providerId: String        // "sirene_fr"
     let siren: String
@@ -60,13 +60,13 @@ struct CompanyMatch: Hashable, Sendable, Identifiable {
     let nafCode: String?
     let isActive: Bool
     let creationDate: Date?
-    /// Nombre TOTAL d'établissements de l'entreprise, tous non retournés.
+    /// TOTAL number of the company's establishments, all not returned.
     let establishmentCount: Int?
     let openEstablishmentCount: Int?
     let headquarters: Establishment?
-    /// ⚠️ Uniquement les établissements qui MATCHENT la requête, pas tous ceux de
-    /// l'entreprise. L'UI doit le dire ainsi (« établissements correspondant au nom
-    /// recherché ») : laisser croire à une liste exhaustive serait mensonger.
+    /// ⚠️ Only the establishments that MATCH the query, not all of the
+    /// company's. The UI must phrase it that way ("establishments matching the
+    /// searched name"): implying an exhaustive list would be misleading.
     let establishments: [Establishment]
 
     var id: String { siren }
@@ -79,10 +79,10 @@ struct CompanyMatch: Hashable, Sendable, Identifiable {
         return names.filter { !$0.isEmpty }
     }
 
-    /// Vrai si la requête a matché une ENSEIGNE et non la raison sociale. C'est le cas
-    /// courant des franchises : « CARREFOUR MARKET » est l'enseigne, la personne morale
-    /// s'appelle « CSF » ou « OULLIDIS ». Vérifié à l'API : `q=carrefour market` fait
-    /// remonter l'entité légale LIDL parce qu'un de ses établissements porte cette enseigne.
+    /// True if the query matched a TRADE NAME rather than the company name. This is the
+    /// common case with franchises: "CARREFOUR MARKET" is the trade name, the legal
+    /// entity is called "CSF" or "OULLIDIS". Verified against the API: `q=carrefour market`
+    /// surfaces the LIDL legal entity because one of its establishments carries that trade name.
     func matchedViaEnseigne(query: [String]) -> Bool {
         let legalScore = MerchantTokenSimilarity.bestScore(
             query: query, against: [legalName, nomComplet].compactMap { $0 }
@@ -94,8 +94,8 @@ struct CompanyMatch: Hashable, Sendable, Identifiable {
         return enseigneScore > legalScore
     }
 
-    /// Tous les établissements dignes d'être montrés : ceux qui matchent, plus le siège
-    /// s'il n'y figure pas déjà (il porte souvent la seule adresse connue).
+    /// Every establishment worth showing: those that match, plus the headquarters
+    /// if it isn't already among them (it often carries the only known address).
     var allEstablishments: [Establishment] {
         var out = establishments
         if let hq = headquarters, !out.contains(where: { $0.id == hq.id }) {
@@ -105,20 +105,20 @@ struct CompanyMatch: Hashable, Sendable, Identifiable {
     }
 }
 
-// MARK: - Projection vers le modèle plat d'enrichissement
+// MARK: - Projection to the flat enrichment model
 
 extension CompanyMatch {
 
-    /// Projette cette entreprise et l'établissement retenu vers `MerchantEnrichment`.
+    /// Projects this company and the chosen establishment into `MerchantEnrichment`.
     ///
-    /// ⚠️ CHEMIN UNIQUE de conversion, partagé par l'orchestrateur (import batch) et par
-    /// l'UI (choix manuel dans la liste). Les dupliquer les ferait diverger : c'est
-    /// exactement la classe de bug que `EnvelopeSpendingCalculator` a servi à éteindre
-    /// ailleurs dans le projet.
+    /// ⚠️ SINGLE conversion path, shared by the orchestrator (batch import) and by
+    /// the UI (manual choice in the list). Duplicating them would make them diverge: it's
+    /// exactly the bug class `EnvelopeSpendingCalculator` was built to eliminate
+    /// elsewhere in the project.
     ///
-    /// `establishment` est le point clé du drill-down : le siège d'une enseigne est souvent
-    /// à l'autre bout du pays alors que le commerce facturé est une branche. On prend donc
-    /// l'adresse de l'établissement retenu, jamais celle du siège par défaut.
+    /// `establishment` is the key to the drill-down: a chain's headquarters is often
+    /// on the other side of the country while the billed storefront is a branch. So we
+    /// take the chosen establishment's address, never the headquarters' default one.
     func enrichment(for establishment: Establishment?,
                     confidence: Double,
                     fallbackCity: String? = nil,
@@ -149,8 +149,9 @@ extension CompanyMatch {
 }
 
 extension RankedCompany {
-    /// Variante pour le meilleur établissement — le score du classement EST la confiance,
-    /// puisqu'il agrège similarité de nom, correspondance géographique, activité et siège.
+    /// Variant for the best establishment — the ranking score IS the confidence,
+    /// since it already aggregates name similarity, geographic match, business activity, and
+    /// headquarters status.
     func enrichment(fallbackCity: String? = nil,
                     resolveCategory: (String) -> Int? = { _ in nil }) -> MerchantEnrichment {
         match.enrichment(for: bestEstablishment, confidence: score,
@@ -158,18 +159,18 @@ extension RankedCompany {
     }
 }
 
-// MARK: - Adaptation vers les types purs du classement
+// MARK: - Adapting to the ranker's pure types
 
 extension Establishment {
-    /// Projette vers le candidat agnostique attendu par `CandidateRanker`.
+    /// Projects to the provider-agnostic candidate `CandidateRanker` expects.
     ///
-    /// ⚠️ `companyNames` n'est PAS optionnel dans les faits : la plupart des petites
-    /// entreprises n'ont aucune enseigne déclarée (`liste_enseignes` vide), donc
-    /// `searchableNames` est vide et l'établissement n'aurait AUCUN nom à comparer —
-    /// score de similarité 0, quel que soit le libellé. Bug observé en conditions
-    /// réelles : « CB SROM FLANCHES » classait « COMMUNE DE POMMEVIC » devant « SROM »,
-    /// les deux étant à 0 sur le nom et départagés par leur seul identifiant.
-    /// La raison sociale de l'entreprise est donc toujours jointe.
+    /// ⚠️ `companyNames` isn't optional in practice: most small
+    /// companies have no declared trade name at all (`liste_enseignes` empty), so
+    /// `searchableNames` is empty and the establishment would have NO name to compare against —
+    /// a similarity score of 0, whatever the label. Bug observed in
+    /// real conditions: "CB SROM FLANCHES" ranked "COMMUNE DE POMMEVIC" ahead of "SROM",
+    /// both scoring 0 on the name and tied by their id alone.
+    /// The company's own name is therefore always joined in.
     func rankable(providerWeight: Double,
                   matchedViaEnseigne: Bool,
                   companyNames: [String] = []) -> RankableCandidate {
@@ -179,7 +180,7 @@ extension Establishment {
             addressLine: address,
             postalCode: postalCode,
             cityLabel: city,
-            inseeCode: nil,   // l'API renvoie le code commune INSEE dans `commune`
+            inseeCode: nil,   // the API returns the INSEE commune code in `commune`
             isHeadquarters: isHeadquarters,
             isActive: isActive,
             nafCode: nafCode,

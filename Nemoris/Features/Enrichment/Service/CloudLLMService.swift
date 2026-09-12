@@ -1,23 +1,23 @@
 import Foundation
 import Security
 
-/// Client HTTP vers un fournisseur cloud — Claude (Anthropic) ou OpenAI —, avec
-/// la clé API de l'utilisateur.
+/// HTTP client to a cloud provider — Claude (Anthropic) or OpenAI —, with
+/// the user's own API key.
 ///
-/// ⚠️ **Seul backend qui fait sortir les données de l'appareil.** Le libellé
-/// bancaire, le relevé ou la capture concernés sont transmis au fournisseur. Ce
-/// n'est proposé que fonctionnalité par fonctionnalité, jamais globalement, et
-/// l'UI l'affiche explicitement. Le reste de l'app est conçu pour rester local.
+/// ⚠️ **The only backend that makes data leave the device.** The bank
+/// label, statement, or screenshot involved is sent to the provider. It's
+/// only offered feature by feature, never globally, and
+/// the UI shows it explicitly. The rest of the app is designed to stay local.
 ///
-/// Volontairement bâti sur le même modèle que `LocalLLMService` (et pas sur
-/// `ResilientHTTP`, taillé pour les APIs de cours de bourse rate-limitées) :
-/// timeout long, aucun retry automatique. Une inférence lente n'est pas une
-/// erreur, et retenter triplerait l'attente pour apprendre la même chose.
+/// Deliberately built on the same model as `LocalLLMService` (and not
+/// `ResilientHTTP`, tailored for rate-limited stock-market-data APIs):
+/// long timeout, no automatic retry. A slow inference isn't an
+/// error, and retrying would triple the wait to learn the same thing.
 ///
-/// Les deux fournisseurs ont des contrats DIFFÉRENTS, d'où deux encodages :
-///   • OpenAI  → `/v1/chat/completions`, messages à rôles, `Authorization: Bearer`
-///   • Claude  → `/v1/messages`, `system` hors du tableau de messages,
-///               en-têtes `x-api-key` + `anthropic-version`
+/// The two providers have DIFFERENT contracts, hence two encodings:
+///   • OpenAI  → `/v1/chat/completions`, role-based messages, `Authorization: Bearer`
+///   • Claude  → `/v1/messages`, `system` outside the messages array,
+///               `x-api-key` + `anthropic-version` headers
 struct CloudLLMService: Sendable {
 
     let provider: AICloudProvider
@@ -41,16 +41,16 @@ struct CloudLLMService: Sendable {
                                   forKey: modelKey(provider))
     }
 
-    /// Une clé API est-elle enregistrée ? C'est la seule condition d'usage —
-    /// pas d'URL à saisir, contrairement au serveur local.
+    /// Is an API key registered? That's the only usage condition —
+    /// no URL to enter, unlike the local server.
     static func hasConfiguration(_ provider: AICloudProvider) -> Bool {
         !(CloudLLMKeychain.load(provider) ?? "").isEmpty
     }
 
     // MARK: - Identification de marchand
 
-    /// Même contrat de silence que les autres backends : `nil` en cas d'échec,
-    /// l'appelant continue sans ce candidat.
+    /// Same silent-failure contract as the other backends: `nil` on failure,
+    /// the caller continues without this candidate.
     func identify(context: MerchantEnrichmentContext) async -> MerchantEnrichment? {
         do {
             let userPrompt = await EnrichmentLLMService.buildPrompt(context: context)
@@ -68,8 +68,8 @@ struct CloudLLMService: Sendable {
         }
     }
 
-    /// Teste la clé et JETTE une erreur typée — le bouton « Tester » des
-    /// Réglages a besoin d'un message actionnable, pas d'un silence.
+    /// Tests the key and THROWS a typed error — the "Test" button in
+    /// Settings needs an actionable message, not silence.
     func testConnection() async throws -> String {
         let content = try await complete(systemPrompt: "Réponds uniquement par le mot OK.",
                                          userPrompt: "Ping de test depuis Nemoris.")
@@ -77,7 +77,7 @@ struct CloudLLMService: Sendable {
         return "« \(Self.model(for: provider)) » a répondu : \(preview)"
     }
 
-    // MARK: - Complétion
+    // MARK: - Completion
 
     func complete(systemPrompt: String,
                   userPrompt: String,
@@ -93,9 +93,9 @@ struct CloudLLMService: Sendable {
 
         switch provider {
         case .claude:
-            // ⚠️ Anthropic n'utilise PAS `Authorization: Bearer`, et
-            // `anthropic-version` est OBLIGATOIRE — sans lui la requête est
-            // rejetée avec un 400 peu parlant.
+            // ⚠️ Anthropic does NOT use `Authorization: Bearer`, and
+            // `anthropic-version` is REQUIRED — without it the request is
+            // rejected with a not-very-helpful 400.
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
             request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
             request.httpBody = try JSONEncoder().encode(
@@ -126,8 +126,8 @@ struct CloudLLMService: Sendable {
             throw CloudLLMError.unreachable("Réponse HTTP invalide")
         }
         guard 200..<300 ~= http.statusCode else {
-            // Le corps d'erreur porte le vrai motif (clé invalide, quota,
-            // modèle inconnu) : le remonter évite un « HTTP 400 » opaque.
+            // The error body carries the real reason (invalid key, quota,
+            // unknown model): surfacing it avoids an opaque "HTTP 400".
             throw CloudLLMError.badStatus(http.statusCode, Self.errorMessage(from: data))
         }
 
@@ -147,7 +147,7 @@ struct CloudLLMService: Sendable {
         }
     }
 
-    /// Extrait `error.message`, présent chez les deux fournisseurs.
+    /// Extracts `error.message`, present with both providers.
     private static func errorMessage(from data: Data) -> String? {
         struct Envelope: Decodable {
             struct Detail: Decodable { let message: String? }
@@ -170,8 +170,8 @@ private struct ClaudeRequest: Encodable {
     func encode(to encoder: Encoder) throws {
         var root = encoder.container(keyedBy: CodingKeys.self)
         try root.encode(model, forKey: .model)
-        // Chez Anthropic, les instructions système sont un champ de premier
-        // niveau — pas un message de rôle « system » comme chez OpenAI.
+        // With Anthropic, system instructions are a top-level
+        // field — not a "system"-role message like with OpenAI.
         try root.encode(system, forKey: .system)
         try root.encode(4096, forKey: .max_tokens)
         try root.encode(0.2, forKey: .temperature)
@@ -182,8 +182,8 @@ private struct ClaudeRequest: Encodable {
         var parts = message.nestedUnkeyedContainer(forKey: .content)
 
         if let imageDataURL, let payload = Self.base64Payload(from: imageDataURL) {
-            // ⚠️ Anthropic veut les octets base64 NUS plus un `media_type`
-            // séparé — pas la data-URL complète attendue par OpenAI.
+            // ⚠️ Anthropic wants the RAW base64 bytes plus a separate
+            // `media_type` — not the full data-URL OpenAI expects.
             var imagePart = parts.nestedContainer(keyedBy: PartKeys.self)
             try imagePart.encode("image", forKey: .type)
             var source = imagePart.nestedContainer(keyedBy: SourceKeys.self, forKey: .source)
@@ -214,7 +214,7 @@ private struct ClaudeRequest: Encodable {
 private struct ClaudeResponse: Decodable {
     struct Block: Decodable { let type: String; let text: String? }
     let content: [Block]
-    /// Une réponse peut contenir plusieurs blocs : on concatène le texte.
+    /// A response can contain several blocks: we concatenate the text.
     var text: String {
         content.compactMap { $0.type == "text" ? $0.text : nil }.joined()
     }
@@ -298,9 +298,9 @@ enum CloudLLMError: Error, LocalizedError {
 
 // MARK: - Keychain
 
-/// Une clé par fournisseur. Mêmes conventions que `LocalLLMKeychain` :
-/// `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, jamais synchronisé iCloud —
-/// cohérent avec tous les autres secrets du projet (LiveSync, Binance).
+/// One key per provider. Same conventions as `LocalLLMKeychain`:
+/// `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, never synced to iCloud —
+/// consistent with every other secret in this project (LiveSync, Binance).
 enum CloudLLMKeychain {
     private static func account(_ provider: AICloudProvider) -> String {
         "cloud_llm_api_key_\(provider.rawValue)"

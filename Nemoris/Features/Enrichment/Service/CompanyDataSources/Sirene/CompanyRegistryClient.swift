@@ -1,15 +1,15 @@
 import Foundation
 
-/// Client de l'API publique recherche-entreprises.api.gouv.fr.
-/// Pas de clé, pas d'auth, ~7 req/s (cadencé par `RemoteProvider.sireneGouv`).
+/// Client for the public recherche-entreprises.api.gouv.fr API.
+/// No key, no auth, ~7 req/s (paced by `RemoteProvider.sireneGouv`).
 ///
-/// Privacy : seul le nom NETTOYÉ du commerce sort de l'appareil, plus éventuellement un
-/// filtre géographique. Jamais le libellé bancaire brut — il contient des références de
-/// transaction et des numéros de carte. C'est garanti par le type : ce client n'accepte
-/// qu'un `CompanyRegistryQuery`, que seul `MerchantQueryPlanner` sait construire.
+/// Privacy: only the CLEANED-UP business name leaves the device, plus possibly a
+/// geographic filter. Never the raw bank label — it carries transaction
+/// references and card numbers. Guaranteed by the type: this client only accepts
+/// a `CompanyRegistryQuery`, which only `MerchantQueryPlanner` knows how to build.
 ///
-/// Remplace l'ancien `SireneClient`, qui prenait une chaîne libre (donc le libellé entier)
-/// et n'avait qu'un cache mémoire sans TTL.
+/// Replaces the old `SireneClient`, which took a free-form string (so the whole
+/// label) and only had an in-memory cache with no TTL.
 actor CompanyRegistryClient {
 
     static let shared = CompanyRegistryClient()
@@ -17,9 +17,9 @@ actor CompanyRegistryClient {
     private let baseURL = URL(string: "https://recherche-entreprises.api.gouv.fr/search")!
     private let nearPointURL = URL(string: "https://recherche-entreprises.api.gouv.fr/near_point")!
 
-    /// Résultats mis en cache disque. Un résultat VIDE est caché aussi, plus brièvement :
-    /// une requête qui ne donne rien est justement celle qu'on risque de rejouer en boucle.
-    /// Précédent maison : `MerchantLogoService.failedDomains`.
+    /// Results cached to disk. An EMPTY result is cached too, more briefly:
+    /// a query that returns nothing is exactly the one at risk of being replayed in a loop.
+    /// Same house precedent as `MerchantLogoService.failedDomains`.
     private struct CachedSearch: Codable, Sendable {
         let companies: [CachedCompany]
         let fetchedAt: Date
@@ -31,9 +31,9 @@ actor CompanyRegistryClient {
     private static let hitTTL: TimeInterval = 14 * 24 * 3600   // 14 jours
     private static let emptyTTL: TimeInterval = 3 * 24 * 3600  //  3 jours
 
-    // MARK: - Recherche
+    // MARK: - Search
 
-    /// Exécute une requête typée. Renvoie les entreprises avec leurs établissements matchés.
+    /// Runs a typed query. Returns companies with their matched establishments.
     func search(_ query: CompanyRegistryQuery) async throws -> [CompanyMatch] {
         let key = query.canonicalKey
         if let cached = memory[key], !isStale(cached) {
@@ -43,10 +43,10 @@ actor CompanyRegistryClient {
         var items: [URLQueryItem] = [
             .init(name: "q", value: query.q),
             .init(name: "per_page", value: String(min(max(query.perPage, 1), 25))),
-            // ⚠️ ORDRE SIGNIFICATIF : `minimal` DOIT précéder `include`, sinon l'API
-            // répond « Veuillez indiquer si vous souhaitez une réponse minimale avec le
-            // filtre minimal=True avant de préciser les champs à inclure ».
-            // `URLComponents.queryItems` préserve l'ordre d'insertion : ne pas trier ici.
+            // ⚠️ ORDER MATTERS: `minimal` MUST come before `include`, otherwise the API
+            // responds "Please indicate whether you want a minimal response with the
+            // minimal=True filter before specifying the fields to include."
+            // `URLComponents.queryItems` preserves insertion order: don't sort here.
             .init(name: "minimal", value: "true"),
             .init(name: "include", value: "siege,matching_etablissements"),
             .init(name: "limite_matching_etablissements",
@@ -64,8 +64,8 @@ actor CompanyRegistryClient {
         return companies
     }
 
-    /// Recherche par proximité géographique — dernier recours quand aucune requête par nom
-    /// n'a rien donné et qu'on connaît le centroïde de la commune.
+    /// Geographic-proximity search — a last resort when no name-based query
+    /// returned anything and the commune's centroid is known.
     func searchNearPoint(latitude: Double, longitude: Double,
                          radiusKm: Double, perPage: Int) async throws -> [CompanyMatch] {
         let key = "near|\(latitude)|\(longitude)|\(radiusKm)|\(perPage)"
@@ -97,7 +97,7 @@ actor CompanyRegistryClient {
         var request = URLRequest(url: finalURL)
         request.setValue("Nemoris/1.0 (iOS app)", forHTTPHeaderField: "User-Agent")
 
-        // Pacing + disjoncteur 429 + backoff mutualisés avec le reste de l'app.
+        // Pacing + 429 circuit breaker + backoff shared with the rest of the app.
         let data = try await ResilientHTTP.send(request, provider: .sireneGouv, timeout: 12)
         let decoded = try JSONDecoder().decode(SireneSearchResponse.self, from: data)
         return decoded.results.compactMap { $0.asCompanyMatch() }
@@ -115,8 +115,8 @@ actor CompanyRegistryClient {
 
 // MARK: - Projection cachable
 
-/// `CompanyMatch` est `Sendable` mais pas `Codable` (il porte des types métier).
-/// Cette projection permet de persister le cache sans contraindre le modèle de domaine.
+/// `CompanyMatch` is `Sendable` but not `Codable` (it carries business types).
+/// This projection lets us persist the cache without constraining the domain model.
 private struct CachedCompany: Codable, Sendable {
     let providerId: String
     let siren: String
@@ -185,10 +185,10 @@ private struct CachedEstablishment: Codable, Sendable {
     }
 }
 
-// MARK: - Décodage → domaine
+// MARK: - Decoding → domain
 
 extension SireneCompany {
-    /// Convertit la réponse brute en `CompanyMatch`, établissements compris.
+    /// Converts the raw response into a `CompanyMatch`, establishments included.
     func asCompanyMatch() -> CompanyMatch? {
         guard let siren, !siren.isEmpty,
               let legal = nomRaisonSociale ?? nomComplet, !legal.isEmpty else { return nil }
@@ -232,8 +232,8 @@ extension SireneEtablissement {
             nomCommercial: nomCommercial,
             isHeadquarters: isHeadquarters ?? (estSiege ?? false),
             isFormerHeadquarters: ancienSiege ?? false,
-            // Absent du payload d'un établissement matché ⇒ actif (l'appel filtre déjà
-            // sur etat_administratif=A côté entreprise).
+            // Absent from a matched establishment's payload ⇒ active (the call already filters
+            // on etat_administratif=A on the company side).
             isActive: etatAdministratif.map { $0 == "A" } ?? true,
             nafCode: activitePrincipale ?? fallbackNaf,
             latitude: latitude.flatMap(Double.init),

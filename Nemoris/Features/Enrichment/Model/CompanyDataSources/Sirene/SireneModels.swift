@@ -1,14 +1,14 @@
 import Foundation
 import CoreLocation
 
-/// Une entreprise SIRENE (résultat de l'API recherche-entreprises.api.gouv.fr).
+/// A SIRENE company (a result from the recherche-entreprises.api.gouv.fr API).
 struct SireneEstablishment: Identifiable, Hashable {
     let siret: String
     let siren: String
     let legalName: String          // raison sociale (ex "DUPUIS SAS")
     let enseigne: String?          // nom commercial / enseigne (ex "Boulangerie Dupuis")
     let nafCode: String?           // ex "10.71C"
-    let address: String?           // ex "75 RUE DE LA REPUBLIQUE 69002 LYON"
+    let address: String?           // e.g. "75 RUE DE LA REPUBLIQUE 69002 LYON"
     let postalCode: String?
     let city: String?
     let coordinates: CLLocationCoordinate2D?
@@ -17,8 +17,8 @@ struct SireneEstablishment: Identifiable, Hashable {
 
     var id: String { siret }
 
-    /// Le nom le plus pertinent à afficher / utiliser comme nom de tiers.
-    /// L'enseigne (commercial) prime sur la raison sociale (légale).
+    /// The most relevant name to show / use as the payee's name.
+    /// The trade name (commercial) takes priority over the legal (registered) name.
     var displayName: String {
         if let e = enseigne?.trimmingCharacters(in: .whitespaces), !e.isEmpty {
             return e.capitalizedFirst
@@ -34,7 +34,7 @@ struct SireneEstablishment: Identifiable, Hashable {
     }
 }
 
-/// Résultat brut du décodage de la réponse JSON SIRENE.
+/// Raw result of decoding the SIRENE JSON response.
 struct SireneSearchResponse: Decodable {
     let results: [SireneCompany]
     let totalResults: Int
@@ -54,13 +54,14 @@ struct SireneCompany: Decodable {
     let dateFermeture: String?
     let etatAdministratif: String?
     let siege: SireneSiege?
-    /// Établissements (agences, magasins) dont le nom ou l'enseigne matche la requête.
-    /// Renseigné uniquement si l'appel demande `include=matching_etablissements`.
+    /// Establishments (branches, stores) whose name or trade name matches the query.
+    /// Only populated if the call requests `include=matching_etablissements`.
     ///
-    /// C'est la clé du drill-down : le siège d'une enseigne est souvent à l'autre bout du
-    /// pays, alors que le commerce cherché est une BRANCHE — qu'on reconnaît à son adresse.
-    /// Exemple mesuré (`q=boulangerie pralus`) : le siège est à Roanne, mais la boutique
-    /// facturée était « 18 quai Saint-Antoine, 69002 Lyon », qui n'apparaît que là.
+    /// This is the key to the drill-down: a chain's headquarters is often on the other
+    /// side of the country, while the storefront being searched for is a BRANCH — recognized
+    /// by its address. Example measured (`q=boulangerie pralus`): the headquarters is in
+    /// Roanne, but the billed shop was "18 quai Saint-Antoine, 69002 Lyon", which only
+    /// shows up there.
     let matchingEtablissements: [SireneEtablissement]?
     let nombreEtablissements: Int?
     let nombreEtablissementsOuverts: Int?
@@ -81,8 +82,8 @@ struct SireneCompany: Decodable {
     }
 }
 
-/// Un établissement renvoyé dans `matching_etablissements`.
-/// ⚠️ `latitude`/`longitude` arrivent en CHAÎNES dans cette API, pas en nombres.
+/// An establishment returned in `matching_etablissements`.
+/// ⚠️ `latitude`/`longitude` arrive as STRINGS in this API, not as numbers.
 struct SireneEtablissement: Decodable {
     let siret: String?
     let adresse: String?
@@ -135,7 +136,7 @@ struct SireneSiege: Decodable {
 }
 
 extension SireneCompany {
-    /// Convertit la réponse brute en un modèle utilisable côté UI.
+    /// Converts the raw response into a model usable on the UI side.
     func toEstablishment() -> SireneEstablishment? {
         guard let siret = siege?.siret, !siret.isEmpty,
               let siren = siren, !siren.isEmpty,

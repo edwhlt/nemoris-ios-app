@@ -1,27 +1,27 @@
 import Foundation
 
-// Raffinement d'un plan de requête.
-// ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT. Surtout pas `FoundationModels`.
+// Refining a query plan.
+// ⚠️ PURE FILE: `import Foundation` ONLY. Definitely not `FoundationModels`.
 //
-// C'est le type que le planificateur consomme, produit indifféremment par :
-//   • `DeterministicQueryRefiner`  — tables + règles, marche PARTOUT (iOS 18 inclus)
-//   • `LLMQueryRefinementGenerable` — génération guidée, iOS/macOS 26 + Apple Intelligence
+// This is the type the planner consumes, produced indifferently by:
+//   • `DeterministicQueryRefiner`  — tables + rules, works EVERYWHERE (iOS 18 included)
+//   • `LLMQueryRefinementGenerable` — guided generation, iOS/macOS 26 + Apple Intelligence
 //
-// Le fait que les deux chemins renvoient le MÊME type est la raison d'être du découpage :
-// le planificateur n'a qu'UN seul chemin de code, et le corpus de test exerce donc le vrai
-// chemin de production. C'est la doctrine CLAUDE.md (« ne jamais laisser deux chemins de
-// code calculer la même chose différemment ») appliquée à la frontière de l'IA.
+// The fact that both paths return the SAME type is the whole reason for this split:
+// the planner has only ONE code path, so the test corpus exercises the real production
+// path. It's the CLAUDE.md doctrine ("never let two code paths compute
+// the same thing differently") applied at the AI boundary.
 
 struct LLMQueryRefinement: Hashable, Sendable, Codable {
-    /// Nom commercial seul, sans processeur ni ville ni référence.
+    /// Commercial name alone, with no processor, city, or reference.
     var merchantName: String?
-    /// Ville / village / quartier tel qu'écrit dans le libellé.
+    /// City / town / district as written in the label.
     var localityName: String?
     var postalCode: String?
     /// ISO 3166-1 alpha-2, MAJUSCULES.
     var countryCode: String?
     var processorName: String?
-    /// Abréviations développées en clair (« RES » → « restaurant »).
+    /// Abbreviations expanded in full ("RES" → "restaurant").
     var expandedTokens: [String]
     /// Virement nominatif vers un particulier.
     var isPersonNotBusiness: Bool
@@ -49,7 +49,7 @@ struct LLMQueryRefinement: Hashable, Sendable, Codable {
         self.rationale = rationale
     }
 
-    /// Élément neutre : n'apporte rien, ne retire rien.
+    /// A neutral element: adds nothing, removes nothing.
     static let none = LLMQueryRefinement()
 
     var isEmpty: Bool {
@@ -58,16 +58,16 @@ struct LLMQueryRefinement: Hashable, Sendable, Codable {
     }
 }
 
-// MARK: - Normalisation partagée avec le chemin @Generable
+// MARK: - Normalization shared with the @Generable path
 
-/// Le modèle renvoie des CHAÎNES VIDES plutôt que des optionnels (schéma plus plat, plus
-/// robuste d'une version d'OS à l'autre). Cette fonction fait la conversion, le clamp et
-/// la mise en majuscules.
+/// The model returns EMPTY STRINGS rather than optionals (a flatter schema, more
+/// robust across OS versions). This function does the conversion, the clamping, and
+/// the uppercasing.
 ///
-/// Elle vit ici, dans un fichier PUR, et non dans le fichier `@Generable` : la macro n'est
-/// pas testable au harness, mais ce mapping — vide→nil, bornes, casse — l'est, et c'est là
-/// que se logent les vraies erreurs. `GeneratedQueryPlan.toRefinement()` n'est qu'un
-/// renvoi d'une ligne vers cette fonction.
+/// It lives here, in a PURE file, not in the `@Generable` file: the macro isn't
+/// testable by the harness, but this mapping — empty→nil, bounds, case — is, and it's
+/// where the real bugs live. `GeneratedQueryPlan.toRefinement()` is just a
+/// one-line forward to this function.
 enum GeneratedQueryPlanMapping {
 
     static func map(merchantName: String,
@@ -82,8 +82,8 @@ enum GeneratedQueryPlanMapping {
             merchantName: clean(merchantName),
             localityName: clean(localityName).map { $0.lowercased() },
             postalCode: clean(postalCode).flatMap { pc in
-                // Un code postal FR fait exactement 5 chiffres. Tout le reste est du bruit
-                // halluciné qu'on ne veut pas voir partir en filtre `code_postal`.
+                // A French postal code is exactly 5 digits. Everything else is
+                // hallucinated noise we don't want going into the `code_postal` filter.
                 pc.count == 5 && pc.allSatisfy(\.isNumber) ? pc : nil
             },
             countryCode: clean(countryCode).flatMap { cc in
@@ -98,7 +98,7 @@ enum GeneratedQueryPlanMapping {
 
     private static func clean(_ s: String) -> String? {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Le modèle écrit parfois littéralement "null" / "none" quand il ne sait pas.
+        // The model sometimes literally writes "null" / "none" when it doesn't know.
         guard !t.isEmpty, t.lowercased() != "null", t.lowercased() != "none" else { return nil }
         return t
     }

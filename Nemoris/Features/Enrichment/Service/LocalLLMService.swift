@@ -1,20 +1,20 @@
 import Foundation
 import Security
 
-/// Client HTTP pour un serveur compatible OpenAI (`/v1/chat/completions`) — LM Studio,
-/// Ollama, ou toute app exposant ce même contrat, tournant sur le Mac de l'utilisateur
-/// (même réseau local) ou sur l'iPhone lui-même (loopback, si l'utilisateur a installé
-/// une app d'inférence locale qui expose un serveur). Réutilise le prompt et le parsing
-/// JSON de `EnrichmentLLMService` — le format de réponse attendu (JSON strict, même
-/// schéma) est identique quel que soit le moteur d'inférence derrière.
+/// HTTP client for an OpenAI-compatible server (`/v1/chat/completions`) — LM Studio,
+/// Ollama, or any app exposing that same contract, running on the user's Mac
+/// (same local network) or on the iPhone itself (loopback, if the user installed
+/// a local inference app that exposes a server). Reuses `EnrichmentLLMService`'s
+/// prompt and JSON parsing — the expected response format (strict JSON, same
+/// schema) is identical whatever the inference engine behind it.
 ///
-/// Volontairement PAS bâti sur `ResilientHTTP`/`ProviderRateLimiter`
-/// (`Services/MarketDataReliability.swift`) : ces briques sont taillées pour des APIs
-/// publiques rate-limitées avec un timeout de 15s et un retry avec backoff sur 429/5xx.
-/// Un serveur local n'a pas de rate limit, mais une inférence peut légitimement prendre
-/// 60-90s+ — retenter après un timeout court serait à la fois une fausse erreur (le
-/// modèle réfléchit encore) et une UX pire (3x l'attente pour apprendre la même chose :
-/// le serveur ne répond pas).
+/// Deliberately NOT built on `ResilientHTTP`/`ProviderRateLimiter`
+/// (`Services/MarketDataReliability.swift`): those building blocks are tailored for
+/// rate-limited public APIs with a 15s timeout and a retry with backoff on 429/5xx.
+/// A local server has no rate limit, but an inference call can legitimately take
+/// 60-90s+ — retrying after a short timeout would be both a false error (the
+/// model is still thinking) and worse UX (3x the wait to learn the same thing:
+/// the server isn't answering).
 struct LocalLLMService: Sendable {
 
     static let shared = LocalLLMService()
@@ -37,34 +37,34 @@ struct LocalLLMService: Sendable {
 
     private static let disableThinkingKey = "ai.localServer.disableThinking"
 
-    /// Demander au serveur de couper le mode « raisonnement » du modèle.
+    /// Ask the server to turn off the model's "reasoning" mode.
     ///
-    /// ⚠️ **Désactivé par défaut, et c'est délibéré.** Un modèle raisonnement
-    /// bien alimenté produit ici les meilleurs résultats de tous les backends
-    /// testés (qwen3.5-9b via LM Studio). Le couper d'office ferait perdre
-    /// cette qualité pour se prémunir d'un cas — le modèle qui dépense tout
-    /// son budget en réflexion sans jamais conclure — que le découpage en
-    /// passes (`CoachPassPlanner`) traite désormais à la source, en réduisant
-    /// ce qu'on lui demande d'un coup.
+    /// ⚠️ **Off by default, and it's deliberate.** A well-fed reasoning
+    /// model produces the best results of all backends
+    /// tested here (qwen3.5-9b via LM Studio). Turning it off by default would lose
+    /// that quality to guard against one case — a model that spends its whole
+    /// budget on reasoning without ever concluding — which chunking
+    /// into passes (`CoachPassPlanner`) now handles at the source, by reducing
+    /// what it's asked all at once.
     ///
-    /// Le réglage reste exposé comme SOUPAPE : si un serveur continue de
-    /// rendre des réponses vides avec un `reasoning_content` rempli, le
-    /// basculer coupe la réflexion sans changer de modèle.
+    /// The setting stays exposed as a SAFETY VALVE: if a server keeps
+    /// returning empty responses with a filled-in `reasoning_content`,
+    /// toggling it turns off reasoning without switching models.
     static var disableThinking: Bool {
         get { UserDefaults.standard.bool(forKey: disableThinkingKey) }
         set { UserDefaults.standard.set(newValue, forKey: disableThinkingKey) }
     }
 
-    /// Identifie un marchand. `nil` si non configuré ou en cas d'échec réseau/parsing —
-    /// même contrat de silence que `EnrichmentLLMService.identify` : l'orchestrateur et
-    /// les sheets manuelles continuent simplement sans ce candidat.
+    /// Identifies a merchant. `nil` if not configured or on network/parsing failure —
+    /// same silent-failure contract as `EnrichmentLLMService.identify`: the orchestrator and
+    /// the manual sheets simply continue without this candidate.
     func identify(context: MerchantEnrichmentContext) async -> MerchantEnrichment? {
         guard Self.hasConfiguration else { return nil }
         do {
-            // EnrichmentLLMService est @MainActor — le `await` gère le hop d'actor pour
-            // chacun de ses membres statiques, même le prompt/parsing partagés qui ne
-            // touchent pas Foundation Models directement (isolation contagieuse à
-            // toute la classe, pas seulement aux membres qui en ont vraiment besoin).
+            // EnrichmentLLMService is @MainActor — the `await` handles the actor hop for
+            // each of its static members, even the shared prompt/parsing that don't
+            // touch Foundation Models directly (isolation is contagious to the
+            // whole class, not just the members that actually need it).
             let userPrompt = await EnrichmentLLMService.buildPrompt(context: context)
             let content = try await complete(
                 systemPrompt: EnrichmentLLMService.instructions,
@@ -81,9 +81,9 @@ struct LocalLLMService: Sendable {
         }
     }
 
-    /// Teste la connexion et JETTE une erreur typée — contrairement à `identify`, qui
-    /// avale tout en silence, le bouton "Tester la connexion" des Réglages veut un
-    /// message précis et actionnable.
+    /// Tests the connection and THROWS a typed error — unlike `identify`, which
+    /// swallows everything silently, the "Test connection" button in Settings wants a
+    /// precise, actionable message.
     func testConnection() async throws -> String {
         guard Self.hasConfiguration else { throw LocalLLMError.notConfigured }
         let content = try await complete(
@@ -97,21 +97,21 @@ struct LocalLLMService: Sendable {
 
     // MARK: - HTTP
 
-    /// Complétion texte brute. Volontairement `internal` (et non `private`) :
-    /// `AIEnrichmentBackend.completeText` en fait le chemin serveur local de la
-    /// complétion générique, utilisée par l'extraction de relevés
-    /// (`TransactionDocumentParser`) en plus de l'identification de marchands.
-    /// `imageDataURL` : capture encodée en data-URL base64, pour un modèle
-    /// multimodal. Le serveur reçoit alors un message à parties typées
-    /// (protocole OpenAI) au lieu d'une simple chaîne.
-    /// - Parameter maxTokens: budget de SORTIE. ⚠️ Longtemps omis, ce qui
-    ///   laissait le serveur appliquer sa propre limite par défaut — souvent
-    ///   quelques centaines de tokens, d'où des réponses coupées net sans
-    ///   aucun rapport avec la taille du contexte (retour d'usage 2026-08-28).
-    /// - Parameter forceDirectAnswer: coupe le mode raisonnement pour CET
-    ///   appel, quel que soit le réglage de l'utilisateur. Réservé au repli
-    ///   automatique déclenché après un `reasoningOnly` avéré — on ne bride
-    ///   jamais le premier essai, c'est lui qui donne les meilleures analyses.
+    /// Raw text completion. Deliberately `internal` (not `private`):
+    /// `AIEnrichmentBackend.completeText` uses it as the local-server path of the
+    /// generic completion, used by statement extraction
+    /// (`TransactionDocumentParser`) in addition to merchant identification.
+    /// `imageDataURL`: a screenshot encoded as a base64 data-URL, for a
+    /// multimodal model. The server then receives a message with typed parts
+    /// (OpenAI protocol) instead of a plain string.
+    /// - Parameter maxTokens: OUTPUT budget. ⚠️ Long omitted, which
+    ///   let the server apply its own default limit — often
+    ///   a few hundred tokens, hence responses cut off outright with
+    ///   no relation to context size at all (observed in real usage, 2026-08-28).
+    /// - Parameter forceDirectAnswer: turns off reasoning mode for THIS
+    ///   call, whatever the user's setting. Reserved for the automatic
+    ///   fallback triggered after a confirmed `reasoningOnly` — the first attempt is
+    ///   never throttled, it's the one that gives the best analyses.
     func complete(systemPrompt: String,
                   userPrompt: String,
                   imageDataURL: String? = nil,
@@ -168,21 +168,21 @@ struct LocalLLMService: Sendable {
                 throw LocalLLMError.emptyResponse
             }
             if !message.content.isEmpty { return message.content }
-            // ⚠️ Signature MESURÉE sur trois retours d'usage (2026-08-29,
-            // 09-01, 09-06, qwen3.5-9b via LM Studio) : `content` vide,
-            // `reasoning_content` rempli de milliers de tokens et coupé EN
-            // PLEIN MOT, `finish_reason` pourtant à "stop". Le modèle a
-            // dépensé tout le budget disponible à re-dérouler les consignes
-            // sans jamais écrire sa réponse.
+            // ⚠️ Signature MEASURED on three occurrences of the same issue in real
+            // usage (2026-08-29, 09-01, 09-06, qwen3.5-9b via LM Studio):
+            // empty `content`, `reasoning_content` filled with thousands of
+            // tokens and cut off MID-WORD, `finish_reason` nonetheless "stop".
+            // The model spent its entire available budget re-reciting
+            // the instructions without ever writing its answer.
             //
-            // Une ERREUR TYPÉE, pas le texte du raisonnement rendu tel quel :
-            // l'appelant doit pouvoir distinguer « ce serveur a montré sa
-            // vraie limite » d'une réponse hors format, pour relancer en mode
-            // dégradé au lieu d'afficher un échec (cf. `CoachService`).
+            // A TYPED ERROR, not the raw reasoning text handed back as-is:
+            // the caller must be able to tell "this server showed its
+            // true limit" apart from an out-of-format response, so it can retry in
+            // a degraded mode instead of showing a failure (see `CoachService`).
             //
-            // Le raisonnement voyage AVEC l'erreur : il ne contient aucun JSON
-            // exploitable, mais c'est lui qui alimente le dépliant diagnostic
-            // (« Voir la réponse du modèle ») si le repli échoue à son tour.
+            // The reasoning travels WITH the error: it contains no
+            // usable JSON, but it's what feeds the diagnostic panel
+            // ("View the model's response") if the fallback fails too.
             if let reasoning = message.reasoning_content, !reasoning.isEmpty {
                 throw LocalLLMError.reasoningOnly(reasoning)
             }
@@ -195,18 +195,18 @@ struct LocalLLMService: Sendable {
     }
 }
 
-// MARK: - DTOs (sous-ensemble minimal du schéma OpenAI chat completions, partagé
-// par LM Studio, Ollama, et la quasi-totalité des serveurs d'inférence locaux)
+// MARK: - DTOs (a minimal subset of the OpenAI chat-completions schema, shared
+// by LM Studio, Ollama, and nearly every local inference server)
 
 private struct ChatCompletionRequest: Encodable {
-    /// Le champ `content` du protocole OpenAI accepte DEUX formes : une chaîne
-    /// simple, ou un tableau de parties typées quand le message porte une image.
-    /// Les serveurs locaux (LM Studio, Ollama…) suivent ce contrat pour les
-    /// modèles multimodaux.
+    /// The OpenAI protocol's `content` field accepts TWO forms: a plain
+    /// string, or an array of typed parts when the message carries an image.
+    /// Local servers (LM Studio, Ollama…) follow this contract for
+    /// multimodal models.
     struct Message: Encodable {
         let role: String
         let text: String
-        /// Image encodée en data-URL base64, `nil` pour un message texte.
+        /// Image encoded as a base64 data-URL, `nil` for a text message.
         var imageDataURL: String?
 
         enum CodingKeys: String, CodingKey { case role, content }
@@ -217,8 +217,8 @@ private struct ChatCompletionRequest: Encodable {
             var root = encoder.container(keyedBy: CodingKeys.self)
             try root.encode(role, forKey: .role)
             guard let imageDataURL else {
-                // Forme scalaire : compatible avec tous les serveurs, y compris
-                // les modèles purement textuels.
+                // Scalar form: compatible with every server, including
+                // purely text-only models.
                 try root.encode(text, forKey: .content)
                 return
             }
@@ -236,19 +236,19 @@ private struct ChatCompletionRequest: Encodable {
     let messages: [Message]
     let temperature: Double
     let stream: Bool
-    /// Nom volontairement en snake_case : c'est la clé du protocole OpenAI,
-    /// que les serveurs locaux implémentent tel quel.
+    /// Name deliberately in snake_case: it's the OpenAI protocol's
+    /// key, which local servers implement as-is.
     let max_tokens: Int
-    /// Demande au serveur de couper le mode « raisonnement » du modèle, quand
-    /// il honore ce champ (extension vLLM / llama.cpp récents, transmise telle
-    /// quelle au template de chat Jinja).
+    /// Asks the server to turn off the model's "reasoning" mode, when
+    /// it honors this field (a vLLM / recent llama.cpp extension, passed
+    /// through as-is to the Jinja chat template).
     ///
-    /// ⚠️ `nil` par DÉFAUT — donc absent du JSON, donc réflexion CONSERVÉE.
-    /// Une version antérieure l'envoyait systématiquement à `false` : c'était
-    /// se priver du backend qui donne les meilleurs résultats (un modèle
-    /// raisonnement bien alimenté) pour parer un cas que le découpage en
-    /// passes règle mieux. N'est renseigné que si l'utilisateur bascule la
-    /// soupape (`LocalLLMService.disableThinking`).
+    /// ⚠️ `nil` by DEFAULT — so absent from the JSON, so reasoning is KEPT.
+    /// An earlier version always sent `false`: that meant giving up the
+    /// backend that gives the best results (a well-fed reasoning
+    /// model) to guard against a case chunking into
+    /// passes handles better. Only set if the user flips the
+    /// safety valve (`LocalLLMService.disableThinking`).
     let chat_template_kwargs: [String: Bool]?
 }
 
@@ -256,10 +256,10 @@ private struct ChatCompletionResponse: Decodable {
     struct Choice: Decodable {
         struct Msg: Decodable {
             let content: String
-            /// Certains modèles "thinking" (Qwen3, DeepSeek-R1…) exposent leur
-            /// raisonnement dans ce champ séparé plutôt que dans `content` —
-            /// extension du protocole OpenAI portée par LM Studio/vLLM/Ollama.
-            /// `nil` chez tout modèle non-reasoning, donc absent sans risque.
+            /// Some "thinking" models (Qwen3, DeepSeek-R1…) expose their
+            /// reasoning in this separate field rather than in `content` —
+            /// an OpenAI protocol extension carried by LM Studio/vLLM/Ollama.
+            /// `nil` on any non-reasoning model, so absent with no risk.
             let reasoning_content: String?
         }
         let message: Msg
@@ -276,8 +276,8 @@ enum LocalLLMError: Error, LocalizedError {
     case timedOut
     case badStatus(Int)
     case emptyResponse
-    /// Le modèle a produit du RAISONNEMENT mais aucune réponse finale — le
-    /// texte associé est ce raisonnement, conservé pour le diagnostic.
+    /// The model produced REASONING but no final answer — the
+    /// associated text is that reasoning, kept for diagnostics.
     case reasoningOnly(String)
     case decodingFailed(String)
 
@@ -303,12 +303,12 @@ enum LocalLLMError: Error, LocalizedError {
     }
 }
 
-// MARK: - Keychain (clé API optionnelle)
+// MARK: - Keychain (optional API key)
 
-/// Mêmes conventions que `BinanceKeychain` (Features/BinanceTax/BinanceTaxView.swift) :
-/// helper minimal, un seul id fixe puisqu'il n'y a qu'une seule configuration par
-/// appareil. `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` — jamais synchronisé iCloud,
-/// cohérent avec le reste des secrets de ce projet (LiveSync, Binance).
+/// Same conventions as `BinanceKeychain` (Features/BinanceTax/BinanceTaxView.swift):
+/// a minimal helper, a single fixed id since there's only one configuration per
+/// device. `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` — never synced to iCloud,
+/// consistent with every other secret in this project (LiveSync, Binance).
 enum LocalLLMKeychain {
     static let apiKeyID = "local_llm_api_key"
 

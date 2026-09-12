@@ -1,9 +1,9 @@
 import Foundation
 
-/// Zefix — registre officiel des entreprises suisses.
-/// Public, sans clé. Doc : https://www.zefix.admin.ch/ZefixPublicREST/
+/// Zefix — the official Swiss company registry.
+/// Public, no key. Docs: https://www.zefix.admin.ch/ZefixPublicREST/
 ///
-/// Note : Zefix utilise POST avec body JSON, ce qui est inhabituel mais OK.
+/// Note: Zefix uses POST with a JSON body, which is unusual but fine.
 struct ZefixDataSource: CompanyDataSource {
     let id = "zefix_ch"
     let displayName = "Zefix (entreprises CH)"

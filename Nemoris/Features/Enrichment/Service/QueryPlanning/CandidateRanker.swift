@@ -1,22 +1,22 @@
 import Foundation
 
-// Classement des candidats (entreprises, établissements, POI).
-// ⚠️ FICHIER PUR : `import Foundation` UNIQUEMENT.
+// Ranking candidates (companies, establishments, POIs).
+// ⚠️ PURE FILE: `import Foundation` ONLY.
 //
-// Ce fichier existe pour tuer STRUCTURELLEMENT un bug, pas pour le contourner :
-// `EnrichmentOrchestrator.enrichViaSirene` prenait `results.first` d'une concaténation de
-// `withTaskGroup`. « Premier » y désignait l'ordre d'ACHÈVEMENT des tâches réseau, sans la
-// moindre vérification que le candidat correspondait au lieu du libellé. Avec un ordre
-// TOTAL calculé sur des critères explicites, le résultat ne peut plus dépendre de la
-// latence réseau : à entrée identique, sortie identique (vérifié par t10, qui mélange le
-// tableau 20 fois).
+// This file exists to STRUCTURALLY kill a bug, not to work around it:
+// `EnrichmentOrchestrator.enrichViaSirene` used to take `results.first` of a
+// `withTaskGroup` concatenation. "First" there meant the COMPLETION order of the network
+// tasks, with no check at all that the candidate matched the label's location. With a TOTAL
+// order computed on explicit criteria, the result can no longer depend on network
+// latency: same input, same output (verified by t10, which shuffles the
+// array 20 times).
 
-/// Candidat agnostique du fournisseur. Les adaptateurs (Sirene, MapKit, …) le construisent ;
-/// le ranker ignore tout de leur provenance.
+/// A provider-agnostic candidate. Adapters (Sirene, MapKit, …) build it;
+/// the ranker knows nothing about their origin.
 struct RankableCandidate: Hashable, Sendable {
     let id: String
-    /// Tous les noms sous lesquels ce candidat peut matcher : raison sociale, nom complet,
-    /// enseignes, nom commercial. Le meilleur score l'emporte.
+    /// Every name this candidate can match under: company name, full name,
+    /// trade names, commercial name. The best score wins.
     let names: [String]
     let addressLine: String?
     let postalCode: String?
@@ -28,7 +28,7 @@ struct RankableCandidate: Hashable, Sendable {
     let hasCoordinates: Bool
     /// sirene 1.0 · googlePlaces 0.85 · mapkit 0.7 · llm 0.6
     let providerWeight: Double
-    /// Le nom a matché via une enseigne plutôt que la raison sociale.
+    /// The name matched via a trade name rather than the company name.
     let matchedViaEnseigne: Bool
 
     init(id: String,
@@ -58,7 +58,7 @@ struct RankableCandidate: Hashable, Sendable {
     }
 }
 
-/// Décomposition du score, affichée dans « Détails de la recherche » et assertée par les tests.
+/// Score breakdown, shown in "Search details" and asserted by the tests.
 struct RankBreakdown: Hashable, Sendable {
     var nameSimilarity: Double = 0
     var localityMatch: Double = 0
@@ -67,7 +67,7 @@ struct RankBreakdown: Hashable, Sendable {
     var siegeBonus: Double = 0
     var nafKnownBonus: Double = 0
 
-    /// Somme pondérée, bornée 0…1.
+    /// Weighted sum, clamped to 0…1.
     var weightedTotal: Double {
         let raw = nameSimilarity * 0.45
             + localityMatch * 0.30
@@ -88,11 +88,11 @@ struct RankedCandidate: Hashable, Sendable, Identifiable {
 
 enum CandidateRanker {
 
-    /// Classe les candidats selon un ORDRE TOTAL, donc de façon reproductible.
+    /// Ranks candidates by a TOTAL ORDER, so reproducibly.
     ///
-    /// Départage, dans l'ordre : score ↓ · actif ↓ · siège ↓ · id ↑.
-    /// Le dernier critère (`id`, toujours unique) garantit qu'aucune égalité ne subsiste,
-    /// donc que l'ordre d'entrée n'a AUCUNE influence sur l'ordre de sortie.
+    /// Tiebreaks, in order: score ↓ · active ↓ · headquarters ↓ · id ↑.
+    /// The last criterion (`id`, always unique) guarantees no tie ever survives,
+    /// so the input order has NO influence on the output order.
     static func rank(_ candidates: [RankableCandidate], context: RankingContext) -> [RankedCandidate] {
         candidates
             .map { candidate in
@@ -128,27 +128,27 @@ enum CandidateRanker {
         return breakdown
     }
 
-    /// 0…1. **0.5 est le neutre** : quand le libellé ne portait aucune information de lieu,
-    /// on ne peut ni récompenser ni punir un candidat pour sa géographie. Sans ce neutre,
-    /// tout candidat serait pénalisé pour une information que le libellé n'avait pas.
+    /// 0…1. **0.5 is neutral**: when the label carried no location information at
+    /// all, a candidate can't be rewarded or punished for its geography. Without this
+    /// neutral value, every candidate would be penalized for information the label never had.
     private static func localityScore(_ candidate: RankableCandidate,
                                       context: RankingContext) -> Double {
         if context.hasNoLocalityInfo { return 0.5 }
 
-        // Code INSEE : identité exacte de commune.
+        // INSEE code: exact commune identity.
         if let wanted = context.inseeCode, let got = candidate.inseeCode {
             return wanted == got ? 1.0 : 0.0
         }
         // Code postal.
         if !context.postalCodes.isEmpty, let got = candidate.postalCode {
             if context.postalCodes.contains(got) { return 1.0 }
-            // Même département déduit des deux premiers chiffres.
+            // Same department inferred from the first two digits.
             if let wantedDep = context.postalCodes.first?.prefix(2), got.hasPrefix(wantedDep) {
                 return 0.6
             }
             return 0.0
         }
-        // Libellé de commune.
+        // Commune name.
         if let wanted = context.cityLabel, let got = candidate.cityLabel {
             let a = MerchantTokenSimilarity.tokenize(wanted)
             let b = MerchantTokenSimilarity.tokenize(got)
@@ -156,13 +156,13 @@ enum CandidateRanker {
             let similarity = MerchantTokenSimilarity.score(a, b)
             if similarity >= 0.7 { return 0.8 }
         }
-        // Département seul.
+        // Department alone.
         if let wantedDep = context.departmentCode, let got = candidate.postalCode {
             return got.hasPrefix(wantedDep) ? 0.6 : 0.0
         }
-        // Localité NON RÉSOLUE : on la cherche telle quelle dans l'adresse.
-        // C'est ce qui fait vivre le cas SROM/FLANCHES même quand geo.api.gouv.fr ne
-        // connaît pas « Flanches » : un lieu-dit apparaît dans l'adresse de l'établissement.
+        // UNRESOLVED locality: we look for it as-is in the address.
+        // This is what keeps the SROM/FLANCHES case working even when geo.api.gouv.fr
+        // doesn't know "Flanches": a place name shows up in the establishment's address.
         if let free = context.freeLocalityText, !free.isEmpty {
             let haystack = [candidate.addressLine, candidate.cityLabel]
                 .compactMap { $0 }
@@ -173,7 +173,7 @@ enum CandidateRanker {
             let needle = free.folding(options: .diacriticInsensitive,
                                       locale: Locale(identifier: "fr_FR")).lowercased()
             if haystack.contains(needle) { return 0.7 }
-            // Correspondance partielle : le libellé tronque les noms de lieux.
+            // Partial match: the label truncates place names.
             let needleTokens = MerchantTokenSimilarity.tokenize(needle).filter { $0.count >= 3 }
             if !needleTokens.isEmpty, needleTokens.allSatisfy({ haystack.contains($0) }) {
                 return 0.65
@@ -183,12 +183,12 @@ enum CandidateRanker {
         return 0.5
     }
 
-    /// Le ranker n'a pas accès à `NAFCategoryMapper` (qui lit le bundle) : les préfixes
-    /// connus lui sont passés en donnée, ce qui le garde pur.
+    /// The ranker has no access to `NAFCategoryMapper` (which reads the bundle): known
+    /// prefixes are passed in as data, which keeps it pure.
     private static func isKnownNaf(_ code: String?, in prefixes: Set<String>) -> Bool {
         guard let code, !prefixes.isEmpty else { return false }
         if prefixes.contains(code) { return true }
-        // Les codes NAF sont hiérarchiques : « 10.71C » relève de « 10.71 » puis « 10 ».
+        // NAF codes are hierarchical: "10.71C" falls under "10.71" then "10".
         var trimmed = code
         while trimmed.count > 2 {
             trimmed = String(trimmed.dropLast())
