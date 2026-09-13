@@ -4,19 +4,19 @@ import TipKit
 struct TricountDetailView: View {
     let group: TricountGroup
     var initialEntryId: Int? = nil
-    /// macOS : retour à la liste des tricounts. Le détail occupe la colonne du
-    /// module (navigation interne par état — cf. `TricountListView.body`), il
-    /// fournit donc lui-même son retour. nil quand la vue est poussée (iOS) ou
-    /// présentée en sheet depuis TransactionsView.
+    /// macOS: returns to the Tricount list. The detail occupies the
+    /// module's column (internal state-driven navigation — see `TricountListView.body`), so
+    /// it provides its own back button. nil when the view is pushed (iOS) or
+    /// presented as a sheet from TransactionsView.
     var onBack: (() -> Void)? = nil
-    // paneDismiss : ferme la présentation quand la vue est en sheet (niveau 2,
-    // depuis TransactionsView). No-op en pleine page, où c'est `onBack` qui sert.
+    // paneDismiss: closes the presentation when the view is a sheet (level 2,
+    // from TransactionsView). A no-op full-page, where `onBack` serves instead.
     @Environment(\.paneDismiss) private var paneDismiss
-    // iOS : distingue "poussée depuis TricountListView" (.root, ambiante déjà
-    // gérée par la NavigationStack du parent) de "présentée en sheet depuis
-    // TransactionsView" (.modal, cf. `.adaptivePane(item:)` dans
-    // AdaptivePaneItemModifier). C'est ce qui pilote le `if` de `body`
-    // ci-dessous — cf. son commentaire pour le bug que ça corrige.
+    // iOS: distinguishes "pushed from TricountListView" (.root, already
+    // handled by the parent's ambient NavigationStack) from "presented as a
+    // sheet from TransactionsView" (.modal, see `.adaptivePane(item:)` in
+    // AdaptivePaneItemModifier). This drives the `if` in `body`
+    // below — see its comment for the bug this fixes.
     @Environment(\.paneHostContext) private var hostContext
     @Environment(AppState.self) private var appState
     @State private var entries: [TricountEntry] = []
@@ -38,14 +38,14 @@ struct TricountDetailView: View {
     @State private var allTiers: [Tiers] = []
     @State private var hasLoaded = false
 
-    // Tri & filtres de la liste des dépenses — état volontairement NON
-    // persisté (comme la recherche texte de TransactionsView) : un tri/filtre
-    // laissé actif d'une session à l'autre serait plus surprenant qu'utile.
+    // Sort & filters for the expense list — state deliberately NOT
+    // persisted (like TransactionsView's text search): a sort/filter
+    // left active from one session to the next would be more surprising than useful.
     @State private var showEntryFilters = false
     @State private var entrySort: TricountEntrySort = .dateDesc
     @State private var entryTitleSearch = ""
     @State private var entryLinkFilter: TricountLinkFilter = .all
-    /// "" = tous les payeurs.
+    // "" = every payer.
     @State private var entryPayerFilter = ""
     @State private var entryMinShareText = ""
     @State private var entryMaxShareText = ""
@@ -84,12 +84,12 @@ struct TricountDetailView: View {
             .reduce(0.0) { $0 + $1.total }
     }
 
-    /// Effet net des règlements déjà effectués (entrées TRANSFER/BALANCE — les
-    /// "Remboursement" Tricount entre membres). Exclues de `mySpentTotal`/
-    /// `myNetShare` (ce ne sont pas des dépenses partagées) mais elles DOIVENT
-    /// quand même ajuster le solde final : sans ça, un règlement déjà reçu ou
-    /// payé reste compté comme "encore dû", ce qui faisait diverger le solde
-    /// affiché de celui de Tricount dès qu'un membre se réglait.
+    /// The net effect of settlements already made (TRANSFER/BALANCE entries — Tricount's
+    /// "Reimbursement" between members). Excluded from `mySpentTotal`/
+    /// `myNetShare` (they aren't shared expenses) but they DO
+    /// still need to adjust the final balance: without this, a settlement already received or
+    /// paid stays counted as "still owed", which made the displayed
+    /// balance diverge from Tricount's own as soon as a member settled up.
     private var mySettlementsNet: Double {
         let byEntry = Dictionary(grouping: shares, by: { $0.entryId })
         return entries.reduce(0.0) { sum, e in
@@ -97,30 +97,30 @@ struct TricountDetailView: View {
             guard type == "TRANSFER" || type == "BALANCE" else { return sum }
             let entryShares = byEntry[e.id] ?? []
             if e.whoPaid == group.myName {
-                // J'ai réglé une dette : crédité du montant reçu par l'autre partie.
+                // I settled a debt: credited with the amount the other party received.
                 let othersTotal = entryShares.filter { $0.memberName != group.myName }.reduce(0.0) { $0 + $1.amount }
                 return sum + othersTotal
             } else if let myShare = entryShares.first(where: { $0.memberName == group.myName })?.amount, myShare > 0 {
-                // On m'a réglé une dette : débité, cette somme n'est plus due.
+                // Someone settled a debt with me: debited, that amount is no longer owed.
                 return sum - myShare
             }
             return sum
         }
     }
 
-    // positif = on me doit / négatif = je dois
+    // positive = I'm owed / negative = I owe
     private var myBalance: Double { mySpentTotal - myNetShare + mySettlementsNet }
 
-    // MARK: - Tri & filtres des dépenses
+    // MARK: - Expense sort & filters
 
-    /// "Moi" pour le nom du membre courant, le nom brut sinon — même
-    /// convention que `TricountEntryRow.isPaidByMe`.
+    /// "Me" for the current member's name, the raw name otherwise — the same
+    /// convention as `TricountEntryRow.isPaidByMe`.
     private func payerDisplayName(_ name: String) -> String {
         name == group.myName ? "Moi" : name
     }
 
-    /// Noms bruts des payeurs présents dans le groupe, dédupliqués et triés
-    /// sur leur libellé affiché (donc "Moi" trié à sa place alphabétique réelle).
+    /// Raw names of payers present in the group, deduplicated and sorted
+    /// on their displayed label (so "Me" sorts to its real alphabetical position).
     private var entryPayerOptions: [String] {
         Array(Set(entries.map(\.whoPaid))).sorted {
             payerDisplayName($0).localizedCaseInsensitiveCompare(payerDisplayName($1)) == .orderedAscending
@@ -135,9 +135,9 @@ struct TricountDetailView: View {
         Double(entryMaxShareText.replacingOccurrences(of: ",", with: "."))
     }
 
-    /// Bornes réelles des dates de dépenses du groupe — cadre le `DatePicker`
-    /// du filtre et sert de défaut à son activation (période complète plutôt
-    /// que "aujourd'hui" des deux côtés, qui masquerait tout).
+    /// The group's expenses' real date bounds — frames the filter's
+    /// `DatePicker` and serves as the default when it's activated (the full
+    /// period rather than "today" on both ends, which would hide everything).
     private var entryDateBounds: (min: Date, max: Date) {
         let dates = entries.map(\.date)
         return (dates.min() ?? Date(), dates.max() ?? Date())
@@ -155,18 +155,18 @@ struct TricountDetailView: View {
         entry.description.isEmpty ? entry.category : entry.description
     }
 
-    /// Dépenses filtrées + triées pour l'affichage. `entries` (brut, ordre SQL)
-    /// reste la source des totaux du header — filtrer ne doit jamais changer
-    /// le solde affiché, seulement la liste visible.
+    /// Filtered + sorted expenses for display. `entries` (raw, SQL order)
+    /// stays the source for the header's totals — filtering must never change
+    /// the displayed balance, only the visible list.
     private var filteredSortedEntries: [TricountEntry] {
         let byEntry = Dictionary(grouping: shares, by: { $0.entryId })
         let minShare = entryMinShareValue
         let maxShare = entryMaxShareValue
         let cal = Calendar.current
-        // Bornes inclusives par JOUR calendaire — `entry.date` peut porter une
-        // heure (import bancaire) alors que le `DatePicker` ne choisit qu'un
-        // jour ; sans normaliser "Au" à la fin de journée, une dépense datée
-        // en fin d'après-midi du jour sélectionné serait exclue à tort.
+        // Inclusive bounds by calendar DAY — `entry.date` can carry an
+        // hour (a bank import) while the `DatePicker` only picks a
+        // day; without normalizing "To" to the end of the day, an expense dated
+        // late afternoon on the selected day would be wrongly excluded.
         let dayStart = cal.startOfDay(for: entryFromDate)
         let dayEnd = cal.date(byAdding: DateComponents(day: 1, second: -1), to: cal.startOfDay(for: entryToDate)) ?? entryToDate
         let filtered = entries.filter { entry in
@@ -188,8 +188,8 @@ struct TricountDetailView: View {
                 let absShare = abs(myShare)
                 shareMatch = (minShare.map { absShare >= $0 } ?? true) && (maxShare.map { absShare <= $0 } ?? true)
             } else {
-                // Pas de part connue pour cette dépense (ex. TRANSFER/BALANCE) :
-                // ne peut pas satisfaire une borne demandée.
+                // No known share for this expense (e.g. TRANSFER/BALANCE):
+                // can't satisfy a requested bound.
                 shareMatch = false
             }
             return titleMatch && dateMatch && linkMatch && payerMatch && shareMatch
@@ -208,16 +208,15 @@ struct TricountDetailView: View {
 
     var body: some View {
         #if os(macOS)
-        // Contenu de module en pleine page (drill-down depuis TricountListView) :
-        // toolbar NATIVE, avec le retour vers la liste (fenêtre principale, jamais
-        // affectée par le bug ci-dessous). Présentée en sheet (niveau 2, depuis
-        // TransactionsView) : la barre d'outils native d'une `.sheet` macOS a son
-        // propre matériau translucide qui laisse le bureau de l'utilisateur
-        // transparaître, quel que soit son contenu — chrome dessinée à la main à
-        // la place (retour d'usage 2026-08-21, cf. `macSheetChrome` dans
-        // AdaptivePane.swift). Le contenu du menu (mode sélection, actions groupées)
-        // est mirroré plutôt que routé via `.paneChrome` : trop dynamique pour son
-        // modèle à 3 boutons cancel/destructive/confirm.
+        // Full-page module content (a drill-down from TricountListView): a
+        // NATIVE toolbar, with the back button to the list (the main window, never
+        // affected by the bug below). Presented as a sheet (level 2, from
+        // TransactionsView): a macOS `.sheet`'s native toolbar has its
+        // own translucent material that lets the user's desktop show
+        // through, whatever its content — hand-drawn chrome is used instead
+        // (see `macSheetChrome` in AdaptivePane.swift). The menu's content (selection
+        // mode, group actions) is mirrored rather than routed via `.paneChrome`:
+        // too dynamic for its 3-button cancel/destructive/confirm model.
         if onBack != nil {
             detailContent
                 .navigationTitle(group.title)
@@ -232,24 +231,24 @@ struct TricountDetailView: View {
             .background(AppTheme.Colors.background)
         }
         #else
-        // ⚠️ iOS — ne JAMAIS envelopper `detailContent` dans une `NavigationStack`
-        // propre quand cette vue est POUSSÉE (retour d'usage : ouvrir un tricount
-        // pour la première fois éjecte vers "Plus", uniquement quand Tricount vit
-        // dans le menu "Plus"). Cause : `TricountListView` pousse cette vue via un
-        // `NavigationLink(destination:)` classique sur SA propre pile ambiante
-        // (celle de l'onglet Tricount, ou celle de `MoreView` s'il est caché) —
-        // exactement le même mécanisme, une fois de plus, que le bug déjà
-        // documenté et corrigé dans `TricountListView.body` (mélange de styles de
-        // navigation sur une même pile). Y ajouter ICI une SECONDE
-        // `NavigationStack`, imbriquée dans le contenu qui vient d'être poussé,
-        // reproduit le même anti-pattern un niveau plus bas : UIKit peut alors
-        // avaler le tout premier push de la session et faire retomber la pile
-        // ambiante jusqu'à sa racine. `\.paneHostContext` distingue les deux
-        // usages réels de cette vue : `.root` = poussée depuis `TricountListView`
-        // (la pile ambiante gère déjà titre/back/toolbar, rien à envelopper) ;
-        // `.modal` = présentée en sheet depuis `TransactionsView` via
-        // `.adaptivePane(item:)`, qui N'INJECTE aucune `NavigationStack` pour son
-        // contenu — celle-ci reste nécessaire pour que titre/toolbar s'affichent.
+        // ⚠️ iOS — NEVER wrap `detailContent` in its own `NavigationStack`
+        // when this view is PUSHED (opening a tricount for the
+        // first time used to eject to "More", only when Tricount lives
+        // in the "More" menu). Cause: `TricountListView` pushes this view via a
+        // classic `NavigationLink(destination:)` on ITS OWN ambient stack
+        // (the Tricount tab's, or `MoreView`'s if it's hidden) —
+        // exactly the same mechanism, once again, as the bug already
+        // documented and fixed in `TricountListView.body` (mixing
+        // navigation styles on the same stack). Adding a SECOND
+        // `NavigationStack` HERE, nested inside the content just pushed,
+        // reproduces the same anti-pattern one level down: UIKit can then
+        // swallow the session's very first push and drop the ambient
+        // stack back to its root. `\.paneHostContext` distinguishes this
+        // view's two real uses: `.root` = pushed from `TricountListView`
+        // (the ambient stack already provides title/back/toolbar, nothing to wrap);
+        // `.modal` = presented as a sheet from `TransactionsView` via
+        // `.adaptivePane(item:)`, which does NOT inject a `NavigationStack` for its
+        // content — this one is still needed for the title/toolbar to show up.
         if hostContext == .root {
             detailContent
                 .navigationTitle(group.title)
@@ -270,7 +269,7 @@ struct TricountDetailView: View {
     private var detailContent: some View {
         VStack(spacing: 0) {
             if !hasLoaded {
-                // Skeleton de la liste d'entrées en attendant le chargement local.
+                // A skeleton for the entry list while local data loads.
                 List {
                     ForEach(0..<6, id: \.self) { _ in
                         SkeletonTricountEntryRow()
@@ -300,10 +299,10 @@ struct TricountDetailView: View {
                 }
             }
         }
-        // Fond de l'app posé explicitement — sans lui la colonne « content » de
-        // la NavigationSplitView macOS montre son matériau vibrant par défaut
-        // au lieu du fond neutre AppTheme (). C'est l'écran
-        // exact du retour d'usage (détail Tricount, ex. « Vietnam »).
+        // The app's background set explicitly — without it, the macOS
+        // NavigationSplitView's "content" column shows its vibrant material by
+        // default instead of the neutral AppTheme background. This is the exact
+        // screen involved in the earlier report (a Tricount detail, e.g. "Vietnam").
         .background(AppTheme.Colors.background.ignoresSafeArea())
         .adaptivePane(isPresented: $showEntryFilters) {
             TricountEntryFiltersSheet(
@@ -400,14 +399,14 @@ struct TricountDetailView: View {
                 selectedEntry = nil
             }
         }
-        // Swipe rapide : lier une transaction
+        // A quick swipe: link a transaction
         .adaptivePane(item: $quickLinkEntry) { entry in
             TransactionPickerSheet(txRepo: txRepo, currentId: entry.linkedTransactionId) { tx in
                 repo.updateLinkedTransaction(entryId: entry.id, transactionId: tx.id)
                 entries = repo.fetchEntries(groupId: group.id)
             }
         }
-        // Swipe rapide : gérer les tags d'une entrée
+        // A quick swipe: manage an entry's tags
         .adaptivePane(item: $tagQuickEntry) { entry in
             TagManagementSheet(
                 initialTagIds: Set(txRepo.fetchTags(forTricountEntry: entry.id).map(\.id)),
@@ -438,13 +437,13 @@ struct TricountDetailView: View {
         }
     }
 
-    // MARK: - Toolbar (retour/fermer + sélection ou actions groupées)
+    // MARK: - Toolbar (back/close + selection or group actions)
 
     #if os(macOS)
-    /// Mirroir de `nativeToolbarContent`, en vues ordinaires plutôt qu'en
-    /// `ToolbarContent`, pour le SEUL cas `.sheet` niveau 2 (`onBack == nil`).
-    /// Même logique de mode (sélection / normal), mêmes actions — mais
-    /// dessiné à la main, cf. le commentaire de `body` ci-dessus.
+    /// A mirror of `nativeToolbarContent`, in plain views rather than
+    /// `ToolbarContent`, for the ONE `.sheet` level-2 case (`onBack == nil`).
+    /// The same mode logic (selection / normal), the same actions — but
+    /// hand-drawn, see `body`'s comment above.
     @ViewBuilder
     private var sheetTopBar: some View {
         HStack {
@@ -532,8 +531,8 @@ struct TricountDetailView: View {
     @ToolbarContentBuilder
     private var nativeToolbarContent: some ToolbarContent {
         #if os(macOS)
-        // Pleine page (drill-down) : retour vers la liste, au placement du back
-        // système. En sheet (niveau 2) : « Fermer ». Jamais les deux.
+        // Full page (a drill-down): a back button to the list, at the native
+        // system placement. As a sheet (level 2): "Close". Never both.
         ToolbarItem(placement: .navigation) {
             if isSelectingEntries {
                 Button {
@@ -560,9 +559,9 @@ struct TricountDetailView: View {
                     if reimbursementsEnabled {
                         PaneToggleButton(label: "Remboursement", systemImage: "arrow.uturn.left.circle", isOn: $showBulkEntryReimburse)
                     }
-                    // Binding custom : le calcul des états initiaux doit rester
-                    // déclenché à l'OUVERTURE (comme avant), pas à chaque
-                    // bascule — un simple `$showBulkEntryTagPicker` le perdrait.
+                    // A custom binding: computing the initial states must stay
+                    // triggered on OPEN (as before), not on every
+                    // toggle — a plain `$showBulkEntryTagPicker` would lose that.
                     PaneToggleButton(label: "Tags", systemImage: "tag", isOn: Binding(
                         get: { showBulkEntryTagPicker },
                         set: { newValue in
@@ -772,10 +771,10 @@ struct TricountDetailView: View {
         }
         #if os(macOS)
         .listStyle(.plain)
-        // Décolle la 1ère carte du Divider() du dessus (chemin sans
-        // remboursements) ou du picker (chemin avec) — même correctif que
-        // TransactionsView. Appliqué ici, dans la List elle-même, pour couvrir
-        // les deux points d'appel de `entriesTab` uniformément.
+        // Detaches the 1st card from the Divider() above it (the path with no
+        // reimbursements) or from the picker (the path with them) — the same fix as
+        // TransactionsView. Applied here, in the List itself, to cover
+        // `entriesTab`'s two call sites uniformly.
         .macGroupedListTopGap()
         #endif
         .scrollContentBackground(.hidden)
@@ -794,8 +793,8 @@ struct TricountDetailView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
         } else {
-            // Form (pas List) : liste statique → boxes arrondies natives macOS
-            // via nemorisFormStyle(), insetGrouped natif sur iOS.
+            // A Form (not a List): static content → native rounded macOS boxes
+            // via nemorisFormStyle(), native insetGrouped on iOS.
             Form {
                 let groupTotal = reimbursementGroups.reduce(0) { $0 + $1.total }
                 Section {

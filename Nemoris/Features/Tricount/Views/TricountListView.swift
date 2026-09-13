@@ -3,16 +3,16 @@ import TipKit
 struct TricountListView: View {
     @State private var groups: [TricountGroup] = []
     @State private var showLoadSheet = false
-    /// macOS UNIQUEMENT : bascule le contenu de la colonne par état (cf.
-    /// `body`). iOS n'en a plus besoin — cf. note sur `listContent`.
+    /// macOS ONLY: switches the column's content by state (see
+    /// `body`). iOS no longer needs this — see the note on `listContent`.
     @State private var selectedGroup: TricountGroup?
     #if os(macOS)
-    /// Pour fermer le panneau au retour vers la liste (cf. `onBack`).
+    /// To close the pane on returning to the list (see `onBack`).
     @Environment(InspectorPaneCenter.self) private var paneCenter: InspectorPaneCenter?
     #endif
     @State private var refreshingId: Int? = nil
     @State private var refreshError: String? = nil
-    /// Skeleton tant que le 1er `loadGroups()` n'est pas terminé.
+    /// A skeleton until the 1st `loadGroups()` completes.
     @State private var hasLoaded = false
     private let repo = TricountRepository()
     private let client = TricountAPIClient()
@@ -23,14 +23,14 @@ struct TricountListView: View {
     var body: some View {
         Group {
             #if os(macOS)
-            // macOS : le détail d'un tricount remplace la liste DANS LA COLONNE
-            // (navigation interne par état, comme la fiche compte des
-            // Investissements). Un tricount est un CONTENEUR d'entrées — chaque
-            // entrée a son propre détail, qui lui s'ouvre dans l'inspecteur.
-            // Règle : conteneur → pleine page, feuille → inspecteur.
+            // macOS: a tricount's detail replaces the list WITHIN THE COLUMN
+            // (internal state-driven navigation, like Investments' account
+            // sheet). A tricount is a CONTAINER of entries — each
+            // entry has its own detail, which opens in the inspector instead.
+            // Rule: a container → full page, a sheet → the inspector.
             if let group = selectedGroup {
-                // Fermeture explicite du panneau au retour (cf. InvestmentsView) :
-                // il ne doit pas survivre au tricount qui l'a ouvert.
+                // An explicit pane dismissal on return (see InvestmentsView):
+                // it must not outlive the tricount that opened it.
                 TricountDetailView(group: group, onBack: {
                     paneCenter?.dismissCurrent()
                     selectedGroup = nil
@@ -38,31 +38,31 @@ struct TricountListView: View {
             } else if isEmbedded {
                 listContent
             } else {
-                // Non-embarqué sur macOS : cas déjà couvert par
-                // `if let group = selectedGroup` ci-dessus dès que la
-                // sélection change, `selectedGroup` n'est donc jamais lu ici
-                // — pas de `.navigationDestination` à y attacher.
+                // Not embedded on macOS: an already-covered case since
+                // `if let group = selectedGroup` above fires as soon as the
+                // selection changes, so `selectedGroup` is never read here
+                // — no `.navigationDestination` to attach to it.
                 NavigationStack { listContent }
             }
             #else
-            // iOS : chaque row pousse directement via `NavigationLink`
-            // (cf. `listContent`) — aucun `.navigationDestination` au niveau
-            // du conteneur, qu'il soit embarqué (menu "Plus") ou racine
-            // (onglet visible). Un `NavigationLink(destination:)` classique
-            // fonctionne à n'importe quelle profondeur d'une NavigationStack
-            // tant qu'il n'est jamais MÉLANGÉ, sur la MÊME pile, avec un
-            // `.navigationDestination(for:)/(item:)` value-based — exactement
-            // ce que faisait `MoreView` en emboîtant cette liste (elle-même
-            // atteinte par un `NavigationLink` classique côté `MoreView`,
-            // cf. `moreSection`) sous un `.navigationDestination(item:)` ici :
-            // le tout premier push de la session était avalé et la pile
-            // retombait jusqu'à la racine de "Plus" (retour d'usage). Réglages
-            // (`SettingsView`, atteint pareil depuis "Plus") n'a jamais ce
-            // souci car il est du `NavigationLink` classique de bout en bout.
-            // ⚠️ Le MÊME anti-pattern existait un niveau plus bas : chaque row
-            // pousse `TricountDetailView`, qui s'enveloppait elle-même
-            // inconditionnellement dans une SECONDE `NavigationStack` — cf. son
-            // commentaire de `body` pour le correctif (`\.paneHostContext`).
+            // iOS: each row pushes directly via `NavigationLink`
+            // (see `listContent`) — no `.navigationDestination` at the
+            // container level, whether embedded (the "More" menu) or
+            // root (a visible tab). A classic `NavigationLink(destination:)`
+            // works at any depth of a NavigationStack
+            // as long as it's never MIXED, on the SAME stack, with a
+            // value-based `.navigationDestination(for:)/(item:)` — exactly
+            // what `MoreView` used to do by nesting this list (itself
+            // reached by a classic `NavigationLink` on `MoreView`'s side,
+            // see `moreSection`) under a `.navigationDestination(item:)` here:
+            // the session's very first push got swallowed and the stack
+            // dropped back to "More"'s root. Settings
+            // (`SettingsView`, reached the same way from "More") never has this
+            // issue because it's classic `NavigationLink` end to end.
+            // ⚠️ The SAME anti-pattern existed one level down: each row
+            // pushes `TricountDetailView`, which unconditionally wrapped
+            // itself in a SECOND `NavigationStack` — see its `body`'s
+            // comment for the fix (`\.paneHostContext`).
             if isEmbedded { listContent } else { NavigationStack { listContent } }
             #endif
         }
@@ -89,7 +89,7 @@ struct TricountListView: View {
                 List {
                     ForEach(groups) { group in
                         #if os(macOS)
-                        // macOS : bascule d'état (cf. `body`), jamais de push.
+                        // macOS: a state switch (see `body`), never a push.
                         Button {
                             selectedGroup = group
                         } label: {
@@ -104,8 +104,8 @@ struct TricountListView: View {
                         )
                         .macGroupedRow(first: group.id == groups.first?.id, last: group.id == groups.last?.id)
                         #else
-                        // iOS : vrai push, chevron natif de la `List` gratuit
-                        // — même mécanisme que "Réglages" dans le menu "Plus".
+                        // iOS: a real push, a native `List` chevron for free
+                        // — the same mechanism as "Settings" in the "More" menu.
                         NavigationLink {
                             TricountDetailView(group: group)
                         } label: {
@@ -122,20 +122,20 @@ struct TricountListView: View {
                     }
                 }
                 #if os(macOS)
-                // Même politique que Transactions/Patrimoine : .plain = base neutre
-                // pour les cartes custom dessinées par macGroupedRow. iOS garde son
-                // insetGrouped natif.
+                // Same policy as Transactions/Patrimoine: .plain = a neutral base
+                // for the custom cards drawn by macGroupedRow. iOS keeps its
+                // native insetGrouped.
                 .listStyle(.plain)
-                // Décolle la 1ère carte du délimiteur natif macOS (barre d'outils
-                // ↔ contenu scrollé) — même correctif que TransactionsView.
+                // Detaches the 1st card from the native macOS separator (toolbar
+                // ↔ scrolled content) — the same fix as TransactionsView.
                 .macGroupedListTopGap()
                 #endif
                 .scrollContentBackground(.hidden)
             }
         }
-        // Fond de l'app posé explicitement — sans lui la colonne « content » de
-        // la NavigationSplitView macOS montre son matériau vibrant par défaut
-        // au lieu du fond neutre AppTheme ().
+        // The app's background set explicitly — without it, the macOS
+        // NavigationSplitView's "content" column shows its vibrant material by
+        // default instead of the neutral AppTheme background.
         .background(AppTheme.Colors.background.ignoresSafeArea())
         .localizedNavigationTitle("Tricounts")
         .toolbar {
@@ -143,9 +143,9 @@ struct TricountListView: View {
                 PaneToggleButton(label: "Charger un Tricount", systemImage: "plus", isOn: $showLoadSheet)
             }
         }
-        // La présentation du détail (push vs pane) est décidée par `body`,
-        // pas ici : elle dépend de `isEmbedded`, que `listContent` n'a pas
-        // besoin de connaître pour le reste de son contenu.
+        // The detail's presentation (push vs. pane) is decided by `body`,
+        // not here: it depends on `isEmbedded`, which `listContent` doesn't
+        // need to know for the rest of its content.
         .adaptivePane(isPresented: $showLoadSheet) {
             TricountLoadSheet { repo.setupTables(); loadGroups() }
         }

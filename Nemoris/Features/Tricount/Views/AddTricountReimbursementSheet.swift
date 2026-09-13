@@ -6,9 +6,9 @@ struct AddTricountReimbursementSheet: View {
     @Environment(\.paneDismiss) private var dismiss
     let defaultAmount: Double
     let currency: String
-    /// Non-nil = édition d'une ligne existante — préchargée au lieu de repartir
-    /// du calcul théorique de part (correctif v44 : "Modifier…" dupliquait
-    /// silencieusement si l'utilisateur changeait de payee).
+    /// Non-nil = editing an existing row — pre-filled instead of starting
+    /// from the theoretical share calculation (a v44 fix: "Edit…" used to
+    /// silently duplicate if the user changed the payee).
     var existingReimbursement: Reimbursement? = nil
     let onAdd: (Int, Double, String) -> Void
 
@@ -47,8 +47,8 @@ struct AddTricountReimbursementSheet: View {
                     HStack {
                         Text("Montant (\(currency))")
                         Spacer()
-                        // Titre vide : la row a déjà son label ("Montant (…)")
-                        // — cf. TransactionEditSheet pour la raison macOS.
+                        // An empty title: the row already has its label ("Amount (…)")
+                        // — see TransactionEditSheet for the macOS reason.
                         TextField("", text: $amountText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
@@ -66,15 +66,15 @@ struct AddTricountReimbursementSheet: View {
                 allTiers = txRepo.fetchTiers()
             }
             .sheet(isPresented: $showTiersPicker) {
-                // Ré-injection \.locale obligatoire : `.sheet()` niveau 2+ sur
-                // macOS n'hérite pas de l'environnement depuis un ancêtre
-                // au-dessus d'un `NavigationSplitView` (cf. CLAUDE.md §5).
-                // `\.paneHostContext` itou : cette sheet est ouverte depuis une
-                // vue elle-même hébergée dans l'inspecteur macOS (`.inspector`,
-                // cette sheet est présentée via `.adaptivePane`) — sans reset à
-                // `.modal`, le `.paneChrome` de `TiersSearchSheet` publierait
-                // ses boutons dans la barre système au lieu de les dessiner
-                // dans CETTE fenêtre séparée (aucun bouton visible).
+                // Re-injecting \.locale is required: a level-2+ `.sheet()` on
+                // macOS doesn't inherit the environment from an ancestor
+                // above a `NavigationSplitView` (see CLAUDE.md §5).
+                // `\.paneHostContext` too: this sheet is opened from a
+                // view itself hosted in the macOS inspector (`.inspector`,
+                // this sheet is presented via `.adaptivePane`) — without resetting to
+                // `.modal`, `TiersSearchSheet`'s `.paneChrome` would publish
+                // its buttons in the system bar instead of drawing them
+                // in THIS separate window (no button visible).
                 TiersSearchSheet(allTiers: allTiers, selectedId: $selectedTiersId)
                     .environment(\.locale, AppLocalization.locale)
                     .environment(\.paneHostContext, .modal)

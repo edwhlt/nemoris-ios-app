@@ -7,8 +7,8 @@ struct TricountRepository {
 
     private let store: SQLiteStore
 
-    /// La valeur par défaut vise la base de l'application : les sites d'appel
-    /// existants n'ont pas à changer.
+    /// The default value targets the app's database: existing call sites
+    /// don't have to change.
     init(store: SQLiteStore = SQLiteStore()) {
         self.store = store
     }
@@ -297,7 +297,7 @@ struct TricountRepository {
         return gid
     }
 
-    /// Charge un groupe par son ID local (utile pour la navigation depuis une transaction liée).
+    /// Loads a group by its local ID (useful for navigation from a linked transaction).
     func fetchGroup(id: Int) -> TricountGroup? {
         guard store.databaseExists else { return nil }
         var db: OpaquePointer?

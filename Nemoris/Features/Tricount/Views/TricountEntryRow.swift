@@ -13,14 +13,14 @@ struct TricountEntryRow: View {
         guard let myShare else { return nil }
         let type = entry.typeTransaction.uppercased()
         if type == "TRANSFER" || type == "BALANCE" { return nil }
-        // INCOME : revenu → ma part est positive (je reçois de l'argent)
+        // INCOME: income → my share is positive (I receive money)
         if type == "INCOME" { return myShare }
-        // NORMAL : dépense → ma part est toujours négative (argent dépensé)
+        // NORMAL: an expense → my share is always negative (money spent)
         return -myShare
     }
 
-    /// Total affiché avec le bon signe selon la convention comptable :
-    /// dépense = négatif, revenu = positif, transfert = positif
+    /// The total shown with the correct sign per accounting convention:
+    /// an expense = negative, income = positive, a transfer = positive
     private var displayTotal: Double {
         let type = entry.typeTransaction.uppercased()
         if type == "NORMAL" { return -entry.total }
@@ -36,7 +36,7 @@ struct TricountEntryRow: View {
         }
     }
 
-    /// Icône neutre — la couleur du montant porte déjà l'information dépense/revenu.
+    /// A neutral icon — the amount's color already carries the expense/income information.
     private var iconColor: Color { .secondary }
 
     private var shouldShowLocalAmount: Bool {
@@ -64,7 +64,7 @@ struct TricountEntryRow: View {
                      : entry.description)
                     .font(.body)
                     .lineLimit(1)
-                // Ligne info : payeur · date · liée
+                // Info line: payer · date · linked
                 HStack(spacing: 4) {
                     Text(isPaidByMe ? "Moi" : entry.whoPaid)
                         .font(.caption)
@@ -102,13 +102,13 @@ struct TricountEntryRow: View {
                                 .foregroundStyle(tag.displayColor)
                         }
                     }
-                    // ⚠️ macOS : JAMAIS de ScrollView dans une row de List. Un scroll
-                    // (ici horizontal, pour les chips) mesuré dans une cellule
-                    // NSTableView provoque une « reentrant operation in NSTableView
-                    // delegate » → boucle de layout → la barre de fenêtre et le
-                    // bouton retour des vues poussées vibrent EN PERMANENCE. Sur Mac
-                    // on rend les chips dans un HStack clippé (largeur de row large
-                    // en desktop, la plupart tiennent). iOS garde le scroll tactile.
+                    // ⚠️ macOS: NEVER a ScrollView inside a List row. A scroll
+                    // (horizontal here, for the chips) measured inside an
+                    // NSTableView cell triggers a "reentrant operation in NSTableView
+                    // delegate" → a layout loop → the window bar and pushed
+                    // views' back button vibrate CONSTANTLY. On Mac
+                    // the chips are rendered in a clipped HStack (a wide row width
+                    // on desktop, most fit). iOS keeps the touch scroll.
                     #if os(macOS)
                     chips
                         .frame(maxWidth: .infinity, alignment: .leading)

@@ -16,9 +16,9 @@ struct TricountEntryDetailSheet: View {
     let onChanged: () -> Void
 
     @State private var reimbursements: [Reimbursement] = []
-    /// Ligne en cours d'édition via "Modifier…" — nil pour un nouvel assignement.
-    /// Distingue une vraie mise à jour (par id) d'un nouvel upsert, pour ne
-    /// jamais dupliquer silencieusement si le payee change (correctif v44).
+    /// The row being edited via "Edit…" — nil for a new assignment.
+    /// Distinguishes a real update (by id) from a new upsert, so it never
+    /// silently duplicates if the payee changes (a v44 fix).
     @State private var editingReimbursement: Reimbursement? = nil
     @State private var linkedTransaction: FinanceTransaction? = nil
     @State private var entryTags: [Tag] = []
@@ -50,7 +50,7 @@ struct TricountEntryDetailSheet: View {
         let type = entry.typeTransaction.uppercased()
         if type == "TRANSFER" || type == "BALANCE" { return nil }
         if type == "INCOME" { return s }   // revenu → positif
-        return -s                           // dépense → toujours négatif
+        return -s                           // an expense → always negative
     }
 
     private var displayTotal: Double {
@@ -68,7 +68,7 @@ struct TricountEntryDetailSheet: View {
 
     var body: some View {
             Form {
-                // Infos de la dépense
+                // Expense info
                 Section("Dépense") {
                     LabeledContent("Type") {
                         Text(entryTypeLabel).foregroundStyle(AppTheme.Colors.textSecondary)
@@ -87,7 +87,7 @@ struct TricountEntryDetailSheet: View {
                     if let share = displayShare {
                         LabeledContent("Ma part") {
                             Text(share, format: .currency(code: groupCurrency))
-                                // positif = je reçois / négatif = je dois
+                                // positive = I receive / negative = I owe
                                 .foregroundStyle(share >= 0 ? AppTheme.Colors.accent : AppTheme.Colors.danger)
                         }
                     }
@@ -96,7 +96,7 @@ struct TricountEntryDetailSheet: View {
                     }
                 }
 
-                // Transaction liée
+                // A linked transaction
                 Section("Transaction liée") {
                     if let tx = linkedTransaction {
                         VStack(alignment: .leading, spacing: 4) {
@@ -144,7 +144,7 @@ struct TricountEntryDetailSheet: View {
                     }
                 }
 
-                // Remboursements Tricount (1 seul max par entrée)
+                // Tricount reimbursements (1 max per entry)
                 if reimbursementsEnabled {
                     Section {
                         if let r = reimbursements.first {
@@ -209,15 +209,15 @@ struct TricountEntryDetailSheet: View {
             }
             .adaptivePane(isPresented: $showAddReimbursement) {
                 AddTricountReimbursementSheet(
-                    // On passe la valeur absolue : un remboursement est toujours un montant > 0
-                    // (ce qu'on attend de recevoir, peu importe le signe de la part)
+                    // The absolute value is passed: a reimbursement is always an amount > 0
+                    // (what's expected to be received, regardless of the share's sign)
                     defaultAmount: abs(displayShare ?? 0),
                     currency: groupCurrency,
                     existingReimbursement: editingReimbursement
                 ) { tiersId, amount, currency in
                     if let existing = editingReimbursement {
-                        // Édition par id : met à jour la ligne existante même si
-                        // le payee change, ne duplique jamais (correctif v44).
+                        // Editing by id: updates the existing row even if
+                        // the payee changes, never duplicates (a v44 fix).
                         reimbursementRepo.updateReimbursement(id: existing.id, payeeId: tiersId, amount: amount, currency: currency)
                     } else {
                         reimbursementRepo.addOrUpdateReimbursement(tricountEntryId: entry.id, payeeId: tiersId, amount: amount, currency: currency)

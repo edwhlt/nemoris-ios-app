@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Ordre d'affichage des dépenses d'un Tricount. `.dateDesc` reproduit
-/// le comportement historique (ordre SQL de `TricountRepository.fetchEntries`).
+/// Display order for a Tricount's expenses. `.dateDesc` reproduces
+/// the historical behavior (the SQL order of `TricountRepository.fetchEntries`).
 enum TricountEntrySort: String, CaseIterable, Identifiable {
     case dateDesc  = "Date (récent → ancien)"
     case dateAsc   = "Date (ancien → récent)"
@@ -18,8 +18,8 @@ enum TricountEntrySort: String, CaseIterable, Identifiable {
     }
 }
 
-/// Filtre "liée à une transaction" — cf. `TricountEntry.linkedTransactionId`,
-/// distinct des remboursements (cf. commentaire de `TricountDetailView`).
+/// A "linked to a transaction" filter — see `TricountEntry.linkedTransactionId`,
+/// distinct from reimbursements (see `TricountDetailView`'s comment).
 enum TricountLinkFilter: String, CaseIterable, Identifiable {
     case all       = "Toutes"
     case linked    = "Liées"
@@ -31,22 +31,22 @@ enum TricountLinkFilter: String, CaseIterable, Identifiable {
 struct TricountEntryFiltersSheet: View {
     @Environment(\.paneDismiss) private var paneDismiss
 
-    /// Noms bruts des payeurs présents dans le groupe (`TricountEntry.whoPaid`),
-    /// dédupliqués et triés par l'appelant.
+    /// Raw names of payers present in the group (`TricountEntry.whoPaid`),
+    /// deduplicated and sorted by the caller.
     let payerOptions: [String]
-    /// "Moi" pour `group.myName`, le nom brut sinon — même convention que
+    /// "Me" for `group.myName`, the raw name otherwise — the same convention as
     /// `TricountEntryRow.isPaidByMe`.
     let payerDisplayName: (String) -> String
     let currency: String
-    /// Bornes réelles des dates de dépenses du groupe — cadre le `DatePicker`
-    /// et sert de valeurs par défaut à l'activation du filtre (période
-    /// complète plutôt que "aujourd'hui" des deux côtés, qui masquerait tout).
+    /// The group's expenses' real date bounds — frames the `DatePicker`
+    /// and serves as the default values when the filter is activated (the full
+    /// period rather than "today" on both ends, which would hide everything).
     let minDate: Date
     let maxDate: Date
 
     @Binding var titleSearchText: String
     @Binding var linkFilter: TricountLinkFilter
-    /// "" = tous les payeurs.
+    /// "" = every payer.
     @Binding var payerFilter: String
     @Binding var minShareText: String
     @Binding var maxShareText: String
@@ -56,8 +56,8 @@ struct TricountEntryFiltersSheet: View {
 
     let onApply: () -> Void
 
-    // Copies locales — évite de re-rendre la liste filtrée à chaque frappe
-    // (texte) ou à chaque glissement de roue (dates).
+    // Local copies — avoids re-rendering the filtered list on every
+    // keystroke (text) or every wheel scroll (dates).
     @State private var localTitleSearch = ""
     @State private var localMinShare = ""
     @State private var localMaxShare = ""

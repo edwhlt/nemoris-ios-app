@@ -1,10 +1,10 @@
 import Foundation
 import Security
 
-// Couche d'accès à l'API Tricount : DTO de transport et client réseau.
-// Séparée des vues, elle ne dépend d'aucun type SwiftUI.
-// Les DTO restent privés — ils ne sortent jamais de ce fichier, seul
-// TricountFetchResult franchit la frontière.
+// The Tricount API access layer: transport DTOs and the network client.
+// Separate from the views, it depends on no SwiftUI type.
+// The DTOs stay private — they never leave this file, only
+// TricountFetchResult crosses the boundary.
 
 // MARK: - API Codable structs (private)
 
