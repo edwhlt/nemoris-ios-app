@@ -2,13 +2,13 @@ import SwiftUI
 
 // MARK: - TaxReportView
 //
-// Écran poussé depuis Settings → Avancé → "Rapport fiscal".
-// Sélecteur d'année + 3 sections (CTO PV, PEA, Fonciers) avec un récap
-// pré-rempli des cases de la déclaration française.
+// A screen pushed from Settings → Advanced → "Tax report".
+// A year picker + 3 sections (CTO capital gains, PEA, Real estate income) with a
+// pre-filled recap of the French tax-return boxes.
 //
-// **Export** : bouton "Copier" sur chaque section pour faciliter le report
-// dans la déclaration en ligne. Le PDF formaté est un nice-to-have qu'on
-// pourra ajouter en V2.
+// **Export**: a "Copy" button on each section to make it easier to carry
+// over into the online tax return. A nicely formatted PDF is a nice-to-have that
+// could be added in V2.
 
 struct TaxReportView: View {
     @Environment(AppState.self) private var appState
@@ -22,11 +22,11 @@ struct TaxReportView: View {
         return Array((current - 5)...current).reversed()
     }
 
-    // Toujours atteinte par PUSH (settingsLink : NavigationLink iOS / pushedSection
-    // macOS), jamais en sheet — la NavigationStack + le bouton "Fermer" propres à
-    // cet écran doublaient le bouton retour natif fourni par l'appelant. Titre
-    // conservé (nécessaire côté iOS, où l'appelant n'en pose pas) mais sans
-    // conteneur de navigation propre.
+    // Always reached by PUSH (settingsLink: NavigationLink on iOS / pushedSection
+    // on macOS), never as a sheet — this screen's own NavigationStack + "Close"
+    // button duplicated the native back button already provided by the caller. The
+    // title is kept (needed on iOS, where the caller doesn't set one) but without
+    // its own navigation container.
     var body: some View {
         ZStack {
             AppTheme.Colors.background.ignoresSafeArea()
@@ -143,7 +143,7 @@ struct TaxReportView: View {
                     in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg)
                 )
 
-                // Détail par cession (FIFO appliqué)
+                // Detail per disposal (FIFO applied)
                 ForEach(report.ctoGains) { gain in
                     ctoGainRow(gain)
                 }
@@ -239,7 +239,7 @@ struct TaxReportView: View {
         .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md))
     }
 
-    // MARK: - Revenus fonciers
+    // MARK: - Real estate income
 
     @ViewBuilder private func fonciersSection(report: TaxReportYear) -> some View {
         let income = report.propertyIncome

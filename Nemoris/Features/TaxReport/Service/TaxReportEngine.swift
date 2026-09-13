@@ -2,26 +2,26 @@ import Foundation
 
 // MARK: - TaxReportEngine
 //
-// Calcul des éléments fiscaux annuels pour la déclaration française.
+// Computes annual tax figures for the French tax return.
 //
-// **MVP — 3 sections** :
-//   1. **Plus-values mobilières CTO (case 3VG / 3UA)** — calcul FIFO strict
-//      des ventes de l'année, gain/perte par cession + total annuel
-//   2. **Suivi PEA** — alertes "PEA < 5 ans (retrait taxable)", valorisation
-//      actuelle, montant total versé estimé
-//   3. **Revenus fonciers (case 4BA / micro-foncier 4BE)** — somme des
-//      transactions catégorisées "Revenus fonciers" (filter sur catégorie
-//      Revenus + libellé contenant "Loyer" comme heuristique fallback)
+// **MVP — 3 sections**:
+//   1. **CTO securities capital gains (box 3VG / 3UA)** — a strict FIFO
+//      calculation of the year's sales, gain/loss per disposal + the annual total
+//   2. **PEA tracking** — "PEA < 5 years (a taxable withdrawal)" alerts, the
+//      current valuation, an estimated total amount paid in
+//   3. **Property income (box 4BA / micro-foncier 4BE)** — the sum of
+//      transactions categorized "Property income" (filtered on the Income
+//      category + a label containing "Rent" as a fallback heuristic)
 //
-// **Limites assumées** :
-//   - Pas de gestion des moins-values reportables (case 3VH) — l'utilisateur les
-//     compense lui-même via les exports.
-//   - Pas de gestion fiscale crypto (BIC/BNC vs case 3AN — complexe).
-//   - Pas de calcul d'abattement PEA selon ancienneté de retrait.
-//   - Pas de gestion CSG/CRDS (l'utilisateur a 17.2% par défaut, on l'affiche en info).
+// **Assumed limitations**:
+//   - No handling of carry-forward losses (box 3VH) — the user offsets them
+//     themselves via the exports.
+//   - No crypto tax handling (BIC/BNC vs. box 3AN — complex).
+//   - No PEA allowance calculation based on withdrawal seniority.
+//   - No CSG/CRDS handling (the user's default 17.2% is shown as info).
 //
-// Le but est de pré-remplir 90 % du travail — l'utilisateur vérifie et reporte
-// les chiffres sur sa déclaration.
+// The goal is to pre-fill 90% of the work — the user checks and transfers
+// the figures onto their tax return.
 
 struct TaxReportYear {
     let year: Int
@@ -30,47 +30,47 @@ struct TaxReportYear {
     let propertyIncome: PropertyIncomeSummary
     let generatedAt: Date
 
-    /// Somme nette des PV CTO de l'année (gain - perte).
+    /// The year's net sum of CTO capital gains (gain - loss).
     var ctoNetGain: Double {
         ctoGains.reduce(0) { $0 + $1.gain }
     }
 
-    /// Vrai si on a des données à remonter (sinon le rapport est inutile).
+    /// True if there's data to report (otherwise the report is pointless).
     var hasData: Bool {
         !ctoGains.isEmpty || !peaSnapshots.isEmpty || propertyIncome.totalAmount > 0
     }
 }
 
-/// Une ligne = une vente partielle/totale d'une position, matchée FIFO avec
-/// un ou plusieurs achats antérieurs.
+/// One row = a partial/full sale of a position, matched FIFO against
+/// one or more earlier purchases.
 struct CTOGainEntry: Identifiable, Hashable {
     var id: String { "\(positionId)_\(soldAt.timeIntervalSince1970)" }
     let positionId: Int
     let assetName: String
     let ticker: String
     let accountName: String
-    /// Quantité vendue (positive).
+    /// The quantity sold (positive).
     let quantity: Double
-    /// Prix unitaire à la vente (€).
+    /// The unit sale price (€).
     let unitSalePrice: Double
-    /// PRU moyen FIFO des lots vendus (€/unité).
+    /// The FIFO weighted-average cost of the sold lots (€/unit).
     let weightedBuyPrice: Double
-    /// Date de la vente.
+    /// The sale's date.
     let soldAt: Date
-    /// Frais imputés à cette cession (vente uniquement — les frais d'achat sont
-    /// déjà intégrés au PRU).
+    /// Fees charged on this disposal (sale only — purchase fees are
+    /// already baked into the weighted-average cost).
     let saleFees: Double
 
-    /// Gain/perte brut(e) sur la cession = (sale_price - weighted_buy_price) * qty - sale_fees
+    /// The gross gain/loss on the disposal = (sale_price - weighted_buy_price) * qty - sale_fees
     var gain: Double {
         (unitSalePrice - weightedBuyPrice) * quantity - saleFees
     }
 
-    /// Montant de la cession = unitSalePrice × quantity.
+    /// The disposal's amount = unitSalePrice × quantity.
     var saleAmount: Double { unitSalePrice * quantity }
 }
 
-/// Snapshot d'un compte PEA en fin d'année (informatif — pour décision retrait).
+/// A PEA account's snapshot at year-end (informational — for a withdrawal decision).
 struct PEASnapshotEntry: Identifiable, Hashable {
     var id: Int { accountId }
     let accountId: Int
@@ -78,14 +78,14 @@ struct PEASnapshotEntry: Identifiable, Hashable {
     let openedAt: Date
     let currentValue: Double
     let totalInvested: Double
-    /// Années depuis l'ouverture du PEA. Détermine la fiscalité du retrait :
-    /// <5 ans = clôture + imposition, ≥5 ans = retraits possibles, ≥8 ans = sorties
-    /// en rente possibles.
+    /// Years since the PEA was opened. Determines the withdrawal's tax treatment:
+    /// <5 years = closure + taxation, ≥5 years = withdrawals possible, ≥8 years = annuity
+    /// payouts possible.
     var ageYears: Int {
         Calendar.current.dateComponents([.year], from: openedAt, to: Date()).year ?? 0
     }
 
-    /// Avertissement fiscal selon l'âge.
+    /// A tax warning based on age.
     var taxStatusLabel: LocalizedStringResource {
         if ageYears < 5 { return "Retrait avant 5 ans : clôture obligatoire + IR" }
         if ageYears < 8 { return "Retraits possibles (5-8 ans, sans clôture)" }
@@ -93,15 +93,15 @@ struct PEASnapshotEntry: Identifiable, Hashable {
     }
 }
 
-/// Récap des revenus fonciers de l'année — somme des transactions catégorisées
-/// "Loyer reçu" / "Revenus fonciers".
+/// A recap of the year's property income — the sum of transactions categorized
+/// "Rent received" / "Property income".
 struct PropertyIncomeSummary {
     let year: Int
     let totalAmount: Double
     let entriesCount: Int
 
-    /// Au-delà de 15 000 € → régime réel obligatoire ; sous → micro-foncier
-    /// possible (abattement 30 %). On informe l'utilisateur.
+    /// Beyond €15,000 → the actual-expenses regime is mandatory; below → the micro-foncier
+    /// regime is possible (a 30% allowance). The user is informed.
     var suggestedRegime: String {
         totalAmount > 15000
             ? "Régime réel obligatoire (> 15 000 €)"
@@ -111,11 +111,11 @@ struct PropertyIncomeSummary {
 
 enum TaxReportEngine {
 
-    /// Génère le rapport fiscal pour une année donnée.
+    /// Generates the tax report for a given year.
     /// - Parameters:
-    ///   - invRepo, txRepo: repositories, à valeur par défaut sur la base de
-    ///     l'application. Les tests les injectent sur une base temporaire — le
-    ///     calcul FIFO d'une plus-value ne se vérifie pas autrement.
+    ///   - invRepo, txRepo: repositories, defaulting to the
+    ///     app's database. Tests inject them against a temporary database — a
+    ///     capital gain's FIFO calculation can't be verified otherwise.
     static func generate(year: Int,
                          invRepo: InvestmentRepository = InvestmentRepository(),
                          txRepo: TransactionRepository = TransactionRepository()) -> TaxReportYear {
@@ -141,9 +141,9 @@ enum TaxReportEngine {
 
     // MARK: - 1. Plus-values CTO FIFO
 
-    /// Pour chaque compte CTO, on prend les positions, leurs orders triés
-    /// chronologiquement, et on applique FIFO : chaque SELL consomme les BUY
-    /// les plus anciens jusqu'à épuiser sa quantité.
+    /// For each CTO account, its positions and their orders are taken, sorted
+    /// chronologically, and FIFO is applied: each SELL consumes the oldest
+    /// BUYs until its quantity is exhausted.
     private static func computeCTOGains(year: Int, yearStart: Date, yearEnd: Date,
                                         invRepo: InvestmentRepository) -> [CTOGainEntry] {
         let accounts = invRepo.fetchAccounts().filter { $0.accountType == "CTO" }
@@ -155,13 +155,13 @@ enum TaxReportEngine {
                 let orders = invRepo.fetchOrders(positionId: position.id)
                     .sorted { $0.executedAt < $1.executedAt }
 
-                // Lots d'achat en attente de consommation FIFO.
-                // Chaque lot : (quantité restante, prix unitaire moyen incluant fees répartis)
+                // Purchase lots awaiting FIFO consumption.
+                // Each lot: (remaining quantity, average unit price including allocated fees)
                 var buyLots: [(qty: Double, unitCost: Double)] = []
 
                 for order in orders {
                     if order.orderType == .buy {
-                        // Coût unitaire = prix + fees répartis sur la qty
+                        // Unit cost = price + fees allocated over the quantity
                         let unitCost = order.unitPrice + (order.fees / max(order.quantity, 0.000001))
                         buyLots.append((qty: order.quantity, unitCost: unitCost))
                     } else if order.orderType == .sell {
@@ -180,7 +180,7 @@ enum TaxReportEngine {
                             }
                         }
                         let consumed = order.quantity - remainingToSell
-                        // On ne crée l'entry que si la vente tombe dans l'année cible
+                        // The entry is only created if the sale falls within the target year
                         if order.executedAt >= yearStart, order.executedAt <= yearEnd, consumed > 0 {
                             let weightedBuyPrice = totalCostBasis / consumed
                             result.append(CTOGainEntry(
@@ -196,8 +196,8 @@ enum TaxReportEngine {
                             ))
                         }
                     }
-                    // DIV / autres : ignorés pour la PV (les dividendes ont leur
-                    // propre case 2DC qui n'est pas couverte en MVP).
+                    // DIV / other: ignored for capital gains (dividends have their
+                    // own box 2DC, not covered in the MVP).
                 }
             }
         }
@@ -219,11 +219,11 @@ enum TaxReportEngine {
         }
     }
 
-    // MARK: - 3. Revenus fonciers
+    // MARK: - 3. Property income
 
-    /// Heuristique : on prend les transactions de revenus (amount > 0) de
-    /// l'année dont le libellé OU la catégorie OU le tiers contient "loyer"
-    /// (case-insensitive). Bonne approximation pour la plupart des bailleurs.
+    /// A heuristic: takes the year's income transactions (amount > 0) whose
+    /// label OR category OR payee contains "loyer" (rent, case-insensitive).
+    /// A good approximation for most landlords.
     private static func computePropertyIncome(year: Int, yearStart: Date, yearEnd: Date,
                                               txRepo: TransactionRepository) -> PropertyIncomeSummary {
         let txs = txRepo.fetchTransactionsAllAccounts(
