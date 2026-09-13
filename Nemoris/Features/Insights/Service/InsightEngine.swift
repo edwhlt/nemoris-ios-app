@@ -2,33 +2,33 @@ import Foundation
 
 // MARK: - InsightEngine
 //
-// Moteur de détection des "insights" — opportunités d'optimisation détectées
-// statistiquement à partir de l'historique de l'utilisateur. Pas de ML / LLM
-// ici : 5 détecteurs purs déterministes.
+// A detection engine for "insights" — optimization opportunities detected
+// statistically from the user's history. No ML/LLM here: 5 pure, deterministic
+// detectors.
 //
-// Depuis AXE AC (coach IA), ce moteur sert à DEUX endroits : (1) source des
-// "signaux" injectés dans le dossier envoyé au coach dépenses
-// (`CoachService.transactionsBriefing`), et (2) repli affiché sur le Dashboard
-// tant qu'aucune analyse IA n'a encore tourné (`InsightsCoachCard`, doctrine
-// offline-first). Il n'est plus le moteur de recommandation principal.
+// This engine now serves TWO purposes: (1) a source of
+// "signals" injected into the brief sent to the spending coach
+// (`CoachService.transactionsBriefing`), and (2) a fallback shown on the Dashboard
+// as long as no AI analysis has run yet (`InsightsCoachCard`, an
+// offline-first doctrine). It's no longer the primary recommendation engine.
 //
-// **Philosophie** : on préfère 3 insights solides et actionnables à 20
-// insights vagues. Les seuils sont calibrés pour ne déclencher que sur des
-// signaux statistiquement robustes.
+// **Philosophy**: 3 solid, actionable insights are preferred over 20
+// vague ones. The thresholds are calibrated to only fire on
+// statistically robust signals.
 
 enum InsightEngine {
 
-    /// Période d'analyse — 180 jours = 6 mois glissants. Permet d'avoir une
-    /// baseline solide pour la détection de drift et la moyenne des fréquences.
+    /// The analysis period — 180 days = a rolling 6 months. Provides a
+    /// solid baseline for drift detection and frequency averaging.
     private static let analysisDays = 180
 
-    /// Génère tous les insights pertinents, triés par `compositeScore` décroissant.
-    /// Cap à 8 insights max — au-delà ça devient du bruit pour l'utilisateur.
+    /// Generates every relevant insight, sorted by decreasing `compositeScore`.
+    /// Capped at 8 insights max — beyond that it becomes noise for the user.
     /// - Parameters:
-    ///   - txRepo: repository, à valeur par défaut sur la base de
-    ///     l'application. Les tests l'injectent sur une base temporaire.
-    ///   - now: date d'évaluation, pour que la fenêtre d'analyse soit
-    ///     reproductible au lieu de dépendre du jour d'exécution.
+    ///   - txRepo: the repository, defaulting to the
+    ///     app's database. Tests inject it against a temporary database.
+    ///   - now: the evaluation date, so the analysis window is
+    ///     reproducible instead of depending on the day it runs.
     static func compute(txRepo: TransactionRepository = TransactionRepository(),
                         now: Date = Date()) -> [Insight] {
         let cal = Calendar(identifier: .gregorian)
@@ -56,10 +56,10 @@ enum InsightEngine {
 
     // MARK: - 1. Abonnements dormants
 
-    /// Détecte les récurrents `MONTHLY` ou `YEARLY` dont le payee n'a pas eu
-    /// de transaction additionnelle non-récurrente depuis 90+ jours — signal
-    /// classique d'un abonnement payé mais non consommé (Netflix, Disney+,
-    /// applis qu'on a oublié de désabonner).
+    /// Detects `MONTHLY` or `YEARLY` recurring items whose payee has had no
+    /// additional non-recurring transaction in 90+ days — a
+    /// classic signal of a subscription paid for but unused (Netflix, Disney+,
+    /// apps someone forgot to cancel).
     private static func detectDormantSubscriptions(
         patterns: [RecurringPattern],
         txs: [FinanceTransaction],
@@ -72,16 +72,16 @@ enum InsightEngine {
         var result: [Insight] = []
         for pattern in patterns where pattern.isExpense {
             guard let payeeId = pattern.payeeId else { continue }
-            // Dernière transaction ASSOCIÉE au payee (toutes, pas seulement récurrente).
-            // En MVP on n'a pas de flag "is_recurring_match" → approximation : on
-            // prend la dernière tx du payee. Si elle est récente (≤ 90j) on
-            // considère que l'utilisateur "consomme" — pas d'insight. Sinon on alerte.
+            // The last transaction ASSOCIATED with the payee (all of them, not just recurring).
+            // The MVP has no "is_recurring_match" flag → an approximation: the
+            // payee's last transaction is taken. If it's recent (≤ 90 days), the user is
+            // considered to be "using" it — no insight. Otherwise it's flagged.
             let payeeTxs = txs.filter { $0.tiersId == payeeId }.sorted { $0.date > $1.date }
             guard let last = payeeTxs.first else { continue }
             let daysSinceLast = cal.dateComponents([.day], from: last.date, to: now).day ?? 0
             guard daysSinceLast >= dormancyThresholdDays else { continue }
 
-            // Coût annuel = mensualité × 12 ou montant tel quel pour yearly
+            // Annual cost = the monthly payment × 12, or the amount as-is for yearly
             let annualCost: Double = {
                 switch pattern.frequency {
                 case .monthly:    return abs(pattern.amountAvg) * 12
@@ -103,19 +103,19 @@ enum InsightEngine {
                 title:"\(payeeName) — non utilisé depuis \(daysSinceLast) jours",
                 detail: "Vous payez \(monthlyStr)/mois pour \(payeeName) mais aucune transaction associée n'apparaît depuis \(daysSinceLast) jours. Envisagez de résilier — \(annualStr) économisés par an.",
                 annualImpact: annualCost,
-                actionability: 5,  // Désabonnement = 1 clic dans Réglages → Abonnements iOS
+                actionability: 5,  // Unsubscribing = 1 click in Settings → iOS Subscriptions
                 confidence: min(1.0, Double(daysSinceLast) / 180.0)  // Plus dormant longtemps → plus confiant
             ))
         }
         return result
     }
 
-    // MARK: - 2. Habitudes café/snack
+    // MARK: - 2. Coffee/snack habits
 
-    /// Détecte les payees où l'utilisateur a un comportement "rituel" : fréquence
-    /// élevée (≥ 8 transactions / 90 jours) ET montant unitaire faible
-    /// (≤ 10 €). Typiquement : café Starbucks, snack midi, viennoiseries.
-    /// La somme cumulée annuelle peut être surprenante pour l'utilisateur.
+    /// Detects payees with a "ritual" behavior: a high frequency
+    /// (≥ 8 transactions / 90 days) AND a low unit amount
+    /// (≤ €10). Typically: a Starbucks coffee, a midday snack, pastries.
+    /// The cumulative annual sum can be surprising for the user.
     private static func detectSmallFrequentHabits(
         txs: [FinanceTransaction],
         allTiers: [Tiers]
@@ -139,8 +139,8 @@ enum InsightEngine {
             guard unitAvg <= 10.0 else { continue }  // Filtre montants > 10 €
             // Projection annuelle
             let annualCost = totalAbs * (365.0 / 90.0)
-            // Cas "réduction de moitié" : combien on économiserait en diminuant
-            // la fréquence de 50 %
+            // The "halve it" case: how much would be saved by cutting
+            // the frequency by 50%
             let potentialSaving = annualCost * 0.5
 
             let payeeName = allTiers.first(where: { $0.id == tierId })?.name ?? "Inconnu"
@@ -153,7 +153,7 @@ enum InsightEngine {
                 title: "\(payeeName) — \(count) achats en 90 j à ~\(unitAvgStr)",
                 detail: "Cumulé sur l'année : \(annualCostStr). Réduire la fréquence de moitié → \(savingStr) économisés/an.",
                 annualImpact: potentialSaving,
-                actionability: 3,  // Changement d'habitude — pas trivial mais réalisable
+                actionability: 3,  // A habit change — not trivial but achievable
                 confidence: min(1.0, Double(count) / 30.0)  // Plus de tx → plus de confiance
             ))
         }
@@ -162,10 +162,10 @@ enum InsightEngine {
 
     // MARK: - 3. Abonnements similaires (doublons)
 
-    /// Détecte plusieurs récurrents actifs dans la même catégorie (ex : Netflix +
-    /// Disney+ + Apple TV simultanés). Pas une recommandation explicite de
-    /// "supprimer le plus cher" — juste un éclairage que l'utilisateur a peut-être
-    /// oublié de combien il en avait.
+    /// Detects several active recurring items in the same category (e.g. Netflix +
+    /// Disney+ + Apple TV all at once). Not an explicit recommendation
+    /// to "cancel the most expensive one" — just a heads-up that the user may have
+    /// forgotten how many they have.
     private static func detectDuplicateSubscriptions(
         patterns: [RecurringPattern],
         allCategories: [Category]
@@ -189,7 +189,7 @@ enum InsightEngine {
                 kind: .duplicateSubscriptions,
                 title: "\(group.count) abonnements actifs en \(catName)",
                 detail: "Vous payez actuellement \(names) — total \(monthlyStr)/mois (\(annualStr)/an). Vérifiez si tous sont vraiment utilisés.",
-                annualImpact: monthlyTotal * 12 * 0.3,  // Hypothèse : 30 % réduction possible
+                annualImpact: monthlyTotal * 12 * 0.3,  // Hypothesis: a 30% reduction is possible
                 actionability: 4,
                 confidence: 0.7
             ))
@@ -197,12 +197,12 @@ enum InsightEngine {
         return result
     }
 
-    // MARK: - 4. Drift de catégorie
+    // MARK: - 4. Category drift
 
-    /// Détecte les catégories dont les dépenses du dernier mois sont
-    /// significativement (> +25 %) au-dessus de la moyenne des 3 mois précédents.
-    /// Signal d'une dérive comportementale récente que l'utilisateur n'a peut-être pas
-    /// remarquée.
+    /// Detects categories whose last month's spending is
+    /// significantly (> +25%) above the average of the previous 3 months.
+    /// A signal of a recent behavioral drift the user may not have
+    /// noticed.
     private static func detectCategoryDrift(
         txs: [FinanceTransaction],
         allCategories: [Category],
@@ -213,7 +213,7 @@ enum InsightEngine {
               let baselineStart = cal.date(byAdding: .day, value: -120, to: now) else { return [] }
 
         let recentExpenses = txs.filter { $0.amount < 0 && $0.categoryId != nil }
-        // Sum par cat sur dernier mois ET sur baseline 90 j antérieurs
+        // Sum per category over the last month AND over the prior 90-day baseline
         var lastMonth: [Int: Double] = [:]
         var baseline: [Int: Double] = [:]
         for tx in recentExpenses {
@@ -241,19 +241,19 @@ enum InsightEngine {
                 kind: .categoryDrift,
                 title: "\(catName) : +\(Int(increasePct)) % vs vos 3 mois précédents",
                 detail: "Ce mois-ci : \(lastMonthStr). Moyenne des 3 mois précédents : \(baselineStr). Soit \(increaseStr) de plus. Pic ponctuel ou nouvelle tendance ?",
-                annualImpact: increase * 12,  // Si la dérive persiste 1 an
-                actionability: 2,  // Identifier la cause demande de l'analyse user
+                annualImpact: increase * 12,  // If the drift persists for 1 year
+                actionability: 2,  // Identifying the cause requires the user's own analysis
                 confidence: min(1.0, baselineMonthly / 200.0)
             ))
         }
         return result
     }
 
-    // MARK: - 5. Concentration top catégorie
+    // MARK: - 5. Top-category concentration
 
-    /// Calcule la part du top-1 dans les dépenses totales sur la période.
-    /// Si > 30 %, on génère un insight informatif (pas vraiment actionable
-    /// mais éclairant — souvent l'utilisateur sous-estime ce poste).
+    /// Computes the top-1 category's share of total spending over the period.
+    /// If > 30%, an informational insight is generated (not really actionable
+    /// but illuminating — the user often underestimates this item).
     private static func detectTopCategoryConcentration(
         txs: [FinanceTransaction],
         allCategories: [Category]
@@ -276,7 +276,7 @@ enum InsightEngine {
             kind: .topCategoryConcentration,
             title: "\(catName) = \(Int(share * 100)) % de vos dépenses",
             detail: "Sur les 6 derniers mois, vous avez dépensé \(topAmountStr) en \(catName) — \(Int(share * 100)) % de votre total. C'est votre principal poste : un ajustement même modeste ici a un impact disproportionné.",
-            annualImpact: 0,  // Informatif, pas d'action chiffrée
+            annualImpact: 0,  // Informational, no quantified action
             actionability: 1,
             confidence: 0.8
         )]

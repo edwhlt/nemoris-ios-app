@@ -2,22 +2,22 @@ import SwiftUI
 
 // MARK: - InsightsCoachSection
 //
-// Section "Coach" affichée dans le Dashboard. Affiche les **3 meilleurs**
-// insights selon `compositeScore`. Tap sur un insight ouvre une sheet détail
-// avec le `detail` complet + boutons d'action (Vu / Pas pour moi).
+// The "Coach" section shown in the Dashboard. Shows the **top 3**
+// insights by `compositeScore`. Tapping an insight opens a detail sheet
+// with the full `detail` + action buttons (Seen / Not for me).
 //
-// **Persistance des dismissals** : les insights "Pas pour moi" sont stockés
-// dans UserDefaults par `id` — on ne les re-suggère plus pendant 90 j (au-delà,
-// peut-être que l'utilisateur a changé d'avis ou que les conditions ont évolué).
+// **Dismissal persistence**: "Not for me" insights are stored
+// in UserDefaults by `id` — they aren't suggested again for 90 days (beyond
+// that, the user may have changed their mind or conditions may have changed).
 
 struct InsightsCoachSection: View {
     let insights: [Insight]
-    /// `false` quand la section est rendue dans une `DashboardTile`, qui porte déjà
-    /// le titre — sinon on empilerait deux en-têtes.
+    /// `false` when the section is rendered inside a `DashboardTile`, which already
+    /// carries the title — otherwise we'd stack two headers.
     var showsHeader: Bool = true
     @State private var selectedInsight: Insight? = nil
 
-    /// Top 3 insights non dismissés.
+    /// The top 3 non-dismissed insights.
     private var topInsights: [Insight] {
         let dismissed = InsightDismissalStore.shared.activeDismissals()
         return insights
@@ -117,7 +117,7 @@ struct InsightDetailSheet: View {
             ZStack {
                 AppTheme.Colors.background.ignoresSafeArea()
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
-                    // Header — icône + kind label
+                    // Header — icon + kind label
                     HStack(spacing: AppTheme.Spacing.md) {
                         Image(systemName: insight.kind.systemIcon)
                             .font(.system(size: 22, weight: .semibold))
@@ -139,7 +139,7 @@ struct InsightDetailSheet: View {
                         .font(AppTheme.Typography.bodyMedium)
                         .foregroundStyle(AppTheme.Colors.textPrimary)
 
-                    // KPIs (gain potentiel, faisabilité, confiance)
+                    // KPIs (potential gain, feasibility, confidence)
                     if insight.isActionable {
                         HStack(spacing: AppTheme.Spacing.lg) {
                             kpi(label: "Impact / an", value: insight.annualImpact.formatted(.currency(code: "EUR").presentation(.narrow).locale(appState.locale)), color: AppTheme.Colors.success)
@@ -209,22 +209,22 @@ struct InsightDetailSheet: View {
 
 // MARK: - Dismissal persistence
 
-/// Stocke les `insight.id` que l'utilisateur a marqués "Pas pour moi" avec leur
-/// date de dismissal. On les ignore pendant 90 jours, après quoi ils sont
-/// remis en lice (peut-être que les conditions ont changé).
+/// Stores the `insight.id`s the user marked "Not for me", with their
+/// dismissal date. They're ignored for 90 days, after which they're
+/// back in the running (conditions may have changed).
 final class InsightDismissalStore: @unchecked Sendable {
     static let shared = InsightDismissalStore()
     private let key = "insightDismissals"
     private let cooldownDays: TimeInterval = 90 * 24 * 3600
 
-    /// Marque un insight comme dismissé maintenant.
+    /// Marks an insight as dismissed now.
     func dismiss(_ id: String) {
         var dict = stored()
         dict[id] = Date().timeIntervalSince1970
         UserDefaults.standard.set(dict, forKey: key)
     }
 
-    /// Retourne le set des IDs actuellement dismissés (date < cooldownDays).
+    /// Returns the set of currently dismissed IDs (date < cooldownDays).
     func activeDismissals() -> Set<String> {
         let now = Date().timeIntervalSince1970
         let dict = stored()
