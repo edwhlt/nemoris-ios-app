@@ -2,31 +2,31 @@ import SwiftUI
 
 // MARK: - AssetFormView
 //
-// Sheet de création/édition d'un asset Patrimoine (Mobilier & Liquidités).
+// A sheet for creating/editing a Patrimoine asset (Movable Assets & Cash).
 //
-// 2 modes mutuellement exclusifs :
-//   • **Standalone** : l'utilisateur saisit une valeur manuelle. Champ éditable, figé
-//     tant que l'utilisateur ne le met pas à jour.
-//   • **Linked** : l'utilisateur choisit un compte source (Account ou InvestmentAccount)
-//     via `AccountLinkPickerSheet`. La valeur affichée devient lecture seule —
-//     elle sera résolue dynamiquement à chaque ouverture de la PatrimoineView.
+// 2 mutually exclusive modes:
+//   • **Standalone**: the user enters a manual value. An editable field, fixed
+//     until the user updates it.
+//   • **Linked**: the user picks a source account (Account or InvestmentAccount)
+//     via `AccountLinkPickerSheet`. The displayed value becomes read-only —
+//     it will be resolved dynamically every time PatrimoineView opens.
 //
-// Validation côté form :
-//   - Nom obligatoire (non vide après trim)
-//   - Si linked → on vérifie que le compte source n'est pas déjà pris par un
-//     autre asset (le VM remonte un échec → toast).
+// Form-side validation:
+//   - The name is required (non-empty after trimming)
+//   - If linked → checks that the source account isn't already taken by
+//     another asset (the VM surfaces a failure → a toast).
 //
-// L'édition utilise le même form (passe `existingAsset` non-nil). Bouton
-// "Supprimer" affiché en bas dans ce cas.
+// Editing uses the same form (passing a non-nil `existingAsset`). A "Delete"
+// button is shown at the bottom in that case.
 
 struct AssetFormView: View {
     @Environment(\.paneDismiss) private var dismiss
     @Environment(AppState.self) private var appState
     let viewModel: PatrimoineViewModel
-    /// Nil = création, sinon édition.
+    /// Nil = creation, otherwise editing.
     let existingAsset: PatrimoineAsset?
 
-    // ── Champs du draft ───────────────────────────────────────────
+    // ── Draft fields ───────────────────────────────────────────
     @State private var name: String
     @State private var kind: AssetKind
     @State private var linkSelection: LinkSelection
@@ -38,7 +38,7 @@ struct AssetFormView: View {
     @State private var showDeleteConfirm = false
     @FocusState private var valueFieldFocused: Bool
 
-    // MARK: - Init (préremplissage du draft)
+    // MARK: - Init (pre-filling the draft)
 
     init(viewModel: PatrimoineViewModel, existingAsset: PatrimoineAsset? = nil) {
         self.viewModel = viewModel
@@ -70,8 +70,8 @@ struct AssetFormView: View {
         return true
     }
 
-    /// Valeur live à afficher en preview quand un compte est lié. Recalcule à chaque
-    /// build — c'est local au form, le coût est négligeable.
+    /// The live value to show in the preview when an account is linked. Recomputed on every
+    /// build — it's local to the form, the cost is negligible.
     private var linkedLiveValue: Double {
         switch linkSelection {
         case .none: return 0
@@ -80,7 +80,7 @@ struct AssetFormView: View {
         }
     }
 
-    /// Libellé du compte sélectionné (ex : "Livret A perso"). Vide si .none.
+    /// The selected account's label (e.g. "My savings account"). Empty if .none.
     private var linkedAccountName: String {
         switch linkSelection {
         case .none: return ""
@@ -101,8 +101,8 @@ struct AssetFormView: View {
 
     // MARK: - Body
 
-    /// Vrai si on édite un asset dont le compte source a été supprimé. Source de
-    /// vérité : le set `brokenLinkAssetIds` du VM (recalculé à chaque load).
+    /// True when editing an asset whose source account was deleted. The source of
+    /// truth: the VM's `brokenLinkAssetIds` set (recomputed on every load).
     private var isEditingBrokenLink: Bool {
         guard let id = existingAsset?.id else { return false }
         return viewModel.brokenLinkAssetIds.contains(id)
@@ -110,7 +110,7 @@ struct AssetFormView: View {
 
     var body: some View {
             Form {
-                // ── Bannière lien rompu (édition d'un asset orphelin) ────
+                // ── Broken-link banner (editing an orphaned asset) ────
                 if isEditingBrokenLink {
                     Section {
                         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
@@ -145,7 +145,7 @@ struct AssetFormView: View {
                     .listRowBackground(AppTheme.Colors.warning.opacity(0.08))
                 }
 
-                // ── Identité ────────────────────────────────────────
+                // ── Identity ────────────────────────────────────────
                 Section("Identité") {
                     TextField("Nom (ex. Livret A perso)", text: $name)
                         .autocorrectionDisabled()
@@ -157,7 +157,7 @@ struct AssetFormView: View {
                     }
                 }
 
-                // ── Source de la valeur ─────────────────────────────
+                // ── Source of the value ─────────────────────────────
                 Section {
                     Button {
                         showLinkPicker = true
@@ -180,7 +180,7 @@ struct AssetFormView: View {
                     .buttonStyle(.plain)
 
                     if isLinked {
-                        // Valeur résolue affichée en lecture seule.
+                        // The resolved value shown read-only.
                         HStack {
                             Text("Valeur lue")
                                 .font(AppTheme.Typography.bodyMedium)
@@ -196,8 +196,8 @@ struct AssetFormView: View {
                             Text("Valeur")
                                 .font(AppTheme.Typography.bodyMedium)
                             Spacer()
-                            // Titre vide : la row a déjà son label ("Valeur")
-                            // — cf. TransactionEditSheet pour la raison macOS.
+                            // An empty title: the row already has its label ("Value")
+                            // — see TransactionEditSheet for the macOS reason.
                             TextField("", text: $manualValueText)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
@@ -223,7 +223,7 @@ struct AssetFormView: View {
                         .lineLimit(2...5)
                 }
 
-                // ── Suppression (édition uniquement) ────────────────
+                // ── Deletion (editing only) ────────────────────────
                 if existingAsset != nil {
                     Section {
                         Button(role: .destructive) {
@@ -246,8 +246,8 @@ struct AssetFormView: View {
                     excludingAssetId: existingAsset?.id
                 ) { newSelection in
                     linkSelection = newSelection
-                    // Si on bascule en .none, on remet manualValueText à 0 (vide pour
-                    // forcer l'utilisateur à taper sa valeur).
+                    // If switching to .none, manualValueText is reset to 0 (empty, to
+                    // force the user to type their own value).
                     if newSelection == .none, existingAsset == nil {
                         manualValueText = ""
                     }
@@ -297,17 +297,17 @@ struct AssetFormView: View {
             updated.assetKind = kind
             updated.linkedAccountId = bankId
             updated.linkedInvestmentAccountId = investmentId
-            // Si l'asset passe en linked, on garde la manualValue précédente comme
-            // valeur de secours (utile si l'utilisateur re-bascule en standalone plus tard).
-            // En .none, on prend la valeur saisie.
+            // If the asset switches to linked, the previous manualValue is kept as a
+            // fallback value (useful if the user switches back to standalone later).
+            // In .none, the entered value is used.
             if !isLinked {
                 updated.manualValue = manualValueParsed
             }
             updated.notes = notesValue
             success = viewModel.updateAsset(updated)
         } else {
-            // Create — pour un linked, manualValue stocke la valeur actuelle lue
-            // comme "valeur de bascule possible" si l'utilisateur désactive le lien plus tard.
+            // Create — for a linked asset, manualValue stores the currently read
+            // value as a "possible fallback value" if the user disables the link later.
             let manualForCreate = isLinked ? linkedLiveValue : manualValueParsed
             success = viewModel.createAsset(
                 name: trimmedName,
@@ -322,8 +322,8 @@ struct AssetFormView: View {
         if success {
             dismiss()
         } else {
-            // Échec = très probablement un conflit UNIQUE INDEX (compte déjà lié à
-            // un autre asset). Le VM a déjà logué l'erreur. On post un toast user.
+            // A failure = most likely a UNIQUE INDEX conflict (the account is already
+            // linked to another asset). The VM already logged the error. A toast is posted.
             appState.postToast(
                 .error,
                 "Impossible d'enregistrer. Ce compte est peut-être déjà lié à un autre élément Patrimoine."

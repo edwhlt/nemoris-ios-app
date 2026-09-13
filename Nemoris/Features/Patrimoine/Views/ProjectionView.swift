@@ -3,18 +3,18 @@ import Charts
 
 // MARK: - ProjectionView
 //
-// Sheet plein écran qui montre la courbe de projection du patrimoine net sur 5 ans
-// selon 3 scenarios. Accessible depuis le hero Patrimoine via un bouton "Projeter".
+// A full-screen sheet showing net worth's 5-year projection curve
+// across 3 scenarios. Reached from the Patrimoine hero via a "Project" button.
 //
-// **Lecture de la courbe** :
-//   - Ligne verte : net worth projeté (assets − dettes)
-//   - Aire en dessous : matérialise visuellement la croissance
-//   - 3 scenarios pickables en haut → ligne se met à jour avec animation
+// **Reading the curve**:
+//   - The green line: the projected net worth (assets − debts)
+//   - The area below: visually conveys the growth
+//   - 3 pickable scenarios at the top → the line updates with an animation
 //
-// **KPIs en bas** :
-//   - Patrimoine net dans 5 ans
-//   - Gain absolu vs aujourd'hui
-//   - Date estimée où le patrimoine net dépasse un palier (100k, 250k, 500k…)
+// **KPIs at the bottom**:
+//   - Net worth in 5 years
+//   - The absolute gain vs. today
+//   - The estimated date net worth crosses a threshold (100k, 250k, 500k…)
 
 struct ProjectionView: View {
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
@@ -62,7 +62,7 @@ struct ProjectionView: View {
                         .padding(.horizontal, AppTheme.Spacing.lg)
                         .padding(.top, AppTheme.Spacing.md)
 
-                    // KPI hero — patrimoine net projeté dans 5 ans
+                    // The hero KPI — the projected net worth in 5 years
                     kpiHero
                         .padding(.horizontal, AppTheme.Spacing.lg)
 
@@ -74,7 +74,7 @@ struct ProjectionView: View {
                     scenarioDetails
                         .padding(.horizontal, AppTheme.Spacing.lg)
 
-                    // Caveat + alerte contextuelle cashFlow négatif
+                    // A caveat + a contextual alert for negative cash flow
                     caveatSection
                         .padding(.horizontal, AppTheme.Spacing.lg)
                         .padding(.bottom, AppTheme.Spacing.xxxl)
@@ -158,7 +158,7 @@ struct ProjectionView: View {
     // MARK: - Chart
 
     @ViewBuilder private var chartSection: some View {
-        // Couleur dynamique — vert si la projection est globalement haussière, terracotta sinon.
+        // A dynamic color — green if the projection is generally upward, terracotta otherwise.
         let trendColor: Color = gainAbsolute >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
             Text("ÉVOLUTION MOIS PAR MOIS")
@@ -213,18 +213,18 @@ struct ProjectionView: View {
         .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.lg))
     }
 
-    // MARK: - Caveat éditorial
+    // MARK: - Editorial caveat
 
-    /// Caveat sous le chart : explique les hypothèses du moteur ET donne un
-    /// message contextuel si le cashFlow est négatif (= mois où l'utilisateur dépense
-    /// plus qu'il ne gagne en récurrents → la projection est purement extrapolée
-    /// et ne tient pas compte de mécanismes correcteurs réels comme l'agios,
-    /// l'augmentation de salaire, etc.).
+    /// A caveat under the chart: explains the engine's assumptions AND gives a
+    /// contextual message if cash flow is negative (= months where the user spends
+    /// more than they earn from recurring items → the projection is purely extrapolated
+    /// and doesn't account for real corrective mechanisms like overdraft fees,
+    /// a salary raise, etc.).
     @ViewBuilder private var caveatSection: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             if monthlyCashFlow < 0 {
-                // Cashflow négatif → la projection part dans le rouge.
-                // On l'explique en amont pour éviter le sentiment de bug.
+                // A negative cash flow → the projection heads into the red.
+                // It's explained upfront to avoid the feeling of a bug.
                 HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 12, weight: .semibold))
@@ -247,7 +247,7 @@ struct ProjectionView: View {
         }
     }
 
-    // MARK: - Détails scenario
+    // MARK: - Scenario details
 
     @ViewBuilder private var scenarioDetails: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
@@ -265,7 +265,7 @@ struct ProjectionView: View {
 
             Divider()
 
-            // Détails inputs utilisés
+            // Details of the inputs used
             inputRow(label: "Flux net mensuel", value: monthlyCashFlow * scenario.cashFlowMultiplier, color: monthlyCashFlow >= 0 ? AppTheme.Colors.success : AppTheme.Colors.danger)
             inputRow(label: "Rendement annuel assets", value: scenario.annualGrowthRate * 100, suffix: " %", color: AppTheme.Colors.accent)
             if let last = points.last {

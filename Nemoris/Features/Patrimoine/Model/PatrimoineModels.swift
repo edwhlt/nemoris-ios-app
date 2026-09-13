@@ -1,20 +1,20 @@
 import Foundation
 
-// MARK: - Patrimoine — Modèles du module Net Worth
+// MARK: - Patrimoine — Net Worth module models
 //
-// 3 entités métier indépendantes (real estate, loans, assets) + leurs enums
-// associés. Persistées via la migration v37 (cf. DatabaseManager).
+// 3 independent business entities (real estate, loans, assets) + their
+// associated enums. Persisted via migration v37 (see DatabaseManager).
 //
-// Convention : tous les `id` sont des Int (SQLite AUTOINCREMENT). Toutes les
-// dates en SQL stockées au format yyyy-MM-dd.
+// Convention: every `id` is an Int (SQLite AUTOINCREMENT). Every
+// date is stored in SQL as yyyy-MM-dd.
 
-// MARK: - Kinds (énumérations associées)
+// MARK: - Kinds (associated enums)
 
-/// Famille fonctionnelle d'un asset "Mobilier & Liquidités". Pas une contrainte
-/// stricte côté SQL — un asset CASH avec un compte courant lié reste valide.
-/// Sert surtout au tri et à l'icône par défaut dans l'UI.
+/// A "Movable Assets & Cash" asset's functional family. Not a strict
+/// constraint on the SQL side — a CASH asset linked to a checking account remains
+/// valid. Mainly used for sorting and the default icon in the UI.
 enum AssetKind: String, CaseIterable {
-    case cash       = "CASH"       // Espèces, trésorerie courante
+    case cash       = "CASH"       // Cash, current treasury
     case savings    = "SAVINGS"    // Livret A, LDDS, LEP, PEL, CEL…
     case investment = "INVESTMENT" // PEA, CTO, Assurance Vie, crypto
     case other      = "OTHER"
@@ -38,14 +38,14 @@ enum AssetKind: String, CaseIterable {
     }
 }
 
-/// Type de prêt — discrimine la formule de calcul du capital restant dû.
-/// La logique vit dans `LoanCalculator` (étape 4 de l'implémentation).
+/// A loan's type — determines the formula used to compute the remaining principal.
+/// The logic lives in `LoanCalculator`.
 enum LoanType: String, CaseIterable {
-    case amortizing      = "AMORT"             // Mensualité fixe, amortissement progressif
-    case inFine          = "IN_FINE"           // Capital remboursé en bloc à l'échéance
-    case deferredTotal   = "DEFERRED_TOTAL"    // Différé total puis amortissement
-    case deferredPartial = "DEFERRED_PARTIAL"  // Différé partiel (intérêts seuls) puis amortissement
-    case revolving       = "REVOLVING"         // Crédit renouvelable, capital restant saisi manuellement
+    case amortizing      = "AMORT"             // A fixed monthly payment, progressive amortization
+    case inFine          = "IN_FINE"           // The principal repaid in one block at maturity
+    case deferredTotal   = "DEFERRED_TOTAL"    // A total deferral then amortization
+    case deferredPartial = "DEFERRED_PARTIAL"  // A partial deferral (interest only) then amortization
+    case revolving       = "REVOLVING"         // Revolving credit, the remaining principal entered manually
 
     var label: String {
         switch self {
@@ -57,7 +57,7 @@ enum LoanType: String, CaseIterable {
         }
     }
 
-    /// Affiché en aide à la création — explique en 1 phrase ce que ce type implique.
+    /// Shown as creation help — explains in 1 sentence what this type implies.
     var explanation: String {
         switch self {
         case .amortizing:
@@ -82,14 +82,14 @@ struct PatrimoineRealEstate: Identifiable, Hashable {
     var purchasePrice: Double
     var purchaseDate: Date
     var currentValue: Double
-    /// Date de la dernière estimation manuelle. Nil = jamais réestimé depuis l'achat.
+    /// The date of the last manual estimate. Nil = never re-estimated since the purchase.
     var estimatedAt: Date?
     var address: String?
     var notes: String?
     let createdAt: Date
 
-    /// Plus-value brute estimée (sans frais notaire ni rénovation). C'est une
-    /// estimation user, pas un calcul fiscal.
+    /// An estimated gross gain (excluding notary fees or renovation). This is a
+    /// user estimate, not a tax calculation.
     var capitalGain: Double { currentValue - purchasePrice }
 
     var capitalGainPercent: Double {
@@ -98,83 +98,83 @@ struct PatrimoineRealEstate: Identifiable, Hashable {
     }
 }
 
-// MARK: - Loan (prêt / dette)
+// MARK: - Loan
 
 struct PatrimoineLoan: Identifiable, Hashable {
     let id: Int
     var name: String
     var loanType: LoanType
-    var principal: Double        // Capital emprunté initial
+    var principal: Double        // The initial borrowed principal
     var annualRate: Double       // Taux annuel nominal (ex 0.034 = 3.4%)
-    var durationMonths: Int      // Durée totale en mois
-    var deferralMonths: Int      // Mois de différé (0 si type ≠ DEFERRED_*)
+    var durationMonths: Int      // The total duration in months
+    var deferralMonths: Int      // Deferral months (0 if type ≠ DEFERRED_*)
     var startDate: Date
-    /// Assurance emprunteur mensuelle (en EUR). Charge séparée de la mensualité
-    /// d'amortissement — n'affecte PAS le capital restant dû ni le calcul des
-    /// intérêts. Affichée dans le form + sommée dans le coût mensuel total.
-    /// 0 si pas d'assurance ou si l'utilisateur ne la suit pas séparément.
+    /// Monthly borrower's insurance (in EUR). A cost separate from the
+    /// amortization payment — does NOT affect the remaining principal or the
+    /// interest calculation. Shown in the form + summed into the total monthly cost.
+    /// 0 if there's no insurance or the user doesn't track it separately.
     var insuranceMonthly: Double
-    /// Lien optionnel vers un bien immobilier (typiquement le prêt finance ce bien).
-    /// ON DELETE SET NULL côté SQL — la suppression du bien ne supprime pas le prêt.
+    /// An optional link to a real-estate property (typically the loan funds this property).
+    /// ON DELETE SET NULL on the SQL side — deleting the property doesn't delete the loan.
     var linkedRealEstateId: Int?
     var notes: String?
     let createdAt: Date
 
-    /// Coût d'assurance cumulé sur toute la durée du prêt (charges totales).
-    /// Indicatif pour le form — visualise combien l'assurance "coûtera" au total.
+    /// The cumulative insurance cost over the loan's whole duration (the total cost).
+    /// Indicative for the form — shows how much the insurance will "cost" in total.
     var totalInsuranceCost: Double { insuranceMonthly * Double(durationMonths) }
 }
 
-// MARK: - Asset (élément "Mobilier & Liquidités")
+// MARK: - Asset (a "Movable Assets & Cash" item)
 
 struct PatrimoineAsset: Identifiable, Hashable {
     let id: Int
     var name: String
     var assetKind: AssetKind
 
-    // Linking soft — au plus 1 des 2 colonnes est non-nil (garanti par UNIQUE INDEX
-    // partiels côté SQL : un compte ne peut être lié qu'à 1 asset Patrimoine).
-    var linkedAccountId: Int?            // Lien vers accounts.id (livret, courant, épargne)
+    // A soft link — at most 1 of the 2 columns is non-nil (guaranteed by partial
+    // SQL UNIQUE INDEXes: an account can only be linked to 1 Patrimoine asset).
+    var linkedAccountId: Int?            // A link to accounts.id (a savings account, checking, savings)
     var linkedInvestmentAccountId: Int?  // Lien vers investment_accounts.id (PEA, CTO, etc.)
 
-    /// Valeur saisie manuellement par l'utilisateur. Utilisée UNIQUEMENT si aucun link n'est défini.
+    /// A value entered manually by the user. Used ONLY if no link is set.
     var manualValue: Double
 
-    /// Dernier snapshot de la valeur résolue (lu depuis le compte lié ou copié de
-    /// manualValue). Conservé même si le lien est rompu — sert de fallback offline
-    /// et de mémoire si l'utilisateur supprime son compte source.
+    /// The last snapshot of the resolved value (read from the linked account or
+    /// copied from manualValue). Kept even if the link is broken — serves as an
+    /// offline fallback and a memory if the user deletes their source account.
     var lastKnownValue: Double
 
     var notes: String?
     let createdAt: Date
 
-    /// Vrai si l'asset est rattaché à un compte source (Account ou InvestmentAccount).
-    /// Quand `true` la valeur affichée est résolue dynamiquement ; l'édition manuelle
-    /// du champ valeur est désactivée côté UI.
+    /// True if the asset is attached to a source account (Account or InvestmentAccount).
+    /// When `true` the displayed value is resolved dynamically; manual editing
+    /// of the value field is disabled in the UI.
     var isLinked: Bool {
         linkedAccountId != nil || linkedInvestmentAccountId != nil
     }
 }
 
-// MARK: - Snapshot agrégé (utilisé par le hero patrimoine global)
+// MARK: - Aggregated snapshot (used by the global net-worth hero)
 
-/// Vue d'ensemble du patrimoine total à un instant T. Calculé en mémoire par le
-/// ViewModel à partir des 3 collections (assets résolus + immo + prêts).
-/// Pas persisté (pour l'instant — les snapshots historiques sont hors scope MVP).
+/// An overview of total net worth at a point in time. Computed in memory by the
+/// ViewModel from the 3 collections (resolved assets + real estate + loans).
+/// Not persisted (for now — historical snapshots are out of MVP scope).
 struct PatrimoineSnapshot {
-    let totalAssets: Double        // Σ assets résolus + Σ real estate currentValue
-    let totalLiabilities: Double   // Σ loans capital restant dû
+    let totalAssets: Double        // Σ resolved assets + Σ real estate currentValue
+    let totalLiabilities: Double   // Σ loans' remaining principal
     let assetsCount: Int
     let realEstateCount: Int
     let loansCount: Int
 
     var netWorth: Double { totalAssets - totalLiabilities }
 
-    /// Nombre total d'éléments suivis, toutes catégories confondues.
+    /// The total number of tracked items, across every category.
     var itemsCount: Int { assetsCount + realEstateCount + loansCount }
 
-    /// Faux quand l'utilisateur n'a rien saisi dans le module — le Dashboard masque
-    /// alors son bloc Patrimoine plutôt que d'afficher un net worth à 0 €.
+    /// False when the user hasn't entered anything in the module — the Dashboard
+    /// then hides its Patrimoine block rather than showing a €0 net worth.
     var hasData: Bool { itemsCount > 0 }
 
     static let empty = PatrimoineSnapshot(

@@ -2,15 +2,15 @@ import SwiftUI
 
 // MARK: - RealEstateFormView
 //
-// Sheet de création/édition d'un bien immobilier. Saisie 100% manuelle (pas de
-// linking — l'immobilier n'a pas de "compte source" qui bouge tout seul).
+// A sheet for creating/editing a real-estate property. 100% manual entry (no
+// linking — real estate has no "source account" that moves on its own).
 //
-// La preview live de la plus-value (chip vert/rouge en bas de section Achat) sert
-// de feedback pédagogique pendant la saisie : tu vois immédiatement si ton bien
-// a pris ou perdu de la valeur depuis l'achat.
+// The live gain preview (a green/red chip at the bottom of the Purchase section) serves
+// as educational feedback while typing: the user immediately sees whether their property
+// has gained or lost value since the purchase.
 //
-// Validation : nom non vide. Le prix d'achat et la valeur actuelle peuvent être 0
-// (utile pour un bien en construction ou en sinistre avant indemnisation).
+// Validation: a non-empty name. The purchase price and current value can be 0
+// (useful for a property under construction or damaged before compensation).
 
 struct RealEstateFormView: View {
     @Environment(\.paneDismiss) private var dismiss
@@ -18,7 +18,7 @@ struct RealEstateFormView: View {
     let viewModel: PatrimoineViewModel
     let existingItem: PatrimoineRealEstate?
 
-    // ── Champs du draft ───────────────────────────────────────────
+    // ── Draft fields ───────────────────────────────────────────
     @State private var name: String
     @State private var purchasePriceText: String
     @State private var purchaseDate: Date
@@ -93,8 +93,8 @@ struct RealEstateFormView: View {
                         Text("Prix d'achat")
                             .font(AppTheme.Typography.bodyMedium)
                         Spacer()
-                        // Titre vide : la row a déjà son label — cf.
-                        // TransactionEditSheet pour la raison macOS.
+                        // An empty title: the row already has its label — see
+                        // TransactionEditSheet for the macOS reason.
                         TextField("", text: $purchasePriceText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
@@ -116,9 +116,9 @@ struct RealEstateFormView: View {
                             .frame(maxWidth: 160)
                     }
 
-                    // Toggle "Date d'estimation" : l'utilisateur peut choisir de la marquer
-                    // (utile pour se rappeler quand il a fait la dernière revalo) ou
-                    // de la laisser nulle (estimation au doigt mouillé permanente).
+                    // The "Estimate date" toggle: the user can choose to set it
+                    // (useful to remember when the last re-valuation was done) or
+                    // leave it nil (a permanent rough estimate).
                     Toggle("Marquer la date d'estimation", isOn: Binding(
                         get: { estimatedAt != nil },
                         set: { isOn in
@@ -132,8 +132,8 @@ struct RealEstateFormView: View {
                         ), displayedComponents: .date)
                     }
 
-                    // Preview live de la plus-value. Donne un feedback éditorial
-                    // immédiat à l'utilisateur pendant la saisie.
+                    // A live preview of the gain. Gives immediate editorial
+                    // feedback to the user while typing.
                     if purchasePrice > 0 && currentValue > 0 {
                         HStack(spacing: AppTheme.Spacing.xs) {
                             Image(systemName: capitalGain >= 0 ? "arrow.up.right" : "arrow.down.right")

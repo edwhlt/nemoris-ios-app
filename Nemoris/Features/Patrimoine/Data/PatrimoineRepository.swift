@@ -3,16 +3,16 @@ import SQLite3
 
 // MARK: - PatrimoineRepository
 //
-// CRUD pour les 3 tables du module Patrimoine (cf. migration v37) :
+// CRUD for the Patrimoine module's 3 tables (see migration v37):
 //   • patrimoine_real_estate
 //   • patrimoine_loans
 //   • patrimoine_assets
 //
-// **Étape 1 — CRUD nu**. Pas de résolution de linking ici : `resolveValue(for:)`
-// arrive à l'étape 2 (Mobilier & Liquidités) où on en aura besoin pour le picker.
-// Pareil pour `LoanCalculator` : structure Swift pure ajoutée à l'étape 4.
+// **Plain CRUD**. No linking resolution here: `resolveValue(for:)`
+// lives elsewhere (Movable Assets & Cash), where it's needed for the picker.
+// Same for `LoanCalculator`: a pure Swift structure added separately.
 //
-// Pattern aligné sur InvestmentRepository (struct + `query` read-only + `writeSingle`).
+// A pattern aligned with InvestmentRepository (a struct + a read-only `query` + `writeSingle`).
 
 private let SQLITE_TRANSIENT_PATRIMOINE = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -20,8 +20,8 @@ struct PatrimoineRepository {
 
     private let store: SQLiteStore
 
-    /// La valeur par défaut vise la base de l'application : les sites d'appel
-    /// existants n'ont pas à changer.
+    /// The default value targets the app's database: existing call sites
+    /// don't have to change.
     init(store: SQLiteStore = SQLiteStore()) {
         self.store = store
     }
@@ -128,8 +128,8 @@ struct PatrimoineRepository {
 
     func fetchLoans() -> [PatrimoineLoan] {
         query { db in
-            // insurance_monthly ajouté en v38 — pas de COALESCE car NOT NULL DEFAULT 0
-            // côté SQL (existant sur les bases pré-v38 → 0 par défaut après ALTER).
+            // insurance_monthly added in v38 — no COALESCE since it's NOT NULL DEFAULT 0
+            // on the SQL side (existing pre-v38 databases → 0 by default after the ALTER).
             let sql = """
             SELECT id, name, loan_type, principal, annual_rate,
                    duration_months, deferral_months, start_date,
@@ -335,8 +335,8 @@ struct PatrimoineRepository {
         }
     }
 
-    /// Met à jour uniquement `last_known_value` — utilisé après chaque résolution
-    /// dynamique de la valeur d'un asset lié. Évite de toucher aux autres champs.
+    /// Updates only `last_known_value` — used after every dynamic resolution
+    /// of a linked asset's value. Avoids touching the other fields.
     @discardableResult
     func updateLastKnownValue(assetId: Int, value: Double) -> Bool {
         writeSingle(sql: "UPDATE patrimoine_assets SET last_known_value = ? WHERE id = ?;") { stmt in
@@ -347,10 +347,10 @@ struct PatrimoineRepository {
 
     // MARK: - Linking conflict detection
 
-    /// Retourne le `PatrimoineAsset.id` qui occupe déjà ce lien, s'il existe.
-    /// Utilisé par les forms pour empêcher la double-comptabilisation avant l'INSERT,
-    /// avec un message d'erreur explicite (l'UNIQUE INDEX SQL est la deuxième ligne
-    /// de défense — il déclenche un échec sqlite3_step, mais sans context user-friendly).
+    /// Returns the `PatrimoineAsset.id` that already occupies this link, if there is one.
+    /// Used by the forms to prevent double-counting before the INSERT,
+    /// with an explicit error message (the SQL UNIQUE INDEX is the second line
+    /// of defense — it triggers an sqlite3_step failure, but with no user-friendly context).
     func assetIdLinkedTo(accountId: Int?, investmentAccountId: Int?, excludingAssetId: Int?) -> Int? {
         guard accountId != nil || investmentAccountId != nil else { return nil }
         return query { db in

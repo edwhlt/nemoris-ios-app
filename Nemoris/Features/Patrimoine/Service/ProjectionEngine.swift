@@ -2,32 +2,32 @@ import Foundation
 
 // MARK: - ProjectionEngine
 //
-// Moteur pur (sans état) qui projette le patrimoine net mois par mois sur N mois
-// (60 par défaut = 5 ans). Réutilise `LoanCalculator` pour l'amortissement et
-// `PatrimoineSnapshot` comme point de départ.
+// A pure (stateless) engine that projects net worth month by month over N months
+// (60 by default = 5 years). Reuses `LoanCalculator` for amortization and
+// `PatrimoineSnapshot` as the starting point.
 //
-// **Inputs** :
-//   - `snapshot` : situation patrimoine actuelle (totalAssets, totalLiabilities)
-//   - `totalAssetsLiquid` : valeur courante des assets liquides (mobilier &
-//     liquidités) — c'est CE qui croît avec le cash flow et le rendement
-//   - `realEstateValue` : valeur courante de l'immobilier (gardée constante en
-//     MVP, on n'extrapole pas la plus-value immobilière)
-//   - `loans` : liste des prêts à projeter (chaque mois on appelle LoanCalculator
-//     à la date projetée pour avoir le capital restant exact)
-//   - `netMonthlyCashFlow` : Σ revenus récurrents − Σ dépenses récurrentes ramené
-//     à un montant mensuel (cf. ProjectionInputs.cashFlowFromBudget)
-//   - `scenario` : ajuste cashFlow, growth, et accélération de remboursement
+// **Inputs**:
+//   - `snapshot`: the current net-worth situation (totalAssets, totalLiabilities)
+//   - `totalAssetsLiquid`: the current value of liquid assets (movable assets &
+//     cash) — this is WHAT grows with cash flow and returns
+//   - `realEstateValue`: the current value of real estate (kept constant in
+//     the MVP, real-estate appreciation isn't extrapolated)
+//   - `loans`: the list of loans to project (each month LoanCalculator is
+//     called at the projected date to get the exact remaining principal)
+//   - `netMonthlyCashFlow`: Σ recurring income − Σ recurring expenses, reduced
+//     to a monthly amount (see ProjectionInputs.cashFlowFromBudget)
+//   - `scenario`: adjusts cashFlow, growth, and repayment acceleration
 //
-// **Hypothèses MVP assumées** :
-//   - L'immobilier ne bouge pas (pas de plus-value extrapolée — trop incertain)
-//   - Les assets liquides croissent uniformément au taux du scenario (2-5%/an)
-//   - L'accélération du remboursement (scenario `accelerated`) est modélisée
-//     comme un % de réduction supplémentaire du capital restant chaque mois
-//     (approximation — pas de simulation d'amortissement avec VR exact)
-//   - Pas de nouveaux prêts/assets créés en cours de route
-//   - Pas d'inflation (le netWorth projeté est en € constants)
+// **Assumed MVP hypotheses**:
+//   - Real estate doesn't move (no extrapolated appreciation — too uncertain)
+//   - Liquid assets grow uniformly at the scenario's rate (2-5%/year)
+//   - Repayment acceleration (the `accelerated` scenario) is modeled
+//     as an extra % reduction of the remaining principal each month
+//     (an approximation — no amortization simulation with exact present value)
+//   - No new loans/assets created along the way
+//   - No inflation (the projected netWorth is in constant euros)
 
-/// Point d'évolution du patrimoine net à une date donnée.
+/// A net-worth point at a given date.
 struct ProjectionPoint: Identifiable, Hashable {
     var id: Date { date }
     let date: Date
@@ -36,12 +36,12 @@ struct ProjectionPoint: Identifiable, Hashable {
     let totalLiabilities: Double  // Σ capitaux restants
 }
 
-/// Scenario de projection — ajuste 3 leviers : cashFlowMultiplier, annualGrowthRate,
-/// et debtAcceleration (réduction additionnelle du capital restant des prêts).
+/// A projection scenario — adjusts 3 levers: cashFlowMultiplier, annualGrowthRate,
+/// and debtAcceleration (an additional reduction of loans' remaining principal).
 enum ProjectionScenario: String, CaseIterable, Identifiable {
-    case conservative   // Statu quo. Flux courant, rendement prudent, pas d'accélération.
-    case optimistic     // +20 % d'épargne, rendement plus ambitieux.
-    case accelerated    // Flux courant + remboursement accéléré des prêts (~30 %).
+    case conservative   // Status quo. The current flow, a cautious return, no acceleration.
+    case optimistic     // +20% savings, a more ambitious return.
+    case accelerated    // The current flow + accelerated loan repayment (~30%).
 
     var id: String { rawValue }
 
@@ -72,7 +72,7 @@ enum ProjectionScenario: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Coefficient appliqué au `netMonthlyCashFlow`. >1 augmente l'épargne.
+    /// A coefficient applied to `netMonthlyCashFlow`. >1 increases savings.
     var cashFlowMultiplier: Double {
         switch self {
         case .conservative: return 1.0
@@ -81,7 +81,7 @@ enum ProjectionScenario: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Rendement annuel des assets liquides (en décimal). 0.02 = 2 %/an.
+    /// The liquid assets' annual return (as a decimal). 0.02 = 2%/year.
     var annualGrowthRate: Double {
         switch self {
         case .conservative: return 0.02
@@ -90,9 +90,9 @@ enum ProjectionScenario: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Coefficient appliqué au capital restant des prêts CHAQUE MOIS pour modéliser
-    /// un remboursement anticipé. 0.0 = aucun. 0.003 ≈ -30 % d'horizon de prêt
-    /// (ordre de grandeur, approximation).
+    /// A coefficient applied to loans' remaining principal EVERY MONTH to model
+    /// an early repayment. 0.0 = none. 0.003 ≈ -30% of the loan's horizon
+    /// (an order of magnitude, an approximation).
     var debtAccelerationPerMonth: Double {
         switch self {
         case .accelerated: return 0.003
@@ -103,8 +103,8 @@ enum ProjectionScenario: String, CaseIterable, Identifiable {
 
 enum ProjectionEngine {
 
-    /// Projette le patrimoine net mois par mois pendant `months` mois.
-    /// Le premier point (index 0) correspond à **aujourd'hui** (snapshot tel quel).
+    /// Projects net worth month by month over `months` months.
+    /// The first point (index 0) corresponds to **today** (the snapshot as-is).
     static func project(
         snapshot: PatrimoineSnapshot,
         totalAssetsLiquid: Double,
@@ -123,23 +123,23 @@ enum ProjectionEngine {
         var points: [ProjectionPoint] = []
         let cal = Calendar(identifier: .gregorian)
 
-        // Capital liquide qui évolue mois par mois.
+        // Liquid capital, which evolves month by month.
         var currentLiquid = totalAssetsLiquid
-        // Capital "supplémentaire" remboursé via l'accélération (cumulé). On le
-        // soustrait du capital restant via le LoanCalculator pour avoir un effet
-        // visible sur la courbe de dette.
+        // "Extra" capital repaid via the acceleration (cumulative). It's
+        // subtracted from the remaining principal via LoanCalculator to have a
+        // visible effect on the debt curve.
         var cumulativeExtraDebtPaid: Double = 0
 
         for monthOffset in 0...months {
             let date = cal.date(byAdding: .month, value: monthOffset, to: startDate) ?? startDate
 
-            // 1) Cash flow + croissance des assets liquides.
-            // PAS de bornage à 0 : on laisse `currentLiquid` aller en territoire
-            // négatif si le cashFlow l'exige. C'est plus honnête — ça matérialise
-            // le découvert continu que l'utilisateur aurait si rien ne change. Pour la
-            // croissance, on n'applique pas le facteur quand on est négatif
-            // (un découvert ne "rend" pas — au contraire les agios coûtent, mais
-            // on n'a pas la modélisation pour ça en MVP, on reste neutre).
+            // 1) Cash flow + liquid assets' growth.
+            // NO clamping to 0: `currentLiquid` is let go into
+            // negative territory if the cashFlow requires it. That's more honest — it
+            // conveys the ongoing overdraft the user would have if nothing changes. For
+            // growth, the factor isn't applied while negative
+            // (an overdraft doesn't "yield" — on the contrary, overdraft fees cost money, but
+            // that isn't modeled in the MVP, so it's kept neutral).
             if monthOffset > 0 {
                 currentLiquid += adjustedCashFlow
                 if currentLiquid > 0 {
@@ -147,27 +147,27 @@ enum ProjectionEngine {
                 }
             }
 
-            // 2) Dette projetée à cette date — somme des capitaux restants
-            //    selon LoanCalculator à `date`. On applique en plus un effet
-            //    cumulatif d'accélération sur le total.
+            // 2) Debt projected at this date — the sum of remaining principals
+            //    per LoanCalculator at `date`. An extra cumulative
+            //    acceleration effect is also applied to the total.
             let projectedLiabilitiesRaw = loans.reduce(0.0) { acc, loan in
                 let state = LoanCalculator.compute(loan: loan, asOf: date)
                 return acc + state.remainingCapital
             }
-            // Accélération : on retire la part déjà "remboursée en plus" cumulée.
-            // Compose multiplicativement chaque mois via debtAccelFactor.
+            // Acceleration: the already-cumulated "extra repaid" share is removed.
+            // Composes multiplicatively each month via debtAccelFactor.
             if monthOffset > 0 {
-                // À chaque mois, on ajoute une "tranche supp" proportionnelle au
-                // capital restant courant. Donc cumulativeExtraDebtPaid croît
-                // mais est borné par la dette restante.
+                // Each month, an "extra installment" proportional to the
+                // current remaining principal is added. So cumulativeExtraDebtPaid grows
+                // but is bounded by the remaining debt.
                 let extraThisMonth = max(0, projectedLiabilitiesRaw - cumulativeExtraDebtPaid)
                                      * scenario.debtAccelerationPerMonth
                 cumulativeExtraDebtPaid += extraThisMonth
             }
             let projectedLiabilities = max(0, projectedLiabilitiesRaw - cumulativeExtraDebtPaid)
-            _ = debtAccelFactor  // gardé pour la lisibilité du raisonnement
+            _ = debtAccelFactor  // kept for the reasoning's readability
 
-            // 3) Compose le snapshot
+            // 3) Compose the snapshot
             let totalAssets = currentLiquid + realEstateValue
             let netWorth = totalAssets - projectedLiabilities
 
@@ -183,31 +183,31 @@ enum ProjectionEngine {
     }
 }
 
-// MARK: - ProjectionInputs helper (récupération du cash flow depuis Budget)
+// MARK: - ProjectionInputs helper (fetching cash flow from Budget)
 
 enum ProjectionInputs {
 
-    /// Calcule le cash flow mensuel net (Σ revenus − Σ dépenses) à partir des
-    /// récurrents Budget actifs. Convertit chaque pattern en équivalent mensuel
-    /// selon sa fréquence (weekly ×4.33, monthly ×1, quarterly ÷3, yearly ÷12).
+    /// Computes the net monthly cash flow (Σ income − Σ expenses) from
+    /// active Budget recurring items. Converts each pattern to a monthly equivalent
+    /// based on its frequency (weekly ×4.33, monthly ×1, quarterly ÷3, yearly ÷12).
     ///
-    /// Renvoie 0 si Budget pas activé / pas de récurrents — la projection sera
-    /// alors une simple courbe de la dette sans croissance des assets.
+    /// Returns 0 if Budget isn't enabled / there are no recurring items — the projection
+    /// then becomes a plain debt curve with no asset growth.
     static func netMonthlyCashFlowFromBudget() -> Double {
-        // 1. Récurrents (loyer, salaire, abonnements) — déjà signés.
+        // 1. Recurring items (rent, salary, subscriptions) — already signed.
         let patterns = BudgetRepository.shared.fetchActivePatterns()
         let recurringNet = patterns.reduce(0.0) { acc, p in
             acc + monthlyEquivalent(amount: p.amountAvg, frequency: p.frequency)
         }
-        // 2. Enveloppes — comptent comme des dépenses prévues. On les
-        //    additionne EN NÉGATIF au cashFlow. Si une catégorie est
-        //    couverte à la fois par un récurrent (montant fixe) ET une
-        //    enveloppe (budget variable), on évite le double comptage en
-        //    soustrayant uniquement le delta : env.amount - récurrent_de_cette_cat.
+        // 2. Envelopes — count as planned expenses. They're
+        //    added to cashFlow AS A NEGATIVE. If a category is
+        //    covered both by a recurring item (a fixed amount) AND an
+        //    envelope (a variable budget), double counting is avoided by
+        //    subtracting only the delta: env.amount - the recurring item for that category.
         //
-        //    Stratégie pragmatique MVP : on ne soustrait que les enveloppes
-        //    dont la catégorie n'a PAS de récurrent — les autres sont déjà
-        //    couvertes par recurringNet. Précision suffisante pour la projection.
+        //    A pragmatic MVP strategy: only envelopes whose category
+        //    has NO recurring item are subtracted — the others are already
+        //    covered by recurringNet. Precision is good enough for the projection.
         let envelopes = BudgetRepository.shared.fetchEnvelopes().filter { $0.isActive }
         let recurringCategoryIds = Set(patterns.compactMap { $0.categoryId })
         let envelopesNet = envelopes
@@ -216,8 +216,8 @@ enum ProjectionInputs {
                 return !recurringCategoryIds.contains(cid)
             }
             .reduce(0.0) { acc, env in
-                // env.amount toujours positif (= budget alloué). On soustrait
-                // pour compter comme une dépense mensuelle estimée.
+                // env.amount is always positive (= the allocated budget). It's subtracted
+                // to count as an estimated monthly expense.
                 acc - envelopeMonthlyEquivalent(amount: env.amount, period: env.period)
             }
         return recurringNet + envelopesNet

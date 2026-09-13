@@ -2,65 +2,65 @@ import Foundation
 
 // MARK: - LoanCalculator
 //
-// Logique pure et sans état pour calculer le capital restant dû d'un prêt à une
-// date donnée, selon son type. Aucune dépendance SQLite — input = `PatrimoineLoan`
-// + date d'évaluation, output = `LoanState`. Testable unitairement.
+// Pure, stateless logic to compute a loan's remaining principal at a
+// given date, depending on its type. No SQLite dependency — input = `PatrimoineLoan`
+// + an evaluation date, output = `LoanState`. Unit-testable.
 //
-// **Formules** (taux mensuel i = annualRate / 12, P = principal, n = durationMonths)
+// **Formulas** (monthly rate i = annualRate / 12, P = principal, n = durationMonths)
 //
-//   • AMORT (amortissable à mensualité fixe)
+//   • AMORT (amortizing at a fixed monthly payment)
 //     M = P · i / (1 − (1+i)^(−n))
-//     Capital restant après k mois :
+//     Remaining principal after k months:
 //         CR(k) = P · (1+i)^k − M · ((1+i)^k − 1) / i   (i ≠ 0)
-//         CR(k) = P · (1 − k/n)                          (i = 0, prêt 0%)
+//         CR(k) = P · (1 − k/n)                          (i = 0, a 0% loan)
 //
-//   • IN_FINE (intérêts seuls jusqu'à l'échéance)
+//   • IN_FINE (interest only until maturity)
 //     M = P · i
-//     CR(k) = P si k < n, sinon 0
+//     CR(k) = P if k < n, otherwise 0
 //
-//   • DEFERRED_TOTAL (différé total puis amortissement)
-//     Pendant le différé (k < d) : capital capitalisé, pas de paiement
+//   • DEFERRED_TOTAL (full deferral then amortization)
+//     During the deferral (k < d): the principal is capitalized, no payment
 //         CR(k) = P · (1+i)^k
 //         M_diff = 0
-//     Après le différé (k ≥ d) : amortissement classique sur (n − d) mois
+//     After the deferral (k ≥ d): classic amortization over (n − d) months
 //         P' = P · (1+i)^d
 //         M  = P' · i / (1 − (1+i)^(−(n−d)))
 //         CR(k) = P' · (1+i)^(k−d) − M · ((1+i)^(k−d) − 1) / i
 //
-//   • DEFERRED_PARTIAL (intérêts seuls pendant le différé puis amortissement)
-//     Pendant le différé (k < d) : seuls les intérêts sont payés
+//   • DEFERRED_PARTIAL (interest only during the deferral, then amortization)
+//     During the deferral (k < d): only interest is paid
 //         CR(k) = P
 //         M_diff = P · i
-//     Après le différé (k ≥ d) : amortissement classique sur (n − d) mois avec P
+//     After the deferral (k ≥ d): classic amortization over (n − d) months with P
 //         M  = P · i / (1 − (1+i)^(−(n−d)))
 //         CR(k) = P · (1+i)^(k−d) − M · ((1+i)^(k−d) − 1) / i
 //
-//   • REVOLVING (crédit renouvelable, capital saisi manuellement)
-//     CR = principal (l'utilisateur met à jour le champ Capital quand il rembourse)
-//     M = 0 (pas de mensualité fixe — varie selon utilisation)
+//   • REVOLVING (revolving credit, principal entered manually)
+//     CR = principal (the user updates the Principal field when they repay)
+//     M = 0 (no fixed payment — varies with usage)
 
-/// État calculé d'un prêt à une date donnée. Tous les montants en EUR (cohérent
-/// avec le reste de l'app — pas de multidevise en MVP).
+/// A loan's computed state at a given date. Every amount in EUR (consistent
+/// with the rest of the app — no multi-currency in the MVP).
 struct LoanState: Equatable {
-    /// Capital restant dû à la date d'évaluation. Borné à `[0, principal]`.
+    /// The remaining principal at the evaluation date. Clamped to `[0, principal]`.
     let remainingCapital: Double
-    /// Mensualité courante (intérêts seuls pendant un différé partiel, mensualité
-    /// d'amortissement après, 0 pour un différé total ou un revolving).
+    /// The current monthly payment (interest only during a partial deferral, an
+    /// amortization payment afterward, 0 for a total deferral or a revolving loan).
     let monthlyPayment: Double
-    /// Montant total des intérêts payés depuis le début. Indicatif (peut être 0 si
-    /// REVOLVING ou si on est encore dans un différé total).
+    /// The total amount of interest paid since the start. Indicative (can be 0 if
+    /// REVOLVING or still within a total deferral).
     let interestsPaid: Double
-    /// Montant total du capital remboursé depuis le début (= principal − remainingCapital
-    /// pour les types qui amortissent ; 0 pour REVOLVING/IN_FINE en cours).
+    /// The total principal repaid since the start (= principal − remainingCapital
+    /// for amortizing types; 0 for an ongoing REVOLVING/IN_FINE).
     let capitalPaid: Double
-    /// Nombre de mois écoulés depuis `startDate` (cappé à `durationMonths`).
+    /// The number of months elapsed since `startDate` (capped at `durationMonths`).
     let monthsElapsed: Int
-    /// `true` si la date d'évaluation est antérieure à `startDate` (prêt pas encore débuté).
+    /// `true` if the evaluation date is before `startDate` (the loan hasn't started yet).
     let isPending: Bool
-    /// `true` si la durée totale du prêt est dépassée (prêt remboursé en théorie).
+    /// `true` if the loan's total duration has passed (theoretically repaid).
     let isCompleted: Bool
 
-    /// Pourcentage du capital remboursé (0…1). Utilisé pour la barre de progression UI.
+    /// The percentage of principal repaid (0…1). Used for the UI's progress bar.
     var progressRatio: Double {
         guard remainingCapital + capitalPaid > 0 else { return 0 }
         return capitalPaid / (remainingCapital + capitalPaid)
@@ -69,22 +69,22 @@ struct LoanState: Equatable {
 
 enum LoanCalculator {
 
-    /// Calcule l'état du prêt `loan` à la date `asOf` (défaut : maintenant).
+    /// Computes `loan`'s state at date `asOf` (default: now).
     static func compute(loan: PatrimoineLoan, asOf reference: Date = Date()) -> LoanState {
         let calendar = Calendar(identifier: .gregorian)
-        // Mois écoulés depuis le début (entier — on ignore la fraction de mois).
+        // Months elapsed since the start (an integer — the fraction of a month is ignored).
         let comps = calendar.dateComponents([.month], from: loan.startDate, to: reference)
         let rawMonths = comps.month ?? 0
         let isPending = rawMonths < 0
         let n = loan.durationMonths
         let d = max(0, loan.deferralMonths)
         let totalDuration = (loan.loanType == .deferredTotal || loan.loanType == .deferredPartial)
-            ? n + 0  // n inclut déjà le différé dans nos conventions
+            ? n + 0  // n already includes the deferral in our conventions
             : n
         let monthsElapsed = max(0, min(rawMonths, totalDuration))
         let isCompleted = rawMonths >= totalDuration
 
-        // REVOLVING : pas de math. Capital = principal saisi (l'utilisateur le tient à jour).
+        // REVOLVING: no math. Principal = the entered value (kept up to date by the user).
         if loan.loanType == .revolving {
             return LoanState(
                 remainingCapital: loan.principal,
@@ -93,11 +93,11 @@ enum LoanCalculator {
                 capitalPaid: 0,
                 monthsElapsed: monthsElapsed,
                 isPending: isPending,
-                isCompleted: false  // un revolving n'est jamais "fini" par construction
+                isCompleted: false  // a revolving loan is never "finished" by construction
             )
         }
 
-        // Si pas encore débuté → capital plein, pas d'amortissement.
+        // If not started yet → the full principal, no amortization.
         if isPending {
             let initialMonthly = initialMonthlyPayment(loan: loan)
             return LoanState(
@@ -111,7 +111,7 @@ enum LoanCalculator {
             )
         }
 
-        // Si fini → tout remboursé (sauf IN_FINE qui rembourse en bloc à n).
+        // If finished → everything repaid (except IN_FINE, which repays in one block at n).
         if isCompleted {
             return LoanState(
                 remainingCapital: 0,
@@ -131,7 +131,7 @@ enum LoanCalculator {
         switch loan.loanType {
 
         case .revolving:
-            // Déjà traité en début de fonction, le compilateur exige la branche.
+            // Already handled at the top of the function, the compiler requires this branch.
             return LoanState(remainingCapital: P, monthlyPayment: 0, interestsPaid: 0,
                              capitalPaid: 0, monthsElapsed: 0, isPending: false, isCompleted: false)
 
@@ -139,7 +139,7 @@ enum LoanCalculator {
             return amortizingState(P: P, i: i, n: n, k: k)
 
         case .inFine:
-            // Capital constant jusqu'à l'échéance, intérêts seuls payés tous les mois.
+            // Constant principal until maturity, interest-only paid every month.
             let monthly = P * i
             let interests = monthly * Double(k)
             return LoanState(
@@ -153,14 +153,14 @@ enum LoanCalculator {
             )
 
         case .deferredTotal:
-            // Pendant le différé : capitalisation des intérêts, M = 0.
-            // Après : amortissement classique sur (n − d) mois avec un nouveau principal P'.
+            // During the deferral: interest is capitalized, M = 0.
+            // Afterward: classic amortization over (n − d) months with a new principal P'.
             if k < d {
                 let capitalized = P * pow(1 + i, Double(k))
                 return LoanState(
                     remainingCapital: capitalized,
                     monthlyPayment: 0,
-                    interestsPaid: capitalized - P,  // intérêts capitalisés mais pas payés
+                    interestsPaid: capitalized - P,  // interest capitalized but not paid
                     capitalPaid: 0,
                     monthsElapsed: k,
                     isPending: false,
@@ -172,8 +172,8 @@ enum LoanCalculator {
             return amortizingState(P: pPrime, i: i, n: nPrime, k: k - d, prePaidInterests: pPrime - P)
 
         case .deferredPartial:
-            // Pendant le différé : capital constant, mensualité = intérêts seuls.
-            // Après : amortissement classique sur (n − d) mois avec P (inchangé).
+            // During the deferral: a constant principal, the payment = interest only.
+            // Afterward: classic amortization over (n − d) months with P (unchanged).
             if k < d {
                 let monthly = P * i
                 return LoanState(
@@ -197,10 +197,10 @@ enum LoanCalculator {
         }
     }
 
-    // MARK: - Helpers privés
+    // MARK: - Private helpers
 
-    /// Calcule un état d'amortissement classique à mensualité fixe au mois k (sur n mois).
-    /// `prePaidInterests` ajoute des intérêts déjà payés ou capitalisés (différé).
+    /// Computes a classic fixed-payment amortization state at month k (over n months).
+    /// `prePaidInterests` adds interest already paid or capitalized (a deferral).
     private static func amortizingState(P: Double, i: Double, n: Int, k: Int,
                                         prePaidInterests: Double = 0) -> LoanState {
         guard P > 0, n > 0 else {
@@ -208,7 +208,7 @@ enum LoanCalculator {
                              capitalPaid: 0, monthsElapsed: k, isPending: false, isCompleted: true)
         }
 
-        // Cas spécial : taux nul → mensualité = P/n, capital décroît linéairement.
+        // Special case: a zero rate → the payment = P/n, the principal decreases linearly.
         if i == 0 {
             let monthly = P / Double(n)
             let capitalPaid = monthly * Double(k)
@@ -248,11 +248,11 @@ enum LoanCalculator {
         )
     }
 
-    /// Mensualité au démarrage du prêt (mois 1) — utile pour afficher un montant
-    /// indicatif dans le form quand on n'a pas encore d'historique.
-    /// (Le `deferralMonths` n'est lu nulle part ici : pour DEFERRED_TOTAL la
-    /// mensualité initiale est 0 par construction, et pour DEFERRED_PARTIAL on
-    /// renvoie les intérêts seuls sur P inchangé — pas besoin du nb de mois.)
+    /// The payment at the loan's start (month 1) — useful to show an
+    /// indicative amount in the form when there's no history yet.
+    /// (`deferralMonths` isn't read anywhere here: for DEFERRED_TOTAL the
+    /// initial payment is 0 by construction, and for DEFERRED_PARTIAL
+    /// interest-only on the unchanged P is returned — no need for the number of months.)
     private static func initialMonthlyPayment(loan: PatrimoineLoan) -> Double {
         let i = loan.annualRate / 12.0
         let n = loan.durationMonths
@@ -265,10 +265,10 @@ enum LoanCalculator {
         case .inFine:
             return P * i
         case .deferredTotal:
-            // Mois 1 : pas de paiement (on est dans le différé).
+            // Month 1: no payment (still within the deferral).
             return 0
         case .deferredPartial:
-            return P * i  // intérêts seuls
+            return P * i  // interest only
         }
     }
 
@@ -279,8 +279,8 @@ enum LoanCalculator {
         return P * i * factor / (factor - 1)
     }
 
-    /// Intérêts totaux payés sur toute la durée — utilisé quand le prêt est terminé
-    /// pour afficher un total cohérent au lieu de 0.
+    /// The total interest paid over the whole duration — used when the loan is
+    /// finished to show a consistent total instead of 0.
     private static func totalInterestsAtCompletion(loan: PatrimoineLoan) -> Double {
         let i = loan.annualRate / 12.0
         let n = loan.durationMonths
@@ -297,7 +297,7 @@ enum LoanCalculator {
         case .deferredTotal:
             let pPrime = P * pow(1 + i, Double(d))
             let M = classicMonthly(P: pPrime, i: i, n: n - d)
-            // Intérêts = intérêts capitalisés pendant le différé + intérêts payés ensuite
+            // Interest = interest capitalized during the deferral + interest paid afterward
             return (pPrime - P) + max(0, M * Double(n - d) - pPrime)
         case .deferredPartial:
             let M = classicMonthly(P: P, i: i, n: n - d)

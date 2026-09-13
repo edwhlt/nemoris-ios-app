@@ -3,24 +3,24 @@ import Observation
 
 // MARK: - PatrimoineViewModel
 //
-// VM principal du module Patrimoine. Orchestre :
-//   • Les 3 collections persistées (assets / real estate / loans)
-//   • La résolution dynamique des valeurs liées aux comptes existants
-//   • La persistance opportuniste de `last_known_value` pour les assets linkés
+// The main VM for the Patrimoine module. Orchestrates:
+//   • the 3 persisted collections (assets / real estate / loans)
+//   • the dynamic resolution of values linked to existing accounts
+//   • the opportunistic persistence of `last_known_value` for linked assets
 //
-// **Étape 2** : seuls les assets sont vraiment "live" (chargement + résolution).
-// Real estate et loans sont chargés mais pas encore consommés par l'UI — leurs
-// sections arriveront aux étapes 3 et 4. On charge tout dès maintenant pour éviter
-// d'éparpiller des `load()` partiels au fur et à mesure.
+// Only assets are truly "live" (loading + resolution) for now. Real estate
+// and loans are loaded but not yet consumed by the UI — their
+// sections come later. Everything is loaded right away to avoid
+// scattering partial `load()`s over time.
 
-/// Provenance de la valeur résolue d'un asset. Sert à afficher un badge contextuel
-/// dans la liste (lié, manuel, lien rompu).
+/// The provenance of an asset's resolved value. Used to show a contextual badge
+/// in the list (linked, manual, a broken link).
 enum AssetValueSource {
-    case manual              // Mode standalone, valeur saisie par l'utilisateur
-    case linkedAccount       // Lié à un compte bancaire (Account)
-    case linkedInvestment    // Lié à un compte investissement (InvestmentAccount)
-    case brokenLink          // L'ID lié existe encore en mémoire mais le compte est introuvable
-                             // (cas edge — SQL devrait avoir SET NULL côté delete cascade)
+    case manual              // A standalone mode, a value entered by the user
+    case linkedAccount       // Linked to a bank account (Account)
+    case linkedInvestment    // Linked to an investment account (InvestmentAccount)
+    case brokenLink          // The linked ID still exists in memory but the account can't be found
+                             // (an edge case — SQL should have SET NULL on the delete cascade)
 }
 
 @Observable
@@ -32,28 +32,29 @@ final class PatrimoineViewModel {
     var realEstates: [PatrimoineRealEstate] = []
     var loans: [PatrimoineLoan] = []
 
-    /// Cache des comptes "transactions" — sert au picker, au libellé "Lié à : Livret A",
-    /// et à valider rapidement qu'un lien pointe vers un compte qui existe encore.
+    /// A cache of "transactions" accounts — used by the picker, the "Linked to:
+    /// Livret A" label, and to quickly check that a link points to an account that
+    /// still exists.
     var availableBankAccounts: [Account] = []
 
-    /// Cache des comptes investissements — même usage.
+    /// A cache of investment accounts — the same use.
     var availableInvestmentAccounts: [InvestmentAccount] = []
 
-    /// Valeurs résolues : assetId → valeur courante. Recalculé à chaque `load()`.
-    /// On garde la map plutôt que de recalculer à chaque accès UI : évite de
-    /// retoucher la DB sur chaque scroll de la liste.
+    /// Resolved values: assetId → the current value. Recomputed on every `load()`.
+    /// The map is kept rather than recomputing on every UI access: this avoids
+    /// hitting the database again on every list scroll.
     var resolvedAssetValues: [Int: Double] = [:]
 
-    /// Source de la valeur résolue par asset — utile pour les badges dans l'UI.
+    /// A resolved value's source per asset — useful for badges in the UI.
     var resolvedAssetSources: [Int: AssetValueSource] = [:]
 
-    /// Set des assets dont le lien est cassé (compte source supprimé alors qu'il
-    /// existe une trace de lien). Recalculé à chaque `load()` à partir des sources
-    /// résolues. Permet à la View de cibler les rows à mettre en avant.
+    /// The set of assets whose link is broken (their source account was deleted while
+    /// a trace of the link still exists). Recomputed on every `load()` from the
+    /// resolved sources. Lets the View target rows to highlight.
     var brokenLinkAssetIds: Set<Int> = []
 
-    /// Vrai s'il existe au moins 1 asset au lien rompu — utilisé pour décider
-    /// d'afficher une banner d'alerte en tête de la List.
+    /// True if at least 1 asset has a broken link — used to decide whether
+    /// to show an alert banner at the top of the List.
     var hasBrokenLinks: Bool { !brokenLinkAssetIds.isEmpty }
 
     var isLoading = false
@@ -65,8 +66,8 @@ final class PatrimoineViewModel {
     private let investmentRepo: InvestmentRepository
     private let goalRepo: GoalRepository
 
-    /// La valeur par défaut vise la base de l'application : aucun site d'appel
-    /// ne change. Les tests injectent une base temporaire.
+    /// The default value targets the app's database: no call site
+    /// needs to change. Tests inject a temporary database.
     init(store: SQLiteStore = SQLiteStore()) {
         patrimoineRepo = PatrimoineRepository(store: store)
         transactionRepo = TransactionRepository(store: store)
@@ -74,32 +75,32 @@ final class PatrimoineViewModel {
         goalRepo = GoalRepository(store: store)
     }
 
-    // MARK: - Computed (agrégats)
+    // MARK: - Computed (aggregates)
 
-    /// Somme de tous les assets résolus (mobilier & liquidités).
+    /// The sum of every resolved asset (movable assets & cash).
     var totalAssetsValue: Double {
         PatrimoineSnapshotBuilder.totalAssetsValue(assets: assets, resolvedValues: resolvedAssetValues)
     }
 
-    /// Somme de la valeur actuelle estimée de tous les biens immobiliers.
-    /// `currentValue` est saisi manuellement par l'utilisateur — pas de résolution dynamique
-    /// nécessaire (l'immobilier ne s'apparente pas à un compte qui bouge tout seul).
+    /// The sum of the current estimated value of every real-estate property.
+    /// `currentValue` is entered manually by the user — no dynamic resolution
+    /// needed (real estate isn't like an account that moves on its own).
     var totalRealEstateValue: Double {
         realEstates.reduce(0) { $0 + $1.currentValue }
     }
 
-    /// Plus-value brute estimée agrégée (Σ currentValue − Σ purchasePrice).
-    /// Affichée dans le header de la section Immobilier.
+    /// The aggregated estimated gross gain (Σ currentValue − Σ purchasePrice).
+    /// Shown in the Real Estate section's header.
     var totalRealEstateCapitalGain: Double {
         realEstates.reduce(0) { $0 + $1.capitalGain }
     }
 
-    // MARK: - Snapshot agrégé (vue globale)
+    // MARK: - Aggregated snapshot (the global view)
 
-    /// Snapshot complet du patrimoine à un instant T — utilisé par le hero éditorial
-    /// du module et par le bandeau Dashboard. Calculé en mémoire à chaque accès
-    /// (toutes les opérations sont des sommations O(n) sur des collections en RAM,
-    /// donc négligeable même pour des centaines d'items).
+    /// A complete snapshot of net worth at a point in time — used by the module's
+    /// editorial hero and by the Dashboard banner. Computed in memory on every
+    /// access (every operation is an O(n) sum over in-RAM collections,
+    /// so negligible even for hundreds of items).
     var snapshot: PatrimoineSnapshot {
         PatrimoineSnapshotBuilder.snapshot(
             assets: assets,
@@ -110,37 +111,37 @@ final class PatrimoineViewModel {
         )
     }
 
-    /// Ratio dette/patrimoine brut (0…1+). Utilisé pour la barre dans le hero qui
-    /// matérialise le "poids" du passif. Renvoie 0 si pas de brut (évite la /0).
+    /// The debt/gross-assets ratio (0…1+). Used for the hero's bar, which
+    /// conveys the liabilities' "weight". Returns 0 if there are no gross assets (avoids a /0).
     var leverageRatio: Double {
         let assets = snapshot.totalAssets
         guard assets > 0 else { return 0 }
         return min(2.0, snapshot.totalLiabilities / assets)
     }
 
-    /// États des prêts calculés via `LoanCalculator` (cache rafraîchi à chaque load).
-    /// `loanId → LoanState` pour éviter de recalculer à chaque accès UI.
+    /// Loan states computed via `LoanCalculator` (the cache refreshed on every load).
+    /// `loanId → LoanState` to avoid recomputing on every UI access.
     var loanStates: [Int: LoanState] = [:]
 
-    /// Somme des capitaux restants dus sur tous les prêts (côté passif du patrimoine).
+    /// The sum of the remaining principal on every loan (the liabilities side of net worth).
     var totalLoansRemainingCapital: Double {
         PatrimoineSnapshotBuilder.totalLiabilities(loans: loans, loanStates: loanStates)
     }
 
     // MARK: - Goals state
 
-    /// Goals chargés depuis SQLite. Rafraîchi à chaque `load()`.
+    /// Goals loaded from SQLite. Refreshed on every `load()`.
     var goals: [Goal] = []
 
-    /// Cache des progressions calculées via `GoalCalculator`. `goalId → progress`.
-    /// Recalculé à chaque `load()` pour rester aligné avec le snapshot patrimoine.
+    /// A cache of progressions computed via `GoalCalculator`. `goalId → progress`.
+    /// Recomputed on every `load()` to stay aligned with the Patrimoine snapshot.
     var goalProgresses: [Int: GoalProgress] = [:]
 
-    /// Baseline de dette pour les goals `.debtPayoff`. Stockée en UserDefaults
-    /// par goal_id — l'idée : au moment où l'utilisateur crée un goal de remboursement,
-    /// on capture la dette MAX (= snapshot.totalLiabilities à cet instant) qui
-    /// devient le 100% à atteindre. Sans ça, le progress serait toujours 0%
-    /// (current dette / current dette = 1 → ratio = 0).
+    /// A debt baseline for `.debtPayoff` goals. Stored in UserDefaults
+    /// by goal_id — the idea: the moment the user creates a debt-payoff goal,
+    /// the MAX debt (= snapshot.totalLiabilities at that instant) is captured,
+    /// becoming the 100% to reach. Without this, progress would always be 0%
+    /// (current debt / current debt = 1 → ratio = 0).
     private func debtBaseline(forGoalId id: Int) -> Double {
         UserDefaults.standard.double(forKey: "goalDebtBaseline_\(id)")
     }
@@ -149,9 +150,9 @@ final class PatrimoineViewModel {
         UserDefaults.standard.set(value, forKey: "goalDebtBaseline_\(id)")
     }
 
-    /// IDs des comptes déjà liés à un asset Patrimoine. Utilisé par le picker pour
-    /// griser les choix indisponibles (un compte ne peut être lié qu'à 1 seul asset
-    /// à la fois — règle métier renforcée par UNIQUE INDEX SQL).
+    /// IDs of accounts already linked to a Patrimoine asset. Used by the picker to
+    /// gray out unavailable choices (an account can only be linked to 1 asset
+    /// at a time — a business rule enforced by a SQL UNIQUE INDEX).
     var linkedBankAccountIds: Set<Int> {
         Set(assets.compactMap { $0.linkedAccountId })
     }
@@ -162,23 +163,23 @@ final class PatrimoineViewModel {
 
     // MARK: - Public API
 
-    /// Charge l'intégralité des données du module et résout les valeurs liées.
-    /// Synchronie volontaire — SQLite est local, pas la peine de Task.detached pour
-    /// quelques dizaines de rows.
+    /// Loads the module's full data and resolves linked values.
+    /// Deliberately synchronous — SQLite is local, no need for a Task.detached for
+    /// a few dozen rows.
     func load() {
         isLoading = true
-        // Caches comptes d'abord — la résolution des assets en a besoin.
+        // Account caches first — asset resolution needs them.
         availableBankAccounts = transactionRepo.fetchAccounts()
         availableInvestmentAccounts = investmentRepo.fetchAccounts()
 
-        // Puis les 3 entités Patrimoine.
+        // Then the 3 Patrimoine entities.
         assets = patrimoineRepo.fetchAssets()
         realEstates = patrimoineRepo.fetchRealEstate()
         loans = patrimoineRepo.fetchLoans()
 
-        // Résolution des valeurs assets via le moteur pur, partagé avec le Dashboard.
-        // Les soldes bancaires sont fetchés UNE fois, et seulement pour les comptes
-        // réellement liés (un `fetchAccountBalance` = un SUM sur toute la table).
+        // Resolving asset values via the pure engine, shared with the Dashboard.
+        // Bank balances are fetched ONCE, and only for accounts
+        // actually linked (a `fetchAccountBalance` = a SUM over the whole table).
         let (values, sources) = PatrimoineSnapshotBuilder.resolveValues(
             assets: assets,
             existingBankAccountIds: Set(availableBankAccounts.map(\.id)),
@@ -188,36 +189,37 @@ final class PatrimoineViewModel {
         resolvedAssetValues = values
         resolvedAssetSources = sources
 
-        // Persistance opportuniste de last_known_value — uniquement si le lien a été
-        // résolu vivant, pour ne pas écraser une valeur historique avec 0 quand le
-        // lien est cassé. Reste ici : un moteur pur n'écrit pas en base.
+        // Opportunistic persistence of last_known_value — only if the link was
+        // resolved as alive, so as not to overwrite a historical value with 0 when the
+        // link is broken. Kept here: a pure engine doesn't write to the database.
         for asset in assets where sources[asset.id] == .linkedAccount || sources[asset.id] == .linkedInvestment {
             guard let value = values[asset.id], abs(value - asset.lastKnownValue) > 0.005 else { continue }
             patrimoineRepo.updateLastKnownValue(assetId: asset.id, value: value)
         }
 
-        // Recense les liens rompus pour mettre en avant les rows concernées et
-        // permettre une bannière d'alerte au sommet de la List.
+        // Records broken links to highlight the affected rows and
+        // allow an alert banner at the top of the List.
         brokenLinkAssetIds = Set(sources.compactMap { $0.value == .brokenLink ? $0.key : nil })
 
-        // Calcul des états de prêt — Swift pur, ultra rapide même pour 50 prêts.
+        // Computing loan states — pure Swift, blazing fast even for 50 loans.
         var states: [Int: LoanState] = [:]
         for loan in loans {
             states[loan.id] = LoanCalculator.compute(loan: loan)
         }
         loanStates = states
 
-        // Goals — chargés après loans (la baseline debt_payoff a besoin du snapshot
-        // courant, et le snapshot dépend des assets/realEstates/loans déjà chargés).
+        // Goals — loaded after loans (the debt_payoff baseline needs the
+        // current snapshot, and the snapshot depends on the already-loaded
+        // assets/realEstates/loans).
         goals = goalRepo.fetchGoals()
-        let snap = snapshot  // appel unique du computed
+        let snap = snapshot  // a single call to the computed property
         let assetsTotal = totalAssetsValue
         var progresses: [Int: GoalProgress] = [:]
         for goal in goals {
-            // Pour debt_payoff : on lit la baseline persistée. Si absente (cas d'un
-            // goal qui vient d'être créé ou import d'une vieille DB), on la capture
-            // maintenant avec la dette courante — au moins le progress sera stable
-            // dans le temps même s'il commence à 0.
+            // For debt_payoff: the persisted baseline is read. If absent (a
+            // goal just created, or importing an old database), it's captured
+            // now with the current debt — at least progress will be stable
+            // over time even if it starts at 0.
             var baseline: Double? = nil
             if goal.kind == .debtPayoff {
                 let stored = debtBaseline(forGoalId: goal.id)
@@ -264,17 +266,17 @@ final class PatrimoineViewModel {
 
     @discardableResult
     func deleteGoal(id: Int) -> Bool {
-        // Nettoie aussi la baseline persistée (sinon UserDefaults grossit pour rien
-        // au fil des goals supprimés et recréés avec le même id auto-incrémenté).
+        // Also cleans up the persisted baseline (otherwise UserDefaults grows for no
+        // reason over goals deleted and recreated with the same auto-incremented id).
         UserDefaults.standard.removeObject(forKey: "goalDebtBaseline_\(id)")
         let ok = goalRepo.deleteGoal(id: id)
         if ok { load() }
         return ok
     }
 
-    /// Résout la valeur d'un asset selon son mode (linked ou standalone).
-    /// Exposée pour le form et le picker (pour afficher la valeur lue en preview).
-    /// Délègue au moteur pur — la règle de résolution n'existe qu'à un seul endroit.
+    /// Resolves an asset's value based on its mode (linked or standalone).
+    /// Exposed for the form and the picker (to show the read value in a preview).
+    /// Delegates to the pure engine — the resolution rule exists in only one place.
     func resolveValue(for asset: PatrimoineAsset) -> (value: Double, source: AssetValueSource) {
         PatrimoineSnapshotBuilder.resolveValue(
             for: asset,
@@ -284,9 +286,9 @@ final class PatrimoineViewModel {
         )
     }
 
-    /// Soldes des comptes bancaires liés aux assets fournis. Un seul
-    /// `fetchAccountBalance` par compte, et uniquement pour les comptes existants —
-    /// un compte supprimé doit rester détecté comme lien rompu, pas lu à 0 €.
+    /// Balances of the bank accounts linked to the given assets. A single
+    /// `fetchAccountBalance` per account, and only for accounts that still exist —
+    /// a deleted account must stay detected as a broken link, not read as €0.
     private func bankBalances(for assets: [PatrimoineAsset]) -> [Int: Double] {
         let existing = Set(availableBankAccounts.map(\.id))
         var balances: [Int: Double] = [:]
@@ -296,9 +298,9 @@ final class PatrimoineViewModel {
         return balances
     }
 
-    /// Wrapper côté VM qui calcule la valeur fraîche d'un compte source sans toucher
-    /// au state du VM. Utilisé par le picker pour afficher "Valeur lue : X €" à côté
-    /// de chaque compte sélectionnable.
+    /// A VM-side wrapper that computes a source account's fresh value without touching
+    /// the VM's state. Used by the picker to show "Value read: €X" next to
+    /// each selectable account.
     func liveValue(forBankAccountId id: Int) -> Double {
         transactionRepo.fetchAccountBalance(accountId: id, upToDate: nil)
     }
@@ -310,13 +312,13 @@ final class PatrimoineViewModel {
 
     // MARK: - Assets — CRUD wrapper
 
-    /// Crée un asset. Si linked, `lastKnownValue` est initialisé avec la valeur lue
-    /// fraîchement pour pouvoir l'afficher en fallback si le compte source disparaît.
+    /// Creates an asset. If linked, `lastKnownValue` is initialized with the freshly
+    /// read value, so it can be shown as a fallback if the source account disappears.
     @discardableResult
     func createAsset(name: String, kind: AssetKind,
                      linkedAccountId: Int?, linkedInvestmentAccountId: Int?,
                      manualValue: Double, notes: String?) -> Bool {
-        // Détection conflit avant l'INSERT (l'UNIQUE INDEX est la 2nde ligne de défense).
+        // Conflict detection before the INSERT (the UNIQUE INDEX is the 2nd line of defense).
         if let conflict = patrimoineRepo.assetIdLinkedTo(
             accountId: linkedAccountId,
             investmentAccountId: linkedInvestmentAccountId,
@@ -325,8 +327,8 @@ final class PatrimoineViewModel {
             print("[Patrimoine] createAsset refused — link conflict with asset id \(conflict)")
             return false
         }
-        // Pour un asset linked, on calcule la valeur initiale du snapshot last_known_value
-        // pour qu'il ne soit pas à 0 même si l'utilisateur ne consulte pas la liste tout de suite.
+        // For a linked asset, the snapshot's initial last_known_value is computed
+        // so it isn't 0 even if the user doesn't check the list right away.
         var lastKnown: Double = manualValue
         if let bankId = linkedAccountId {
             lastKnown = transactionRepo.fetchAccountBalance(accountId: bankId, upToDate: nil)
@@ -350,7 +352,7 @@ final class PatrimoineViewModel {
 
     @discardableResult
     func updateAsset(_ asset: PatrimoineAsset) -> Bool {
-        // Conflit possible aussi sur update si l'utilisateur re-link vers un autre compte
+        // A conflict is also possible on update if the user re-links to another account
         if let conflict = patrimoineRepo.assetIdLinkedTo(
             accountId: asset.linkedAccountId,
             investmentAccountId: asset.linkedInvestmentAccountId,
@@ -399,10 +401,10 @@ final class PatrimoineViewModel {
 
     @discardableResult
     func deleteRealEstate(id: Int) -> Bool {
-        // ON DELETE SET NULL côté SQL fait que les prêts liés à ce bien (loan.linked_real_estate_id)
-        // passent automatiquement en "prêt orphelin" sans être supprimés — exactement
-        // la sémantique souhaitée (l'utilisateur peut continuer à suivre la dette même
-        // après vente du bien).
+        // ON DELETE SET NULL on the SQL side means loans linked to this property
+        // (loan.linked_real_estate_id) automatically become an "orphaned loan" without
+        // being deleted — exactly the desired semantics (the user can keep
+        // tracking the debt even after the property is sold).
         let ok = patrimoineRepo.deleteRealEstate(id: id)
         if ok { load() }
         return ok
@@ -431,14 +433,14 @@ final class PatrimoineViewModel {
         return ok
     }
 
-    /// Coût mensuel total (mensualité d'amortissement + assurance) sommé sur tous
-    /// les prêts actifs (non terminés et non pending). Affiché dans le header de
-    /// la section Prêts pour donner le "poids" mensuel total du passif.
+    /// The total monthly cost (amortization payment + insurance) summed across
+    /// every active loan (not finished and not pending). Shown in the Loans
+    /// section's header to convey the liabilities' total monthly "weight".
     var totalMonthlyLoanCost: Double {
         loans.reduce(0) { acc, loan in
             let state = loanStates[loan.id]
-            // On compte la mensualité uniquement si le prêt est en cours d'amortissement.
-            // L'assurance, elle, court tant que le prêt n'est pas terminé (différé inclus).
+            // The payment is only counted if the loan is currently amortizing.
+            // Insurance, however, runs as long as the loan isn't finished (deferred included).
             let m = (state?.isPending == true || state?.isCompleted == true) ? 0 : (state?.monthlyPayment ?? 0)
             let ins = (state?.isCompleted == true) ? 0 : loan.insuranceMonthly
             return acc + m + ins
@@ -459,22 +461,23 @@ final class PatrimoineViewModel {
         return ok
     }
 
-    /// Nom du bien immobilier lié à un prêt, ou nil si aucun lien (ou bien supprimé).
+    /// The name of the real-estate property linked to a loan, or nil if there's no link
+    /// (or the property was deleted).
     func realEstateName(forLoanLinked id: Int?) -> String? {
         guard let id else { return nil }
         return realEstates.first(where: { $0.id == id })?.name
     }
 
-    // MARK: - Helpers d'affichage (libellés "Lié à …")
+    // MARK: - Display helpers ("Linked to …" labels)
 
-    /// Texte descriptif court pour la source d'un asset, prêt à être affiché en
-    /// sous-titre de row. Pas de logique conditionnelle dans la View.
+    /// A short descriptive text for an asset's source, ready to be shown as a
+    /// row subtitle. No conditional logic in the View.
     ///
-    /// Rend une `LocalizedStringResource`, pas un `Text` : ce type est résolu à
-    /// la LECTURE par la vue, donc il suit un changement de langue en cours de
-    /// session, là où un `Text` construit ici figerait la traduction au moment
-    /// du calcul. Il garde en prime ce fichier libre de SwiftUI — la règle
-    /// d'architecture vérifiée en intégration continue.
+    /// Returns a `LocalizedStringResource`, not a `Text`: this type is resolved AT
+    /// READ time by the view, so it follows a language change mid-session, where a
+    /// `Text` built here would freeze the translation at
+    /// computation time. It also keeps this file free of SwiftUI — the
+    /// architecture rule verified in continuous integration.
     func sourceLabel(for asset: PatrimoineAsset) -> LocalizedStringResource {
         if let bankId = asset.linkedAccountId,
            let acc = availableBankAccounts.first(where: { $0.id == bankId }) {
@@ -485,9 +488,9 @@ final class PatrimoineViewModel {
             return LocalizedStringResource("Lié à \(acc.name)")
         }
         if asset.isLinked {
-            // Le lien existe en mémoire mais le compte source a disparu — l'UNIQUE
-            // INDEX et le ON DELETE SET NULL devraient empêcher ce cas, mais on
-            // tient ce libellé en filet de sécurité.
+            // The link exists in memory but the source account has disappeared — the
+            // UNIQUE INDEX and ON DELETE SET NULL should prevent this case, but
+            // this label is kept as a safety net.
             return LocalizedStringResource("Lien rompu (dernière valeur connue)")
         }
         return LocalizedStringResource("Valeur saisie manuellement")

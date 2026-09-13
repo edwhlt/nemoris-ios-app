@@ -1,10 +1,10 @@
 import SwiftUI
 
-// MARK: - LinkSelection (modèle léger remonté par le picker)
+// MARK: - LinkSelection (a lightweight model returned by the picker)
 
-/// Représente le résultat de la sélection dans `AccountLinkPickerSheet`.
-/// `.none` = pas de lien (mode manuel). Les 2 autres cas portent l'ID du compte source.
-/// Utilisé comme état du form `AssetFormView`.
+/// Represents the selection result in `AccountLinkPickerSheet`.
+/// `.none` = no link (manual mode). The 2 other cases carry the source account's ID.
+/// Used as `AssetFormView`'s form state.
 enum LinkSelection: Equatable, Hashable {
     case none
     case bank(Int)        // accounts.id
@@ -13,33 +13,33 @@ enum LinkSelection: Equatable, Hashable {
 
 // MARK: - AccountLinkPickerSheet
 
-/// Sheet de sélection du compte source pour un asset Patrimoine.
+/// A sheet for picking the source account for a Patrimoine asset.
 ///
-/// Affiche en sections :
-///   • Comptes bancaires (livrets, courants — types EPARGNE / COURANT uniquement)
-///   • Comptes investissements (PEA, CTO, crypto wallets, etc.)
-///   • Option "Aucun — saisir manuellement"
+/// Shown in sections:
+///   • Bank accounts (savings, checking — EPARGNE / COURANT types only)
+///   • Investment accounts (PEA, CTO, crypto wallets, etc.)
+///   • A "None — enter manually" option
 ///
-/// Un compte déjà lié à un AUTRE asset Patrimoine est listé mais désactivé, avec
-/// un libellé "(déjà lié)". L'asset en cours d'édition (`excludingAssetId`)
-/// échappe à ce grisage — sinon on ne pourrait pas conserver son propre lien.
+/// An account already linked to ANOTHER Patrimoine asset is listed but disabled, with
+/// a "(already linked)" label. The asset currently being edited (`excludingAssetId`)
+/// is exempt from this graying-out — otherwise its own link couldn't be kept.
 ///
-/// Le tap sur une ligne **sélectionne immédiatement et ferme la sheet**. Pas de
-/// bouton "Confirmer" séparé (UX volontairement rapide).
+/// Tapping a row **selects immediately and closes the sheet**. No separate
+/// "Confirm" button (deliberately fast UX).
 struct AccountLinkPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     let viewModel: PatrimoineViewModel
     let currentSelection: LinkSelection
-    /// ID de l'asset en cours d'édition (nil si création). Sert à ne PAS griser
-    /// le compte que cet asset utilise déjà — il doit pouvoir le conserver.
+    /// The ID of the asset currently being edited (nil if creating). Used to NOT gray
+    /// out the account this asset already uses — it must be able to keep it.
     let excludingAssetId: Int?
     let onSelect: (LinkSelection) -> Void
 
     @State private var search = ""
 
-    /// On ne propose que les comptes pertinents pour le patrimoine (épargne / courant).
-    /// Différé et "autre" sont écartés : ils ne représentent pas du patrimoine
-    /// au sens net worth (le différé est transitoire, "autre" est ambigu).
+    /// Only accounts relevant to net worth are offered (savings / checking).
+    /// Deferred and "other" are excluded: they don't represent net worth
+    /// in the net-worth sense (deferred is transient, "other" is ambiguous).
     private var eligibleBankAccounts: [Account] {
         viewModel.availableBankAccounts.filter { acc in
             acc.accountType == .epargne || acc.accountType == .courant
@@ -130,7 +130,7 @@ struct AccountLinkPickerSheet: View {
                     .buttonStyle(.plain)
                 }
 
-                // Cas où aucun compte n'est disponible nulle part.
+                // The case where no account is available anywhere.
                 if eligibleBankAccounts.isEmpty && viewModel.availableInvestmentAccounts.isEmpty {
                     Section {
                         Text("Aucun compte existant à lier. Créez un compte dans **Données** ou **Investissements** d'abord, ou continuez en mode manuel.")
@@ -140,27 +140,27 @@ struct AccountLinkPickerSheet: View {
                 }
             }
             #if os(macOS)
-            // `List` peint SON PROPRE fond système sur macOS PAR-DESSUS
-            // celui du panneau hôte — sans ce modificateur, le bureau de
-            // l'utilisateur transparaît (retour d'usage 2026-08-19).
+            // `List` paints ITS OWN system background on macOS ON TOP OF
+            // the host pane's — without this modifier, the user's
+            // desktop shows through.
             .scrollContentBackground(.hidden)
             #endif
             .paneSearchable(text: $search, prompt: "Rechercher un compte…")
-            // `.paneChrome` dessine ses propres barres sur macOS-sheet — la
-            // tentative précédente (`.toolbarBackground(for: .windowToolbar)`)
-            // compilait mais n'avait AUCUN effet visuel, confirmé par capture
-            // d'écran en direct (retour d'usage 2026-08-21). Cf. le
-            // commentaire de `macSheetChrome` dans AdaptivePane.swift.
+            // `.paneChrome` draws its own bars on macOS-sheet — the earlier
+            // attempt (`.toolbarBackground(for: .windowToolbar)`)
+            // compiled but had NO visual effect at all, confirmed by a live
+            // screenshot. See the
+            // `macSheetChrome` comment in AdaptivePane.swift.
             .paneChrome("Source de la valeur", cancelLabel: "Annuler", onCancel: { dismiss() })
     }
 
     // MARK: - Rows
 
-    /// Détermine si un compte bancaire doit être grisé : il est lié à un autre asset
-    /// Patrimoine que celui en cours d'édition.
+    /// Determines whether a bank account should be grayed out: it's linked to another
+    /// Patrimoine asset than the one being edited.
     private func isBankConflicting(_ acc: Account) -> Bool {
         guard viewModel.linkedBankAccountIds.contains(acc.id) else { return false }
-        // L'asset en cours d'édition utilise déjà ce compte → ne pas griser.
+        // The asset being edited already uses this account → don't gray it out.
         if case let .bank(currentId) = currentSelection, currentId == acc.id {
             return false
         }

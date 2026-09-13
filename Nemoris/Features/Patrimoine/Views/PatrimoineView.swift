@@ -2,14 +2,14 @@ import SwiftUI
 
 // MARK: - PatrimoineView
 //
-// Vue racine du module Patrimoine. **Étape 2** : section "Mobilier & Liquidités"
-// fonctionnelle (création / édition / suppression d'assets + linking vers comptes
-// existants). Les sections Immobilier / Prêts / Vue nette globale arriveront aux
-// étapes 3 à 5 et resteront masquées tant que pas implémentées.
+// The Patrimoine module's root view. A functional "Movable Assets & Cash"
+// section (create / edit / delete assets + linking to existing
+// accounts). Real Estate / Loans / Global net-worth sections stay
+// hidden until implemented.
 //
-// Pattern visuel aligné sur le Dashboard refondu : pas de cards à outrance, des
-// eyebrows uppercased pour structurer les sections, des rows pleine largeur avec
-// la valeur à droite.
+// A visual pattern aligned with the redesigned Dashboard: no cards-everywhere,
+// uppercased eyebrows to structure sections, full-width rows with
+// the value on the right.
 
 struct PatrimoineView: View {
     @Environment(AppState.self) private var appState
@@ -26,7 +26,7 @@ struct PatrimoineView: View {
     @State private var editingRealEstate: PatrimoineRealEstate? = nil
     @State private var realEstateToDelete: PatrimoineRealEstate? = nil
 
-    // Sheets — prêts
+    // Sheets — loans
     @State private var showCreateLoan = false
     @State private var editingLoan: PatrimoineLoan? = nil
     @State private var loanToDelete: PatrimoineLoan? = nil
@@ -45,14 +45,14 @@ struct PatrimoineView: View {
         if isEmbedded { navBody } else { NavigationStack { navBody } }
     }
 
-    /// Corps scindé en couches (coreContent → panesLayer → navBody) :
-    /// l'expression unique dépassait le budget du type-checker Swift après
-    /// l'ajout des panneaux détail macOS (adaptiveEntityPane ×4).
+    /// The body is split into layers (coreContent → panesLayer → navBody):
+    /// a single expression exceeded the Swift type checker's budget after
+    /// the macOS detail panes were added (adaptiveEntityPane ×4).
     private var coreContent: some View {
         Group {
             if vm.assets.isEmpty && vm.realEstates.isEmpty && vm.loans.isEmpty {
-                // Empty state pleine page — on garde un ScrollView simple pour ne
-                // pas montrer une List vide alors qu'on veut une intro éditoriale.
+                // A full-page empty state — a plain ScrollView is kept so as not
+                // to show an empty List when an editorial intro is wanted instead.
                 ZStack {
                     AppTheme.Colors.background.ignoresSafeArea()
                     ScrollView {
@@ -62,20 +62,20 @@ struct PatrimoineView: View {
                     }
                 }
             } else {
-                // List native — chaque row peut être supprimée par swipe-trailing et
-                // éditée par swipe-leading. Les rows gardent leur look "card flottante"
-                // grâce à `listRowBackground(.clear)` + `listRowSeparator(.hidden)`.
+                // A native List — each row can be deleted via trailing swipe and
+                // edited via leading swipe. Rows keep their "floating card" look
+                // via `listRowBackground(.clear)` + `listRowSeparator(.hidden)`.
                 List {
-                    // Hero global Patrimoine net (1ère section, scroll naturel).
-                    // ⚠️ `.macGroupedRow` (PAS un `.listRowInsets`/`.background` custom) :
-                    // c'est le MÊME mécanisme que les rows objectifs/mobilier/immobilier/
-                    // prêts en dessous (et que Tricount/ReferenceData/Investments) —
-                    // garantit que cette carte a exactement le même bord gauche/droit et
-                    // le même rayon d'arrondi que toutes les autres de l'écran (retour
-                    // terrain 2026-08-15 : les cartes n'étaient pas alignées entre elles,
-                    // chaque section réinventait sa propre marge/arrondi). Le dégradé
-                    // devient le fond de la carte, comme `AppTheme.Colors.surface` l'est
-                    // pour une row normale.
+                    // The global net-worth hero (1st section, natural scroll).
+                    // ⚠️ `.macGroupedRow` (NOT a custom `.listRowInsets`/`.background`):
+                    // it's the SAME mechanism as the goals/movable-assets/real-estate/
+                    // loans rows below (and Tricount/ReferenceData/Investments) —
+                    // guarantees this card has exactly the same left/right edge and
+                    // the same corner radius as every other one on screen (the cards
+                    // weren't aligned with each other, each section reinvented its own
+                    // margin/radius). The gradient
+                    // becomes the card's background, the way `AppTheme.Colors.surface` is
+                    // for a normal row.
                     Section {
                         heroSection
                             .listRowSeparator(.hidden)
@@ -90,9 +90,9 @@ struct PatrimoineView: View {
                                 )
                             }
                     }
-                    // Bannière "liens rompus" si au moins 1 asset linké a perdu son
-                    // compte source (cascade SET NULL). Affichée entre hero et donut
-                    // pour être impossible à manquer mais sans bloquer la scroll.
+                    // A "broken links" banner if at least 1 linked asset lost its
+                    // source account (a SET NULL cascade). Shown between the hero and the
+                    // donut to be impossible to miss but without blocking the scroll.
                     if vm.hasBrokenLinks {
                         Section {
                             brokenLinksBanner
@@ -102,10 +102,10 @@ struct PatrimoineView: View {
                                 }
                         }
                     }
-                    // Objectifs financiers — affichés en priorité haute (juste sous
-                    // le hero) pour matérialiser "où je vais" avant "ce que j'ai".
+                    // Financial goals — shown at high priority (right under
+                    // the hero) to convey "where I'm going" before "what I have".
                     goalsListSection
-                    // Donut allocation (visible uniquement si on a du brut à montrer)
+                    // The allocation donut (visible only if there's gross assets to show)
                     if vm.snapshot.totalAssets > 0 {
                         Section {
                             allocationCard
@@ -118,18 +118,18 @@ struct PatrimoineView: View {
                     pretsListSection
                 }
                 #if os(macOS)
-                // macOS : .plain = base neutre pour les cartes custom dessinées par
-                // macGroupedRow (coins arrondis first/last, inset, séparateurs
-                // internes). iOS garde son insetGrouped natif — macGroupedRow n'y
-                // pose que le listRowBackground (cf. TransactionsView, même pattern).
+                // macOS: .plain = a neutral base for the custom cards drawn by
+                // macGroupedRow (first/last rounded corners, inset, internal
+                // separators). iOS keeps its native insetGrouped — macGroupedRow there
+                // only sets the listRowBackground (see TransactionsView, the same pattern).
                 .listStyle(.plain)
                 .macGroupedListTopGap()
                 #else
-                // iOS : l'écran empile 7 `Section` (hero, liens rompus, objectifs,
-                // donut, mobilier, immobilier, prêts) — sans ce modifier, l'espacement
-                // système entre sections d'un `.insetGrouped` (~35pt) se cumule à
-                // chaque frontière et donne un écran "décousu" comparé aux modules
-                // qui regroupent davantage leur contenu (retour terrain 2026-08-15).
+                // iOS: the screen stacks 7 `Section`s (hero, broken links, goals,
+                // donut, movable assets, real estate, loans) — without this modifier, the
+                // system's spacing between `.insetGrouped` sections (~35pt) piles up at
+                // every boundary and gives a "disjointed" screen compared to modules
+                // that group their content more tightly.
                 .listSectionSpacing(.compact)
                 #endif
                 .scrollContentBackground(.hidden)
@@ -140,8 +140,8 @@ struct PatrimoineView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             #if os(macOS)
-            // macOS : le menu "+" est étalé en boutons icône seule + tooltip
-            // natif, groupés dans UNE pilule (ControlGroup).
+            // macOS: the "+" menu is spread into icon-only buttons + a
+            // native tooltip, grouped in ONE pill (ControlGroup).
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 PaneToggleButton(label: "Nouvel actif", systemImage: "banknote.fill", isOn: $showCreateAsset)
                 PaneToggleButton(label: "Nouveau bien", systemImage: "house.fill", isOn: $showCreateRealEstate)
@@ -150,8 +150,8 @@ struct PatrimoineView: View {
             }
             #else
             ToolbarItem(placement: .navigationBarTrailing) {
-                // Le toolbar `+` devient un Menu maintenant qu'on a 2 types d'entrées
-                // (actif liquide vs bien immobilier). Étape 4 ajoutera "Prêt" ici.
+                // The toolbar "+" becomes a Menu now that there are 2 entry
+                // types (a liquid asset vs. a real-estate property). A future step will add "Loan" here.
                 Menu {
                     Button {
                         showCreateAsset = true
@@ -183,7 +183,7 @@ struct PatrimoineView: View {
         }
     }
 
-    /// Grappe des présentations (panes création + détail/édition).
+    /// The cluster of presentations (creation panes + detail/edit).
     private var panesLayer: some View {
         coreContent
         .adaptivePane(isPresented: $showCreateAsset) {
@@ -331,17 +331,17 @@ struct PatrimoineView: View {
         }
     }
 
-    // MARK: - Hero éditorial (Patrimoine net global)
+    // MARK: - Editorial hero (global net Patrimoine)
 
-    /// Hero pleine largeur en tête de la List : eyebrow + big number 44pt du patrimoine
-    /// net + sous-totaux Brut/Dettes + barre de levier (dette/patrimoine brut).
-    /// Cohérent avec le hero éditorial du DashboardView (refonte 2026-06-01).
+    /// A full-width hero at the top of the List: an eyebrow + a 44pt big number of net
+    /// worth + Gross/Debts subtotals + a leverage bar (debt/gross assets).
+    /// Consistent with DashboardView's editorial hero.
     @ViewBuilder private var heroSection: some View {
         let snap = vm.snapshot
         let isPositive = snap.netWorth >= 0
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-            // Eyebrow daté — donne le contexte temporel sans avoir besoin d'un sélecteur
-            // de période (le snapshot reflète toujours "maintenant").
+            // A dated eyebrow — gives the temporal context with no need for a
+            // period picker (the snapshot always reflects "now").
             let now = Date().formatted(.dateTime.month(.wide).year().locale(AppLocalization.locale))
             Text("Patrimoine net · \(now)")
                 .textCase(.uppercase)
@@ -349,8 +349,8 @@ struct PatrimoineView: View {
                 .tracking(0.8)
                 .foregroundStyle(AppTheme.Colors.textSecondary)
 
-            // Big number — couleur dynamique (vert si positif, terracotta si négatif).
-            // 44pt bold pour faire concurrence au hero Dashboard et hiérarchiser cet écran.
+            // The big number — a dynamic color (green if positive, terracotta if negative).
+            // 44pt bold to compete with the Dashboard hero and rank this screen.
             MoneyText(
                 amount: snap.netWorth,
                 font: .system(size: 44, weight: .bold, design: .default),
@@ -360,7 +360,7 @@ struct PatrimoineView: View {
             .lineLimit(1)
             .minimumScaleFactor(0.5)
 
-            // Sous-totaux Brut/Dettes alignés horizontalement
+            // Gross/Debts subtotals aligned horizontally
             HStack(spacing: AppTheme.Spacing.xl) {
                 heroSubtotal(
                     icon: "arrow.up.right",
@@ -377,15 +377,15 @@ struct PatrimoineView: View {
             }
             .padding(.top, AppTheme.Spacing.sm)
 
-            // Barre de "levier" — matérialise visuellement le ratio dettes/actif brut.
-            // Affichée seulement s'il y a effectivement de la dette (sinon parasite).
+            // A "leverage" bar — visually conveys the debt/gross-asset ratio.
+            // Shown only if there's actually some debt (otherwise it's noise).
             if snap.totalLiabilities > 0 {
                 leverageBar
                     .padding(.top, AppTheme.Spacing.sm)
             }
 
-            // Bouton "Projection 5 ans" — discret mais accessible. Visible si on
-            // a quelque chose à projeter (snapshot non vide).
+            // A "5-year projection" button — discreet but accessible. Shown if
+            // there's something to project (a non-empty snapshot).
             if snap.totalAssets > 0 || snap.totalLiabilities > 0 {
                 Button {
                     showProjection = true
@@ -413,20 +413,19 @@ struct PatrimoineView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(AppTheme.Spacing.lg)
-        // ⚠️ Le fond (dégradé) est fourni par `.macGroupedRow(...)` AU CALL SITE,
-        // PAS ici — cf. commentaire à l'appel dans `coreContent`. Avant, ce fond
-        // était dessiné en interne (`.background` + `.overlay` de bordure) pendant
-        // que le call site posait EN PLUS son propre `.listRowInsets` custom : deux
-        // mécanismes de marge/arrondi différents pour la même carte, jamais
-        // garantis identiques à ceux des rows `.macGroupedRow` en dessous (goals,
-        // mobilier…) — d'où des cartes visiblement pas alignées/pas au même rayon
-        // sur iOS (retour terrain 2026-08-15 : "pas le même rounded, pas le même
-        // alignement"). En passant par `.macGroupedRow`, le hero partage
-        // EXACTEMENT le même mécanisme de marge/arrondi que toutes les autres
-        // cartes de l'écran (et que Tricount/ReferenceData/Investments).
+        // ⚠️ The background (gradient) is provided by `.macGroupedRow(...)` AT THE CALL SITE,
+        // NOT here — see the comment at the call in `coreContent`. Before, this
+        // background was drawn internally (`.background` + a border `.overlay`) while
+        // the call site ALSO set its own custom `.listRowInsets`: two
+        // different margin/rounding mechanisms for the same card, never
+        // guaranteed identical to the `.macGroupedRow` rows below (goals,
+        // movable assets…) — hence cards that were visibly misaligned/at a
+        // different radius on iOS. By going through `.macGroupedRow`, the hero shares
+        // EXACTLY the same margin/rounding mechanism as every other
+        // card on screen (and Tricount/ReferenceData/Investments).
     }
 
-    /// Sous-totaux Brut / Dettes du hero — icône colorée + label uppercased + valeur.
+    /// The hero's Gross / Debts subtotals — a colored icon + an uppercased label + a value.
     @ViewBuilder
     private func heroSubtotal(icon: String, label: LocalizedStringKey, value: Double, color: Color) -> some View {
         HStack(spacing: AppTheme.Spacing.sm) {
@@ -450,8 +449,8 @@ struct PatrimoineView: View {
         }
     }
 
-    /// Barre de levier : montre quelle proportion de l'actif brut est financée par
-    /// de la dette. > 50% = warning visuel, > 100% = danger (passif > actif).
+    /// A leverage bar: shows what proportion of gross assets is funded by
+    /// debt. > 50% = a visual warning, > 100% = danger (liabilities > assets).
     @ViewBuilder private var leverageBar: some View {
         let ratio = vm.leverageRatio  // 0…2.0
         let ratioPercent = ratio * 100
@@ -484,10 +483,10 @@ struct PatrimoineView: View {
 
     // MARK: - Broken links banner
 
-    /// Bannière warning au sommet de la List quand au moins 1 asset lié a perdu son
-    /// compte source (le compte a été supprimé). L'asset reste affiché avec sa
-    /// `lastKnownValue` mais ne se met plus à jour. Le tap ouvre le premier asset
-    /// concerné pour que l'utilisateur puisse relier ou repasser en manuel.
+    /// A warning banner at the top of the List when at least 1 linked asset lost its
+    /// source account (the account was deleted). The asset stays shown with its
+    /// `lastKnownValue` but no longer updates. Tapping opens the first affected
+    /// asset so the user can relink it or switch it back to manual.
     @ViewBuilder private var brokenLinksBanner: some View {
         let count = vm.brokenLinkAssetIds.count
         let firstBroken = vm.assets.first(where: { vm.brokenLinkAssetIds.contains($0.id) })
@@ -515,19 +514,19 @@ struct PatrimoineView: View {
                     .foregroundStyle(AppTheme.Colors.textSecondary.opacity(0.6))
             }
             .padding(AppTheme.Spacing.md)
-            // Fond fourni par `.macGroupedRow(...)` au call site — cf. commentaire
-            // détaillé sur `heroSection`, même remède.
+            // A background provided by `.macGroupedRow(...)` at the call site — see
+            // `heroSection`'s detailed comment, the same fix.
         }
         .buttonStyle(.plain)
     }
 
-    // MARK: - Allocation actif brut (donut + légende)
+    // MARK: - Gross asset allocation (donut + legend)
 
-    /// Card "Composition de votre patrimoine" : donut + légende verticale réutilisant
-    /// `AllocationDonutChart` du module Investments. Slices = totals par catégorie
-    /// d'actif (Mobilier liquide, Immobilier). Les dettes sont volontairement
-    /// **exclues** — le donut représente l'actif BRUT, pas le net (qui est déjà
-    /// affiché en gros dans le hero).
+    /// A "Composition of your net worth" card: a donut + a vertical legend reusing
+    /// the Investments module's `AllocationDonutChart`. Slices = totals per asset
+    /// category (Liquid movable assets, Real estate). Debts are deliberately
+    /// **excluded** — the donut represents GROSS assets, not the net (already
+    /// shown prominently in the hero).
     @ViewBuilder private var allocationCard: some View {
         let slices = allocationSlices
         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
@@ -547,15 +546,15 @@ struct PatrimoineView: View {
             }
         }
         .padding(AppTheme.Spacing.lg)
-        // Fond fourni par `.macGroupedRow(...)` au call site — cf. commentaire
-        // détaillé sur `heroSection`, même remède (et c'est déjà exactement le
-        // fond par défaut de `.macGroupedRow()`, `AppTheme.Colors.surface`).
+        // A background provided by `.macGroupedRow(...)` at the call site — see
+        // `heroSection`'s detailed comment, the same fix (and it's already exactly
+        // `.macGroupedRow()`'s default background, `AppTheme.Colors.surface`).
     }
 
-    /// Construit les slices pour le donut. On regroupe Mobilier (tous les assets,
-    /// quelle que soit leur kind) et Immobilier en 2 grosses catégories pour ne
-    /// pas saturer le donut. Plus tard on pourra splitter par AssetKind si l'utilisateur
-    /// le souhaite (toggle dans la card).
+    /// Builds the donut's slices. Movable assets (every asset, whatever
+    /// its kind) and Real estate are grouped into 2 broad categories so as
+    /// not to saturate the donut. Splitting by AssetKind could be added later if the user
+    /// wants it (a toggle in the card).
     private var allocationSlices: [AllocationSlice] {
         var slices: [AllocationSlice] = []
         if vm.totalAssetsValue > 0 {
@@ -569,11 +568,11 @@ struct PatrimoineView: View {
 
     // MARK: - Empty state
 
-    // `EmptyStateView` (icône/titre/message) est le mécanisme unique pour les
-    // écrans vides — cf. CLAUDE.md §5. Patrimoine a besoin de deux CTA en plus
-    // (Actif/Bien), d'où le slot `actions` plutôt qu'un état vide custom qui
-    // dépareillait (cercle teinté 88pt vs icône plate, titleLarge vs
-    // titleMedium) des autres modules (retour d'usage).
+    // `EmptyStateView` (icon/title/message) is the single mechanism for
+    // empty screens — see CLAUDE.md §5. Patrimoine needs two extra CTAs
+    // (Asset/Property), hence the `actions` slot rather than a custom empty
+    // state that stood out (an 88pt tinted circle vs. a flat icon, titleLarge vs.
+    // titleMedium) from the other modules.
     @ViewBuilder private var emptyState: some View {
         EmptyStateView(
             icon: "house.fill",
@@ -610,11 +609,11 @@ struct PatrimoineView: View {
         }
     }
 
-    /// Header de section uniformisé : eyebrow uppercased + total en `moneyMedium`
-    /// (couleur paramétrable pour différencier actifs et passifs) + un complément
-    /// optionnel à droite (compte d'items, coût mensuel, gain agrégé).
+    /// A unified section header: an uppercased eyebrow + a total in `moneyMedium`
+    /// (a configurable color to tell assets and liabilities apart) + an
+    /// optional addition on the right (an item count, monthly cost, aggregated gain).
     ///
-    /// Centralisé ici plutôt que dupliqué dans chaque section.
+    /// Centralized here rather than duplicated in every section.
     @ViewBuilder
     private func sectionHeader(eyebrow: LocalizedStringKey,
                                total: Double,
@@ -628,8 +627,8 @@ struct PatrimoineView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(0.8)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
-                // Pour les sections sans total monétaire pertinent (ex : "OBJECTIFS",
-                // qui n'a pas de "somme" qui ait du sens), on masque la ligne de chiffre.
+                // For sections with no relevant monetary total (e.g. "GOALS",
+                // which has no meaningful "sum"), the figure line is hidden.
                 if !hideTotal {
                     Text(total, format: .currency(code: "EUR").presentation(.narrow))
                         .font(AppTheme.Typography.moneyMedium)
@@ -651,29 +650,29 @@ struct PatrimoineView: View {
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             }
         }
-        .textCase(nil)  // SwiftUI met les section headers en MAJUSCULES par défaut — on désactive
+        .textCase(nil)  // SwiftUI uppercases section headers by default — turned off
         .padding(.vertical, AppTheme.Spacing.sm)
     }
 
-    // MARK: - Section Objectifs (Goals)
+    // MARK: - Goals section
 
-    /// Section "Objectifs" en tête des collections Patrimoine. Visible uniquement
-    /// si l'utilisateur a au moins 1 goal — sinon on n'affiche rien (header inclus) pour
-    /// rester cohérent avec le pattern des autres sections.
+    /// A "Goals" section at the top of the Patrimoine collections. Shown only
+    /// if the user has at least 1 goal — otherwise nothing is shown (header included) to
+    /// stay consistent with the other sections' pattern.
     ///
-    /// Le toolbar Menu `+` reste l'entry point unique pour créer.
+    /// The toolbar's "+" Menu stays the single entry point to create one.
     @ViewBuilder private var goalsListSection: some View {
         if !vm.goals.isEmpty {
             Section {
                 ForEach(vm.goals) { goal in
                     goalRow(goal)
-                        // ⚠️ Identité PRÉFIXÉE par le type (cf. `mobilierListSection`) :
-                        // objectif/actif/bien/prêt partagent des `id: Int` qui se
-                        // recouvrent, et la `List` macOS (NSTableView) recycle ses
-                        // lignes PAR IDENTITÉ à travers TOUTES les sections — sans
-                        // préfixe, une ligne d'objectif s'affichait dans la section
-                        // des actifs ou des prêts. iOS scope par section, d'où un
-                        // bug invisible sur mobile.
+                        // ⚠️ Identity PREFIXED by type (see `mobilierListSection`):
+                        // goal/asset/property/loan share `id: Int`s that
+                        // overlap, and macOS's `List` (NSTableView) recycles its
+                        // rows BY IDENTITY across EVERY section — without a
+                        // prefix, a goal row showed up in the assets or
+                        // loans section. iOS scopes by section, hence a bug
+                        // invisible on mobile.
                         .id("goal-\(goal.id)")
                         .rowActions(
                             leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingGoal = goal }],
@@ -686,10 +685,10 @@ struct PatrimoineView: View {
             } header: {
                 sectionHeader(
                     eyebrow: "OBJECTIFS",
-                    total: 0,                                  // Pas de total monétaire pertinent ici
+                    total: 0,                                  // No relevant monetary total here
                     accent: AppTheme.Colors.textPrimary,
                     trailingNote: Text("\(vm.goals.count) objectif\(vm.goals.count > 1 ? "s" : "")"),
-                    hideTotal: true                            // On masque le 0 € — irrelevant
+                    hideTotal: true                            // Hides the €0 — irrelevant
                 )
                 .macGroupedSectionHeader()
             }
@@ -703,7 +702,7 @@ struct PatrimoineView: View {
             editingGoal = goal
         } label: {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
-                // Ligne 1 : icône + nom + % atteint
+                // Line 1: icon + name + % reached
                 HStack(spacing: AppTheme.Spacing.md) {
                     Image(systemName: goal.kind.systemIcon)
                         .font(.system(size: 14, weight: .semibold))
@@ -731,8 +730,8 @@ struct PatrimoineView: View {
                     }
                 }
 
-                // Ligne 2 : barre de progression couleur dynamique selon état
-                // (success si atteint, warning si overdue, accent vert sinon)
+                // Line 2: a progress bar with a dynamic color depending on state
+                // (success if reached, warning if overdue, accent green otherwise)
                 if let progress {
                     let barColor: Color = progress.isCompleted
                         ? AppTheme.Colors.success
@@ -750,7 +749,7 @@ struct PatrimoineView: View {
                     }
                     .frame(height: 5)
 
-                    // Ligne 3 : current / target + mensualité requise (si deadline)
+                    // Line 3: current / target + required monthly payment (if there's a deadline)
                     HStack {
                         MoneyText(
                             amount: progress.currentAmount,
@@ -789,9 +788,9 @@ struct PatrimoineView: View {
         .buttonStyle(.plain)
     }
 
-    /// Sous-titre row goal : kind label + statut deadline + hint contextuel.
-    /// Pour debt_payoff à 0% on ajoute une note explicative ("Baseline capturée…")
-    /// pour éviter que l'utilisateur pense que c'est cassé.
+    /// A goal row's subtitle: the kind label + deadline status + a contextual hint.
+    /// For a debt_payoff at 0% an explanatory note is added ("Baseline captured…")
+    /// so the user doesn't think it's broken.
     private func goalSubtitle(goal: Goal, progress: GoalProgress?) -> Text {
         var parts: [Text] = [Text(LocalizedStringKey(goal.kind.label))]
         if let progress, progress.isCompleted {
@@ -808,9 +807,9 @@ struct PatrimoineView: View {
                 parts.append(Text("Dans ~\(years) an\(years > 1 ? "s" : "")"))
             }
         }
-        // Hint pédagogique pour debt_payoff à 0% : le calcul est correct mais
-        // contre-intuitif (vous avez 0% car vous n'avez encore rien remboursé
-        // **depuis la création du goal**, pas depuis le début du prêt).
+        // A teaching hint for a debt_payoff at 0%: the calculation is correct but
+        // counter-intuitive (it's at 0% because nothing has been paid off
+        // **since the goal was created**, not since the start of the loan).
         if goal.kind == .debtPayoff, let progress, progress.ratio == 0 {
             parts.append(Text("Point de départ"))
         }
@@ -819,17 +818,17 @@ struct PatrimoineView: View {
         }
     }
 
-    // MARK: - Section Mobilier & Liquidités (List native)
+    // MARK: - Movable Assets & Cash section (a native List)
 
     @ViewBuilder private var mobilierListSection: some View {
-        // Section entièrement masquée si vide (header + content) — évite un header
-        // orphelin suspendu. La création se fait via le toolbar Menu `+`.
+        // A section fully hidden when empty (header + content) — avoids an
+        // orphaned header. Creation happens via the toolbar's "+" Menu.
         if !vm.assets.isEmpty {
             Section {
                 ForEach(vm.assets) { asset in
                     assetRow(asset)
-                        // Identité préfixée — cf. `goalsListSection` (collision d'id
-                        // entre collections + recyclage NSTableView sur macOS).
+                        // A prefixed identity — see `goalsListSection` (an id collision
+                        // between collections + macOS's NSTableView recycling).
                         .id("asset-\(asset.id)")
                         // Actions adaptatives : swipe iOS / clic droit macOS (cf. RowActions).
                         .rowActions(
@@ -859,7 +858,7 @@ struct PatrimoineView: View {
             Section {
                 ForEach(vm.realEstates) { item in
                     realEstateRow(item)
-                        // Identité préfixée — cf. `goalsListSection`.
+                        // A prefixed identity — see `goalsListSection`.
                         .id("realestate-\(item.id)")
                         .rowActions(
                             leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingRealEstate = item }],
@@ -881,7 +880,7 @@ struct PatrimoineView: View {
         }
     }
 
-    // (addRealEstateCard retiré — création via le toolbar Menu `+` uniquement.)
+    // (addRealEstateCard removed — creation via the toolbar's "+" Menu only.)
 
     @ViewBuilder
     private func realEstateRow(_ item: PatrimoineRealEstate) -> some View {
@@ -913,8 +912,8 @@ struct PatrimoineView: View {
                         .font(AppTheme.Typography.moneySmall)
                         .foregroundStyle(AppTheme.Colors.textPrimary)
 
-                    // Mini chip plus-value (+X € / +Y%) si l'utilisateur a un prix d'achat
-                    // renseigné — sinon on cache (pas pertinent).
+                    // A mini gain chip (+X € / +Y%) if the user entered a purchase
+                    // price — otherwise hidden (not relevant).
                     if item.purchasePrice > 0 {
                         HStack(spacing: 2) {
                             Image(systemName: item.capitalGain >= 0 ? "arrow.up.right" : "arrow.down.right")
@@ -932,17 +931,17 @@ struct PatrimoineView: View {
             }
         }
         .buttonStyle(.plain)
-        // contextMenu retiré au profit des swipeActions natifs (configurés côté
-        // List dans immobilierListSection).
+        // The contextMenu was removed in favor of native swipeActions (configured on the
+        // List's side in immobilierListSection).
     }
 
-    /// Sous-titre pédagogique : "Acheté 240 000 € en oct. 2018" + adresse si renseignée.
+    /// An educational subtitle: "Bought €240,000 in Oct. 2018" + the address if entered.
     ///
-    /// Retourne un `Text` (pas un `String`) : `.formatted()` appelé directement sur une
-    /// valeur en dehors d'un `Text(_:format:)` ignore le `\.locale` d'environnement forcé
-    /// par l'app et retombe sur la locale RÉELLE de l'appareil — d'où un mélange
-    /// "36 323,38 €" / "€1,041.69" à l'écran quand l'iPhone est en anglais (cf. CLAUDE.md
-    /// "Téléphone en anglais, app FR-first"). `Text(_:format:)` seul respecte l'environnement.
+    /// Returns a `Text` (not a `String`): `.formatted()` called directly on a
+    /// value outside a `Text(_:format:)` ignores the app-forced environment
+    /// `\.locale` and falls back to the device's ACTUAL locale — hence a mix of
+    /// "36 323,38 €" / "€1,041.69" on screen when the iPhone is set to English (see
+    /// CLAUDE.md "iPhone in English, FR-first app"). `Text(_:format:)` alone respects the environment.
     private func realEstateSubtitle(_ item: PatrimoineRealEstate) -> Text {
         let price: Text = item.purchasePrice > 0
             ? Text(item.purchasePrice, format: .currency(code: "EUR").presentation(.narrow))
@@ -950,21 +949,21 @@ struct PatrimoineView: View {
         let date = Text(item.purchaseDate, format: .dateTime.month(.abbreviated).year())
         let baseLine = Text("Acheté ") + price + Text(" en ") + date
         if let address = item.address, !address.isEmpty {
-            // On garde la première ligne d'adresse pour éviter de polluer la row.
+            // The first address line is kept, to avoid cluttering the row.
             let firstLine = address.split(separator: "\n").first.map(String.init) ?? address
             return baseLine + Text(" · \(firstLine)")
         }
         return baseLine
     }
 
-    // MARK: - Section Prêts & dettes (List native)
+    // MARK: - Loans & Debts section (a native List)
 
     @ViewBuilder private var pretsListSection: some View {
         if !vm.loans.isEmpty {
             Section {
                 ForEach(vm.loans) { loan in
                     loanRow(loan)
-                        // Identité préfixée — cf. `goalsListSection`.
+                        // A prefixed identity — see `goalsListSection`.
                         .id("loan-\(loan.id)")
                         .rowActions(
                             leading: [RowAction("Modifier", systemImage: "pencil", tint: AppTheme.Colors.accent) { editingLoan = loan }],
@@ -975,8 +974,8 @@ struct PatrimoineView: View {
                         .macGroupedRow(first: loan.id == vm.loans.first?.id, last: loan.id == vm.loans.last?.id)
                 }
             } header: {
-                // Header dette : montant en danger (terracotta) + coût mensuel total
-                // (mensualités + assurances) en chip pour matérialiser le "poids" du passif.
+                // A debt header: the amount in danger (terracotta) + the total monthly cost
+                // (payments + insurance) in a chip to convey the liability's "weight".
                 sectionHeader(
                     eyebrow: "PRÊTS & DETTES",
                     total: vm.totalLoansRemainingCapital,
@@ -990,7 +989,7 @@ struct PatrimoineView: View {
         }
     }
 
-    // (addLoanCard retiré — création via le toolbar Menu `+` uniquement.)
+    // (addLoanCard removed — creation via the toolbar's "+" Menu only.)
 
     @ViewBuilder
     private func loanRow(_ loan: PatrimoineLoan) -> some View {
@@ -999,7 +998,7 @@ struct PatrimoineView: View {
             editingLoan = loan
         } label: {
             VStack(spacing: AppTheme.Spacing.sm) {
-                // Ligne principale : icône + nom + capital restant.
+                // The main line: icon + name + remaining principal.
                 HStack(spacing: AppTheme.Spacing.md) {
                     Image(systemName: "creditcard.fill")
                         .font(.system(size: 14, weight: .semibold))
@@ -1025,9 +1024,9 @@ struct PatrimoineView: View {
                              format: .currency(code: "EUR").presentation(.narrow))
                             .font(AppTheme.Typography.moneySmall)
                             .foregroundStyle(AppTheme.Colors.danger)
-                        // Coût mensuel = mensualité prêt + assurance (si renseignée).
-                        // On affiche en 1 ligne pour ne pas étirer la row, et avec un
-                        // tooltip "+ assu" pour matérialiser la présence de l'assurance.
+                        // Monthly cost = the loan payment + insurance (if entered).
+                        // Shown on 1 line so as not to stretch the row, with a
+                        // "+ ins." tooltip to convey the presence of insurance.
                         if let state, !state.isPending && !state.isCompleted {
                             let totalMonthly = state.monthlyPayment + loan.insuranceMonthly
                             if totalMonthly > 0 {
@@ -1044,9 +1043,9 @@ struct PatrimoineView: View {
                     }
                 }
 
-                // Barre de progression % remboursé — visualise instantanément l'avancement
-                // du prêt. Masquée pour REVOLVING (pas pertinent) et pour les prêts
-                // pas encore démarrés (état pending).
+                // A % repaid progress bar — instantly visualizes the loan's
+                // progress. Hidden for REVOLVING (not relevant) and for loans
+                // not yet started (a pending state).
                 if loan.loanType != .revolving,
                    let state, !state.isPending,
                    state.capitalPaid > 0 || state.remainingCapital > 0 {
@@ -1075,11 +1074,11 @@ struct PatrimoineView: View {
             }
         }
         .buttonStyle(.plain)
-        // contextMenu retiré au profit des swipeActions natifs (configurés côté
-        // List dans pretsListSection).
+        // The contextMenu was removed in favor of native swipeActions (configured on the
+        // List's side in pretsListSection).
     }
 
-    /// Sous-titre row prêt : type + durée + bien lié si applicable.
+    /// A loan row's subtitle: type + duration + the linked property if applicable.
     private func loanSubtitle(_ loan: PatrimoineLoan) -> Text {
         var parts: [Text] = [Text(LocalizedStringKey(loan.loanType.label))]
         if loan.loanType != .revolving {
@@ -1104,7 +1103,7 @@ struct PatrimoineView: View {
         }
     }
 
-    // (addAssetCard retiré — création via le toolbar Menu `+` uniquement.)
+    // (addAssetCard removed — creation via the toolbar's "+" Menu only.)
 
     @ViewBuilder
     private func assetRow(_ asset: PatrimoineAsset) -> some View {
@@ -1127,7 +1126,7 @@ struct PatrimoineView: View {
                             .font(AppTheme.Typography.titleSmall)
                             .foregroundStyle(AppTheme.Colors.textPrimary)
                             .lineLimit(1)
-                        // Badge contextuel selon la source résolue.
+                        // A contextual badge depending on the resolved source.
                         sourceBadge(source)
                     }
                     Text(vm.sourceLabel(for: asset))
@@ -1144,13 +1143,13 @@ struct PatrimoineView: View {
             }
         }
         .buttonStyle(.plain)
-        // contextMenu retiré au profit des swipeActions natifs (configurés côté
-        // List dans mobilierListSection).
+        // The contextMenu was removed in favor of native swipeActions (configured on the
+        // List's side in mobilierListSection).
     }
 
-    /// Petit pictogramme à droite du nom qui matérialise instantanément la source
-    /// de la valeur (lien actif, manuel, lien rompu). Évite à l'utilisateur de lire le
-    /// sous-titre pour comprendre l'état.
+    /// A small pictogram to the right of the name that instantly conveys the value's
+    /// source (an active link, manual, a broken link). Saves the user from reading the
+    /// subtitle to understand the state.
     @ViewBuilder
     private func sourceBadge(_ source: AssetValueSource) -> some View {
         switch source {
@@ -1163,9 +1162,9 @@ struct PatrimoineView: View {
                 .frame(width: 18, height: 18)
                 .background(AppTheme.Colors.accent.opacity(0.13), in: Circle())
         case .brokenLink:
-            // Triangle warning explicite — l'icône `link.badge.plus` était trop
-            // discrète et confondue avec "lien actif". Ici on signale clairement
-            // qu'une action user est nécessaire (réparer ou repasser en manuel).
+            // An explicit warning triangle — the `link.badge.plus` icon was too
+            // discreet and confused with "active link". This one clearly signals
+            // a user action is needed (fix it or switch back to manual).
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(AppTheme.Colors.warning)
@@ -1183,8 +1182,8 @@ struct PatrimoineView: View {
         }
     }
 
-    // (Teaser "À venir" retiré à l'étape 5 — toutes les sections sont maintenant
-    //  implémentées : Mobilier, Immobilier, Prêts, Vue globale via le hero.)
+    // (The "Coming soon" teaser was removed — every section is now
+    //  implemented: Movable assets, Real estate, Loans, the global view via the hero.)
 }
 
 #Preview {
@@ -1192,10 +1191,10 @@ struct PatrimoineView: View {
         .environment(AppState())
 }
 
-// MARK: - Panneaux détail macOS (patrimoine)
+// MARK: - macOS detail panes (Patrimoine)
 
-/// Détail lecture seule d'un actif — mode « voir » du panneau macOS.
-/// Jamais instancié sur iOS (le tap y ouvre directement l'édition en sheet).
+/// A read-only detail of an asset — the "view" mode of the macOS pane.
+/// Never instantiated on iOS (there, tapping opens editing directly as a sheet).
 private struct AssetDetailPane: View {
     let asset: PatrimoineAsset
     let vm: PatrimoineViewModel
@@ -1244,7 +1243,7 @@ private struct AssetDetailPane: View {
     }
 }
 
-/// Détail lecture seule d'un bien immobilier — mode « voir » du panneau macOS.
+/// A read-only detail of a real-estate property — the "view" mode of the macOS pane.
 private struct RealEstateDetailPane: View {
     let item: PatrimoineRealEstate
 
@@ -1300,7 +1299,7 @@ private struct RealEstateDetailPane: View {
     }
 }
 
-/// Détail lecture seule d'un prêt — mode « voir » du panneau macOS.
+/// A read-only detail of a loan — the "view" mode of the macOS pane.
 private struct LoanDetailPane: View {
     let loan: PatrimoineLoan
     let realEstates: [PatrimoineRealEstate]
@@ -1371,7 +1370,7 @@ private struct LoanDetailPane: View {
     }
 }
 
-/// Détail lecture seule d'un objectif — mode « voir » du panneau macOS.
+/// A read-only detail of a goal — the "view" mode of the macOS pane.
 private struct GoalDetailPane: View {
     let goal: Goal
 

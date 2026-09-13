@@ -2,16 +2,16 @@ import SwiftUI
 
 // MARK: - LoanFormView
 //
-// Sheet de création/édition d'un prêt. Le picker `LoanType` discrimine le mode de
-// calcul ET l'affichage : les champs spécifiques au différé n'apparaissent que pour
-// les types DEFERRED_*, et REVOLVING masque taux + durée (pas pertinents).
+// A sheet for creating/editing a loan. The `LoanType` picker determines both the
+// calculation mode AND the display: deferral-specific fields only appear for
+// DEFERRED_* types, and REVOLVING hides the rate + duration (not relevant).
 //
-// Le pavé "Aperçu" en bas du form recalcule en direct via `LoanCalculator` :
-//   - Mensualité actuelle
-//   - Capital restant dû à aujourd'hui
-//   - Total des intérêts payés à date
-// → Feedback éditorial pendant la saisie, et permet de tester un scénario avant
-// même de l'enregistrer.
+// The "Preview" block at the bottom of the form recomputes live via `LoanCalculator`:
+//   - The current monthly payment
+//   - The remaining principal owed today
+//   - The total interest paid to date
+// → Editorial feedback while typing, and lets a scenario be tested before
+// it's even saved.
 
 struct LoanFormView: View {
     @Environment(\.paneDismiss) private var dismiss
@@ -23,7 +23,7 @@ struct LoanFormView: View {
     @State private var name: String
     @State private var loanType: LoanType
     @State private var principalText: String
-    /// Saisie en pourcentage (ex: 3.4 = 3.4%). Converti en décimal au save (÷100).
+    /// Entered as a percentage (e.g. 3.4 = 3.4%). Converted to a decimal on save (÷100).
     @State private var annualRatePercentText: String
     @State private var durationMonths: Int
     @State private var deferralMonths: Int
@@ -45,7 +45,7 @@ struct LoanFormView: View {
         _principalText = State(initialValue: initialPrincipal == 0 ? "" : String(format: "%.2f", initialPrincipal))
         let initialRate = (existingLoan?.annualRate ?? 0) * 100
         _annualRatePercentText = State(initialValue: initialRate == 0 ? "" : String(format: "%.2f", initialRate))
-        _durationMonths = State(initialValue: existingLoan?.durationMonths ?? 240)  // 20 ans par défaut
+        _durationMonths = State(initialValue: existingLoan?.durationMonths ?? 240)  // 20 years by default
         _deferralMonths = State(initialValue: existingLoan?.deferralMonths ?? 0)
         _startDate = State(initialValue: existingLoan?.startDate ?? Date())
         let initialInsurance = existingLoan?.insuranceMonthly ?? 0
@@ -60,7 +60,7 @@ struct LoanFormView: View {
         Double(principalText.replacingOccurrences(of: ",", with: ".")) ?? 0
     }
     private var annualRate: Double {
-        // l'utilisateur saisit en %, on stocke en décimal (0.034 = 3.4%).
+        // The user enters a %, it's stored as a decimal (0.034 = 3.4%).
         (Double(annualRatePercentText.replacingOccurrences(of: ",", with: ".")) ?? 0) / 100
     }
     private var insuranceMonthly: Double {
@@ -70,8 +70,8 @@ struct LoanFormView: View {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    /// Aperçu live du prêt en l'état du form. Recalculé à chaque keystroke — coût
-    /// négligeable (Swift pur, quelques additions/exponentiations).
+    /// A live preview of the loan as the form currently stands. Recomputed on every
+    /// keystroke — a negligible cost (pure Swift, a few additions/exponentiations).
     private var livePreviewState: LoanState? {
         guard principal > 0 else { return nil }
         let draft = PatrimoineLoan(
@@ -103,13 +103,13 @@ struct LoanFormView: View {
 
     var body: some View {
             Form {
-                // ── Identité ────────────────────────────────────────
+                // ── Identity ────────────────────────────────────────
                 Section("Identité") {
                     TextField("Nom (ex. Prêt immo Paris)", text: $name)
                         .autocorrectionDisabled()
                 }
 
-                // ── Type de prêt ────────────────────────────────────
+                // ── Loan type ────────────────────────────────────────
                 Section {
                     Picker("Type", selection: $loanType) {
                         ForEach(LoanType.allCases, id: \.self) { t in
@@ -123,14 +123,14 @@ struct LoanFormView: View {
                     Text("Type de prêt")
                 }
 
-                // ── Caractéristiques ────────────────────────────────
+                // ── Characteristics ────────────────────────────────
                 Section {
                     HStack {
                         Text(loanType == .revolving ? "Capital restant" : "Capital emprunté")
                             .font(AppTheme.Typography.bodyMedium)
                         Spacer()
-                        // Titre vide : la row a déjà son label — cf.
-                        // TransactionEditSheet pour la raison macOS.
+                        // An empty title: the row already has its label — see
+                        // TransactionEditSheet for the macOS reason.
                         TextField("", text: $principalText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
@@ -167,7 +167,7 @@ struct LoanFormView: View {
                     Text("Caractéristiques")
                 }
 
-                // ── Différé (conditionnel) ──────────────────────────
+                // ── Deferral (conditional) ──────────────────────────
                 if showsDeferralSection {
                     Section {
                         Stepper(value: $deferralMonths, in: 0...max(durationMonths - 1, 0), step: 1) {
@@ -190,8 +190,8 @@ struct LoanFormView: View {
                     }
                 }
 
-                // ── Assurance emprunteur ────────────────────────────
-                // Charge mensuelle séparée — ne modifie PAS le calcul d'amortissement.
+                // ── Borrower's insurance ────────────────────────────
+                // A separate monthly cost — does NOT change the amortization calculation.
                 Section {
                     HStack {
                         Text("Assurance / mois")
@@ -221,7 +221,7 @@ struct LoanFormView: View {
                         .font(AppTheme.Typography.bodySmall)
                 }
 
-                // ── Bien immobilier lié (optionnel) ─────────────────
+                // ── Linked real-estate property (optional) ─────────────────
                 if !viewModel.realEstates.isEmpty {
                     Section {
                         Picker("Bien lié", selection: Binding(
@@ -241,7 +241,7 @@ struct LoanFormView: View {
                     }
                 }
 
-                // ── Aperçu live ─────────────────────────────────────
+                // ── Live preview ─────────────────────────────────────
                 if let preview = livePreviewState {
                     Section {
                         previewRow(label: "Mensualité prêt",
@@ -338,7 +338,7 @@ struct LoanFormView: View {
         }
     }
 
-    /// Affichage humain de la durée (ex: "240 mois · 20 ans" ou "18 mois · 1 an et 6 mois").
+    /// A human-readable duration (e.g. "240 months · 20 years" or "18 months · 1 year and 6 months").
     private func durationLabel(_ months: Int) -> String {
         let years = months / 12
         let rem = months % 12
@@ -354,7 +354,7 @@ struct LoanFormView: View {
         let trimmedNotes = notes.trimmingCharacters(in: .whitespaces)
         let notesValue: String? = trimmedNotes.isEmpty ? nil : trimmedNotes
 
-        // Pour REVOLVING, on borne deferralMonths à 0 et on ignore la durée saisie.
+        // For REVOLVING, deferralMonths is clamped to 0 and the entered duration is ignored.
         let safeDeferral = (loanType == .deferredTotal || loanType == .deferredPartial)
             ? deferralMonths
             : 0

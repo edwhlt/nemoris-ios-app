@@ -2,33 +2,33 @@ import Foundation
 
 // MARK: - PatrimoineSnapshotBuilder
 //
-// **Moteur pur** de résolution des valeurs d'assets et d'agrégation du patrimoine.
-// Aucun accès base : l'appelant fetche, le moteur calcule. C'est ce qui le rend
-// testable et surtout partageable entre `PatrimoineViewModel` (module) et le
-// Dashboard, qui en avait jusqu'ici une copie inlinée avec le commentaire
-// « résolution identique au PatrimoineViewModel mais inlinée ici pour ne pas
-// instancier 2 VMs » — donc deux implémentations libres de diverger.
+// **A pure engine** for resolving asset values and aggregating net worth.
+// No database access: the caller fetches, the engine computes. This is what makes it
+// testable and, above all, shareable between `PatrimoineViewModel` (the module) and the
+// Dashboard, which until now had an inlined copy with the comment
+// "resolution identical to PatrimoineViewModel but inlined here to avoid
+// instantiating 2 VMs" — so two implementations free to diverge.
 //
-// ⚠️ Un builder pur n'écrit jamais en base. La persistance opportuniste de
-// `last_known_value` reste dans `PatrimoineViewModel.load()`.
+// ⚠️ A pure builder never writes to the database. The opportunistic persistence of
+// `last_known_value` stays in `PatrimoineViewModel.load()`.
 
 enum PatrimoineSnapshotBuilder {
 
-    /// Comptes bancaires dont il faut connaître le solde pour résoudre les assets.
-    /// Permet à l'appelant de ne fetcher QUE les soldes utiles (un `fetchAccountBalance`
-    /// est un `SUM(amount)` sur toute la table `transactions`).
+    /// Bank accounts whose balance needs to be known to resolve assets.
+    /// Lets the caller fetch ONLY the useful balances (a `fetchAccountBalance`
+    /// is a `SUM(amount)` over the whole `transactions` table).
     static func linkedBankAccountIds(in assets: [PatrimoineAsset]) -> Set<Int> {
         Set(assets.compactMap(\.linkedAccountId))
     }
 
-    /// Résout la valeur courante d'un asset.
+    /// Resolves an asset's current value.
     ///
     /// - Parameters:
-    ///   - existingBankAccountIds: ids des comptes bancaires qui existent RÉELLEMENT.
-    ///     Indispensable pour distinguer un compte supprimé (lien rompu → fallback sur
-    ///     `lastKnownValue`) d'un compte bien vivant dont le solde vaut 0 — un solde
-    ///     seul ne permet pas de faire la différence.
-    ///   - bankBalances: soldes déjà fetchés, indexés par id de compte.
+    ///   - existingBankAccountIds: ids of bank accounts that ACTUALLY exist.
+    ///     Essential to distinguish a deleted account (a broken link → falls back to
+    ///     `lastKnownValue`) from a perfectly alive account whose balance is 0 — a balance
+    ///     alone can't tell the difference.
+    ///   - bankBalances: balances already fetched, indexed by account id.
     static func resolveValue(
         for asset: PatrimoineAsset,
         existingBankAccountIds: Set<Int>,
@@ -50,7 +50,7 @@ enum PatrimoineSnapshotBuilder {
         return (asset.manualValue, .manual)
     }
 
-    /// Résout tous les assets d'un coup.
+    /// Resolves every asset at once.
     static func resolveValues(
         assets: [PatrimoineAsset],
         existingBankAccountIds: Set<Int>,
@@ -72,20 +72,20 @@ enum PatrimoineSnapshotBuilder {
         return (values, sources)
     }
 
-    /// Somme des assets résolus. `lastKnownValue` sert de filet si un asset n'a pas
-    /// été résolu (ne devrait pas arriver, mais évite qu'un oubli fasse disparaître
-    /// silencieusement une ligne du patrimoine).
+    /// The sum of resolved assets. `lastKnownValue` serves as a safety net if an asset
+    /// wasn't resolved (shouldn't happen, but prevents an oversight from
+    /// silently dropping a line from net worth).
     static func totalAssetsValue(assets: [PatrimoineAsset], resolvedValues: [Int: Double]) -> Double {
         assets.reduce(0.0) { $0 + (resolvedValues[$1.id] ?? $1.lastKnownValue) }
     }
 
-    /// Somme des capitaux restants dus. `principal` sert de filet si l'état du prêt
-    /// n'a pas été calculé.
+    /// The sum of remaining principals. `principal` serves as a safety net if a loan's
+    /// state wasn't computed.
     static func totalLiabilities(loans: [PatrimoineLoan], loanStates: [Int: LoanState]) -> Double {
         loans.reduce(0.0) { $0 + (loanStates[$1.id]?.remainingCapital ?? $1.principal) }
     }
 
-    /// Agrège le snapshot complet à partir des collections déjà résolues.
+    /// Aggregates the full snapshot from already-resolved collections.
     static func snapshot(
         assets: [PatrimoineAsset],
         realEstates: [PatrimoineRealEstate],
