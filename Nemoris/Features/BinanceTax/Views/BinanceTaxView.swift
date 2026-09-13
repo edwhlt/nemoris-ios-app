@@ -2,7 +2,7 @@ import SwiftUI
 import CryptoKit
 import Security
 
-// MARK: - Keychain Storage (clés API sensibles)
+// MARK: - Keychain Storage (sensitive API keys)
 
 private enum BinanceKeychain {
     static let apiKeyID  = "binance_api_key"
@@ -48,12 +48,12 @@ struct FiscalTrade: Identifiable {
     let qtySold: Decimal
     let priceEUR: Decimal    // prix unitaire EUR
     let totalEUR: Decimal    // produit de cession en EUR
-    let costBasisEUR: Decimal // coût de revient selon CMP
+    let costBasisEUR: Decimal // the cost basis per the weighted-average method
     let gain: Decimal        // plus/moins-value = totalEUR - costBasisEUR
 }
 
-/// Résumé par actif : achats, ventes, CMP, position restante.
-/// Permet de vérifier le calcul même si aucune cession fiscale n'a eu lieu cette année.
+/// A per-asset summary: purchases, sales, weighted-average cost, remaining position.
+/// Lets the calculation be checked even if no taxable disposal happened this year.
 struct AssetSummary: Identifiable {
     let id: String          // = asset (BTC, ETH…)
     let asset: String
@@ -62,8 +62,8 @@ struct AssetSummary: Identifiable {
     let totalSoldQty: Decimal
     let totalSoldEUR: Decimal
     let remainingQty: Decimal
-    let cmpPerUnit: Decimal     // coût moyen pondéré unitaire final
-    let salesCount: Int         // nombre de ventes sur toute la période
+    let cmpPerUnit: Decimal     // the final weighted-average unit cost
+    let salesCount: Int         // the number of sales over the whole period
 }
 
 struct FiscalReport {
@@ -86,9 +86,9 @@ private struct BinanceAPIError: LocalizedError {
     var errorDescription: String? { message }
 }
 
-/// Un enregistrement de la fonctionnalité Convert/Quick Sell de Binance.
-/// Ces conversions NE figurent PAS dans /api/v3/myTrades — elles nécessitent
-/// l'endpoint /sapi/v1/convert/tradeFlow.
+/// A record from Binance's Convert/Quick Sell feature.
+/// These conversions do NOT show up in /api/v3/myTrades — they need
+/// the /sapi/v1/convert/tradeFlow endpoint.
 private struct ConvertRecord: Decodable {
     let orderId: String
     let orderStatus: String
@@ -100,7 +100,7 @@ private struct ConvertRecord: Decodable {
 }
 private struct ConvertTradeFlow: Decodable { let list: [ConvertRecord] }
 
-// Decodage des klines Binance : tableaux hétérogènes [Int64 | String | Double]
+// Decoding Binance klines: heterogeneous arrays [Int64 | String | Double]
 private enum KlineValue: Decodable {
     case int(Int64), double(Double), string(String)
     init(from decoder: Decoder) throws {
@@ -144,7 +144,7 @@ private struct BinanceAPI {
             .map { String(format: "%02hhx", $0) }.joined()
     }
 
-    /// Requête GET signée avec X-MBX-APIKEY
+    /// A GET request signed with X-MBX-APIKEY
     private func signedGet<T: Decodable>(path: String, params: String) async throws -> T {
         let query = "\(params)&timestamp=\(now)"
         let sig   = sign(query)
@@ -161,7 +161,7 @@ private struct BinanceAPI {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    /// Requête GET publique (sans auth)
+    /// A public GET request (no auth)
     private func publicGet<T: Decodable>(path: String, params: String) async throws -> T {
         guard let url = URL(string: "\(base)\(path)?\(params)") else {
             throw BinanceAPIError(message: "URL invalide")
@@ -172,7 +172,7 @@ private struct BinanceAPI {
 
     // MARK: - Endpoints
 
-    /// Retourne les assets avec solde non nul (hors monnaies fiat stables)
+    /// Returns assets with a non-zero balance (excluding stable fiat currencies)
     func fetchAssets() async throws -> [String] {
         let resp: AccountResponse = try await signedGet(path: "/api/v3/account", params: "")
         let stable: Set<String> = ["EUR", "USDT", "BUSD", "USDC", "TUSD", "DAI", "PAX", "FDUSD"]
@@ -181,12 +181,12 @@ private struct BinanceAPI {
             .map(\.asset)
     }
 
-    /// Retourne tous les trades pour un symbole depuis startTime jusqu'à endTime.
-    /// Gère la pagination automatiquement.
+    /// Returns every trade for a symbol from startTime to endTime.
+    /// Handles pagination automatically.
     ///
-    /// Note Binance : startTime+endTime simultanément est limité à 24h.
-    /// On utilise donc startTime seul pour la première page, puis fromId pour paginer,
-    /// et on s'arrête quand le dernier trade dépasse endTime.
+    /// Binance note: startTime+endTime together are limited to 24h.
+    /// So startTime alone is used for the first page, then fromId to paginate,
+    /// stopping once the last trade exceeds endTime.
     func fetchAllTrades(symbol: String, startTime: Int64, endTime: Int64) async throws -> [RawTrade] {
         var all: [RawTrade] = []
         var lastId: Int64? = nil
@@ -194,32 +194,32 @@ private struct BinanceAPI {
         while true {
             var params = "symbol=\(symbol)&limit=1000"
             if let id = lastId {
-                // Pages suivantes : pagination par ID, sans contrainte de temps
+                // Following pages: ID-based pagination, no time constraint
                 params += "&fromId=\(id + 1)"
             } else {
-                // Première page : on démarre depuis startTime (sans endTime pour éviter la limite 24h)
+                // First page: starts from startTime (no endTime, to avoid the 24h limit)
                 params += "&startTime=\(startTime)"
             }
 
             let batch: [RawTrade] = try await signedGet(path: "/api/v3/myTrades", params: params)
             guard !batch.isEmpty else { break }
 
-            // Filtre les trades dans la fenêtre souhaitée et arrête si on a dépassé endTime
+            // Filters trades within the desired window and stops once endTime is exceeded
             let inRange = batch.filter { $0.time <= endTime }
             all.append(contentsOf: inRange)
 
-            if inRange.count < batch.count { break } // au moins un trade était après endTime
-            guard batch.count == 1000 else { break }  // dernière page
+            if inRange.count < batch.count { break } // at least one trade was after endTime
+            guard batch.count == 1000 else { break }  // the last page
 
             lastId = batch.last!.id
-            try await Task.sleep(nanoseconds: 80_000_000) // 80ms pour respecter le rate limit
+            try await Task.sleep(nanoseconds: 80_000_000) // 80ms to respect the rate limit
         }
         return all
     }
 
-    /// Historique des conversions (bouton "Convertir" / Quick Sell de Binance).
-    /// Binance limite chaque requête à 30 jours — on itère mois par mois.
-    /// Disponible depuis ~2021 ; requiert la permission "Lecture des données de trading".
+    /// Conversion history (Binance's "Convert" button / Quick Sell).
+    /// Binance limits each request to 30 days — iterated month by month.
+    /// Available since ~2021; requires the "Read trading data" permission.
     func fetchConvertHistory(startTime: Int64, endTime: Int64) async throws -> [ConvertRecord] {
         var all: [ConvertRecord] = []
         let thirtyDays: Int64 = 30 * 24 * 60 * 60 * 1000
@@ -228,7 +228,7 @@ private struct BinanceAPI {
         while t < endTime {
             let tEnd = min(t + thirtyDays, endTime)
             let params = "startTime=\(t)&endTime=\(tEnd)&limit=1000"
-            // L'endpoint peut ne pas exister ou retourner une erreur si aucune donnée → on ignore
+            // The endpoint may not exist or return an error if there's no data → ignored
             if let result = try? await signedGet(path: "/sapi/v1/convert/tradeFlow", params: params) as ConvertTradeFlow {
                 all.append(contentsOf: result.list.filter { $0.orderStatus == "SUCCESS" })
             }
@@ -238,8 +238,8 @@ private struct BinanceAPI {
         return all
     }
 
-    /// Taux de clôture EUR/USDT sous forme de klines mensuelles pour une année.
-    /// Retourne un tableau [(timestamp_ms, rate)] trié chronologiquement.
+    /// The EUR/USDT closing rate as monthly klines for a year.
+    /// Returns a [(timestamp_ms, rate)] array sorted chronologically.
     func fetchMonthlyEURUSDT(year: Int) async throws -> [(Int64, Decimal)] {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC")!
@@ -260,10 +260,10 @@ private struct BinanceAPI {
 
 // MARK: - Convert → RawTrade adapter
 
-/// Traduit un ConvertRecord en RawTrade pour le passer au TaxCalculator.
-/// Seules les conversions impliquant EUR ou un stablecoin d'un côté sont traitées
+/// Translates a ConvertRecord into a RawTrade to feed the TaxCalculator.
+/// Only conversions involving EUR or a stablecoin on one side are handled
 /// (crypto→EUR, EUR→crypto, crypto→USDT, USDT→crypto).
-/// Les conversions cross-crypto (BTC→ETH) sont ignorées pour l'instant.
+/// Cross-crypto conversions (BTC→ETH) are ignored for now.
 private func convertToRawTrade(_ r: ConvertRecord) -> RawTrade? {
     let stable: Set<String> = ["EUR", "USDT", "BUSD", "USDC", "TUSD", "DAI", "PAX", "FDUSD"]
 
@@ -276,26 +276,26 @@ private func convertToRawTrade(_ r: ConvertRecord) -> RawTrade? {
 
     let symbol: String
     let isBuyer: Bool
-    let qty: String       // quantité crypto
+    let qty: String       // the crypto quantity
     let quoteQty: String  // montant fiat/stable
     let price: String
 
     if toIsStable && !fromIsStable {
-        // Vente crypto → fiat/stable  (ex: BTC → EUR ou ETH → USDT)
+        // A crypto sale → fiat/stable (e.g. BTC → EUR or ETH → USDT)
         symbol   = "\(r.fromAsset)\(r.toAsset)"
         isBuyer  = false
         qty      = r.fromAmount
         quoteQty = r.toAmount
         price    = "\(toAmt / fromAmt)"
     } else if fromIsStable && !toIsStable {
-        // Achat crypto avec fiat/stable  (ex: EUR → BTC)
+        // A crypto purchase with fiat/stable (e.g. EUR → BTC)
         symbol   = "\(r.toAsset)\(r.fromAsset)"
         isBuyer  = true
         qty      = r.toAmount
         quoteQty = r.fromAmount
         price    = "\(fromAmt / toAmt)"
     } else {
-        return nil  // cross-crypto ou stable→stable : ignoré
+        return nil  // cross-crypto or stable→stable: ignored
     }
 
     return RawTrade(
@@ -311,16 +311,16 @@ private func convertToRawTrade(_ r: ConvertRecord) -> RawTrade? {
     )
 }
 
-// MARK: - Tax Calculator (Coût Moyen Pondéré — méthode CMP)
+// MARK: - Tax Calculator (Weighted-Average Cost method)
 
 private enum TaxCalculator {
 
-    // Assets cotés directement en EUR, sinon USDT (converti)
+    // Assets quoted directly in EUR, otherwise USDT (converted)
     static let stableQuotes: Set<String> = ["USDT", "BUSD", "USDC", "TUSD", "DAI", "PAX", "FDUSD"]
 
-    /// Extrait (baseAsset, quoteAsset) d'un symbole Binance.
+    /// Extracts (baseAsset, quoteAsset) from a Binance symbol.
     static func parseSymbol(_ symbol: String) -> (base: String, quote: String)? {
-        // Essaie d'abord les quotes les plus longues pour éviter les collisions
+        // Tries the longest quotes first, to avoid collisions
         let quotes = ["USDT", "BUSD", "USDC", "TUSD", "FDUSD", "DAI", "PAX", "EUR", "BTC", "ETH", "BNB"]
         for q in quotes {
             if symbol.hasSuffix(q), symbol.count > q.count {
@@ -330,13 +330,13 @@ private enum TaxCalculator {
         return nil
     }
 
-    /// Calcule les plus/moins-values selon la méthode CMP.
+    /// Computes gains/losses using the weighted-average cost method.
     ///
     /// - Parameters:
-    ///   - trades: Tous les trades historiques (y compris avant l'année fiscale, pour la base de coût).
-    ///   - eurRates: Tableau (timestamp_ms, USDT→EUR rate) pour convertir les paires USDT.
-    ///   - year: Année fiscale (seules les cessions de cette année sont dans `fiscalTrades`).
-    /// - Returns: Tuple (cessions fiscales de l'année, résumé par actif sur toute la période).
+    ///   - trades: Every historical trade (including before the fiscal year, for the cost basis).
+    ///   - eurRates: An array of (timestamp_ms, USDT→EUR rate) to convert USDT pairs.
+    ///   - year: The fiscal year (only that year's disposals are in `fiscalTrades`).
+    /// - Returns: A tuple (that year's taxable disposals, a per-asset summary over the whole period).
     static func calculate(
         trades: [RawTrade],
         eurRates: [(Int64, Decimal)],
@@ -350,11 +350,11 @@ private enum TaxCalculator {
             return closest.1
         }
 
-        // Regroupe les trades par asset de base
+        // Groups trades by base asset
         var byAsset: [String: [RawTrade]] = [:]
         for trade in trades {
             guard let (base, quote) = parseSymbol(trade.symbol) else { continue }
-            // Ignore les paires cross-crypto (BTC/ETH/BNB) — trop complexes sans prix EUR direct
+            // Ignores cross-crypto pairs (BTC/ETH/BNB) — too complex with no direct EUR price
             guard quote == "EUR" || stableQuotes.contains(quote) else { continue }
             byAsset[base, default: []].append(trade)
         }
@@ -366,11 +366,11 @@ private enum TaxCalculator {
         for (asset, assetTrades) in byAsset {
             let sorted = assetTrades.sorted { $0.time < $1.time }
 
-            // État CMP pour cet asset
+            // The weighted-average cost state for this asset
             var holdingQty:     Decimal = 0
             var holdingCostEUR: Decimal = 0
 
-            // Compteurs pour AssetSummary
+            // Counters for AssetSummary
             var totalBoughtQty: Decimal = 0
             var totalBoughtEUR: Decimal = 0
             var totalSoldQty:   Decimal = 0
@@ -391,18 +391,18 @@ private enum TaxCalculator {
                 let priceEUR: Decimal = quote == "EUR" ? price    : price    / eurRate
 
                 if raw.isBuyer {
-                    // ── Achat : mise à jour du CMP ──
+                    // ── Purchase: updating the weighted-average cost ──
                     holdingQty     += qty
                     holdingCostEUR += totalEUR
                     totalBoughtQty += qty
                     totalBoughtEUR += totalEUR
                 } else {
-                    // ── Vente : calcul de la plus/moins-value ──
+                    // ── Sale: computing the gain/loss ──
                     let avgCost   = holdingQty > 0 ? holdingCostEUR / holdingQty : 0
                     let costBasis = avgCost * qty
                     let gain      = totalEUR - costBasis
 
-                    // Mise à jour du stock restant
+                    // Updating the remaining stock
                     holdingQty     = max(0, holdingQty - qty)
                     holdingCostEUR = max(0, avgCost * holdingQty)
 
@@ -410,7 +410,7 @@ private enum TaxCalculator {
                     totalSoldEUR += totalEUR
                     salesCount   += 1
 
-                    // N'inclure que les cessions de l'année fiscale sélectionnée
+                    // Only include disposals from the selected fiscal year
                     if cal.component(.year, from: date) == year {
                         results.append(FiscalTrade(
                             id: raw.id,
@@ -459,8 +459,8 @@ final class BinanceTaxViewModel {
     var error: String?
     var report: FiscalReport?
     var diagnosticLog: [String] = []
-    /// Actifs supplémentaires à scanner même si leur solde est nul (séparés par virgule).
-    /// Utile quand tous les cryptos ont été vendus (solde = 0 = introuvable via fetchAssets).
+    /// Extra assets to scan even if their balance is zero (comma-separated).
+    /// Useful when every crypto was sold (balance = 0 = unfindable via fetchAssets).
     var additionalAssetsInput: String = ""
 
     var hasCredentials: Bool {
@@ -523,10 +523,10 @@ final class BinanceTaxViewModel {
 
         let api = BinanceAPI(apiKey: apiKey, apiSecret: apiSecret)
 
-        // Bornes temporelles :
-        // • Pour la base de coût (CMP), on remonte au 1er janvier 2017 (lancement Binance)
-        // • On arrête au 31/12 de l'année sélectionnée
-        // • Convert existe depuis ~2021 — on démarre le scan convert en 2021
+        // Time bounds:
+        // • For the cost basis (weighted-average), goes back to January 1, 2017 (Binance's launch)
+        // • Stops at December 31 of the selected year
+        // • Convert has existed since ~2021 — the convert scan starts in 2021
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC")!
         let start2017    = cal.date(from: DateComponents(year: 2017, month: 1, day: 1))!
@@ -536,7 +536,7 @@ final class BinanceTaxViewModel {
         let convertStart = Int64(start2021.timeIntervalSince1970 * 1000)
         let endMs        = Int64(endOfYear.timeIntervalSince1970  * 1000)
 
-        // 1. Récupère les assets avec solde non nul (peut être vide si tout vendu)
+        // 1. Fetches assets with a non-zero balance (can be empty if everything was sold)
             progress = "Récupération des actifs du compte…"
             let spotAssets = (try? await api.fetchAssets()) ?? []
             if spotAssets.isEmpty {
@@ -552,12 +552,12 @@ final class BinanceTaxViewModel {
                 ? "⚠️ Taux EUR/USDT non disponibles, fallback 0.92 utilisé"
                 : "✅ \(eurRates.count) taux EUR/USDT chargés")
 
-            // 3. Historique Convert (bouton "Convertir" / Quick Sell — NE figure PAS dans myTrades)
+            // 3. Convert history (the "Convert" button / Quick Sell — does NOT show up in myTrades)
             progress = "Récupération de l'historique Convert (vente rapide)…"
             let convertRecords = (try? await api.fetchConvertHistory(startTime: convertStart, endTime: endMs)) ?? []
             let convertTrades  = convertRecords.compactMap { convertToRawTrade($0) }
 
-            // Assets découverts via Convert (utiles si solde spot = 0)
+            // Assets discovered via Convert (useful if the spot balance = 0)
             let convertAssets = Set(convertTrades.compactMap { trade -> String? in
                 TaxCalculator.parseSymbol(trade.symbol)?.base
             })
@@ -577,7 +577,7 @@ final class BinanceTaxViewModel {
                 diagnosticLog.append("➕ Actifs manuels : \(manualAssets.joined(separator: ", "))")
             }
 
-            // 5. Liste complète des assets à scanner via spot
+            // 5. The full list of assets to scan via spot
             let assetsToScan = Array(Set(spotAssets + Array(convertAssets) + manualAssets))
 
             guard !assetsToScan.isEmpty else {
@@ -586,7 +586,7 @@ final class BinanceTaxViewModel {
                 return
             }
 
-            // 6. Récupère les trades spot pour tous les assets détectés
+            // 6. Fetches spot trades for every detected asset
             let symbols = assetsToScan.sorted().flatMap { ["\($0)EUR", "\($0)USDT"] }
             diagnosticLog.append("🔍 \(symbols.count) symboles spot à interroger : \(symbols.joined(separator: ", "))")
 
@@ -769,7 +769,7 @@ struct BinanceTaxView: View {
 
     @ViewBuilder
     private func reportSection(_ report: FiscalReport) -> some View {
-        // Résumé fiscal
+        // Tax summary
         Section {
             summaryRow("Plus-values", value: report.totalGains, positive: true)
             summaryRow("Moins-values", value: report.totalLosses, positive: false)
@@ -791,7 +791,7 @@ struct BinanceTaxView: View {
                 .font(.caption2)
         }
 
-        // Détail par actif (achats, ventes, CMP — visible même si 0 cession cette année)
+        // Per-asset detail (purchases, sales, weighted-average cost — visible even with 0 disposals this year)
         if !report.assetSummaries.isEmpty {
             Section {
                 ForEach(report.assetSummaries) { s in
@@ -805,7 +805,7 @@ struct BinanceTaxView: View {
             }
         }
 
-        // Liste des cessions de l'année sélectionnée
+        // The list of disposals for the selected year
         if report.trades.isEmpty {
             Section {
                 if report.assetSummaries.allSatisfy({ $0.salesCount == 0 }) {
