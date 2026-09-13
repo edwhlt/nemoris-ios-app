@@ -3,15 +3,15 @@ import SwiftUI
 import UIKit
 #endif
 
-/// wrapper Identifiable pour présenter l'import V3 pré-rempli via
-/// `.sheet(item:)` (CSV déposé par un raccourci Siri ou la share extension).
-/// Miroir de `PreloadedInvestmentImport` côté Investissements.
+/// Identifiable wrapper to present the pre-filled V3 import via
+/// `.sheet(item:)` (a CSV dropped by a Siri shortcut or the share extension).
+/// Mirrors `PreloadedInvestmentImport` on the Investments side.
 struct PreloadedTransactionImport: Identifiable {
     let id = UUID()
     let urls: [URL]
 }
 
-/// Ouverture de l'outil d'importation demandée par un module.
+/// An import-tool opening requested by a module.
 struct RequestedImport: Identifiable {
     let id = UUID()
     let destination: ImportDestination
@@ -22,44 +22,44 @@ struct MainTabView: View {
     @Environment(PurchaseManager.self) private var purchaseManager
     @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var showCancelImportConfirm = false
-    /// Analyse de document en arrière-plan : l'utilisateur garde la main
-    /// pendant que ça travaille, le bandeau sert de point de retour.
+    /// Background document analysis: the user stays in control
+    /// while it works, the banner serving as the return point.
     private var importCoordinator: DocumentImportCoordinator { .shared }
     @State private var showAnalysisReview = false
     @State private var showInvestmentReview = false
     @State private var showCancelAnalysisConfirm = false
-    /// import V3 pré-rempli par un CSV partagé/raccourci.
+    /// A V3 import pre-filled by a shared/shortcut CSV.
     @State private var preloadedTransactionImport: PreloadedTransactionImport?
-    /// iPhone : l'outil d'importation demandé par un module, présenté en feuille
-    /// faute de sidebar où l'envoyer.
+    /// iPhone: the import tool requested by a module, presented as a sheet
+    /// for lack of a sidebar to send it to.
     @State private var requestedImport: RequestedImport?
-    /// Desktop : destination capturée pour `sidebarImportTag` (cf.
-    /// `.onChange(of: appState.importToolRequest)`) — `detailView(for:)` ne
-    /// peut pas relire `appState.importToolRequest` directement, il est déjà
-    /// remis à `nil` par le même handler avant le prochain rendu.
+    /// Desktop: the destination captured for `sidebarImportTag` (see
+    /// `.onChange(of: appState.importToolRequest)`) — `detailView(for:)`
+    /// can't re-read `appState.importToolRequest` directly, it's already
+    /// reset to `nil` by the same handler before the next render.
     @State private var sidebarImportDestination: ImportDestination = .transactions
     #if os(macOS)
-    /// Slot unique de l'inspecteur global desktop : les `.adaptivePane` de
-    /// niveau 1 routent leur contenu ici (cf. doc `AdaptivePane.swift`).
+    /// The desktop global inspector's single slot: level-1 `.adaptivePane`s
+    /// route their content here (see `AdaptivePane.swift`'s docs).
     @State private var paneCenter = InspectorPaneCenter()
-    /// Recherche globale — bouton posé à côté du toggle de sidebar (cf.
-    /// `sidebarList`). Sur iOS, l'équivalent vit dans le toolbar Dashboard ;
-    /// macOS n'a pas de Dashboard "toujours visible" au même titre (l'utilisateur
-    /// peut être sur n'importe quel module), donc l'entrée vit à la racine.
+    /// Global search — a button placed next to the sidebar toggle (see
+    /// `sidebarList`). On iOS, the equivalent lives in the Dashboard toolbar;
+    /// macOS has no "always visible" Dashboard the same way (the user
+    /// can be on any module), so the entry lives at the root.
     @State private var showGlobalSearch = false
     #endif
     private let moreTag = "more"
-    /// Entrées "Outils" propres à la sidebar (pas des MainTabItem).
-    /// Source unique dans AppState (réutilisée par le gear Dashboard sur Mac).
+    /// "Tools" entries specific to the sidebar (not MainTabItems).
+    /// A single source in AppState (reused by the Dashboard gear on Mac).
     private let sidebarImportTag = AppState.sidebarImportTag
     private let sidebarSettingsTag = AppState.sidebarSettingsTag
 
-    /// layout desktop : sidebar sur Mac et iPad en paysage, où une
-    /// tab bar iPhone dépareille dans une grande fenêtre. iPhone (et iPad
-    /// compact / Split View étroit) garde la TabView.
+    /// Desktop layout: a sidebar on Mac and landscape iPad, where an
+    /// iPhone tab bar looks out of place in a large window. iPhone (and compact/
+    /// narrow Split View iPad) keeps the TabView.
     private var useSidebar: Bool {
         #if os(macOS)
-        return true   // Mac natif = toujours la sidebar
+        return true   // A native Mac = always the sidebar
         #else
         return UIDevice.current.userInterfaceIdiom == .pad && hSizeClass == .regular
         #endif
@@ -67,11 +67,11 @@ struct MainTabView: View {
 
     var body: some View {
         @Bindable var state = appState
-        // Position du bandeau : EN HAUT sur iOS (style "appel en cours", sous
-        // l'encoche et loin de la tab bar), EN BAS sur macOS — une barre d'état
-        // persistante y est une convention desktop (barre de statut de fenêtre),
-        // alors qu'en haut elle entre en concurrence avec la barre de titre et
-        // la toolbar du module.
+        // Banner position: AT THE TOP on iOS (an "ongoing call" style, below
+        // the notch and away from the tab bar), AT THE BOTTOM on macOS — a
+        // persistent status bar is a desktop convention there (a window status
+        // bar), whereas at the top it competes with the title bar and
+        // the module's toolbar.
         return VStack(spacing: 0) {
             #if !os(macOS)
             importBanner(edge: .top)
@@ -92,11 +92,11 @@ struct MainTabView: View {
         .appToast($state.currentToast)
         .adaptivePane(isPresented: $state.showImportSessionSheet) {
             if let summary = appState.activeImportSession {
-                // ⚠️ La revue dépend de la DESTINATION : une session de
-                // transactions ouvre la résolution ligne à ligne (tiers,
-                // catégories), une session d'investissements ouvre le
-                // rattachement d'ordres à un compte-titres. Les deux répondent
-                // à des questions différentes et restent distinctes.
+                // ⚠️ The review depends on the DESTINATION: a transactions
+                // session opens row-by-row resolution (payees,
+                // categories), an investments session opens
+                // attaching orders to a brokerage account. The two answer
+                // different questions and stay distinct.
                 switch summary.destination {
                 case .transactions:
                     NavigationStack {
@@ -112,29 +112,29 @@ struct MainTabView: View {
                             importCoordinator.clear()
                         }
                     )
-                    // Le rechargement depuis la base, quand l'app a redémarré,
-                    // est fait par `AppState.reloadActiveImportSession` — donc
-                    // AVANT cette construction, sans quoi le `@State` de la
-                    // revue serait déjà figé sur un résultat vide.
+                    // Reloading from the database, when the app has restarted,
+                    // is done by `AppState.reloadActiveImportSession` — so
+                    // BEFORE this construction, otherwise the review's `@State`
+                    // would already be frozen on an empty result.
                     .id(summary.id)
                 }
             }
         }
-        // CSV déposé par le raccourci "Importer des transactions (CSV)"
-        // ou la share extension Transactions : import V3 pré-rempli. Si une
-        // session est déjà active, ImportEntryView affiche l'alerte de reprise.
+        // A CSV dropped by the "Import transactions (CSV)" shortcut
+        // or the Transactions share extension: a pre-filled V3 import. If a
+        // session is already active, ImportEntryView shows the resume alert.
         .adaptivePane(item: $preloadedTransactionImport) { item in
             ImportEntryView(preloadedFileURLs: item.urls)
         }
-        // Relecture du résultat d'une analyse en arrière-plan.
+        // Reviewing the result of a background analysis.
         .adaptivePane(isPresented: $showAnalysisReview) {
             TransactionDocumentReviewView(
                 coordinator: importCoordinator,
                 onConfirm: { summary in
                     importCoordinator.clear()
                     appState.activeImportSession = summary
-                    // Passage à la revue complète sans clignotement
-                    // (cf. `ImportEntryView.handOver`).
+                    // Handing off to the full review with no flicker
+                    // (see `ImportEntryView.handOver`).
                     ImportEntryView.handOver(to: appState,
                                                dismissSelf: { showAnalysisReview = false })
                 },
@@ -157,26 +157,26 @@ struct MainTabView: View {
         .onChange(of: appState.pendingTransactionImportURLs) { _, urls in
             consumePendingTransactionImport(urls)
         }
-        // Un module a demandé l'outil d'importation : c'est la navigation
-        // RACINE qui décide où l'afficher, pas le module.
+        // A module requested the import tool: it's the ROOT
+        // navigation that decides where to show it, not the module.
         .onChange(of: appState.importToolRequest) { _, request in
             guard let request else { return }
             if useSidebar {
-                // Desktop : une destination à part entière, pas le volet
-                // latéral collé au module qu'on vient de quitter. La
-                // destination est capturée dans un `@State` DÉDIÉ (pas relue
-                // depuis `appState.importToolRequest` par `detailView(for:)`)
-                // — les deux mutations de ce handler sont coalescées dans le
-                // MÊME cycle de rendu par SwiftUI, donc `detailView` ne
-                // verrait jamais la valeur avant qu'elle soit remise à `nil`
-                // trois lignes plus bas.
+                // Desktop: a full destination, not a side pane
+                // stuck to the module just left. The
+                // destination is captured in a DEDICATED `@State` (not re-read
+                // from `appState.importToolRequest` by `detailView(for:)`)
+                // — this handler's two mutations are coalesced in the
+                // SAME render cycle by SwiftUI, so `detailView` would
+                // never see the value before it's reset to `nil`
+                // three lines below.
                 sidebarImportDestination = request
                 state.selectedTab = sidebarImportTag
             } else {
                 requestedImport = RequestedImport(destination: request)
             }
-            // La demande est consommée : elle a servi à choisir la destination,
-            // la laisser rouvrirait l'import au prochain changement d'onglet.
+            // The request is consumed: it served to pick the destination,
+            // leaving it would reopen import on the next tab change.
             appState.importToolRequest = nil
         }
         .adaptivePane(item: $requestedImport) { item in
@@ -192,9 +192,9 @@ struct MainTabView: View {
                     ImportSessionRepository().deleteSession(id: id)
                     ImportNotificationService.cancelReminder(forSessionId: id)
                     appState.activeImportSession = nil
-                    // ⚠️ Fermer AUSSI le panneau : sans ça l'inspecteur macOS
-                    // restait ouvert sur une session supprimée — l'utilisateur
-                    // voyait un import « toujours en cours » qui n'existait plus.
+                    // ⚠️ ALSO close the pane: without this the macOS inspector
+                    // stayed open on a deleted session — the user
+                    // saw an import "still in progress" that no longer existed.
                     appState.showImportSessionSheet = false
                 }
             }
@@ -211,19 +211,19 @@ struct MainTabView: View {
             Button(importCoordinator.isReady ? "Abandonner le résultat" : "Interrompre l'analyse",
                    role: .destructive) {
                 importCoordinator.cancel()
-                // ⚠️ Refermer AUSSI la relecture éventuellement ouverte : sinon
-                // l'inspecteur macOS restait affiché sur un résultat qui
-                // n'existe plus (même classe de bug que la session annulée).
+                // ⚠️ ALSO close any open review: otherwise
+                // the macOS inspector stayed showing a result that
+                // no longer exists (the same bug class as the canceled session).
                 showAnalysisReview = false
                 showInvestmentReview = false
             }
             Button("Poursuivre", role: .cancel) {}
         } message: {
-            // ⚠️ Le message affirmait « le document analysé n'est pas
-            // conservé : il faudra le re-sélectionner » — devenu FAUX pour les
-            // investissements depuis que l'analyse est persistée en session
-            // (migration v45). Il reste vrai pendant l'analyse, où rien n'est
-            // encore écrit en base.
+            // ⚠️ The message claimed "the analyzed document isn't
+            // kept: it'll need to be re-selected" — become FALSE for
+            // investments since the analysis is persisted in a session
+            // (migration v45). It stays true during the analysis, where nothing
+            // is written to the database yet.
             Text(importCoordinator.isReady
                  ? "Les opérations reconnues seront perdues : il faudra relancer l'analyse du document."
                  : "Le document en cours d'analyse ne sera pas conservé : il faudra le re-sélectionner.")
@@ -239,14 +239,14 @@ struct MainTabView: View {
         .onChange(of: appState.showBudget)      { _, _ in ensureValidSelection() }
         .onChange(of: appState.showPatrimoine)  { _, _ in ensureValidSelection() }
         .onChange(of: appState.showSQLConsole)  { _, _ in ensureValidSelection() }
-        // Bascule tab bar ↔ sidebar (rotation iPad, resize fenêtre Mac) + capte
-        // les navigateToTab(...) → "more" quand la sidebar n'a pas d'onglet Plus.
+        // Switches tab bar ↔ sidebar (iPad rotation, Mac window resize) + catches
+        // navigateToTab(...) → "more" when the sidebar has no More tab.
         .onChange(of: hSizeClass) { _, _ in ensureValidSelection() }
         .onChange(of: appState.selectedTab) { _, _ in
             if useSidebar { ensureValidSelection() }
             #if os(macOS)
-            // L'inspecteur est contextuel au module affiché → changement de
-            // module = fermeture (reset du binding du call site inclus).
+            // The inspector is contextual to the displayed module → a module
+            // change means closing it (resetting the call site's binding included).
             paneCenter.dismissCurrent()
             #endif
         }
@@ -258,18 +258,18 @@ struct MainTabView: View {
         #endif
     }
 
-    /// Bandeau « import en cours », glissant depuis le bord où il est ancré.
+    /// An "import in progress" banner, sliding in from the edge it's anchored to.
     ///
-    /// Deux états possibles, jamais les deux à la fois : une analyse de document
-    /// en cours (ou prête à être relue), sinon une session d'import ouverte.
+    /// Two possible states, never both at once: an ongoing document analysis
+    /// (or one ready to be reviewed), otherwise an open import session.
     @ViewBuilder
     private func importBanner(edge: Edge) -> some View {
         if importCoordinator.isActive {
             ImportAnalysisBanner(
                 coordinator: importCoordinator,
                 onOpen: { openAnalysisReview() },
-                // Confirmation comme pour une session d'import : le résultat
-                // d'analyse n'est PAS persisté, l'abandonner le perd pour de bon.
+                // A confirmation like an import session's: the analysis
+                // result is NOT persisted, abandoning it loses it for good.
                 onCancel: { showCancelAnalysisConfirm = true }
             )
             .transition(.move(edge: edge).combined(with: .opacity))
@@ -283,7 +283,7 @@ struct MainTabView: View {
         }
     }
 
-    /// Ouvre la relecture du résultat d'analyse, selon la destination choisie.
+    /// Opens the analysis result's review, based on the chosen destination.
     private func openAnalysisReview() {
         switch importCoordinator.destination {
         case .transactions:
@@ -293,9 +293,9 @@ struct MainTabView: View {
         }
     }
 
-    /// présente l'import V3 pré-rempli et libère les URL en attente
-    /// (one-shot). No-op si vide ou si une sheet préchargée est déjà en cours.
-    /// Miroir de `consumePendingInvestmentImport` dans InvestmentsView.
+    /// Presents the pre-filled V3 import and releases the pending URLs
+    /// (one-shot). A no-op if empty or if a preloaded sheet is already in progress.
+    /// Mirrors `consumePendingInvestmentImport` in InvestmentsView.
     private func consumePendingTransactionImport(_ urls: [URL]) {
         guard !urls.isEmpty, preloadedTransactionImport == nil else { return }
         preloadedTransactionImport = PreloadedTransactionImport(urls: urls)
@@ -311,9 +311,9 @@ struct MainTabView: View {
             ForEach(visibleTabs) { tab in
                 tabView(for: tab)
                     .tabItem {
-                        // Si total slots (visibles + Plus) > 4 → icon only,
-                        // sinon label + icon comme avant. iOS tab bar gère
-                        // automatiquement le centrage des icônes seules.
+                        // If total slots (visible + More) > 4 → icon only,
+                        // otherwise a label + icon as before. The iOS tab bar
+                        // automatically handles centering icon-only tabs.
                         if iconOnlyMode {
                             Image(systemName: tab.systemImage)
                         } else {
@@ -333,84 +333,84 @@ struct MainTabView: View {
                 }
                 .tag(moreTag)
         }
-        // Sans ce .id, UIKit réutilise les UITabBarItem des onglets dont la
-        // position n'a pas changé quand iconOnlyMode bascule (ex: 4→5 modules
-        // actifs) → certains gardent leur libellé texte, d'autres non (rendu
-        // incohérent). Forcer un remount complet du TabView évite ce diff partiel.
+        // Without this .id, UIKit reuses the UITabBarItems of tabs whose
+        // position hasn't changed when iconOnlyMode toggles (e.g. 4→5 active
+        // modules) → some keep their text label, others don't (an
+        // inconsistent render). Forcing a full TabView remount avoids this partial diff.
         .id(iconOnlyMode)
         .tint(AppTheme.Colors.accent)
     }
 
-    /// Layout desktop : sidebar avec TOUS les modules (pas de limite
-    /// à 4, pas d'onglet Plus) + section Outils. Chaque module garde sa propre
-    /// NavigationStack dans sa colonne.
+    /// Desktop layout: a sidebar with EVERY module (no cap
+    /// at 4, no More tab) + a Tools section. Each module keeps its own
+    /// NavigationStack in its column.
     ///
-    /// ⚠️ Le split view doit rester la vue RACINE. Une V1 le wrappait dans un
-    /// HStack (`HStack { NavigationSplitView; panneau }`) → le split view, qui
-    /// veut être racine, négociait sa largeur en BOUCLE avec le HStack → la barre
-    /// de fenêtre (et le bouton retour des vues poussées, ex. Tricount) vibrait
-    /// en permanence. Le panneau est donc une COLONNE du split view, jamais un
-    /// voisin posé à côté.
+    /// ⚠️ The split view must stay the ROOT view. A V1 wrapped it in an
+    /// HStack (`HStack { NavigationSplitView; pane }`) → the split view, which
+    /// wants to be the root, negotiated its width in a LOOP with the HStack → the
+    /// window bar (and pushed views' back button, e.g. Tricount) vibrated
+    /// constantly. The pane is therefore a COLUMN of the split view, never a
+    /// sibling placed next to it.
     private var sidebarLayout: some View {
         sidebarSplitView
     }
 
-    /// ⚠️ `.id(selection)` sur la colonne du module est OBLIGATOIRE : sans elle,
-    /// `NavigationSplitView` sur macOS ne détruit PAS l'état de navigation
-    /// interne (push) de l'ancien module quand la sélection change — le contenu
-    /// poussé (détail Tricount, détail compte/position Investissements…) reste
-    /// affiché à l'écran, et seul un pop (bouton retour) force enfin le re-rendu
-    /// vers le nouveau module. `.id()` force une identité de vue liée à l'onglet :
-    /// au changement, SwiftUI démonte tout l'ancien sous-arbre (donc son
-    /// `NavigationStack`/push interne) au lieu de tenter de le réutiliser.
+    /// ⚠️ `.id(selection)` on the module's column is REQUIRED: without it,
+    /// `NavigationSplitView` on macOS does NOT destroy the previous module's
+    /// internal navigation state (a push) when the selection changes — the
+    /// pushed content (a Tricount detail, an Investments account/position
+    /// detail…) stays on screen, and only a pop (back button) finally forces
+    /// a re-render toward the new module. `.id()` forces a view identity tied
+    /// to the tab: on change, SwiftUI unmounts the whole old sub-tree
+    /// (so its internal `NavigationStack`/push) instead of trying to reuse it.
     ///
-    /// ⚠️ Cette identité NE dépend PAS de la langue, et ne doit pas le devenir.
-    /// Une version intermédiaire y avait ajouté `preferredLanguage` pour forcer
-    /// le rafraîchissement des `.navigationTitle` au changement de langue —
-    /// mauvais remède : ça détruisait tout l'état du module (navigation interne,
-    /// scroll, onglet courant) à chaque bascule, alors que la vraie cause était
-    /// ailleurs. `.localizedNavigationTitle` (cf. `AppLocalization`) résout la
-    /// langue contre le bon bundle ET se rafraîchit seul via
-    /// `@Environment(\.locale)`, sans rien reconstruire.
+    /// ⚠️ This identity does NOT depend on the language, and must not become
+    /// one. An intermediate version added `preferredLanguage` to it to force
+    /// `.navigationTitle` refreshes on a language change —
+    /// a bad fix: it destroyed the whole module's state (internal navigation,
+    /// scroll, current tab) on every switch, when the real cause was
+    /// elsewhere. `.localizedNavigationTitle` (see `AppLocalization`) resolves
+    /// the language against the right bundle AND refreshes itself via
+    /// `@Environment(\.locale)`, with nothing to rebuild.
     #if os(macOS)
-    /// macOS — **trois colonnes** : sidebar · module · panneau.
+    /// macOS — **three columns**: sidebar · module · pane.
     ///
-    /// Le panneau est une VRAIE colonne de `NavigationSplitView`, et pas un
-    /// `.inspector` ni un `HStack` custom, parce que c'est la seule construction
-    /// qui reproduit le comportement des apps système (Mail, Notes) :
+    /// The pane is a REAL `NavigationSplitView` column, not an
+    /// `.inspector` nor a custom `HStack`, because it's the only construction
+    /// that reproduces system apps' behavior (Mail, Notes):
     ///
-    /// 1. **Séparateur déplaçable** — l'utilisateur choisit la largeur du
-    ///    panneau, AppKit la mémorise. L'ancien `HStack` la figeait à 440 pt.
-    /// 2. **Barre d'outils scindée** — chaque colonne déclare sa propre
-    ///    `.toolbar`, et macOS insère entre elles un séparateur de suivi
-    ///    (`NSTrackingSeparatorToolbarItem`) aligné sur le séparateur de
-    ///    colonnes. Les actions du module s'arrêtent donc au séparateur, celles
-    ///    du panneau commencent après : l'appartenance de chaque groupe se lit
-    ///    sans étiquette.
+    /// 1. **A draggable separator** — the user picks the pane's width,
+    ///    AppKit remembers it. The old `HStack` fixed it at 440pt.
+    /// 2. **A split toolbar** — each column declares its own
+    ///    `.toolbar`, and macOS inserts a tracking separator between them
+    ///    (`NSTrackingSeparatorToolbarItem`) aligned with the column
+    ///    separator. The module's actions therefore stop at the separator, the
+    ///    pane's start after it: each group's ownership reads
+    ///    without a label.
     ///
-    /// > Mesuré : ni le `HStack` custom ni `.inspector` n'obtiennent le point 2.
-    /// > Avec eux, tous les boutons s'entassent au bord droit de la fenêtre,
-    /// > donc au-dessus du panneau — y compris ceux du module. Un
-    /// > `ToolbarSpacer(.flexible)` n'y change rien (testé aux deux placements) :
-    /// > le séparateur vient de la STRUCTURE en colonnes, pas de la barre.
+    /// > Measured: neither the custom `HStack` nor `.inspector` achieve point 2.
+    /// > With them, every button piles up at the window's right edge,
+    /// > so above the pane — the module's included. A
+    /// > `ToolbarSpacer(.flexible)` changes nothing there (tested at both placements):
+    /// > the separator comes from the column STRUCTURE, not the bar.
     ///
-    /// ⚠️ Répartition de la largeur — l'`ideal` du module est un COMPROMIS, pas
-    /// une préférence esthétique. Dans un split view à 3 colonnes, c'est la
-    /// colonne `detail` qui absorbe l'espace libre, et on redimensionne le
-    /// panneau en tirant le bord de la colonne du MODULE. Les deux extrêmes sont
-    /// donc mauvais, et ont été mesurés :
+    /// ⚠️ Width distribution — the module's `ideal` is a COMPROMISE, not
+    /// an aesthetic preference. In a 3-column split view, it's the
+    /// `detail` column that absorbs the free space, and the pane is resized
+    /// by dragging the MODULE column's edge. Both extremes are
+    /// therefore bad, and were measured:
     ///
-    /// - `ideal` du module très large (essai à 1 200) : le module veut toute la
-    ///   place, le séparateur module|panneau devient **impossible à tirer** (le
-    ///   séparateur sidebar|module, lui, répond toujours — c'est ce qui a permis
-    ///   d'isoler la cause) et le panneau reste collé à son `min`.
-    /// - Aucune contrainte sur le module : le panneau part à son `max` et
-    ///   s'élargit avec la fenêtre, alors que c'est la liste du module qui a
-    ///   besoin de la place.
+    /// - A very wide module `ideal` (tried at 1,200): the module wants all the
+    ///   room, the module|pane separator becomes **impossible to drag** (the
+    ///   sidebar|module separator, on the other hand, still responds — that's what
+    ///   made isolating the cause possible) and the pane stays stuck at its `min`.
+    /// - No constraint on the module: the pane goes to its `max` and
+    ///   widens with the window, when it's the module's list that needs
+    ///   the room.
     ///
-    /// Valeurs retenues : le module a un `ideal` modéré (assez pour rester
-    /// dominant, assez souple pour que le séparateur bouge) et le panneau un
-    /// `max` qui l'empêche de manger la fenêtre.
+    /// Values kept: the module has a moderate `ideal` (enough to stay
+    /// dominant, flexible enough for the separator to move) and the pane a
+    /// `max` that keeps it from eating the window.
     private var sidebarSplitView: some View {
         @Bindable var state = appState
         return NavigationSplitView {
@@ -428,28 +428,28 @@ struct MainTabView: View {
         .tint(AppTheme.Colors.accent)
     }
 
-    /// Colonne du panneau. Sans pane ouvert elle se REPLIE à zéro (vérifié : la
-    /// colonne du module récupère alors toute la largeur) — un module comme le
-    /// Dashboard n'a donc aucune place perdue, contrairement au troisième volet
-    /// permanent d'un client mail.
+    /// The pane's column. With no pane open it COLLAPSES to zero (verified: the
+    /// module column then reclaims the whole width) — a module like the
+    /// Dashboard therefore loses no room, unlike a mail client's permanent
+    /// third pane.
     ///
-    /// ⚠️ Seule la BRANCHE de cette colonne change quand un pane s'ouvre ; la
-    /// colonne du module, elle, garde la même identité de vue. C'est ce qui
-    /// préserve son `@State` (une version antérieure basculait entre
-    /// `detailView` seul et `HStack { detailView; panneau }` : SwiftUI y voyait
-    /// deux structures différentes, DÉTRUISAIT la vue du module à l'ouverture du
-    /// panneau et la recréait — l'onglet courant de « Données » retombait sur
-    /// Comptes, les filtres se vidaient…).
+    /// ⚠️ Only this column's BRANCH changes when a pane opens; the
+    /// module's column keeps the same view identity. This is what
+    /// preserves its `@State` (an earlier version switched between
+    /// `detailView` alone and `HStack { detailView; pane }`: SwiftUI saw
+    /// two different structures there, DESTROYING the module's view when the
+    /// pane opened and recreating it — the "Data" module's current tab fell
+    /// back to Accounts, filters emptied out…).
     ///
-    /// Le panneau ne reçoit AUCUN chrome d'ici : son contenu déclare lui-même sa
-    /// `.toolbar` (cf. `publishesInspectorChrome`), donc les actions sont toujours
-    /// celles du rendu courant — jamais des closures périmées.
+    /// The pane receives NO chrome from here: its content declares its own
+    /// `.toolbar` (see `publishesInspectorChrome`), so the actions are always
+    /// the current render's — never stale closures.
     @ViewBuilder
     private var inspectorColumn: some View {
         if let pane = paneCenter.pane {
-            // `.id(pane.id)` : un pane re-présenté repart avec un @State frais
-            // → cliquer une autre donnée change le détail sans passer par
-            // « Fermer ».
+            // `.id(pane.id)`: a re-presented pane starts with a fresh @State
+            // → clicking another piece of data changes the detail without going
+            // through "Close".
             pane.content
                 .id(pane.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -466,9 +466,9 @@ struct MainTabView: View {
         }
     }
     #else
-    /// iOS / iPadOS — deux colonnes, comportement historique : les panes y sont
-    /// des `.sheet` (cf. `adaptivePane`), il n'y a donc pas de troisième colonne
-    /// à prévoir.
+    /// iOS / iPadOS — two columns, the historical behavior: panes there are
+    /// `.sheet`s (see `adaptivePane`), so there's no third column
+    /// to plan for.
     private var sidebarSplitView: some View {
         @Bindable var state = appState
         return NavigationSplitView {
@@ -487,22 +487,22 @@ struct MainTabView: View {
     private var sidebarList: some View {
         @Bindable var state = appState
         #if os(macOS)
-        // Sélection pilotée MANUELLEMENT : la List `.sidebar` macOS dessine son
-        // highlight de sélection avec la couleur d'accentuation SYSTÈME (bleu),
-        // non recolorable via `.tint` (même limitation que les icônes). On retire
-        // donc le binding `selection:` et on peint notre propre pastille ADN via
-        // `.listRowBackground` (cf. sidebarRow). Contrepartie assumée : plus de
-        // navigation clavier ↑/↓ entre modules (sidebar = clic).
+        // Selection driven MANUALLY: macOS's `.sidebar` List draws its
+        // selection highlight with the SYSTEM accent color (blue),
+        // not recolorable via `.tint` (the same limitation as icons). The
+        // `selection:` binding is therefore dropped and a custom ADN dot is painted
+        // via `.listRowBackground` (see sidebarRow). An accepted tradeoff: no more
+        // ↑/↓ keyboard navigation between modules (sidebar = click).
         List {
             Section("Modules") {
                 ForEach(availableTabs) { tab in
                     sidebarRow(title: LocalizedStringKey(tab.title), systemImage: tab.systemImage, tag: tab.rawValue)
                 }
             }
-            // ⚠️ Réglages n'est PAS un outil : c'est la configuration de l'app,
-            // pas une action qu'on mène sur ses données. Le ranger avec
-            // l'importation mettait sur le même plan « je traite un relevé » et
-            // « je change mes préférences ».
+            // ⚠️ Settings is NOT a tool: it's the app's configuration,
+            // not an action performed on its data. Filing it with
+            // import put "I'm processing a statement" and
+            // "I'm changing my preferences" on the same footing.
             Section("Outils") {
                 sidebarRow(title: "Importation", systemImage: "square.and.arrow.down", tag: sidebarImportTag)
             }
@@ -511,17 +511,17 @@ struct MainTabView: View {
             }
         }
         .listStyle(.sidebar)
-        // Placement `.navigation` = segment de toolbar où macOS peint déjà le
-        // bouton de bascule sidebar (auto-généré par `NavigationSplitView`) —
-        // c'est ce qui met la loupe juste à côté de lui plutôt que noyée dans
-        // la toolbar du module affiché.
+        // `.navigation` placement = the toolbar segment where macOS already paints
+        // the sidebar toggle button (auto-generated by `NavigationSplitView`) —
+        // this is what places the magnifying glass right next to it rather than lost in
+        // the displayed module's toolbar.
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 PaneToggleButton(label: "Rechercher", systemImage: "magnifyingglass", isOn: $showGlobalSearch)
             }
         }
         #else
-        // iOS / iPad : sélection native (le highlight suit le `.tint` ici).
+        // iOS / iPad: native selection (the highlight follows `.tint` here).
         List(selection: Binding<String?>(
             get: { state.selectedTab },
             set: { if let value = $0 { state.selectedTab = value } }
@@ -536,7 +536,7 @@ struct MainTabView: View {
                 sidebarLabel("Importation", systemImage: "square.and.arrow.down")
                     .tag(sidebarImportTag)
             }
-            // Section propre : cf. commentaire de la branche macOS.
+            // Its own section: see the macOS branch's comment.
             Section {
                 sidebarLabel("Réglages", systemImage: "gearshape")
                     .tag(sidebarSettingsTag)
@@ -547,21 +547,21 @@ struct MainTabView: View {
     }
 
     #if os(macOS)
-    /// Row de sidebar macOS à sélection custom. On reproduit le highlight NEUTRE
-    /// de macOS (façon Mail : gris translucide) plutôt que le highlight bleu
-    /// système accent — non recolorable via `.tint`. L'icône reste verte (ADN),
-    /// le libellé passe en semibold quand sélectionné (emphase à la Mail).
+    /// A macOS sidebar row with custom selection. Reproduces macOS's NEUTRAL
+    /// highlight (Mail-style: translucent gray) rather than the system's blue
+    /// accent highlight — not recolorable via `.tint`. The icon stays green (ADN),
+    /// the label goes semibold when selected (Mail-style emphasis).
     ///
-    /// Sélection sur un `Button` (pas `onTapGesture`) : hit-testing immédiat et
-    /// feedback au clic — l'`onTapGesture` sur une row de List donnait un ressenti
-    /// "mou". Reste custom (pas de nav clavier ↑/↓, prix de la couleur non-bleue).
+    /// Selection on a `Button` (not `onTapGesture`): immediate hit-testing and
+    /// click feedback — `onTapGesture` on a List row felt
+    /// "mushy". Stays custom (no ↑/↓ keyboard nav, the price of the non-blue color).
     ///
-    /// ⚠️ La pastille de fond est un `.background` posé SUR le contenu du bouton,
-    /// pas un `.listRowBackground` — `.listRowBackground` remplit toute la largeur
-    /// de la row (jusqu'aux bords de la sidebar), ce qui donnait un highlight
-    /// plein-largeur au lieu de la pilule margée façon Mail. `.listRowInsets`
-    /// rétrécit la row elle-même (marge horizontale + petit espace vertical entre
-    /// rows) pour que la pastille ne touche jamais les bords de la sidebar.
+    /// ⚠️ The background dot is a `.background` set ON the button's content,
+    /// not a `.listRowBackground` — `.listRowBackground` fills the row's whole
+    /// width (up to the sidebar's edges), which gave a full-width highlight
+    /// instead of the Mail-style margined pill. `.listRowInsets`
+    /// shrinks the row itself (horizontal margin + a small vertical gap between
+    /// rows) so the dot never touches the sidebar's edges.
     @ViewBuilder
     private func sidebarRow(title: LocalizedStringKey, systemImage: String, tag: String) -> some View {
         let isSelected = appState.selectedTab == tag
@@ -591,12 +591,12 @@ struct MainTabView: View {
     }
     #endif
 
-    /// Sur macOS, une `Label` dans une `List` `.listStyle(.sidebar)` teinte son
-    /// icône avec `controlAccentColor` (réglage système "Couleur d'accentuation"),
-    /// pas avec l'environnement `.tint()`/`accentColor` de SwiftUI — d'où les icônes
-    /// bleues malgré le `.tint(AppTheme.Colors.accent)` posé plus haut. Seul un
-    /// `.foregroundStyle` explicite sur l'icône (natif, pas de hack AppKit) permet
-    /// de forcer la couleur ADN ici.
+    /// On macOS, a `Label` in a `.listStyle(.sidebar)` `List` tints its
+    /// icon with `controlAccentColor` (the system's "Accent color" setting),
+    /// not with SwiftUI's `.tint()`/`accentColor` environment — hence the blue
+    /// icons despite the `.tint(AppTheme.Colors.accent)` set above. Only an
+    /// explicit `.foregroundStyle` on the icon (native, no AppKit hack) can
+    /// force the ADN color here.
     private func sidebarLabel(_ title: LocalizedStringKey, systemImage: String) -> some View {
         Label {
             Text(title)
@@ -618,37 +618,37 @@ struct MainTabView: View {
         } else if let tab = MainTabItem(rawValue: selection) {
             tabView(for: tab)
         } else {
-            // Sélection transitoire invalide ("more" pendant la bascule) —
-            // ensureValidSelection corrige juste après.
+            // A transient invalid selection ("more" during the switch) —
+            // ensureValidSelection fixes it right after.
             tabView(for: .dashboard)
         }
     }
 
-    // ⚠️ Délègue à `AppState.availableTabsResolved` — ne PAS dupliquer le
-    // switch ici. Une copie locale existait avant et n'avait jamais été mise
-    // à jour quand `.transactions`/`.referenceData` ont rejoint le filtre
-    // (elle retombait sur `return true`, donc le toggle Transactions des
-    // Réglages n'avait strictement aucun effet). Un seul filtre, une seule
-    // fois — même doctrine que les calculs d'enveloppes budgétaires.
+    // ⚠️ Delegates to `AppState.availableTabsResolved` — do NOT duplicate the
+    // switch here. A local copy existed before and was never updated
+    // when `.transactions`/`.referenceData` joined the filter
+    // (it fell back to `return true`, so the Transactions toggle in
+    // Settings had strictly no effect). One filter, one place —
+    // the same doctrine as the budget envelope calculations.
     private var availableTabs: [MainTabItem] { appState.availableTabsResolved }
 
-    /// Max 4 onglets visibles avant le bouton "Plus" (iOS tab bar tolère 5 slots
-    /// total = 4 visibles + Plus). Le mode icon-only se déclenche dès qu'on dépasse
-    /// 4 slots, donc à partir de 4 visibles + Plus (= 5).
+    /// Max 4 visible tabs before the "More" button (the iOS tab bar tolerates 5 slots
+    /// total = 4 visible + More). Icon-only mode kicks in as soon as there are more than
+    /// 4 slots, so from 4 visible + More (= 5) onward.
     private var visibleTabs: [MainTabItem] { Array(availableTabs.prefix(4)) }
     private var hiddenTabs: [MainTabItem]  { Array(availableTabs.dropFirst(4)) }
 
-    /// True si total slots dans la tab bar > 4 → masquer les labels (icon only)
-    /// pour éviter le crowding. visibleTabs.count + 1 (slot Plus toujours présent).
+    /// True if total slots in the tab bar > 4 → hide labels (icon only)
+    /// to avoid crowding. visibleTabs.count + 1 (the More slot is always present).
     private var iconOnlyMode: Bool {
         visibleTabs.count + 1 > 4
     }
 
     private func ensureValidSelection() {
         if useSidebar {
-            // Pas d'onglet "Plus" en sidebar : une navigation cross-tab qui y
-            // visait un onglet caché (navigateToTab → "more" + pending) est
-            // redirigée vers l'onglet cible directement.
+            // No "More" tab in the sidebar: a cross-tab navigation that
+            // targeted a hidden tab there (navigateToTab → "more" + pending) is
+            // redirected straight to the target tab.
             if appState.selectedTab == moreTag {
                 appState.selectedTab = appState.pendingMoreDestination?.rawValue
                     ?? availableTabs.first?.rawValue
@@ -689,9 +689,9 @@ private struct MoreView: View {
     @Environment(AppState.self) private var appState
     let orderedHiddenTabs: [MainTabItem]
     @State private var searchText = ""
-    /// Path de navigation contrôlé. Sert à push programmatiquement quand l'utilisateur
-    /// arrive ici via `appState.pendingMoreDestination` (ex : bandeau Patrimoine
-    /// sur le Dashboard).
+    /// A controlled navigation path. Used to programmatically push when the user
+    /// arrives here via `appState.pendingMoreDestination` (e.g. the Patrimoine
+    /// banner on the Dashboard).
     @State private var navPath: [MainTabItem] = []
 
     var body: some View {
@@ -730,24 +730,24 @@ private struct MoreView: View {
             .localizedNavigationTitle("Plus")
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $searchText, prompt: "Rechercher une fonctionnalité…")
-            // Destination programmatique : consommée par MoreView quand une
-            // autre View pousse `appState.pendingMoreDestination` (ex : tap sur
-            // le bandeau Patrimoine du Dashboard alors que Patrimoine est dans
-            // les onglets cachés).
+            // A programmatic destination: consumed by MoreView when another
+            // View pushes `appState.pendingMoreDestination` (e.g. tapping
+            // the Dashboard's Patrimoine banner while Patrimoine is among
+            // the hidden tabs).
             .navigationDestination(for: MainTabItem.self) { tab in
                 destinationView(for: tab)
             }
             .onChange(of: appState.pendingMoreDestination) { _, newValue in
                 guard let tab = newValue else { return }
-                // On reset le path avant de pousser pour ne pas empiler si la
-                // destination était déjà ouverte (l'utilisateur fait 2 fois la navigation).
+                // The path is reset before pushing, so it doesn't stack if the
+                // destination was already open (the user navigates there twice).
                 navPath = [tab]
-                // Consommé → clear pour ne pas re-push à chaque rebuild.
+                // Consumed → cleared so it isn't re-pushed on every rebuild.
                 appState.pendingMoreDestination = nil
             }
             .onAppear {
-                // Cas où l'utilisateur atteint MoreView avec une destination déjà pending
-                // (helper appelé avant que MoreView soit instancié).
+                // The case where the user reaches MoreView with a destination already
+                // pending (a helper called before MoreView is instantiated).
                 if let pending = appState.pendingMoreDestination {
                     navPath = [pending]
                     appState.pendingMoreDestination = nil
@@ -847,13 +847,13 @@ private struct MoreView: View {
         case .tricount:     TricountListView(isEmbedded: true)
         case .budget:       BudgetView(isEmbedded: true)
         case .referenceData: ReferenceDataView(isEmbedded: true)
-        case .sqlConsole:   SQLFilesListView()  // déjà push via NavigationLink (parent NavigationStack)
+        case .sqlConsole:   SQLFilesListView()  // already pushed via NavigationLink (the parent NavigationStack)
         }
     }
 
     // MARK: - Feature Search
     //
-    // Catalogue partagé avec `SearchView` — cf. `FeatureCatalog.swift`.
+    // A catalog shared with `SearchView` — see `FeatureCatalog.swift`.
 
     private func filteredFeatures() -> [FeatureEntry] {
         let q = searchText.trimmingCharacters(in: .whitespaces)
@@ -956,5 +956,5 @@ private struct MoreItem {
     let destination: () -> AnyView
 }
 
-// `FeatureTarget` / `FeatureEntry` : cf. `Features/Search/Service/FeatureCatalog.swift`
-// (partagés avec `SearchView`).
+// `FeatureTarget` / `FeatureEntry`: see `Features/Search/Service/FeatureCatalog.swift`
+// (shared with `SearchView`).

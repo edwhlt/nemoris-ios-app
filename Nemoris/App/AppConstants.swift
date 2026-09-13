@@ -19,11 +19,11 @@ enum AppConstants {
     }
 
     enum Shortcuts {
-        /// Lien iCloud du raccourci "Importer une transaction Apple Pay"
-        /// (automatisation personnelle Raccourcis → `ImportTransactionApplePayEntityIntent`).
-        /// ⚠️ Se fige à l'export : si le raccourci est modifié côté Raccourcis,
-        /// il faut le repartager (Partager → Copier le lien iCloud) et mettre
-        /// à jour cette constante — Apple ne republie pas le même lien.
+        /// iCloud link for the "Import an Apple Pay transaction" shortcut
+        /// (a personal Shortcuts automation → `ImportTransactionApplePayEntityIntent`).
+        /// ⚠️ Frozen at export time: if the shortcut is edited in Shortcuts,
+        /// it must be re-shared (Share → Copy iCloud Link) and this constant
+        /// updated — Apple doesn't republish the same link.
         static let applePayInstallURL = URL(string: "https://www.icloud.com/shortcuts/d43dedc201014857859c6b5204535233")!
     }
 }

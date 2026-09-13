@@ -75,10 +75,10 @@ final class AppState {
         : MainTabItem.dashboard.rawValue
     var selectedAccountId: Int? = nil
     var selectedAccountName: String = ""
-    /// Nom de tiers à injecter dans le filtre "Payee" de `TransactionsView`
-    /// au prochain chargement — écrit par `ReferenceDataView` (bouton "Voir
-    /// les transactions" de la fiche d'un tiers), consommé puis remis à
-    /// `nil` par `TransactionsView.loadInitialData()`.
+    /// A payee name to inject into `TransactionsView`'s "Payee" filter
+    /// on the next load — written by `ReferenceDataView` (a payee's sheet's
+    /// "View transactions" button), consumed then reset to
+    /// `nil` by `TransactionsView.loadInitialData()`.
     var pendingPayeeFilterName: String? = nil
     var filterFromDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     var filterToDate: Date = Date()

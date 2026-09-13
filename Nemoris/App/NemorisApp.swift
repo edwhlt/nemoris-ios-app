@@ -11,9 +11,9 @@ struct NemorisApp: App {
     /// sidebar detail pane), and two separate caches would mean computing
     /// everything twice.
     @State private var dashboardStore = DashboardSnapshotStore()
-    /// Injecté UNE SEULE FOIS, comme `dashboardStore` : `DashboardView` est
-    /// instanciée deux fois (TabView iOS + volet détail macOS), et deux copies
-    /// lanceraient deux analyses IA en parallèle sur le même domaine.
+    /// Injected ONCE, like `dashboardStore`: `DashboardView` is
+    /// instantiated twice (the iOS TabView + the macOS detail pane), and two copies
+    /// would launch two AI analyses in parallel on the same domain.
     @State private var coachStore = CoachStore()
     @State private var hasDatabase: Bool
     /// Unlock state. Starts at `false` if the lock is enabled AND there is a
@@ -104,29 +104,29 @@ struct NemorisApp: App {
     var body: some Scene {
         WindowGroup {
             if hasDatabase {
-                // ⚠️ `.environment(\.locale, …)` posé ICI, sur la racine RÉELLE du
-                // contenu de la fenêtre (ce `ZStack`) — PAS sur `MainTabView()` (un
-                // enfant du ZStack) comme avant. Deux bugs réels distincts,
-                // trouvés le 2026-08-25 :
+                // ⚠️ `.environment(\.locale, …)` set HERE, on the REAL root of the
+                // window's content (this `ZStack`) — NOT on `MainTabView()` (a
+                // child of the ZStack) as before. Two distinct real bugs,
+                // found on 2026-08-25:
                 //
-                // 1. `AppLockGate` est un SIBLING de `MainTabView` dans ce `ZStack`,
-                //    pas un descendant — il n'héritait de RIEN posé seulement sur
-                //    `MainTabView`. "Verrouillé" restait affiché en anglais système
-                //    quelle que soit la langue choisie dans l'app.
-                // 2. Plus insidieux : même posé sur `MainTabView()` (donc au-dessus
-                //    d'`AppLockGate`), `\.locale` n'atteignait PAS de façon fiable le
-                //    contenu des `.sheet()` niveau 2+ ouvertes depuis un panneau macOS
-                //    (ex. "Détails de la synchronisation" depuis la fiche position) —
-                //    vérifié avec un `@Environment(\.locale)` de debug affichant
-                //    `en_US` sur un Mac en anglais système alors que l'app était
-                //    réglée en français. Une sheet macOS est backée par une VRAIE
-                //    `NSWindow` séparée (contrairement à iOS, où elle partage la même
-                //    fenêtre) — l'héritage d'environnement pour ce genre de fenêtre
-                //    semble se calculer par rapport à la racine RÉELLE du contenu de
-                //    la `WindowGroup`, pas par rapport au nœud où le modificateur a
-                //    été posé si celui-ci est un ENFANT de cette racine. Remonter le
-                //    modificateur sur le `ZStack` (la vraie racine) corrige les deux
-                //    bugs d'un coup et évite la duplication précédente sur chaque
+                // 1. `AppLockGate` is a SIBLING of `MainTabView` in this `ZStack`,
+                //    not a descendant — it inherited NOTHING set only on
+                //    `MainTabView`. "Locked" stayed shown in the system's English
+                //    whatever language was chosen in the app.
+                // 2. More insidious: even set on `MainTabView()` (so above
+                //    `AppLockGate`), `\.locale` did NOT reliably reach the
+                //    content of level-2+ `.sheet()`s opened from a macOS pane
+                //    (e.g. "Sync details" from a position's sheet) —
+                //    verified with a debug `@Environment(\.locale)` showing
+                //    `en_US` on a Mac with an English system locale even though the app was
+                //    set to French. A macOS sheet is backed by a REAL, separate
+                //    `NSWindow` (unlike iOS, where it shares the same
+                //    window) — environment inheritance for this kind of window
+                //    seems to be computed relative to the WindowGroup's content's REAL
+                //    root, not relative to the node where the modifier was
+                //    set if that node is a CHILD of that root. Moving the
+                //    modifier up onto the `ZStack` (the real root) fixes both
+                //    bugs at once and avoids the earlier duplication on every
                 //    sibling.
                 ZStack {
                     MainTabView()
@@ -191,11 +191,10 @@ struct NemorisApp: App {
                             // feature off, toggle off, already running, or
                             // last pass < 4h ago.
                             Task { await InvestmentAutoSyncService.shared.autoSyncIfNeeded(trigger: .appActive) }
-                            // Prévient le Dashboard si de nouvelles dépenses
-                            // Apple Pay sont arrivées en arrière-plan
-                            // (automatisation Raccourcis) depuis le dernier
-                            // passage au premier plan. Pas de résolution
-                            // automatique (retirée pour l'instant, à revoir plus tard).
+                            // Notifies the Dashboard if new Apple Pay expenses
+                            // arrived in the background (the Shortcuts
+                            // automation) since the last foreground.
+                            // No automatic resolution (removed for now, to revisit later).
                             ApplePayDashboardSync.syncIfNeeded()
                             // An investment document dropped by a Siri
                             // shortcut (ImportInvestmentDocumentIntent) is
@@ -228,11 +227,11 @@ struct NemorisApp: App {
                         appState.dataRefreshToken = UUID()
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .nemorisApplePayDataDidChange)) { _ in
-                        // Une dépense Apple Pay vient d'être déposée (par
-                        // l'automatisation Raccourcis, en arrière-plan — ce
-                        // process séparé ne peut pas bumper `dataRefreshToken`
-                        // lui-même), écartée, ou purgée : le bandeau du
-                        // Dashboard doit refléter le changement.
+                        // An Apple Pay expense was just dropped (by
+                        // the Shortcuts automation, in the background — this
+                        // separate process can't bump `dataRefreshToken`
+                        // itself), dismissed, or purged: the
+                        // Dashboard's banner must reflect the change.
                         appState.dataRefreshToken = UUID()
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .nemorisImportSessionsDidChange)) { _ in
