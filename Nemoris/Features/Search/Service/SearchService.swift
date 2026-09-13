@@ -2,25 +2,25 @@ import Foundation
 
 // MARK: - SearchService
 //
-// Recherche cross-modules : transactions, payees, comptes, catégories, tags,
-// assets Patrimoine, prêts, biens immobiliers, goals, comptes/positions
-// Investissements, enveloppes/récurrents Budget, groupes/entrées Tricount.
+// Cross-module search: transactions, payees, accounts, categories, tags,
+// Patrimoine assets, loans, real-estate properties, goals, Investments
+// accounts/positions, Budget envelopes/recurring items, Tricount groups/entries.
 //
-// **Stratégie** : on charge les collections en mémoire (les repos ont des fetch
-// rapides, < 50ms typique pour 5000 transactions) puis on filtre + score en Swift
-// pur. Pas de FTS5 ni d'index inversé pour MVP — overkill pour la taille de DB
-// d'une app finance personnelle (typiquement < 10k lignes par table).
+// **Strategy**: the collections are loaded into memory (the repos have fast
+// fetches, < 50ms typical for 5000 transactions) then filtered + scored in pure
+// Swift. No FTS5 or inverted index for the MVP — overkill for the database size
+// of a personal-finance app (typically < 10k rows per table).
 //
-// **Scoring** : 3 niveaux pour ordonner les résultats par pertinence :
-//   - Exact match (case insensitive)        = 100
+// **Scoring**: 3 levels to rank results by relevance:
+//   - An exact match (case insensitive)    = 100
 //   - StartsWith                            = 60
 //   - Contains                              = 30
-// Le score est ensuite agrégé par catégorie et la catégorie avec le meilleur
-// top-score est listée en premier.
+// The score is then aggregated per category, and the category with the best
+// top-score is listed first.
 //
-// **Limit** : 8 résultats par catégorie pour éviter de saturer la UI. Si l'utilisateur
-// cherche un truc fréquent (ex : "loyer") il verra les 8 plus pertinents — les
-// autres sont accessibles via les filtres natifs de chaque module.
+// **Limit**: 8 results per category to avoid overwhelming the UI. If the user
+// searches for something frequent (e.g. "rent") they'll see the 8 most relevant —
+// the rest is reachable via each module's own filters.
 
 enum SearchResult: Identifiable {
     case transaction(FinanceTransaction)
@@ -59,7 +59,7 @@ enum SearchResult: Identifiable {
         }
     }
 
-    /// Catégorie utilisée pour grouper les résultats dans l'UI.
+    /// A category used to group results in the UI.
     var category: SearchCategory {
         switch self {
         case .transaction: return .transactions
@@ -76,11 +76,11 @@ enum SearchResult: Identifiable {
     }
 }
 
-// ⚠️ Conformance MANUELLE, pas synthétisée : `TricountEntry` (et les autres
-// payloads) n'ont pas tous besoin d'être `Hashable` eux-mêmes — l'identité
-// d'un résultat de recherche, c'est son `id` composite (préfixe + id local),
-// pas la valeur entière du modèle. Une synthèse automatique aurait forcé
-// TOUS les cas présents ou futurs à porter `Hashable`, un couplage inutile.
+// ⚠️ MANUAL conformance, not synthesized: `TricountEntry` (and the other
+// payloads) don't all need to be `Hashable` themselves — a search result's
+// identity is its composite `id` (a prefix + the local id),
+// not the model's whole value. An automatic synthesis would force
+// EVERY present or future case to be `Hashable`, an unnecessary coupling.
 extension SearchResult: Hashable {
     static func == (lhs: SearchResult, rhs: SearchResult) -> Bool { lhs.id == rhs.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
@@ -123,11 +123,11 @@ enum SearchCategory: String, CaseIterable, Identifiable {
     }
 }
 
-/// Volontairement PAS @MainActor : `search()` recharge toutes les collections
-/// depuis SQLite — un travail de fond. Sur Mac, l'exécuter sur le main thread
-/// pendant que le moteur de sync CloudKit écrit en concurrence gelait l'UI
-/// (fix freezes 2026-07-17). Stateless : les repos sont des structs qui
-/// ouvrent leur propre connexion par appel → Sendable sans état partagé.
+/// Deliberately NOT @MainActor: `search()` reloads every collection
+/// from SQLite — background work. On Mac, running it on the main thread
+/// while the CloudKit sync engine wrote concurrently used to freeze the UI
+/// (a fix from 2026-07-17). Stateless: the repos are structs that
+/// open their own connection per call → Sendable with no shared state.
 struct SearchService: Sendable {
 
     static let shared = SearchService()
@@ -139,8 +139,8 @@ struct SearchService: Sendable {
     private let budgetRepo: BudgetRepository
     private let tricountRepo: TricountRepository
 
-    /// `shared` reste le point d'accès de l'application ; la valeur par défaut
-    /// vise sa base. Les tests instancient sur une base temporaire.
+    /// `shared` stays the app's access point; the default value
+    /// targets its database. Tests instantiate against a temporary database.
     init(store: SQLiteStore = SQLiteStore()) {
         txRepo = TransactionRepository(store: store)
         patrimoineRepo = PatrimoineRepository(store: store)
@@ -150,21 +150,21 @@ struct SearchService: Sendable {
         tricountRepo = TricountRepository(store: store)
     }
 
-    /// Limite de résultats par catégorie. 8 est un bon compromis : assez pour ne
-    /// pas frustrer, pas trop pour ne pas saturer le sheet sur petits écrans.
+    /// The result limit per category. 8 is a good compromise: enough not
+    /// to frustrate, not so much it overwhelms the sheet on small screens.
     private let limitPerCategory: Int = 8
 
-    /// Lance la recherche et retourne les résultats groupés par catégorie + triés
-    /// par score décroissant. Aucun side effect. Renvoie `[]` si query < 2 caractères
-    /// (évite de tout matcher sur 1 lettre).
+    /// Runs the search and returns results grouped by category + sorted
+    /// by decreasing score. No side effects. Returns `[]` if query < 2 characters
+    /// (avoids matching everything on 1 letter).
     ///
-    /// ⚠️ Les 3 flags de module sont des `Bool` VALEUR (pas une lecture directe
-    /// d'`AppState`, `@MainActor` et non `Sendable`) — l'appelant les capture sur
-    /// le main thread et les passe ici, exécuté hors main (cf. doc de la struct).
-    /// Module désactivé ⇒ pas de requête pour ses tables : cohérent avec le fait
-    /// que l'app le désigne comme "je n'utilise pas cette fonctionnalité", et ça
-    /// évite de faire remonter un résultat vers un onglet que l'utilisateur a
-    /// délibérément masqué.
+    /// ⚠️ The 3 module flags are VALUE `Bool`s (not a direct read of
+    /// `AppState`, which is `@MainActor` and not `Sendable`) — the caller
+    /// captures them on the main thread and passes them here, run off the main thread
+    /// (see the struct's docs). A disabled module ⇒ no query for its tables: consistent
+    /// with the app treating it as "I don't use this feature", and it
+    /// avoids surfacing a result toward a tab the user has
+    /// deliberately hidden.
     func search(_ rawQuery: String,
                 showInvestments: Bool = true,
                 showBudget: Bool = true,
@@ -174,12 +174,12 @@ struct SearchService: Sendable {
 
         var scored: [(SearchResult, Int)] = []
 
-        // Transactions — on charge tout via fetchAllFilteredTransactions avec un
-        // filter ouvert (pas génial pour très grosses bases mais OK MVP). Pour
-        // limiter, on garde uniquement les matchs sur tiersName + information.
+        // Transactions — everything is loaded via fetchAllFilteredTransactions with an
+        // open filter (not great for very large databases but fine for the MVP). To
+        // limit it, only matches on tiersName + information are kept.
         let allTx = txRepo.fetchAllFilteredTransactions(
             filter: TransactionFilter(
-                accountId: 0,  // 0 = "Tous les comptes" sentinel (cf. fetchAllFilteredTransactions)
+                accountId: 0,  // 0 = the "All accounts" sentinel (see fetchAllFilteredTransactions)
                 accountName: "",
                 from: Date.distantPast,
                 to: Date.distantFuture
@@ -245,8 +245,8 @@ struct SearchService: Sendable {
             if score > 0 { scored.append((.goal(goal), score)) }
         }
 
-        // Investissements — comptes + positions. Pas de fetch-all-positions :
-        // on boucle sur les comptes (typiquement < 20) comme le reste de l'app.
+        // Investments — accounts + positions. No fetch-all-positions:
+        // looping over accounts (typically < 20) like the rest of the app.
         if showInvestments {
             let accounts = investmentRepo.fetchAccounts()
             for account in accounts {
@@ -264,7 +264,7 @@ struct SearchService: Sendable {
             }
         }
 
-        // Budget — enveloppes + motifs récurrents.
+        // Budget — envelopes + recurring patterns.
         if showBudget {
             for envelope in budgetRepo.fetchEnvelopes() {
                 let score = scoreFor(field: envelope.name, query: q)
@@ -276,7 +276,7 @@ struct SearchService: Sendable {
             }
         }
 
-        // Tricount — groupes (titre) + entrées (description + qui a payé).
+        // Tricount — groups (title) + entries (description + who paid).
         if showTricount {
             let groups = tricountRepo.fetchGroups()
             for group in groups {
@@ -295,8 +295,8 @@ struct SearchService: Sendable {
         }
 
         // Group by category, sort each group by score descending, limit, then flatten
-        // with a stable order between categories (transactions first car le plus
-        // fréquent, puis tiers, etc. — ordre du enum CaseIterable).
+        // with a stable order between categories (transactions first, being the most
+        // frequent, then payees, etc. — the CaseIterable enum's order).
         var byCategory: [SearchCategory: [(SearchResult, Int)]] = [:]
         for item in scored {
             byCategory[item.0.category, default: []].append(item)
@@ -312,7 +312,7 @@ struct SearchService: Sendable {
         return ordered
     }
 
-    /// Score 0…100. Plus c'est haut, plus c'est pertinent.
+    /// A score 0…100. The higher, the more relevant.
     private func scoreFor(field: String, query: String) -> Int {
         guard !field.isEmpty else { return 0 }
         let f = field.lowercased()

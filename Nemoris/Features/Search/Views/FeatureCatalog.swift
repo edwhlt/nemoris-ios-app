@@ -2,26 +2,26 @@ import SwiftUI
 
 // MARK: - FeatureCatalog
 //
-// Catalogue des FONCTIONNALITÉS/écrans de l'app (pas les données qu'elles
-// contiennent — ça, c'est `SearchService`). Sert la recherche "où est X" :
-// "budget" doit remonter le module Budget même si l'utilisateur n'a encore
-// aucune enveloppe nommée "budget".
+// A catalog of the app's FEATURES/screens (not the data they
+// contain — that's `SearchService`). Serves "where is X" search:
+// "budget" must surface the Budget module even if the user has
+// no envelope named "budget" yet.
 //
-// ⚠️ Source UNIQUE, partagée par `MoreView` (iOS, onglet "Plus") et
-// `SearchView` (recherche globale, les deux plateformes). Avant ce fichier,
-// `MainTabView.MoreView` portait sa propre copie privée — exactement la classe
-// de bug déjà payée ailleurs dans ce dépôt (4 calculs d'enveloppes
-// divergents) : deux implémentations de la même liste finissent par diverger.
+// ⚠️ A SINGLE source, shared by `MoreView` (iOS, the "More" tab) and
+// `SearchView` (global search, both platforms). Before this file,
+// `MainTabView.MoreView` carried its own private copy — exactly the same
+// bug class already paid for elsewhere in this repo (4 diverging
+// envelope calculations): two implementations of the same list end up diverging.
 //
-// ⚠️ `.settings` est un cas À PART : il n'existe aucun hook générique
-// cross-plateforme pour "ouvrir les Réglages depuis n'importe où" (au
-// contraire de `.tab` via `AppState.navigateToTab` et `.importCSV` via
-// `AppState.openImportTool`) — sur iPhone, Réglages ne vit QUE dans la pile de
-// navigation locale de `MoreView` (`NavigationLink` classique). `MoreView`
-// peut donc l'afficher (elle a le contexte pour le pousser elle-même) ;
-// `SearchView`, présentée en sheet/panneau depuis N'IMPORTE QUEL écran, n'a
-// pas cette pile — elle filtre les entrées `.settings` plutôt que d'exposer
-// un bouton dont le tap ne ferait rien.
+// ⚠️ `.settings` is a SPECIAL case: there's no generic cross-platform
+// hook to "open Settings from anywhere" (unlike
+// `.tab` via `AppState.navigateToTab` and `.importCSV` via
+// `AppState.openImportTool`) — on iPhone, Settings lives ONLY in `MoreView`'s
+// local navigation stack (a classic `NavigationLink`). `MoreView`
+// can therefore show it (it has the context to push it itself);
+// `SearchView`, presented as a sheet/pane from ANY screen, doesn't
+// have that stack — it filters out `.settings` entries rather than exposing
+// a button whose tap would do nothing.
 
 enum FeatureTarget {
     case tab(MainTabItem)
@@ -41,9 +41,9 @@ struct FeatureEntry: Identifiable {
 
 enum FeatureCatalog {
 
-    /// Liste complète, filtrée par les modules réellement activés par
-    /// l'utilisateur (`AppState.showX`) — inutile de proposer "Budget" dans la
-    /// recherche si l'utilisateur a désactivé ce module.
+    /// The full list, filtered by the modules the user has actually
+    /// enabled (`AppState.showX`) — no point suggesting "Budget" in
+    /// search if the user disabled that module.
     static func entries(for appState: AppState) -> [FeatureEntry] {
         var entries: [FeatureEntry] = [
             FeatureEntry(
@@ -140,9 +140,9 @@ enum FeatureCatalog {
         return entries
     }
 
-    /// Filtre par mots-clés — tous les mots de la requête doivent apparaître
-    /// quelque part dans titre + description + keywords (AND, pas OR : une
-    /// requête à 2 mots ne doit pas remonter tout ce qui matche l'un des deux).
+    /// A keyword filter — every word of the query must appear
+    /// somewhere in the title + description + keywords (AND, not OR: a
+    /// 2-word query must not surface everything matching just one of them).
     static func matching(_ query: String, in appState: AppState) -> [FeatureEntry] {
         let q = query.lowercased().trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return [] }

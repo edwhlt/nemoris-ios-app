@@ -2,32 +2,32 @@ import SwiftUI
 
 // MARK: - SearchView
 //
-// Sheet "Spotlight" cross-modules — accessible via le bouton loupe du toolbar
-// Dashboard, et via le bouton loupe de la sidebar macOS. Pattern
-// cmd-K macOS : TextField focused au launch, résultats groupés par catégorie,
-// tap = dismiss + navigation contextuelle.
+// A cross-module "Spotlight" sheet — reachable via the Dashboard toolbar's
+// magnifying-glass button, and via the macOS sidebar's magnifying-glass button. A
+// macOS cmd-K pattern: a focused TextField at launch, results grouped by category,
+// a tap = dismiss + contextual navigation.
 //
-// **Deux recherches fusionnées ICI** : DONNÉES (`SearchService`,
-// transactions/tiers/comptes/…/investissements/budget/Tricount) ET
-// FONCTIONNALITÉS/écrans (`FeatureCatalog`, section "FONCTIONNALITÉS" en tête
-// des résultats — "où est X"). Avant, ce 2ᵉ mécanisme n'existait que dans
-// `MainTabView.MoreView` (recherche de la fonctionnalité "Plus", iOS
-// uniquement) — macOS n'avait donc aucun moyen de trouver "où est le Budget"
-// par la recherche. Les deux catalogues restent des fichiers séparés
-// (données vs. features n'ont ni le même scoring, ni la même source, ni le
-// même coût — SQL vs. filtre en mémoire) mais partagent le même écran.
+// **Two searches merged HERE**: DATA (`SearchService`,
+// transactions/payees/accounts/…/investments/budget/Tricount) AND
+// FEATURES/screens (`FeatureCatalog`, a "FEATURES" section at the top
+// of the results — "where is X"). Before, this 2nd mechanism only existed in
+// `MainTabView.MoreView` (the "More" feature's search, iOS
+// only) — macOS therefore had no way to find "where is Budget"
+// through search. The two catalogs stay separate files
+// (data vs. features have neither the same scoring, nor the same source, nor the
+// same cost — SQL vs. an in-memory filter) but share the same screen.
 //
-// **Debounce 250 ms** (DONNÉES seulement) : on évite de spammer le
-// SearchService à chaque keystroke. 250 ms est le sweet-spot iOS standard
-// (Apple Mail, Notes utilisent ~200-300 ms). Les résultats FONCTIONNALITÉS,
-// eux, sont un filtre synchrone sur une poignée d'entrées en mémoire — pas de
-// debounce nécessaire, pas d'I/O à protéger.
+// **A 250ms debounce** (DATA only): avoids spamming
+// SearchService on every keystroke. 250ms is the standard iOS sweet spot
+// (Apple Mail, Notes use ~200-300ms). The FEATURES results,
+// on the other hand, are a synchronous filter over a handful of in-memory entries — no
+// debounce needed, no I/O to protect.
 //
-// **Navigation** : tap sur un résultat → dismiss + bascule sur l'onglet
-// approprié via `appState.selectedTab`. Pour MVP on ne deep-link pas dans la
-// fiche exacte (ex : on ouvre l'onglet Transactions mais pas la TransactionEditSheet
-// du tx précis) — ça nécessiterait un mécanisme de routing global qui sort du
-// scope. l'utilisateur voit la liste filtrable directement.
+// **Navigation**: tapping a result → dismiss + switches to the
+// appropriate tab via `appState.selectedTab`. For the MVP, no deep link into the
+// exact sheet (e.g. the Transactions tab opens but not the specific
+// transaction's TransactionEditSheet) — that would require a global
+// routing mechanism, out of scope. The user sees the filterable list directly.
 
 struct SearchView: View {
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
@@ -39,8 +39,8 @@ struct SearchView: View {
     @State private var debounceTask: Task<Void, Never>? = nil
     @FocusState private var queryFieldFocused: Bool
 
-    /// Résultats groupés par catégorie pour le rendu — préserve l'ordre des
-    /// catégories de `SearchService` (transactions → tiers → … → goals).
+    /// Results grouped by category for rendering — preserves `SearchService`'s
+    /// category order (transactions → payees → … → goals).
     private var grouped: [(SearchCategory, [SearchResult])] {
         var byCat: [SearchCategory: [SearchResult]] = [:]
         for r in results {
@@ -52,14 +52,14 @@ struct SearchView: View {
         }
     }
 
-    /// "Où est X" — les MODULES/écrans qui matchent la requête, pas les
-    /// données qu'ils contiennent (cf. `FeatureCatalog`). Calcul synchrone,
-    /// pas de debounce : c'est un simple filtre sur une liste en mémoire de
-    /// quelques entrées, sans I/O — contrairement à `SearchService.search`.
+    /// "Where is X" — the MODULES/screens matching the query, not the
+    /// data they contain (see `FeatureCatalog`). A synchronous computation,
+    /// no debounce: it's a plain filter over an in-memory list of
+    /// a few entries, no I/O — unlike `SearchService.search`.
     ///
-    /// `.settings` exclu : cf. doc `FeatureCatalog.FeatureTarget` — pas de
-    /// hook générique pour ouvrir les Réglages depuis une vue présentée en
-    /// sheet/panneau depuis n'importe où.
+    /// `.settings` excluded: see `FeatureCatalog.FeatureTarget`'s docs — no
+    /// generic hook to open Settings from a view presented as a
+    /// sheet/pane from anywhere.
     private var featureMatches: [FeatureEntry] {
         guard query.trimmingCharacters(in: .whitespaces).count >= 2 else { return [] }
         return FeatureCatalog.matching(query, in: appState).filter {
@@ -85,9 +85,9 @@ struct SearchView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         List {
-                            // "Où est X" — modules/écrans qui matchent, avant les
-                            // données : c'est souvent CE qu'on cherche pour une
-                            // requête courte ("budget", "sql").
+                            // "Where is X" — matching modules/screens, before
+                            // data: that's often WHAT's being looked for on a
+                            // short query ("budget", "sql").
                             if !featureMatches.isEmpty {
                                 Section {
                                     ForEach(featureMatches) { entry in
@@ -134,11 +134,11 @@ struct SearchView: View {
                 }
             }
             .onAppear {
-                // ⚠️ Pas d'auto-focus sur Mac (Designed for iPad) : le focus
-                // programmatique traverse UIScreen dans la couche de compat
-                // iOS-sur-Mac → NSInternalInconsistencyException ("Accessing
+                // ⚠️ No auto-focus on Mac (Designed for iPad): programmatic
+                // focus goes through UIScreen in the iOS-on-Mac
+                // compatibility layer → an NSInternalInconsistencyException ("Accessing
                 // the focus system through UIScreen is no longer supported").
-                // Sur Mac l'utilisateur clique dans le champ — AppKit gère.
+                // On Mac the user clicks into the field — AppKit handles it.
                 if !ProcessInfo.processInfo.isiOSAppOnMac {
                     queryFieldFocused = true
                 }
@@ -225,7 +225,7 @@ struct SearchView: View {
         .textCase(nil)
     }
 
-    // MARK: - Feature row ("où est X")
+    // MARK: - Feature row ("where is X")
 
     @ViewBuilder
     private func featureRow(_ entry: FeatureEntry) -> some View {
@@ -286,8 +286,8 @@ struct SearchView: View {
         .background(AppTheme.Colors.surface, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md))
     }
 
-    /// Tuple (icon, color) extrait via fonction pure pour ne pas mélanger des
-    /// statements dans un @ViewBuilder (qui n'accepte que des Views).
+    /// A (icon, color) tuple extracted via a pure function, so as not to mix
+    /// statements into a @ViewBuilder (which only accepts Views).
     private func iconStyle(for result: SearchResult) -> (icon: String, color: Color) {
         switch result {
         case .transaction:  return ("creditcard.fill",        AppTheme.Colors.accent)
@@ -439,19 +439,19 @@ struct SearchView: View {
             return
         }
         isSearching = true
-        // ⚠️ Capturés ICI (main actor) : `AppState` n'est pas `Sendable`, ces
-        // 3 `Bool` valeur le sont — c'est ce qui permet à `search()` de tourner
-        // hors main thread sans toucher `appState` depuis ce thread.
+        // ⚠️ Captured HERE (the main actor): `AppState` isn't `Sendable`, these
+        // 3 value `Bool`s are — this is what lets `search()` run
+        // off the main thread with no touching of `appState` from that thread.
         let showInvestments = appState.showInvestments
         let showBudget = appState.showBudget
         let showTricount = appState.showTricount
         debounceTask = Task { @MainActor in
-            // 250 ms debounce — sweet-spot iOS standard pour search-as-you-type.
+            // A 250ms debounce — the standard iOS sweet spot for search-as-you-type.
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled else { return }
-            // Recherche HORS main thread : elle recharge toute la base — sur
-            // Mac, la faire sur le main actor gelait l'UI dès que le moteur
-            // de sync écrivait en parallèle (fix freezes 2026-07-17).
+            // A search OFF the main thread: it reloads the whole database — on
+            // Mac, running it on the main actor used to freeze the UI as soon as the
+            // sync engine wrote in parallel (a fix from 2026-07-17).
             let r = await Task.detached(priority: .userInitiated) {
                 SearchService.shared.search(trimmed,
                                              showInvestments: showInvestments,
@@ -466,9 +466,9 @@ struct SearchView: View {
 
     // MARK: - Navigation
 
-    /// Dismiss la sheet + bascule sur l'onglet contextuel. Pour MVP on n'ouvre
-    /// pas la fiche exacte (deep-link complexe avec les nav stacks isolés) —
-    /// l'utilisateur voit l'écran approprié et trouve son résultat facilement.
+    /// Dismisses the sheet + switches to the contextual tab. For the MVP the
+    /// exact sheet isn't opened (a complex deep link with isolated nav stacks) —
+    /// the user sees the right screen and finds their result easily.
     private func navigate(to result: SearchResult) {
         switch result {
         case .transaction, .payee, .account, .category, .tag:
@@ -485,10 +485,10 @@ struct SearchView: View {
         dismiss()
     }
 
-    /// Résultat "Fonctionnalités" — même dismiss, cible différente. `.settings`
-    /// n'atteint jamais ce point (filtré par `featureMatches`), mais le switch
-    /// reste exhaustif pour que l'ajout d'un futur cas `FeatureTarget` casse la
-    /// compilation ici plutôt que de silencieusement ne rien faire.
+    /// A "Features" result — the same dismiss, a different target. `.settings`
+    /// never reaches this point (filtered out by `featureMatches`), but the switch
+    /// stays exhaustive so that adding a future `FeatureTarget` case breaks the
+    /// build here rather than silently doing nothing.
     private func navigate(to target: FeatureTarget) {
         switch target {
         case .tab(let tab):
