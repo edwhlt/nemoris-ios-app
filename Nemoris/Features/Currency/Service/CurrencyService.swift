@@ -4,21 +4,21 @@ import os
 
 // MARK: - CurrencyService
 //
-// Service de conversion de devises — actor isolé pour gérer le cache thread-safe.
-// Provider gratuit : fawazahmed0/currency-api via jsDelivr CDN (sans clé), avec
-// fallback pages.dev — même provider que `CurrencyRateService` (Tricount).
-// ⚠️ exchangerate.host (ancien provider) exige désormais une clé payante
-// (`missing_access_key`) : toute requête échouait silencieusement, d'où
-// "Impossible de récupérer le taux" pour 100% des conversions.
+// A currency-conversion service — an isolated actor to manage a thread-safe cache.
+// A free provider: fawazahmed0/currency-api via the jsDelivr CDN (no key), with a
+// pages.dev fallback — the same provider as `CurrencyRateService` (Tricount).
+// ⚠️ exchangerate.host (the old provider) now requires a paid key
+// (`missing_access_key`): every request failed silently, hence
+// "Unable to fetch the rate" for 100% of conversions.
 //
-// **Stratégie de cache** : 3 niveaux pour minimiser le réseau :
-//   1. RAM (`Dictionary` en mémoire de l'actor) — recharge à chaque cold start
-//   2. SQLite `currency_rates` (table v6 existante) — survit aux relaunches
-//   3. Réseau (fawazahmed0/currency-api) — fallback ultime
+// **Cache strategy**: 3 levels to minimize network use:
+//   1. RAM (an in-memory `Dictionary` on the actor) — reloaded on every cold start
+//   2. SQLite `currency_rates` (an existing v6 table) — survives relaunches
+//   3. Network (fawazahmed0/currency-api) — the ultimate fallback
 //
-// Lookup : on cherche un taux du JOUR. Si absent, on fallback sur les 30
-// derniers jours (le taux ne bouge pas trop sur 1 mois — acceptable pour
-// l'usage "conversion ad-hoc" du MVP). Au-delà → fetch réseau.
+// Lookup: looks for TODAY's rate. If absent, falls back to the last 30
+// days (the rate doesn't move much over 1 month — acceptable for the
+// MVP's "ad-hoc conversion" use case). Beyond that → a network fetch.
 
 private let SQLITE_TRANSIENT_CURRENCY = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -31,8 +31,8 @@ actor CurrencyService {
     /// Cache RAM : key = "FROM_TO_yyyy-MM-dd", value = rate.
     private var ramCache: [String: Double] = [:]
 
-    /// Liste des devises supportées (top 15 du marché des changes — suffisant
-    /// pour 99 % des cas user).
+    /// The list of supported currencies (the top 15 in the FX market — enough
+    /// for 99% of user cases).
     nonisolated static let supportedCurrencies: [Currency] = [
         Currency(code: "EUR", symbol: "€",  name: "Euro"),
         Currency(code: "USD", symbol: "$",  name: "Dollar US"),
@@ -58,15 +58,15 @@ actor CurrencyService {
         var id: String { code }
     }
 
-    /// Convertit un montant. Retourne `nil` si le taux n'est pas trouvable
-    /// (réseau down + cache vide pour cette paire).
+    /// Converts an amount. Returns `nil` if the rate can't be found
+    /// (the network is down + the cache is empty for this pair).
     func convert(_ amount: Double, from: String, to: String, date: Date = Date()) async -> Double? {
         if from == to { return amount }
         guard let rate = await rate(from: from, to: to, date: date) else { return nil }
         return amount * rate
     }
 
-    /// Cherche un taux dans les 3 caches (RAM → SQL → réseau).
+    /// Looks up a rate across the 3 caches (RAM → SQL → network).
     func rate(from: String, to: String, date: Date) async -> Double? {
         let dayKey = dayKey(date: date)
         let key = "\(from)_\(to)_\(dayKey)"
@@ -74,13 +74,13 @@ actor CurrencyService {
         // 1) RAM
         if let cached = ramCache[key] { return cached }
 
-        // 2) SQLite — chercher le taux du jour, fallback 30j en arrière
+        // 2) SQLite — looks for today's rate, falling back up to 30 days back
         if let stored = readFromSQLite(from: from, to: to, date: date) {
             ramCache[key] = stored
             return stored
         }
 
-        // 3) Réseau
+        // 3) Network
         if let fetched = await fetchFromNetwork(from: from, to: to, date: date) {
             ramCache[key] = fetched
             writeToSQLite(from: from, to: to, date: date, rate: fetched)
@@ -102,9 +102,9 @@ actor CurrencyService {
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
 
-        // Cherche le taux le plus récent dans une fenêtre de 30 jours autour
-        // de la date demandée. Permet de tolérer les jours non cotés (week-end,
-        // jours fériés) sans casser la conversion.
+        // Looks for the most recent rate within a 30-day window around
+        // the requested date. Tolerates unquoted days (weekends,
+        // holidays) without breaking the conversion.
         let dayStr = dayKey(date: date)
         let cal = Calendar.current
         guard let from30 = cal.date(byAdding: .day, value: -30, to: date) else { return nil }
@@ -152,11 +152,11 @@ actor CurrencyService {
 
     // MARK: - Network layer
 
-    /// Fetch le taux via fawazahmed0/currency-api (gratuit, sans clé, ~170 devises).
-    /// Essaie d'abord le CDN jsDelivr (dates historiques disponibles), puis le
-    /// fallback pages.dev (taux du jour uniquement) — même stratégie que
+    /// Fetches the rate via fawazahmed0/currency-api (free, no key, ~170 currencies).
+    /// Tries the jsDelivr CDN first (historical dates available), then the
+    /// pages.dev fallback (today's rate only) — the same strategy as
     /// `CurrencyRateService.fetchRate` (Tricount).
-    /// Réponse : `{ "date": "…", "{fromKey}": { "{toKey}": 0.93 } }`.
+    /// Response: `{ "date": "…", "{fromKey}": { "{toKey}": 0.93 } }`.
     private func fetchFromNetwork(from: String, to: String, date: Date) async -> Double? {
         let fromKey = from.lowercased()
         let toKey = to.lowercased()

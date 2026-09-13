@@ -3,19 +3,19 @@ import SQLite3
 
 private let SQLITE_TRANSIENT_CR = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-/// Service de taux de change historiques.
+/// Historical exchange rate service.
 ///
-/// Source principale : API fawazahmed0 (jsDelivr CDN, gratuite, ~170 devises, pas de clé).
-/// URL : https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@{date}/v1/currencies/{from}.json
-/// Fallback : https://latest.currency-api.pages.dev/v1/currencies/{from}.json
+/// Main source: the fawazahmed0 API (jsDelivr CDN, free, ~170 currencies, no key).
+/// URL: https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@{date}/v1/currencies/{from}.json
+/// Fallback: https://latest.currency-api.pages.dev/v1/currencies/{from}.json
 ///
-/// Utilisation : await CurrencyRateService.syncRates(groupId: gid)
+/// Usage: await CurrencyRateService.syncRates(groupId: gid)
 struct CurrencyRateService {
 
     // MARK: - Public
 
-    /// Synchronise les taux pour tous les groupes Tricount existants en base.
-    /// Utile au premier chargement d'une vue qui affiche des montants convertis.
+    /// Syncs rates for every existing Tricount group in the database.
+    /// Useful on the first load of a view that displays converted amounts.
     @discardableResult
     static func syncAllGroups() async -> Int {
         guard DatabaseManager.shared.hasDatabase() else { return 0 }
@@ -47,14 +47,14 @@ struct CurrencyRateService {
         return ids
     }
 
-    /// Synchronise les taux manquants pour toutes les entrées d'un groupe Tricount.
-    /// Étape 1 : dérive les taux depuis local_total/local_currency déjà stockés (sans réseau).
-    /// Étape 2 : pour les paires (devise, date) encore sans taux, appelle l'API.
+    /// Syncs the missing rates for all entries of a Tricount group.
+    /// Step 1: derives rates from the local_total/local_currency already stored (no network).
+    /// Step 2: for (currency, date) pairs still missing a rate, calls the API.
     @discardableResult
     static func syncRates(groupId: Int) async -> Int {
         guard DatabaseManager.shared.hasDatabase() else { return 0 }
 
-        // 1. Dériver les taux implicites depuis les données Tricount déjà en DB
+        // 1. Derive implicit rates from Tricount data already in the DB
         let derivedCount = persistRatesFromLocalData(groupId: groupId)
 
         // 2. Paires encore manquantes → appel API
@@ -71,11 +71,11 @@ struct CurrencyRateService {
         return derivedCount + fetchedCount
     }
 
-    // MARK: - Dérivation depuis local_total
+    // MARK: - Deriving from local_total
 
-    /// Calcule et persiste les taux implicites depuis local_total/local_currency.
-    /// Exemple : entry VND, total=1_000_000, local_total=40 EUR
-    ///           → rate = 40 / 1_000_000 = 0.00004 (VND → EUR)
+    /// Computes and persists implicit rates from local_total/local_currency.
+    /// Example: entry VND, total=1_000_000, local_total=40 EUR
+    ///          → rate = 40 / 1_000_000 = 0.00004 (VND → EUR)
     @discardableResult
     static func persistRatesFromLocalData(groupId: Int) -> Int {
         guard DatabaseManager.shared.hasDatabase() else { return 0 }
@@ -87,7 +87,7 @@ struct CurrencyRateService {
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 3000)
 
-        // Récupère les paires (devise, date, taux dérivé) pour le groupe
+        // Fetches the (currency, date, derived rate) tuples for the group
         let selectSQL = """
         SELECT DISTINCT te.currency, te.date,
                         te.local_total / te.total AS rate
@@ -176,8 +176,8 @@ struct CurrencyRateService {
 
     // MARK: - Appel API
 
-    /// Récupère le taux `from → EUR` pour une date (yyyy-MM-dd).
-    /// Essaie d'abord jsDelivr, puis le fallback pages.dev.
+    /// Fetches the `from → EUR` rate for a date (yyyy-MM-dd).
+    /// Tries jsDelivr first, then the pages.dev fallback.
     static func fetchRate(from: String, to: String = "EUR", date: String) async throws -> Double {
         let fromLower = from.lowercased()
         let toLower   = to.lowercased()
@@ -193,7 +193,7 @@ struct CurrencyRateService {
     private static func decodeRate(urlString: String, fromKey: String, toKey: String) async throws -> Double {
         guard let url = URL(string: urlString) else { throw URLError(.badURL) }
         let (data, _) = try await URLSession.shared.data(from: url)
-        // Réponse : { "date": "…", "{fromKey}": { "{toKey}": 0.000038 } }
+        // Response: { "date": "…", "{fromKey}": { "{toKey}": 0.000038 } }
         guard let json      = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let ratesDict = json[fromKey] as? [String: Any],
               let rate      = ratesDict[toKey] as? Double else {

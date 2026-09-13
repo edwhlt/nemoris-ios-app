@@ -2,19 +2,19 @@ import SwiftUI
 
 // MARK: - CurrencyConverterSheet
 //
-// Sheet de conversion de devises — accessible depuis Settings → Confidentialité.
-// MVP : usage ad-hoc (l'utilisateur tape un montant + 2 devises). Pas de conversion
-// automatique des transactions de la base — c'est une calculatrice avec cache
-// des taux + persistance dans `currency_rates`.
+// A currency-conversion sheet — accessible from Settings → Privacy.
+// MVP: ad-hoc use (the user types an amount + 2 currencies). No automatic
+// conversion of the database's transactions — it's a calculator with a rate
+// cache + persistence in `currency_rates`.
 //
-// **Flux** :
-//   - User saisit montant + from + to
-//   - Tap "Convertir" → CurrencyService.convert() (cache RAM/SQL/réseau)
-//   - Affichage résultat avec taux utilisé + date du taux
+// **Flow**:
+//   - The user enters amount + from + to
+//   - Tap "Convert" → CurrencyService.convert() (RAM/SQL/network cache)
+//   - Shows the result with the rate used + the rate's date
 //
-// Devise par défaut au launch :
-//   - `from` = devise préférée user (AppState.preferredCurrency)
-//   - `to`   = EUR (sauf si preferredCurrency == EUR, alors USD)
+// Default currency at launch:
+//   - `from` = the user's preferred currency (AppState.preferredCurrency)
+//   - `to`   = EUR (unless preferredCurrency == EUR, then USD)
 
 struct CurrencyConverterSheet: View {
     // paneDismiss : fermeture uniforme sheet iOS / panneau macOS (adaptivePane).
@@ -58,7 +58,7 @@ struct CurrencyConverterSheet: View {
 
                 Section {
                     Button {
-                        // Swap from ↔ to (UX classique des convertisseurs)
+                        // Swap from ↔ to (a classic converter UX)
                         let tmp = fromCurrency
                         fromCurrency = toCurrency
                         toCurrency = tmp
@@ -135,8 +135,8 @@ struct CurrencyConverterSheet: View {
                         .font(AppTheme.Typography.bodySmall)
                 }
 
-                // Devise préférée — utilisée comme default `from` au prochain
-                // lancement du sheet.
+                // Preferred currency — used as the default `from` the next
+                // time the sheet is opened.
                 Section {
                     Picker(selection: Binding(
                         get: { appState.preferredCurrency },
