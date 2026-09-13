@@ -2,18 +2,18 @@ import SwiftUI
 
 // MARK: - GoalFormView
 //
-// Sheet de création/édition d'un objectif financier.
+// A sheet for creating/editing a financial goal.
 //
-// **Templates** : 4 starters proposés en haut du form pour les nouveaux goals,
-// pour accélérer la création la plus fréquente (fonds d'urgence, apport,
-// patrimoine, dette à zéro). Tap → pré-remplit name/kind/targetAmount, l'utilisateur
-// peut tout modifier.
+// **Templates**: 4 starters offered at the top of the form for new goals,
+// to speed up the most common creations (emergency fund, down payment,
+// net worth, zero debt). Tap → pre-fills name/kind/targetAmount, the user
+// can still edit everything.
 //
-// **Champs adaptatifs** :
-//   - kind == .custom → champ "Montant actuel" éditable (pas de tracking auto)
-//   - kind == .debtPayoff → targetAmount = 0 par défaut + footer explicatif sur
-//     la baseline persistée
-//   - tous les autres → targetAmount visible, current dérivé du snapshot patrimoine
+// **Adaptive fields**:
+//   - kind == .custom → an editable "Current amount" field (no auto tracking)
+//   - kind == .debtPayoff → targetAmount = 0 by default + an explanatory footer about
+//     the persisted baseline
+//   - all others → targetAmount visible, current derived from the Patrimoine snapshot
 
 struct GoalFormView: View {
     @Environment(\.paneDismiss) private var dismiss
@@ -40,7 +40,7 @@ struct GoalFormView: View {
         let initialTarget = existingGoal?.targetAmount ?? 0
         _targetAmountText = State(initialValue: initialTarget == 0 ? "" : String(format: "%.2f", initialTarget))
         _hasDeadline = State(initialValue: existingGoal?.deadlineDate != nil)
-        // Default : 1 an dans le futur si pas de deadline saisie
+        // Default: 1 year in the future if no deadline was entered
         _deadlineDate = State(initialValue: existingGoal?.deadlineDate
                               ?? Calendar.current.date(byAdding: .year, value: 1, to: Date()) ?? Date())
         let initialCustom = existingGoal?.customCurrentAmount ?? 0
@@ -59,14 +59,14 @@ struct GoalFormView: View {
     private var canSave: Bool {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return false }
-        // Pour debt_payoff, target = 0 est valide (= rembourser entièrement).
+        // For debt_payoff, target = 0 is valid (= fully repaid).
         if kind == .debtPayoff { return true }
         return targetAmount > 0
     }
 
     var body: some View {
             Form {
-                // ── Templates (création uniquement) ────────────────
+                // ── Templates (creation only) ────────────────
                 if existingGoal == nil {
                     Section {
                         templateRow(name: "Fonds d'urgence", target: 6000, kind: .savings,
@@ -86,7 +86,7 @@ struct GoalFormView: View {
                     }
                 }
 
-                // ── Identité ────────────────────────────────────────
+                // ── Identity ────────────────────────────────────────
                 Section("Identité") {
                     TextField("Nom de l'objectif", text: $name)
                         .autocorrectionDisabled()
@@ -108,15 +108,15 @@ struct GoalFormView: View {
                             Text("Montant cible")
                                 .font(AppTheme.Typography.bodyMedium)
                             Spacer()
-                            // Titre vide : la row a déjà son label ("Montant
-                            // cible") — cf. TransactionEditSheet pour la raison macOS.
+                            // Empty title: the row already has its label ("Target
+                            // amount") — see TransactionEditSheet for the macOS reason.
                             TextField("", text: $targetAmountText)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(maxWidth: 160)
                         }
                     } else {
-                        // debt_payoff : cible toujours 0 (= dette éteinte)
+                        // debt_payoff: target always 0 (= debt cleared)
                         HStack {
                             Text("Montant cible")
                                 .font(AppTheme.Typography.bodyMedium)
@@ -131,8 +131,8 @@ struct GoalFormView: View {
                             Text("Montant actuel")
                                 .font(AppTheme.Typography.bodyMedium)
                             Spacer()
-                            // Titre vide : la row a déjà son label ("Montant
-                            // actuel") — cf. TransactionEditSheet.
+                            // Empty title: the row already has its label ("Current
+                            // amount") — see TransactionEditSheet.
                             TextField("", text: $customCurrentAmountText)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)

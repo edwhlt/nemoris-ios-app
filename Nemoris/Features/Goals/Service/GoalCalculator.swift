@@ -2,31 +2,31 @@ import Foundation
 
 // MARK: - GoalCalculator
 //
-// Calcul pur (sans état) du `GoalProgress` à partir d'un `Goal` et du contexte
-// Patrimoine courant (`PatrimoineSnapshot` + historique de dette initial pour
-// les debt_payoff). Pas de dépendance SQLite, pas de side effect — testable
-// unitairement et appelable depuis n'importe quel VM.
+// A pure (stateless) calculation of `GoalProgress` from a `Goal` and the current
+// Patrimoine context (`PatrimoineSnapshot` + an initial debt history for
+// debt_payoff goals). No SQLite dependency, no side effect — unit-testable
+// and callable from any VM.
 //
-// **Pourquoi pas dans le VM directement ?**
-//   - Séparation de préoccupations : le VM s'occupe de la collection et du
-//     refresh ; le calculator s'occupe du "comment je calcule".
-//   - Testabilité : on peut tester chaque kind de goal avec des inputs fixes.
-//   - Réutilisabilité : la projection (étape 4b) réutilisera la même logique
-//     pour estimer des Goals atteints dans le futur.
+// **Why not directly in the VM?**
+//   - Separation of concerns: the VM handles the collection and the
+//     refresh; the calculator handles "how do I compute this".
+//   - Testability: each goal kind can be tested with fixed inputs.
+//   - Reusability: the projection will reuse the same logic
+//     to estimate Goals reached in the future.
 
 enum GoalCalculator {
 
-    /// Calcule le `GoalProgress` à partir du contexte Patrimoine fourni.
+    /// Computes `GoalProgress` from the given Patrimoine context.
     ///
     /// - Parameters:
-    ///   - goal: l'objectif à évaluer
-    ///   - snapshot: snapshot patrimoine courant (vu d'aujourd'hui)
-    ///   - totalAssetsValue: valeur des assets liquides (déjà résolus depuis les comptes liés)
-    ///   - initialDebtForPayoff: dette de référence pour calculer le % de remboursement
-    ///     (typiquement la dette au moment de la création du goal, ou la dette MAX si on
-    ///     préfère "depuis le pic"). Si nil, on tombe sur `snapshot.totalLiabilities` à
-    ///     la date courante, ce qui donnerait toujours 0% — donc à éviter.
-    ///   - asOf: date d'évaluation, défaut `Date()`. Sert seulement à calculer
+    ///   - goal: the goal to evaluate
+    ///   - snapshot: the current Patrimoine snapshot (as of today)
+    ///   - totalAssetsValue: the value of liquid assets (already resolved from linked accounts)
+    ///   - initialDebtForPayoff: the reference debt used to compute the % repaid
+    ///     (typically the debt at the time the goal was created, or the MAX debt if
+    ///     "since the peak" is preferred). If nil, falls back to `snapshot.totalLiabilities` at
+    ///     the current date, which would always give 0% — so this should be avoided.
+    ///   - asOf: the evaluation date, default `Date()`. Only used to compute
     ///     `daysRemaining`.
     static func progress(for goal: Goal,
                          snapshot: PatrimoineSnapshot,
@@ -34,7 +34,7 @@ enum GoalCalculator {
                          initialDebtForPayoff: Double? = nil,
                          asOf reference: Date = Date()) -> GoalProgress {
 
-        // 1) Résolution du `currentAmount` selon le kind.
+        // 1) Resolving `currentAmount` based on the kind.
         let current: Double
         switch goal.kind {
         case .savings:
@@ -42,22 +42,22 @@ enum GoalCalculator {
         case .netWorth:
             current = max(0, snapshot.netWorth)
         case .debtPayoff:
-            // current = montant REMBOURSÉ = initialDebt − dette actuelle.
-            // Borné à [0, initialDebt] pour éviter les valeurs négatives si la
-            // dette a augmenté (rare mais possible : nouveau prêt après création
-            // du goal).
+            // current = the REPAID amount = initialDebt − the current debt.
+            // Clamped to [0, initialDebt] to avoid negative values if the
+            // debt has increased (rare but possible: a new loan after the goal
+            // was created).
             let initial = initialDebtForPayoff ?? snapshot.totalLiabilities
             current = max(0, min(initial, initial - snapshot.totalLiabilities))
         case .custom:
             current = max(0, goal.customCurrentAmount)
         }
 
-        // 2) Ratio capé à 1.0. Cas dégénéré target_amount == 0 → ratio = 0
-        //    pour éviter la division par zéro et un affichage "100% atteint"
-        //    trompeur sur un goal mal saisi.
+        // 2) The ratio capped at 1.0. The degenerate target_amount == 0 case → a ratio = 0
+        //    to avoid dividing by zero and a misleading "100% reached" display
+        //    on a poorly entered goal.
         let ratio: Double = {
-            // debt_payoff avec target = 0 = "rembourser entièrement". Dans ce cas
-            // le ratio est current / initialDebt (et non current / target qui serait /0).
+            // A debt_payoff with target = 0 = "repay entirely". In that case
+            // the ratio is current / initialDebt (not current / target, which would be /0).
             if goal.kind == .debtPayoff && goal.targetAmount == 0 {
                 let initial = initialDebtForPayoff ?? snapshot.totalLiabilities
                 guard initial > 0 else { return 0 }
@@ -88,12 +88,12 @@ enum GoalCalculator {
         )
     }
 
-    /// Mensualité à mettre de côté pour atteindre l'objectif d'ici la deadline,
-    /// au rythme constant. Nil si pas de deadline ou si l'objectif est déjà
-    /// atteint (rien à faire).
+    /// The monthly amount to set aside to reach the goal by the deadline,
+    /// at a constant pace. Nil if there's no deadline or the goal is already
+    /// reached (nothing to do).
     ///
-    /// Sert d'**indicateur d'action** dans la row du goal : "Il vous faut
-    /// économiser 320 €/mois pour atteindre cet objectif d'ici décembre".
+    /// Serves as an **action indicator** in the goal's row: "You need to
+    /// save €320/month to reach this goal by December".
     static func monthlyContributionNeeded(for progress: GoalProgress,
                                           asOf reference: Date = Date()) -> Double? {
         guard let deadline = progress.goal.deadlineDate else { return nil }
@@ -103,7 +103,7 @@ enum GoalCalculator {
         let comps = cal.dateComponents([.month],
                                        from: cal.startOfDay(for: reference),
                                        to: cal.startOfDay(for: deadline))
-        let months = max(1, comps.month ?? 1)  // jamais < 1 mois pour éviter /0 + UI explosée
+        let months = max(1, comps.month ?? 1)  // never < 1 month, to avoid /0 + a broken UI
         return progress.amountRemaining / Double(months)
     }
 }

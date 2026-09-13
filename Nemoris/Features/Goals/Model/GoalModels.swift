@@ -2,20 +2,20 @@ import Foundation
 
 // MARK: - Goal Models
 //
-// Objectifs financiers — table `goals` (migration v39). Le progress n'est PAS
-// stocké : il se calcule en mémoire dans le ViewModel en croisant avec le
-// `PatrimoineSnapshot` courant. Évite tout drift entre l'objectif et la réalité.
+// Financial goals — the `goals` table (migration v39). Progress is NOT
+// stored: it's computed in memory in the ViewModel by cross-referencing the
+// current `PatrimoineSnapshot`. Avoids any drift between the goal and reality.
 
-/// Type d'objectif — détermine comment on calcule le "current amount".
+/// Goal kind — determines how the "current amount" is computed.
 enum GoalKind: String, CaseIterable {
-    /// Atteindre X € d'épargne. `current` = total des actifs liquides patrimoine.
+    /// Reach €X in savings. `current` = total liquid Patrimoine assets.
     case savings    = "SAVINGS"
     /// Atteindre X € de patrimoine net. `current` = snapshot.netWorth.
     case netWorth   = "NETWORTH"
-    /// Rembourser intégralement la dette. `current` = totalLiabilities, target = 0.
-    /// Progress = (1 − current/initialDebt) — capé à 100%.
+    /// Fully repay the debt. `current` = totalLiabilities, target = 0.
+    /// Progress = (1 − current/initialDebt) — capped at 100%.
     case debtPayoff = "DEBT_PAYOFF"
-    /// Objectif libre — l'utilisateur édite manuellement le "current" (pas de calcul auto).
+    /// A free-form goal — the user manually edits the "current" value (no auto calculation).
     case custom     = "CUSTOM"
 
     var label: String {
@@ -36,7 +36,7 @@ enum GoalKind: String, CaseIterable {
         }
     }
 
-    /// Hint affichée dans le form sous le picker pour expliquer le calcul.
+    /// A hint shown in the form under the picker to explain the calculation.
     var explanation: String {
         switch self {
         case .savings:
@@ -51,39 +51,39 @@ enum GoalKind: String, CaseIterable {
     }
 }
 
-/// Goal persisté en SQLite. `targetAmount` doit être positif ; `customCurrentAmount`
-/// n'est utilisé que pour `kind == .custom`.
+/// A goal persisted in SQLite. `targetAmount` must be positive; `customCurrentAmount`
+/// is only used for `kind == .custom`.
 struct Goal: Identifiable, Hashable {
     let id: Int
     var name: String
     var kind: GoalKind
     var targetAmount: Double
     var deadlineDate: Date?      // nil = pas de deadline
-    var customCurrentAmount: Double  // utilisé uniquement si kind == .custom
+    var customCurrentAmount: Double  // only used if kind == .custom
     var notes: String?
     let createdAt: Date
 }
 
-// MARK: - GoalProgress (calculé en mémoire)
+// MARK: - GoalProgress (computed in memory)
 
-/// Progress d'un goal à un instant T — calculé par `GoalsViewModel` en croisant
-/// avec le `PatrimoineSnapshot`. Tous les montants en EUR.
+/// A goal's progress at a given point in time — computed by `GoalsViewModel` by
+/// cross-referencing the `PatrimoineSnapshot`. All amounts in EUR.
 struct GoalProgress: Equatable {
     let goal: Goal
-    /// Montant actuellement atteint. Pour debt_payoff c'est la dette REMBOURSÉE
-    /// (= initialDebt − currentDebt), pas la dette restante.
+    /// The amount currently reached. For debt_payoff this is the REPAID debt
+    /// (= initialDebt − currentDebt), not the remaining debt.
     let currentAmount: Double
-    /// Ratio 0…1.0 (capé). 1.0 = objectif atteint, > 1.0 ramené à 1.0.
+    /// A 0…1.0 ratio (capped). 1.0 = goal reached, > 1.0 clamped to 1.0.
     let ratio: Double
-    /// Jours restants jusqu'à la deadline. Négatif si dépassée. Nil si pas de deadline.
+    /// Days remaining until the deadline. Negative if past. Nil if there's no deadline.
     let daysRemaining: Int?
-    /// `true` si la deadline est passée mais l'objectif pas encore atteint.
+    /// `true` if the deadline has passed but the goal isn't reached yet.
     let isOverdue: Bool
 
-    /// Vrai si l'objectif est atteint (≥ 100%).
+    /// True if the goal is reached (≥ 100%).
     var isCompleted: Bool { ratio >= 1.0 }
 
-    /// Montant restant à atteindre (target − current). 0 si déjà atteint.
+    /// The remaining amount to reach (target − current). 0 if already reached.
     var amountRemaining: Double { max(0, goal.targetAmount - currentAmount) }
 
     var percentText: String { String(format: "%.0f %%", ratio * 100) }

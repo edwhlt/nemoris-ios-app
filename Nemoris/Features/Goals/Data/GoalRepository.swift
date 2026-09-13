@@ -3,9 +3,9 @@ import SQLite3
 
 // MARK: - GoalRepository
 //
-// CRUD pour la table `goals` (migration v39). L'accès SQLite passe par
-// `SQLiteStore`, injecté à la construction : les tests peuvent ainsi pointer le
-// repository vers une base temporaire.
+// CRUD for the `goals` table (migration v39). SQLite access goes through
+// `SQLiteStore`, injected at construction: tests can thus point the
+// repository to a temporary database.
 
 private let SQLITE_TRANSIENT_GOAL = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -13,8 +13,8 @@ struct GoalRepository {
 
     private let store: SQLiteStore
 
-    /// La valeur par défaut vise la base de l'application : les sites d'appel
-    /// existants n'ont pas à changer.
+    /// The default value targets the app's database: existing call sites
+    /// don't need to change.
     init(store: SQLiteStore = SQLiteStore()) {
         self.store = store
     }
@@ -28,7 +28,7 @@ struct GoalRepository {
 
     // MARK: - Fetch
 
-    /// Tous les goals triés du plus récent au plus ancien.
+    /// All goals sorted from most recent to oldest.
     func fetchGoals() -> [Goal] {
         query { db in
             let sql = """
