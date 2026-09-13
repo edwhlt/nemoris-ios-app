@@ -66,11 +66,11 @@ struct AccountWidgetData: Codable {
         self.excludedFromAggregates = excludedFromAggregates
     }
 
-    // Décodage manuel : le synthétisé échouerait (clé absente) sur un cache App
-    // Group écrit par une version antérieure de l'app — le widget se rechargerait
-    // sur un état vide/placeholder jusqu'au prochain refresh de l'app. v51 ajoute
-    // ce champ ; `decodeIfPresent` fait retomber une entrée ancienne sur `false`
-    // (non exclue), son comportement d'avant cette version.
+    // A manual decode: the synthesized one would fail (missing key) on an App
+    // Group cache written by an earlier app version — the widget would reload
+    // to an empty/placeholder state until the app's next refresh. v51 adds
+    // this field; `decodeIfPresent` falls an old entry back to `false`
+    // (not excluded), its behavior before this version.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(Int.self, forKey: .id)
@@ -89,8 +89,8 @@ struct AllAccountsData: Codable {
     let updatedAt: Date
 
     var combined: AccountWidgetData {
-        // Un compte "autre" garde sa propre entrée (sélectionnable individuellement
-        // dans le widget) mais n'entre pas dans "Tous les comptes".
+        // An "other" account keeps its own entry (individually selectable
+        // in the widget) but doesn't enter "All accounts".
         let accounts = self.accounts.filter { !$0.excludedFromAggregates }
         let totalExpense = accounts.reduce(0) { $0 + $1.monthExpense }
         let totalIncome  = accounts.reduce(0) { $0 + $1.monthIncome }
@@ -138,18 +138,18 @@ struct EnvelopeWidgetItem: Codable {
     var isOver: Bool { spent > allocated }
 }
 
-/// Variation (abs + %) du portefeuille sur une plage donnée, calculée avec le
-/// MÊME moteur que le chart in-app (`PortfolioEvolutionBuilder` + `InvestmentHeroCard`,
-/// cf. `WidgetDataStore.refreshInvestments`) — jamais un second calcul de plus-value.
+/// A portfolio's variation (abs + %) over a given range, computed with the
+/// SAME engine as the in-app chart (`PortfolioEvolutionBuilder` + `InvestmentHeroCard`,
+/// see `WidgetDataStore.refreshInvestments`) — never a second gain calculation.
 struct InvestmentRangeSnapshot: Codable {
     let pnlAbsolute: Double
     let pnlPercent: Double
 }
 
-/// Clés du dictionnaire `InvestmentsWidgetData.rangePnl`. Partagées avec le
-/// mirror de l'extension widget (`AppIntent.swift`) par leur VALEUR brute
-/// ("1J"/"1S"/"1M"), pas par un type commun — les deux cibles ne partagent pas
-/// de module Swift.
+/// Keys of the `InvestmentsWidgetData.rangePnl` dictionary. Shared with the
+/// widget extension's mirror (`AppIntent.swift`) by their raw VALUE
+/// ("1D"/"1W"/"1M"), not a shared type — the two targets don't share
+/// a Swift module.
 enum InvestmentWidgetRangeKey {
     static let oneDay   = "1J"
     static let oneWeek  = "1S"
@@ -158,16 +158,16 @@ enum InvestmentWidgetRangeKey {
 
 struct InvestmentsWidgetData: Codable {
     let totalValue: Double
-    /// Plus-value latente TOTALE depuis l'achat (coût d'acquisition vs valeur
-    /// actuelle) — conservée comme valeur d'affichage par défaut / de repli
-    /// quand la plage sélectionnée dans le widget n'a pas d'historique de prix.
+    /// The TOTAL unrealized gain since purchase (acquisition cost vs. the
+    /// current value) — kept as the default/fallback display value
+    /// when the range selected in the widget has no price history.
     let pnlAbsolute: Double
     let pnlPercent: Double
     let accountCount: Int
     let updatedAt: Date
-    /// Variation sur 1J/1S/1M (clés `InvestmentWidgetRangeKey`). Une plage sans
-    /// historique de prix exploitable est absente du dictionnaire plutôt que
-    /// présente avec un zéro trompeur.
+    /// The 1D/1W/1M variation (`InvestmentWidgetRangeKey` keys). A range with
+    /// no usable price history is absent from the dictionary rather than
+    /// present with a misleading zero.
     var rangePnl: [String: InvestmentRangeSnapshot] = [:]
 
     var hasData: Bool { accountCount > 0 }
@@ -202,7 +202,7 @@ struct TricountGroupWidgetItem: Codable {
     let id: Int
     let title: String
     let currency: String
-    /// Positif = le groupe me doit ; négatif = je dois au groupe.
+    /// Positive = the group owes me; negative = I owe the group.
     let netBalance: Double
 }
 
@@ -231,8 +231,8 @@ enum WidgetDataStore {
     static let investmentsKey = "nemoris.investmentsWidgetData"
     static let patrimoineKey  = "nemoris.patrimoineWidgetData"
     static let tricountKey    = "nemoris.tricountWidgetData"
-    // (pendingCSVKey supprimée 2026-07-22 — flux mort depuis l'import V3.
-    //  Le dépôt de CSV passe par PendingImportInbox kind .transactions.)
+    // (pendingCSVKey removed 2026-07-22 — a dead flow since the V3 import.
+    //  Dropping a CSV now goes through PendingImportInbox kind .transactions.)
 
     private static let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -240,7 +240,7 @@ enum WidgetDataStore {
 
     /// Query the DB and push fresh snapshots for all accounts to the shared container.
     /// Call from a background task — performs synchronous SQLite reads, and hops onto
-    /// `@MainActor` internally for `refreshInvestments()` (le cache de cours l'est).
+    /// `@MainActor` internally for `refreshInvestments()` (the price cache is).
     static func refresh(preferredAccountId: Int? = nil) async {
         let repo = TransactionRepository()
         let accounts = repo.fetchAccounts()
@@ -255,9 +255,9 @@ enum WidgetDataStore {
         var allTxns: [FinanceTransaction] = []
         for account in accounts {
             let txns = repo.fetchTransactions(accountId: account.id, from: monthStart, to: now, limit: 100_000)
-            // Un compte "autre" garde son entrée individuelle (`accountDataList`,
-            // sélectionnable dans le widget) mais ses transactions n'entrent PAS
-            // dans `allTxns` — la source du budget agrégé plus bas.
+            // An "other" account keeps its individual entry (`accountDataList`,
+            // selectable in the widget) but its transactions do NOT enter
+            // `allTxns` — the source for the aggregated budget below.
             if !account.excludedFromAggregates {
                 allTxns.append(contentsOf: txns)
             }
@@ -357,14 +357,14 @@ enum WidgetDataStore {
 
     // MARK: - Investments
 
-    /// Réutilise `InvestmentsRecap`, déjà partagé avec le Dashboard (AXE Q) — même
-    /// chiffre que le module, jamais un calcul divergent en plus.
+    /// Reuses `InvestmentsRecap`, already shared with the Dashboard — the same
+    /// figure as the module, never a diverging calculation on top.
     ///
-    /// Le widget peut aussi afficher la variation sur 1J/1S/1M (choisi par
-    /// l'utilisateur via "Modifier le widget") : calculée avec le MÊME moteur
-    /// que `InvestmentHeroCard` in-app — `PortfolioEvolutionBuilder` + valeur
-    /// courante des positions comme base, jamais un second calcul de plus-value
-    /// (cf. doctrine AXE Q sur les calculs divergents).
+    /// The widget can also show the 1D/1W/1M variation (chosen by
+    /// the user via "Edit Widget"): computed with the SAME engine
+    /// as the in-app `InvestmentHeroCard` — `PortfolioEvolutionBuilder` + positions'
+    /// current value as the basis, never a second gain calculation
+    /// (the doctrine against diverging calculations).
     @MainActor
     private static func refreshInvestments() async {
         let repository = InvestmentRepository()
@@ -379,9 +379,9 @@ enum WidgetDataStore {
                 (InvestmentWidgetRangeKey.oneWeek, InvestmentTimeRange.oneWeek),
                 (InvestmentWidgetRangeKey.oneMonth, InvestmentTimeRange.oneMonth),
             ] {
-                // Même garde que le hero card in-app : en 1J sans AUCUNE cotation
-                // intrajournalière, ne pas fabriquer de courbe depuis des
-                // clôtures quotidiennes — la plage reste juste absente du dict.
+                // The same guard as the in-app hero card: on 1D with NO
+                // intraday quote at all, don't fabricate a curve from
+                // daily closes — the range simply stays absent from the dict.
                 if range == .oneDay,
                    allPositions.allSatisfy({ PositionHistoryResolver.intradaySeries(for: $0).isEmpty }) {
                     continue
@@ -395,14 +395,14 @@ enum WidgetDataStore {
                 }
                 let result = PortfolioEvolutionBuilder.build(inputs: inputs, range: range)
                 guard let start = result.points.first, start.value != 0 else { continue }
-                // ⚠️ Base de comparaison restreinte aux positions RÉELLEMENT
-                // valorisées par le builder (mêmes positions que `start.value`,
-                // via `pricedPositionIds`) — une position sans historique pour
-                // cette plage (ex. 1J sans cotation intrajournalière alors que
-                // d'autres positions en ont) était sinon comptée dans la valeur
-                // courante mais absente du point de départ, ce qui gonflait
-                // artificiellement le %  (même bug que celui déjà corrigé côté
-                // `InvestmentHeroCard` in-app via `variationBasisValue`).
+                // ⚠️ The comparison basis is restricted to positions ACTUALLY
+                // priced by the builder (the same positions as `start.value`,
+                // via `pricedPositionIds`) — a position with no history for
+                // this range (e.g. 1D with no intraday quote while
+                // other positions have one) used to be counted in the
+                // current value but absent from the starting point, artificially
+                // inflating the % (the same bug already fixed on the
+                // in-app `InvestmentHeroCard` side via `variationBasisValue`).
                 let currentPricedValue = allPositions
                     .filter { result.pricedPositionIds.contains($0.id) }
                     .reduce(0.0) { $0 + $1.currentValue }
@@ -429,8 +429,8 @@ enum WidgetDataStore {
 
     // MARK: - Patrimoine
 
-    /// Réutilise `PatrimoineSnapshotBuilder`, le même moteur pur que le Dashboard et
-    /// `PatrimoineViewModel` (AXE Q) — pas un 4ᵉ calcul de patrimoine net.
+    /// Reuses `PatrimoineSnapshotBuilder`, the same pure engine as the Dashboard and
+    /// `PatrimoineViewModel` — not a 4th net-worth calculation.
     private static func refreshPatrimoine() {
         let patrimoineRepo = PatrimoineRepository()
         let assets = patrimoineRepo.fetchAssets()
@@ -484,9 +484,9 @@ enum WidgetDataStore {
 
     // MARK: - Tricount
 
-    /// Réutilise `TricountRepository.computeBalances` (même logique que
-    /// `TricountDetailView`) — le solde net par groupe est la somme des balances
-    /// individuelles (`theyOwe - iOwe`), positif = le groupe me doit.
+    /// Reuses `TricountRepository.computeBalances` (the same logic as
+    /// `TricountDetailView`) — a group's net balance is the sum of individual
+    /// balances (`theyOwe - iOwe`), positive = the group owes me.
     private static func refreshTricount() {
         let repo = TricountRepository()
         let groups = repo.fetchGroups()
@@ -518,10 +518,10 @@ enum WidgetDataStore {
 
         let actual = allTxns.filter { $0.amount < 0 }.reduce(0) { $0 + abs($1.amount) }
 
-        // Moteur partagé avec l'app — le widget affichait jusqu'ici des montants
-        // différents de ceux du Dashboard (il ignorait les sous-catégories).
-        // ⚠️ La forme encodée `BudgetWidgetData` ne bouge pas : c'est le contrat
-        // décodé par l'extension widget via l'App Group.
+        // The engine shared with the app — until now the widget showed
+        // amounts different from the Dashboard's (it ignored sub-categories).
+        // ⚠️ The encoded `BudgetWidgetData` shape doesn't change: it's the contract
+        // the widget extension decodes via the App Group.
         let envelopes = BudgetRepository.shared.fetchEnvelopes()
             .filter { $0.isActive && $0.categoryId != nil }
         let envelopeItems = EnvelopeSpendingCalculator.progresses(

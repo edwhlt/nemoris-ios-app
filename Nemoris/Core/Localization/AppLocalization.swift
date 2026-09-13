@@ -3,66 +3,66 @@ import SwiftUI
 
 // MARK: - AppLocalization
 //
-// Résolution de chaînes localisées dans la langue CHOISIE DANS L'APP (picker
-// des Réglages → `AppState.preferredLanguage`), et pas dans celle du système.
+// Resolves localized strings in the language CHOSEN IN THE APP (the
+// Settings picker → `AppState.preferredLanguage`), not the system's.
 //
-// ⚠️⚠️ LE PIÈGE CENTRAL, mesuré (2026-08-25) — `String(localized:locale:)`
-// N'UTILISE PAS `locale:` POUR CHOISIR LA LANGUE.
+// ⚠️⚠️ THE CENTRAL PITFALL, measured — `String(localized:locale:)`
+// DOES NOT USE `locale:` TO CHOOSE THE LANGUAGE.
 //
-// Le paramètre `locale:` ne pilote QUE le formatage des valeurs interpolées
-// (nombres, dates). Le lookup de la clé, lui, passe par le `bundle:` — dont le
-// défaut est `Bundle.main`, qui résout sa langue d'après les préférences
-// SYSTÈME, figées au lancement du process. Vérifié sur machine en anglais :
+// The `locale:` parameter ONLY drives the formatting of interpolated values
+// (numbers, dates). The key's lookup goes through `bundle:` — whose
+// default is `Bundle.main`, which resolves its language from the
+// SYSTEM's preferences, fixed at process launch. Verified on a machine set to English:
 //
 //     String(localized: "Données", locale: Locale(identifier: "fr_FR"))  →  "Data"
 //
-// C'est la raison pour laquelle l'ancienne version de ce fichier traduisait
-// toujours en langue système, quel que soit le picker — et pourquoi les
-// `AppLocalization.string(...)` posés dans des `Text` ont dû être retirés un
-// par un.
+// That's why the earlier version of this file always translated
+// into the system language, whatever the picker said — and why the
+// `AppLocalization.string(...)` calls placed in `Text`s had to be removed one
+// by one.
 //
-// **Le seul axe qui pilote réellement la langue est le BUNDLE** : en pointant
-// le sous-bundle `<lang>.lproj` (qui ne contient qu'une langue), le lookup ne
-// peut pas retomber ailleurs. Mesuré, et l'interpolation est préservée :
+// **The only axis that actually drives the language is the BUNDLE**: by pointing
+// at the `<lang>.lproj` sub-bundle (which holds only one language), the lookup
+// can't fall back anywhere else. Measured, and interpolation is preserved:
 //
 //     String(localized: "\(n) compte…", bundle: frLproj)  →  "3 comptes" (FR)
 //
-// Les deux axes sont orthogonaux et se cumulent : `bundle` = la langue,
-// `locale` = le formatage des nombres.
+// The two axes are orthogonal and both apply: `bundle` = the language,
+// `locale` = number formatting.
 //
-// ── Deux problèmes distincts, deux remèdes ───────────────────────────────────
+// ── Two distinct problems, two fixes ─────────────────────────────────────────
 //
-// 1. CORRECTION (ce fichier) : le lookup vise `<lang>.lproj`.
-// 2. RÉACTIVITÉ (les modificateurs en bas de fichier) : une `String` résolue
-//    est une valeur morte — rien ne la recalcule quand la langue change. Les
+// 1. CORRECTNESS (this file): the lookup targets `<lang>.lproj`.
+// 2. REACTIVITY (the modifiers at the bottom of this file): a resolved
+//    `String` is a dead value — nothing recomputes it when the language changes. The
 //    `.localizedNavigationTitle` / `.localizedHelp` / `.localizedAccessibilityLabel`
-//    lisent `@Environment(\.locale)`, ce qui en fait une VRAIE dépendance
-//    SwiftUI : au changement de langue, le modificateur est réévalué et produit
-//    une chaîne fraîche.
+//    modifiers read `@Environment(\.locale)`, which makes them a REAL SwiftUI
+//    dependency: on a language change, the modifier is re-evaluated and produces
+//    a fresh string.
 //
-// ── Quand utiliser quoi ──────────────────────────────────────────────────────
+// ── When to use what ─────────────────────────────────────────────────────────
 //
-// • Texte de CONTENU (`Text`, `Label`, `Button`…) : ne rien faire de spécial —
-//   `Text("littéral")` et `Text(LocalizedStringKey(runtimeValue))` respectent
-//   déjà `\.locale` d'environnement (injecté à la racine dans `NemorisApp`) et
-//   se rafraîchissent seuls. **Ne jamais y remettre `AppLocalization.string`.**
-// • Chrome NATIVE (`.navigationTitle`, `.help`, `.accessibilityLabel`) : ces
-//   API pontent vers AppKit/UIKit et ne consultent PAS `\.locale` — d'où les
-//   modificateurs dédiés en bas de ce fichier.
-// • Hors SwiftUI (moteurs purs, services statiques : `InsightEngine`,
-//   `AlertEngine`, `LiveSyncRegistry`, `BudgetNotificationService`…) :
-//   `AppLocalization.string(...)`, qui lit la préférence dans `UserDefaults`.
+// • CONTENT text (`Text`, `Label`, `Button`…): nothing special needed —
+//   `Text("literal")` and `Text(LocalizedStringKey(runtimeValue))` already respect
+//   the environment's `\.locale` (injected at the root in `NemorisApp`) and
+//   refresh on their own. **Never route these back through `AppLocalization.string`.**
+// • NATIVE chrome (`.navigationTitle`, `.help`, `.accessibilityLabel`): these
+//   APIs bridge to AppKit/UIKit and do NOT consult `\.locale` — hence the
+//   dedicated modifiers at the bottom of this file.
+// • Outside SwiftUI (pure engines, static services: `InsightEngine`,
+//   `AlertEngine`, `LiveSyncRegistry`, `BudgetNotificationService`…):
+//   `AppLocalization.string(...)`, which reads the preference from `UserDefaults`.
 enum AppLocalization {
 
     // MARK: - Langue courante
 
-    /// Code de langue à utiliser pour le lookup, d'après la préférence stockée.
-    /// `nil` = « système » : on laisse alors `Bundle.main` faire son travail
-    /// normal, ce qui est exactement le comportement attendu dans ce mode.
+    /// The language code to use for the lookup, based on the stored preference.
+    /// `nil` = "system": `Bundle.main` is then left to do its normal
+    /// job, which is exactly the expected behavior in that mode.
     ///
-    /// Miroir de `AppState.preferredLanguage` (même clé `UserDefaults`) — c'est
-    /// ce qui permet aux moteurs purs, sans accès à l'environnement SwiftUI, de
-    /// suivre le même réglage sans dépendre d'`AppState`.
+    /// A mirror of `AppState.preferredLanguage` (the same `UserDefaults` key) — this
+    /// is what lets pure engines, with no access to the SwiftUI environment,
+    /// follow the same setting without depending on `AppState`.
     private static var preferredLanguageCode: String? {
         switch UserDefaults.standard.string(forKey: "appLanguage") ?? "system" {
         case "fr": return "fr"
@@ -71,8 +71,8 @@ enum AppLocalization {
         }
     }
 
-    /// Locale pour le FORMATAGE (nombres, dates). Ne pilote pas la traduction —
-    /// cf. l'avertissement en tête de fichier.
+    /// The locale for FORMATTING (numbers, dates). Doesn't drive translation —
+    /// see the warning at the top of this file.
     static var locale: Locale {
         switch UserDefaults.standard.string(forKey: "appLanguage") ?? "system" {
         case "fr": return Locale(identifier: "fr_FR")
@@ -81,21 +81,21 @@ enum AppLocalization {
         }
     }
 
-    // MARK: - Résolution du bundle de langue
+    // MARK: - Resolving the language bundle
 
-    /// Cache des bundles `<lang>.lproj`. `Bundle(path:)` est déjà mis en cache
-    /// par Foundation, mais `path(forResource:ofType:)` touche le disque à
-    /// chaque appel — or on résout des chaînes à chaque rendu.
+    /// A cache of `<lang>.lproj` bundles. `Bundle(path:)` is already cached
+    /// by Foundation, but `path(forResource:ofType:)` hits disk on
+    /// every call — and strings are resolved on every render.
     ///
-    /// `nonisolated(unsafe)` + `NSLock` : ce cache est lu depuis le main actor
-    /// (vues) ET depuis des tâches de fond (moteurs, services de sync), donc il
-    /// ne peut pas être isolé sur un acteur sans rendre l'API `async`.
+    /// `nonisolated(unsafe)` + `NSLock`: this cache is read from the main actor
+    /// (views) AND from background tasks (engines, sync services), so it
+    /// can't be isolated on an actor without making the API `async`.
     nonisolated(unsafe) private static var bundleCache: [String: Bundle] = [:]
     private static let cacheLock = NSLock()
 
-    /// Le bundle dans lequel chercher les clés pour `language`.
-    /// Retombe sur `Bundle.main` si la langue est « système », ou si le
-    /// `.lproj` demandé n'existe pas (langue non traduite) — jamais d'échec.
+    /// The bundle to look up keys for `language` in.
+    /// Falls back to `Bundle.main` if the language is "system", or if the
+    /// requested `.lproj` doesn't exist (an untranslated language) — never fails.
     private static func bundle(for language: String?) -> Bundle {
         guard let language else { return .main }
 
@@ -112,74 +112,73 @@ enum AppLocalization {
         return resolved
     }
 
-    /// Code de langue porté par une `Locale` — le pont entre
-    /// `@Environment(\.locale)` (que SwiftUI nous donne) et le `.lproj` à viser.
+    /// A language code carried by a `Locale` — the bridge between
+    /// `@Environment(\.locale)` (what SwiftUI gives us) and the `.lproj` to target.
     ///
-    /// Pour la locale système, ça renvoie la langue système, ce qui est le
-    /// comportement voulu en mode « système ».
+    /// For the system locale, this returns the system language, which is the
+    /// intended behavior in "system" mode.
     static func languageCode(for locale: Locale) -> String? {
         locale.language.languageCode?.identifier
     }
 
     // MARK: - Lookup
 
-    /// L'équivalent `String` de `Text(_ key: LocalizedStringKey)` : cherche
-    /// `value` comme clé dans `Localizable.strings` et renvoie une `String`
-    /// simple, pour les sites qui doivent stocker, concaténer ou transmettre le
-    /// résultat plutôt que le donner directement à une `View`.
+    /// The `String` equivalent of `Text(_ key: LocalizedStringKey)`: looks up
+    /// `value` as a key in `Localizable.strings` and returns a plain
+    /// `String`, for sites that need to store, concatenate or pass along the
+    /// result rather than handing it directly to a `View`.
     ///
-    /// Retombe sur le texte source (français), interpolations substituées,
-    /// quand aucune entrée ne correspond — jamais de crash, jamais de clé brute
-    /// affichée.
+    /// Falls back to the source text (French), interpolations substituted,
+    /// when no entry matches — never a crash, never a raw key shown.
     ///
-    /// - Parameter language: force une langue (`"fr"`, `"en"`). `nil` = la
-    ///   préférence enregistrée. Les modificateurs de vue passent ici la langue
-    ///   déduite de `@Environment(\.locale)`, ce qui rend le résultat réactif.
+    /// - Parameter language: forces a language (`"fr"`, `"en"`). `nil` = the
+    ///   saved preference. View modifiers pass the language
+    ///   inferred from `@Environment(\.locale)` here, which makes the result reactive.
     static func string(_ value: String.LocalizationValue, language: String? = nil) -> String {
         let lang = language ?? preferredLanguageCode
         return String(localized: value, bundle: bundle(for: lang), locale: locale)
     }
 
-    /// Même lookup, pour une valeur qui n'existe qu'en `String` à l'exécution —
-    /// typiquement la propriété calculée `.label` d'un enum (`GoalKind.label`,
-    /// `AccountType.label`…), dont les branches sont toutes des littéraux mais
-    /// dont le TYPE déclaré doit rester `String` parce que d'autres sites la
-    /// passent à des API qui exigent `StringProtocol`.
+    /// The same lookup, for a value that only exists as a runtime `String` —
+    /// typically an enum's computed `.label` property (`GoalKind.label`,
+    /// `AccountType.label`…), whose branches are all literals but
+    /// whose declared TYPE must stay `String` because other sites
+    /// pass it to APIs that require `StringProtocol`.
     ///
-    /// Nommée différemment de `string(_:)` à dessein : une seconde surcharge
-    /// prenant une `String` nue rendrait ambigus tous les sites d'appel
-    /// existants (qui se résolvent aujourd'hui via `ExpressibleByStringLiteral`).
+    /// Named differently from `string(_:)` on purpose: a second overload
+    /// taking a bare `String` would make every existing call site
+    /// ambiguous (they currently resolve via `ExpressibleByStringLiteral`).
     static func string(fromLabel value: String, language: String? = nil) -> String {
         string(String.LocalizationValue(value), language: language)
     }
 }
 
-// MARK: - Chrome native réactive
+// MARK: - Reactive native chrome
 //
-// `.navigationTitle`, `.help` et `.accessibilityLabel` pontent vers la chrome
-// AppKit/UIKit (barre de titre `NSWindow`/`NSToolbar`, infobulles, VoiceOver).
-// Ce pont ne consulte PAS `\.locale` : un `.navigationTitle("Données")` sur une
-// machine en anglais affiche « Data » même quand l'app est réglée en français,
-// et n'est jamais rafraîchi ensuite.
+// `.navigationTitle`, `.help` and `.accessibilityLabel` bridge to
+// AppKit/UIKit chrome (an `NSWindow`/`NSToolbar` title bar, tooltips, VoiceOver).
+// This bridge does NOT consult `\.locale`: a `.navigationTitle("Données")` on a
+// machine set to English shows "Data" even when the app is set to French,
+// and is never refreshed afterward.
 //
-// Ces modificateurs corrigent les deux volets d'un coup :
-//   • la LANGUE, en résolvant contre le bundle `<lang>.lproj` ;
-//   • la RÉACTIVITÉ, parce que lire `@Environment(\.locale)` crée une vraie
-//     dépendance SwiftUI — le modificateur est réévalué au changement de langue
-//     et republie une chaîne fraîche vers la chrome native.
+// These modifiers fix both aspects at once:
+//   • the LANGUAGE, by resolving against the `<lang>.lproj` bundle;
+//   • REACTIVITY, because reading `@Environment(\.locale)` creates a real
+//     SwiftUI dependency — the modifier is re-evaluated on a language change
+//     and republishes a fresh string to the native chrome.
 //
-// ⚠️ Toujours passer la CLÉ source (le texte français tel qu'il est dans
-// `Localizable.strings`), jamais une chaîne déjà résolue.
+// ⚠️ Always pass the SOURCE key (the French text as it is in
+// `Localizable.strings`), never an already-resolved string.
 
 private struct LocalizedNavigationTitle: ViewModifier {
     @Environment(\.locale) private var locale
     let key: String
 
     func body(content: Content) -> some View {
-        // Surcharge verbatim `String` volontaire : la chaîne est DÉJÀ résolue
-        // ici, dans la bonne langue. La laisser repasser par un
-        // `LocalizedStringKey` la ferait re-chercher par la chrome native, donc
-        // en langue système — précisément le bug qu'on corrige.
+        // A deliberate verbatim `String` overload: the string is ALREADY resolved
+        // here, in the right language. Letting it pass through a
+        // `LocalizedStringKey` would make the native chrome look it up again, so
+        // in the system language — precisely the bug being fixed.
         content.navigationTitle(AppLocalization.string(fromLabel: key,
                                                        language: AppLocalization.languageCode(for: locale)))
     }
@@ -206,19 +205,19 @@ private struct LocalizedAccessibilityLabel: ViewModifier {
 }
 
 extension View {
-    /// `.navigationTitle` qui suit le picker de langue de l'app.
-    /// **À utiliser systématiquement à la place de `.navigationTitle`** — cf.
-    /// l'explication au-dessus. Passer la clé source (texte français).
+    /// A `.navigationTitle` that follows the app's language picker.
+    /// **Use this systematically instead of `.navigationTitle`** — see
+    /// the explanation above. Pass the source key (French text).
     func localizedNavigationTitle(_ key: String) -> some View {
         modifier(LocalizedNavigationTitle(key: key))
     }
 
-    /// `.help` (infobulle macOS) qui suit le picker de langue de l'app.
+    /// A `.help` (macOS tooltip) that follows the app's language picker.
     func localizedHelp(_ key: String) -> some View {
         modifier(LocalizedHelp(key: key))
     }
 
-    /// `.accessibilityLabel` (VoiceOver) qui suit le picker de langue de l'app.
+    /// An `.accessibilityLabel` (VoiceOver) that follows the app's language picker.
     func localizedAccessibilityLabel(_ key: String) -> some View {
         modifier(LocalizedAccessibilityLabel(key: key))
     }
