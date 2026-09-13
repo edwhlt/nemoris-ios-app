@@ -1657,34 +1657,34 @@ final class DatabaseManager: @unchecked Sendable {
             "CREATE INDEX IF NOT EXISTS idx_coach_reco_domain ON coach_recommendations(domain, status);",
         ]),
 
-        // v48 — trace de la réponse brute du modèle (AXE AC).
+        // v48 — trace of the model's raw response (AXE AC).
         //
-        // Retour d'usage immédiat : « La réponse du modèle n'a pas pu être
-        // exploitée » — un message exact, mais INDIAGNOSTICABLE. Ni
-        // l'utilisateur ni le développeur ne pouvaient voir ce que le modèle
-        // avait réellement renvoyé, donc impossible de dire si le modèle avait
-        // refusé, répondu à côté, ou été coupé en plein JSON.
+        // Immediate usage feedback: "The model's response couldn't be
+        // used" — an accurate message, but UNDIAGNOSABLE. Neither
+        // the user nor the developer could see what the model had
+        // actually returned, so there was no way to tell whether the model had
+        // refused, answered off-topic, or been cut off mid-JSON.
         //
-        // Même leçon que l'import de documents et son dépliant « Voir le texte
-        // lu (N caractères) » : une extraction ratée n'est exploitable que si
-        // on peut confronter ce que l'app a reçu à ce qu'elle en a fait.
+        // Same lesson as document import and its "See the text read
+        // (N characters)" disclosure: a failed extraction is only actionable if
+        // you can compare what the app received against what it did with it.
         Migration(version: 48, statements: [
             "ALTER TABLE coach_analyses ADD COLUMN raw_response TEXT;",
         ]),
 
-        // v49 — staging Apple Pay (automatisation Raccourcis, déclenchement
-        // silencieux `openAppWhenRun = false`). Table LOCALE, jamais
-        // synchronisée (cf. SyncSchema.swift) : c'est un tampon éphémère,
-        // pas un registre à faire coexister entre appareils — chaque
-        // appareil reçoit ses propres notifications Apple Pay.
+        // v49 — Apple Pay staging (Shortcuts automation, silent
+        // `openAppWhenRun = false` trigger). A LOCAL table, never
+        // synced (see SyncSchema.swift): it's an ephemeral buffer,
+        // not a registry meant to be shared across devices — each
+        // device receives its own Apple Pay notifications.
         //
-        // `matched_transaction_id` référence `transactions`, mais dans le
-        // sens INVERSE de ce qu'on ferait d'habitude (une colonne sur
-        // `transactions` pointant vers cette table) : `transactions` EST
-        // synchronisée, et une FK vers une table non synchronisée y serait
-        // sérialisée comme un entier local brut, sans traduction uuid —
-        // corruption silencieuse sur un 2e appareil. En gardant le lien sur
-        // CETTE table (non synchronisée), il ne quitte jamais l'appareil.
+        // `matched_transaction_id` references `transactions`, but in the
+        // REVERSE direction of what you'd usually do (a column on
+        // `transactions` pointing to this table): `transactions` IS
+        // synced, and a FK to a non-synced table would be serialized
+        // there as a raw local integer, with no uuid translation —
+        // silent corruption on a 2nd device. By keeping the link on
+        // THIS table (unsynced), it never leaves the device.
         Migration(version: 49, statements: [
             """
             CREATE TABLE IF NOT EXISTS pending_apple_pay_entries (
@@ -1731,13 +1731,13 @@ final class DatabaseManager: @unchecked Sendable {
             "DELETE FROM coach_profile WHERE slot = 'default';",
         ]),
 
-        // v51 — comptes "autres" : dissociation des calculs agrégés.
+        // v51 — "other" accounts: dissociation from aggregated calculations.
         //
-        // Retour user : besoin d'un compte (ex. remboursements mutuelle/santé)
-        // dont les transactions restent consultables sur son propre écran mais
-        // n'entrent JAMAIS dans les cumuls automatiques (catégories, budget,
-        // dashboard, coach IA, widget). Défaut à 0 : aucun compte existant n'est
-        // affecté par cette migration.
+        // User feedback: a need for an account (e.g. health/insurance
+        // reimbursements) whose transactions remain viewable on its own screen but
+        // NEVER enter automatic aggregates (categories, budget,
+        // dashboard, AI coach, widget). Defaults to 0: no existing account is
+        // affected by this migration.
         Migration(version: 51, statements: [
             "ALTER TABLE accounts ADD COLUMN excluded_from_aggregates INTEGER NOT NULL DEFAULT 0;",
         ]),

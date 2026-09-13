@@ -20,10 +20,10 @@ struct Account: Identifiable, Hashable {
     let id: Int
     var name: String
     var type: String = "COURANT"
-    /// v51 — exclut ce compte de tous les calculs agrégés (cumuls par catégorie,
-    /// budget, dashboard, coach IA, widget). Ses propres transactions restent
-    /// consultables normalement sur l'écran du compte. Usage type : compte de
-    /// remboursements santé/mutuelle qu'on ne veut pas voir peser sur le budget.
+    /// v51 — excludes this account from all aggregated calculations (category
+    /// totals, budget, dashboard, AI coach, widget). Its own transactions remain
+    /// normally viewable on the account's screen. Typical use case: a health/insurance
+    /// reimbursement account that shouldn't weigh on the budget.
     var excludedFromAggregates: Bool = false
 
     var accountType: AccountType { AccountType(rawValue: type) ?? .courant }
@@ -410,12 +410,12 @@ struct TransactionFilter {
     var accountName: String
     var from: Date
     var to: Date
-    /// Filtre sur le NOM DU TIERS uniquement (payee). Distinct de
-    /// `labelSearchText` depuis la scission des deux champs dans
-    /// `TransactionFiltersSheet` — avant, un seul champ matchait l'un OU
-    /// l'autre ; désormais les deux, quand renseignés, sont exigés ensemble.
+    /// Filters on the PAYEE NAME only. Distinct from
+    /// `labelSearchText` since the two fields were split in
+    /// `TransactionFiltersSheet` — before, a single field matched either one;
+    /// now, both, when filled in, are required together.
     var payeeSearchText: String = ""
-    /// Filtre sur le libellé brut (`transactions.information`) uniquement.
+    /// Filters on the raw label (`transactions.information`) only.
     var labelSearchText: String = ""
     var categoryId: Int = -1
     var categoryName: String = ""
@@ -590,15 +590,15 @@ enum InvestmentAssetType: String, CaseIterable {
         }
     }
 
-    /// Résolution tolérante d'un `asset_type` brut stocké en base (casse/espaces non garantis —
-    /// données legacy ou édition manuelle via la Console SQL). À utiliser PARTOUT où `asset_type`
-    /// sert de clé de groupement (allocation, couleur) pour que deux variantes du même type
-    /// (ex. "stock" vs "STOCK") ne produisent jamais deux entrées distinctes côté UI.
+    /// Tolerant resolution of a raw `asset_type` stored in the database (case/spacing not
+    /// guaranteed — legacy data or a manual edit via the SQL Console). Use this EVERYWHERE
+    /// `asset_type` serves as a grouping key (allocation, color) so that two variants of the
+    /// same type (e.g. "stock" vs "STOCK") never produce two distinct entries in the UI.
     ///
-    /// Résout AUSSI contre le `label` français (ex. "Action", "Obligation") : une valeur legacy
-    /// peut avoir été écrite avec le libellé d'affichage plutôt que le rawValue canonique — sans
-    /// ce second essai, "Action" et "STOCK" restent deux clés distinctes qui s'affichent toutes
-    /// les deux "Action" (bug réel constaté : deux tranches "Action" dans le donut d'allocation).
+    /// ALSO resolves against the French `label` (e.g. "Action", "Obligation"): a legacy
+    /// value may have been written with the display label instead of the canonical rawValue —
+    /// without this second attempt, "Action" and "STOCK" remain two distinct keys that both
+    /// display as "Action" (a real bug observed: two "Action" slices in the allocation donut).
     init?(looselyMatching raw: String) {
         let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if let byRawValue = InvestmentAssetType(rawValue: normalized) {
@@ -612,9 +612,9 @@ enum InvestmentAssetType: String, CaseIterable {
         return nil
     }
 
-    /// Clé de groupement canonique pour un `asset_type` brut : le rawValue de l'enum s'il est
-    /// reconnu (quelle que soit sa casse/espacement d'origine), sinon la version normalisée
-    /// telle quelle — garantit que le groupement et l'affichage retombent toujours sur la même clé.
+    /// The canonical grouping key for a raw `asset_type`: the enum's rawValue if it's
+    /// recognized (whatever its original case/spacing), otherwise the normalized version
+    /// as-is — guarantees grouping and display always fall back to the same key.
     static func canonicalKey(for raw: String) -> String {
         InvestmentAssetType(looselyMatching: raw)?.rawValue
             ?? raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
