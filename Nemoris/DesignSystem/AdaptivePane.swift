@@ -269,16 +269,16 @@ private struct InspectorChromeToolbar: ViewModifier {
             if let icon = button.systemImage {
                 Image(systemName: icon)
             } else {
-                // `LocalizedStringKey(...)`, jamais `Text(button.label)` :
-                // `.label` est une `String` d'exécution, donc l'overload
-                // verbatim — aucune traduction. Enveloppée, elle est résolue
-                // par SwiftUI contre `\.locale`, donc traduite ET réactive.
+                // `LocalizedStringKey(...)`, never `Text(button.label)`:
+                // `.label` is a runtime `String`, so it hits the
+                // verbatim overload — no translation. Wrapped, it's resolved
+                // by SwiftUI against `\.locale`, so translated AND reactive.
                 Text(LocalizedStringKey(button.label))
             }
         }
         .disabled(button.disabled)
-        // `.help`/`.accessibilityLabel` pontent vers la chrome native et ne
-        // consultent PAS `\.locale` — d'où les modificateurs dédiés.
+        // `.help`/`.accessibilityLabel` bridge to native chrome and don't
+        // consult `\.locale` — hence the dedicated modifiers.
         .localizedHelp(button.label)
         .localizedAccessibilityLabel(button.label)
         .tint(button.role == .destructive ? AppTheme.Colors.danger : AppTheme.Colors.accent)
@@ -343,27 +343,26 @@ private struct AdaptivePaneBoolModifier<PaneContent: View>: ViewModifier {
                 paneContent()
                     .environment(\.paneDismiss, { isPresented = false })
                     .environment(\.paneHostContext, .modal)
-                    // ⚠️ Ré-injection EXPLICITE, obligatoire — bug réel confirmé
-                    // par sonde le 2026-08-25 : une `.sheet()` macOS ouverte
-                    // depuis le contenu de la colonne "detail" d'un
-                    // `NavigationSplitView` n'hérite PAS de `\.locale` posé au
-                    // niveau de la fenêtre, même remonté à la vraie racine du
-                    // contenu. Cette sheet est une vraie `NSWindow` séparée sur
-                    // macOS (contrairement à iOS, où elle partage la fenêtre) —
-                    // son ancrage d'environnement semble ignorer tout ce qui est
-                    // au-dessus d'un `NavigationSplitView`. `AppLocalization.locale`
-                    // (lecture directe UserDefaults, pas de dépendance SwiftUI)
-                    // donne la valeur correcte indépendamment de ce bug.
+                    // ⚠️ An EXPLICIT re-injection, required — a real bug confirmed
+                    // by a probe on 2026-08-25: a macOS `.sheet()` opened
+                    // from a `NavigationSplitView`'s "detail" column's content
+                    // does NOT inherit `\.locale` set at the
+                    // window level, even moved up to the content's real root. This
+                    // sheet is a real, separate `NSWindow` on
+                    // macOS (unlike iOS, where it shares the window) —
+                    // its environment anchoring seems to ignore everything
+                    // above a `NavigationSplitView`. `AppLocalization.locale`
+                    // (a direct UserDefaults read, no SwiftUI dependency)
+                    // gives the correct value independent of this bug.
                     .environment(\.locale, AppLocalization.locale)
                     .adaptivePaneFrame()
-                    // Même raison que `presentPane` ci-dessous : sans fond
-                    // explicite, un `.sheet` macOS niveau 2+ (une pane ouverte
-                    // depuis une pane déjà ouverte) laisse transparaître le
-                    // matériau translucide par défaut de la fenêtre — le
-                    // fond de bureau de l'utilisateur bleedait à travers
-                    // (retour d'usage 2026-08-19). Seul le chemin racine
-                    // (`presentPane`) l'avait ; ce chemin niveau 2+ ne
-                    // l'avait jamais eu.
+                    // The same reason as `presentPane` below: without an
+                    // explicit background, a level-2+ macOS `.sheet` (a pane opened
+                    // from a pane already open) lets the window's
+                    // default translucent material show through — the
+                    // user's desktop background used to bleed through.
+                    // Only the root path (`presentPane`) had this fix;
+                    // this level-2+ path never had it.
                     .background(AppTheme.Colors.background)
             }
         }
@@ -422,14 +421,14 @@ private struct AdaptivePaneItemModifier<Item: Identifiable, PaneContent: View>: 
                 paneContent(value)
                     .environment(\.paneDismiss, { item = nil })
                     .environment(\.paneHostContext, .modal)
-                    // Cf. AdaptivePaneBoolModifier : ré-injection obligatoire,
-                    // une `.sheet()` macOS niveau 2+ n'hérite pas de `\.locale`
-                    // depuis un ancêtre au-dessus d'un `NavigationSplitView`.
+                    // See AdaptivePaneBoolModifier: an explicit re-injection is required,
+                    // a level-2+ macOS `.sheet()` doesn't inherit `\.locale`
+                    // from an ancestor above a `NavigationSplitView`.
                     .environment(\.locale, AppLocalization.locale)
                     .adaptivePaneFrame()
-                    // Cf. AdaptivePaneBoolModifier : sans ce fond, un `.sheet`
-                    // macOS niveau 2+ laisse transparaître le matériau
-                    // translucide par défaut de la fenêtre.
+                    // See AdaptivePaneBoolModifier: without this background, a level-2+
+                    // macOS `.sheet` lets the window's default
+                    // translucent material show through.
                     .background(AppTheme.Colors.background)
             }
         }
@@ -458,31 +457,30 @@ private struct AdaptivePaneItemModifier<Item: Identifiable, PaneContent: View>: 
 
 // MARK: - Custom chrome for macOS sheets (level 2+)
 
-/// Dessine la barre de titre + boutons d'une sheet macOS À LA MAIN, sans
-/// `.navigationTitle`/`.toolbar` natif.
+/// Draws a macOS sheet's title bar + buttons BY HAND, with no
+/// native `.navigationTitle`/`.toolbar`.
 ///
-/// Root cause établie par capture d'écran EN DIRECT (retour d'usage
-/// 2026-08-21) : la barre d'outils native d'une `.sheet` macOS (fenêtre
-/// séparée) ET son bandeau de boutons bas (`.cancellationAction`/
-/// `.confirmationAction`) sont des surfaces AppKit à matériau translucide
-/// vibrant — `.toolbarBackground(Color, for: .windowToolbar)` COMPILE mais
-/// n'a AUCUN effet visuel observable dessus (vérifié sur un build fraîchement
-/// recompilé, pas seulement rapporté par l'utilisateur). Le fond d'écran de
-/// l'utilisateur continue de transparaître au travers, en haut ET en bas.
+/// Root cause established by a LIVE screenshot: a macOS `.sheet`'s
+/// (a separate window) native toolbar AND its bottom button bar
+/// (`.cancellationAction`/`.confirmationAction`) are AppKit surfaces with
+/// vibrant translucent material — `.toolbarBackground(Color, for: .windowToolbar)`
+/// COMPILES but has NO observable visual effect on them (verified on a freshly
+/// recompiled build, not just reported by the user). The user's
+/// desktop background keeps showing through, both at the top AND the bottom.
 ///
-/// Contrairement au niveau 1 (inspecteur, `publishesInspectorChrome`), qui
-/// pose de VRAIS `ToolbarItem`s dans la barre système de `MainTabView` (une
-/// surface qui, elle, n'a jamais montré ce bug), une sheet de niveau 2+ est
-/// une fenêtre à part entière sans ce filet. Remède : ne plus jamais confier
-/// le titre/les boutons d'une sheet macOS à `.toolbar` — les dessiner en
-/// SwiftUI ordinaire, dont le compositing (`.background()`) fonctionne
-/// normalement (déjà prouvé par `.scrollContentBackground(.hidden)` sur les
-/// `List`, une classe de bug voisine).
+/// Unlike level 1 (the inspector, `publishesInspectorChrome`), which
+/// sets REAL `ToolbarItem`s in `MainTabView`'s system bar (a
+/// surface that has never shown this bug), a level-2+ sheet is a
+/// full-fledged window with no such safety net. The fix: never entrust
+/// a macOS sheet's title/buttons to `.toolbar` again — draw them in
+/// plain SwiftUI instead, whose compositing (`.background()`) works
+/// normally (already proven by `.scrollContentBackground(.hidden)` on
+/// `List`s, a related bug class).
 #if os(macOS)
-/// Non-`private` : réutilisé directement par `ImportEntryView`, qui a besoin
-/// d'appliquer cette chrome à UN SEUL de ses multiples cas de présentation
-/// (embarqué / inspecteur / sheet niveau 2) sans passer par le `.paneChrome`
-/// générique, qui ne modélise pas son axe `isEmbedded` additionnel.
+/// Not `private`: reused directly by `ImportEntryView`, which needs to
+/// apply this chrome to ONLY ONE of its several presentation cases
+/// (embedded / inspector / level-2 sheet) without going through the
+/// generic `.paneChrome`, which doesn't model its extra `isEmbedded` axis.
 struct MacSheetTopBar: View {
     @Environment(\.locale) private var locale
     
@@ -500,21 +498,21 @@ struct MacSheetTopBar: View {
                 .localizedHelp(cancel.label)
             }
             Spacer()
-            // `title`/`.label` sont des `String` d'exécution — `Text(String)`
-            // est l'overload verbatim, sans aucun lookup. Enveloppé en
-            // `LocalizedStringKey`, SwiftUI résout contre `\.locale`, donc
-            // traduit ET réactif au picker de langue. Un titre dynamique (nom
-            // de compte, de position) n'est pas une clé de table : il retombe
-            // simplement sur lui-même, l'enveloppe est sans risque.
+            // `title`/`.label` are runtime `String`s — `Text(String)`
+            // is the verbatim overload, with no lookup at all. Wrapped in
+            // `LocalizedStringKey`, SwiftUI resolves it against `\.locale`, so
+            // translated AND reactive to the language picker. A dynamic title (an account
+            // name, a position) isn't a table key: it simply
+            // falls back to itself, so the wrapping is risk-free.
             //
-            // ⚠️ `LocalizedStringKey`, PAS `LocalizedStringResource` : ce
-            // dernier porte sa propre locale et court-circuite l'environnement.
+            // ⚠️ `LocalizedStringKey`, NOT `LocalizedStringResource`: the
+            // latter carries its own locale and bypasses the environment.
             Text(LocalizedStringKey(title))
                 .font(.headline)
                 .foregroundStyle(AppTheme.Colors.textPrimary)
             Spacer()
-            // Espaceur symétrique : centre visuellement le titre quand un
-            // bouton "Annuler" occupe le côté gauche.
+            // A symmetric spacer: visually centers the title when a
+            // "Cancel" button occupies the left side.
             if cancel != nil {
                 Color.clear.frame(width: 20, height: 20)
             }
@@ -552,9 +550,9 @@ struct MacSheetBottomBar: View {
     }
 }
 
-/// Assemble le contenu entre les deux barres dessinées à la main. Partagé
-/// par `PaneChromeModifier` et `PaneChromeInlineModifier` — les deux
-/// variantes macOS-sheet doivent rester visuellement identiques.
+/// Assembles the content between the two hand-drawn bars. Shared
+/// by `PaneChromeModifier` and `PaneChromeInlineModifier` — the two
+/// macOS-sheet variants must stay visually identical.
 @MainActor
 func macSheetChrome<Content: View>(
     title: String,
@@ -575,16 +573,16 @@ func macSheetChrome<Content: View>(
     .background(AppTheme.Colors.background)
 }
 
-/// Champ de recherche dessiné à la main, pour macOS uniquement.
+/// A hand-drawn search field, macOS only.
 ///
-/// `.searchable(text:)` bridge vers un `NSSearchToolbarItem` NATIF — une
-/// troisième surface AppKit, DISTINCTE de `.navigationTitle`/`.toolbar` (déjà
-/// neutralisés par `macSheetChrome`), qui continue de laisser transparaître
-/// le matériau translucide de la fenêtre même après leur suppression
-/// (confirmé par capture d'écran en direct : la bande du champ de recherche
-/// restait cuivrée alors que le titre et les boutons, eux, étaient corrigés
-/// — retour d'usage 2026-08-21). Remède identique : ne plus utiliser
-/// `.searchable` sur macOS pour une sheet, dessiner le champ nous-mêmes.
+/// `.searchable(text:)` bridges to a NATIVE `NSSearchToolbarItem` — a
+/// third AppKit surface, DISTINCT from `.navigationTitle`/`.toolbar` (already
+/// neutralized by `macSheetChrome`), which keeps letting
+/// the window's translucent material show through even after they're
+/// removed (confirmed by a live screenshot: the search field's band
+/// stayed coppery while the title and buttons were
+/// fixed). The same fix: stop using
+/// `.searchable` on macOS for a sheet, draw the field ourselves instead.
 private struct MacInlineSearchField: View {
     @Binding var text: String
     let prompt: String
@@ -593,10 +591,10 @@ private struct MacInlineSearchField: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(AppTheme.Colors.textSecondary)
-            // `TextField(prompt, ...)` avec `prompt: String` reste au verbatim
-            // (aucune conversion implicite String → LocalizedStringKey pour
-            // une valeur d'exécution) — cf. CLAUDE.md §5. `LocalizedStringKey`
-            // explicite : la mécanique standard SwiftUI, qui suit `\.locale`.
+            // `TextField(prompt, ...)` with `prompt: String` stays verbatim
+            // (no implicit String → LocalizedStringKey conversion for
+            // a runtime value) — see CLAUDE.md §5. An explicit
+            // `LocalizedStringKey`: SwiftUI's standard mechanism, which follows `\.locale`.
             TextField(LocalizedStringKey(prompt), text: $text)
                 .textFieldStyle(.plain)
             if !text.isEmpty {
@@ -619,16 +617,16 @@ private struct MacInlineSearchField: View {
 #endif
 
 extension View {
-    /// `.searchable` sur iOS ; sur macOS, un champ dessiné à la main placé
-    /// AU-DESSUS du contenu (cf. `MacInlineSearchField`) — jamais le
-    /// `.searchable` natif, dont la barre reste cuivrée même une fois
-    /// `.navigationTitle`/`.toolbar` neutralisés.
+    /// `.searchable` on iOS; on macOS, a hand-drawn field placed
+    /// ABOVE the content (see `MacInlineSearchField`) — never the
+    /// native `.searchable`, whose bar stays coppery even once
+    /// `.navigationTitle`/`.toolbar` are neutralized.
     ///
-    /// Pas de paramètre `placement:` : certains cas (`.navigationBarDrawer`)
-    /// n'existent que côté iOS dans `SearchFieldPlacement` — un paramètre
-    /// non gardé casserait la compilation macOS au premier appel qui s'en
-    /// sert. `.automatic` partout est un compromis assumé (perte mineure :
-    /// le champ peut se cacher au scroll sur iOS au lieu de rester "always").
+    /// No `placement:` parameter: some cases (`.navigationBarDrawer`)
+    /// only exist on iOS in `SearchFieldPlacement` — an unguarded
+    /// parameter would break the macOS build on the first call that
+    /// uses it. `.automatic` everywhere is an accepted tradeoff (a minor loss:
+    /// the field can hide on scroll on iOS instead of staying "always" visible).
     @ViewBuilder
     func paneSearchable(text: Binding<String>, prompt: String) -> some View {
         #if os(macOS)
@@ -637,12 +635,11 @@ extension View {
             self
         }
         #else
-        // `prompt: String` (valeur d'exécution, pas un littéral) résout vers
-        // la surcharge `.searchable(prompt: some StringProtocol)` — verbatim,
-        // jamais localisée, quel que soit le contenu de Localizable.strings.
-        // `LocalizedStringKey` explicite bascule sur la surcharge qui suit
-        // `\.locale` — même remède que `paneChrome`/`PaneToggleButton`
-        // (audit 2026-08-21 pass 16).
+        // `prompt: String` (a runtime value, not a literal) resolves to
+        // the `.searchable(prompt: some StringProtocol)` overload — verbatim,
+        // never localized, whatever Localizable.strings contains.
+        // An explicit `LocalizedStringKey` switches to the overload that follows
+        // `\.locale` — the same fix as `paneChrome`/`PaneToggleButton`.
         self.searchable(text: text, prompt: LocalizedStringKey(prompt))
         #endif
     }
@@ -871,10 +868,10 @@ private struct PaneChromeInlineModifier: ViewModifier {
                 PaneChromeModel(title: title, leading: cancel, trailing: confirm.map { [$0] } ?? [])
             }
         } else {
-            // Cf. PaneChromeModifier.macSheetChrome : le contenu conserve SA
-            // PROPRE `NavigationStack` interne (pour son push), on l'enrobe
-            // juste des barres dessinées à la main au lieu de lui laisser
-            // poser un `.navigationTitle`/`.toolbar` natif inefficace sur
+            // See PaneChromeModifier.macSheetChrome: the content keeps ITS
+            // OWN internal `NavigationStack` (for its push), it's just wrapped
+            // with hand-drawn bars instead of letting it
+            // set a native `.navigationTitle`/`.toolbar` that's ineffective on
             // macOS-sheet.
             macSheetChrome(title: title, cancel: cancel, destructive: nil, confirm: confirm) {
                 content
@@ -962,11 +959,11 @@ struct PaneToggleButton: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        // `label` est une `String` d'exécution (libellés littéraux comme
-        // "Tags", et texte dynamique sur certains sites) — `Label(String, …)`
-        // est l'overload verbatim, sans lookup, contrairement à
-        // `Label(LocalizedStringKey, …)` qui résout contre `\.locale` et suit
-        // donc le picker de langue.
+        // `label` is a runtime `String` (literal labels like
+        // "Tags", and dynamic text on some sites) — `Label(String, …)`
+        // is the verbatim overload, with no lookup, unlike
+        // `Label(LocalizedStringKey, …)`, which resolves against `\.locale` and
+        // therefore follows the language picker.
         Toggle(isOn: $isOn) {
             Label(LocalizedStringKey(label), systemImage: systemImage)
         }
@@ -1038,14 +1035,14 @@ extension View {
                 .environment(\.paneDismiss, { isPresented.wrappedValue = false })
                 .environment(\.paneHostContext, .modal)
                 .adaptivePaneFrame()
-                // Sans fond explicite, la sheet iOS retombe sur le blanc
-                // système par défaut — identique à `AppTheme.Colors.surface`
-                // en light mode, donc AUCUN contraste entre une carte
-                // `macGroupedRow` et la page qui l'entoure (retour d'usage
-                // 2026-09-10 : démarcation des cartes invisible sur mobile en
-                // light). macOS peint déjà ce fond dans les deux branches de
-                // `AdaptivePaneBoolModifier`/`AdaptivePaneItemModifier` ; iOS
-                // ne l'avait jamais eu.
+                // Without an explicit background, the iOS sheet falls back to the
+                // system's default white — identical to `AppTheme.Colors.surface`
+                // in light mode, so NO contrast at all between a
+                // `macGroupedRow` card and the page surrounding it (a `macGroupedRow`
+                // card's edges were invisible on mobile in
+                // light mode). macOS already paints this background in both branches of
+                // `AdaptivePaneBoolModifier`/`AdaptivePaneItemModifier`; iOS
+                // never had it.
                 .background(AppTheme.Colors.background.ignoresSafeArea())
         }
         #endif
@@ -1066,8 +1063,8 @@ extension View {
                 .environment(\.paneDismiss, { item.wrappedValue = nil })
                 .environment(\.paneHostContext, .modal)
                 .adaptivePaneFrame()
-                // Cf. le commentaire équivalent du variant `isPresented:` —
-                // même fond manquant, même bug de contraste nul en light.
+                // See the equivalent comment on the `isPresented:` variant —
+                // the same missing background, the same zero-contrast bug in light mode.
                 .background(AppTheme.Colors.background.ignoresSafeArea())
         }
         #endif

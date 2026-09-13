@@ -286,11 +286,11 @@ struct EmptyStateView<Actions: View>: View {
                     .foregroundStyle(AppTheme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
-            // Le VStack ajoute `spacing` autour de CHAQUE enfant, même un
-            // `EmptyView()` — sans ce garde, les ~20 sites qui n'utilisent
-            // aucune action gagneraient un espace vide en bas (régression
-            // visuelle silencieuse). `Actions.self == EmptyView.self` est
-            // le défaut du paramètre générique quand `actions:` est omis.
+            // A VStack adds `spacing` around EVERY child, even an
+            // `EmptyView()` — without this guard, the ~20 sites that use
+            // no action at all would gain an empty gap at the bottom (a silent
+            // visual regression). `Actions.self == EmptyView.self` is
+            // the generic parameter's default when `actions:` is omitted.
             if Actions.self != EmptyView.self {
                 actions()
             }

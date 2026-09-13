@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 //
 // `.onMove(perform:)` alone does NOT produce a working drag gesture on macOS
 // in this app — confirmed by direct usage on `ModulesSettingsView` and
-// `DashboardCustomizeView` (2026-09), both `List`-backed at the time and both
+// `DashboardCustomizeView`, both `List`-backed at the time and both
 // already wired with `.onMove`: dragging a row silently did nothing on
 // device. `.onMove` stays wired anyway (harmless, and iOS still needs it to
 // drive its edit-mode reorder handle) but macOS reordering goes through the
@@ -18,8 +18,8 @@ import UniformTypeIdentifiers
 // both screens now use `Form`, cf. `ReorderDropDelegate`'s history below for
 // why `List` specifically turned out to be a problem for `ModulesSettingsView`.
 //
-// ⚠️ History of this delegate, and why it looks the way it does now (retour
-// d'usage 2026-09, three rounds) :
+// ⚠️ History of this delegate, and why it looks the way it does now (three
+// rounds):
 // 1. First version moved `items` live in `dropEntered` (rows slide out of
 //    the way while dragging, à la iOS) AND in `performDrop`. Freeze reported
 //    on release.
@@ -117,9 +117,9 @@ extension View {
 }
 
 #if os(macOS)
-/// Visible affordance for a `macReorderable` row — without it, the row is
-/// draggable but nothing on screen says so (retour d'usage 2026-09: "on peut
-/// drag, mais on ne voit pas qu'on peut le faire"). Purely decorative (drag
+/// A visible affordance for a `macReorderable` row — without it, the row is
+/// draggable but nothing on screen says so ("you can
+/// drag, but you can't see that you can"). Purely decorative (a drag
 /// starts from anywhere on the row, not just this glyph) — placed at the
 /// row's trailing edge, the conventional spot for a reorder handle.
 struct ReorderHandle: View {

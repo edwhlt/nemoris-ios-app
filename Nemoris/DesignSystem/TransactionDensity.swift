@@ -13,8 +13,8 @@ import CoreGraphics
 //   - verticalPadding: row `.vertical(_:)` padding
 //   - rowMinHeight: minimum row height (= logo size, for centering)
 //   - showLogo: always true — even compact keeps the merchant icon, just
-//     shrunk (retour d'usage : un icône reste le repère visuel le plus
-//     rapide pour scanner une liste dense, plus utile que le gain d'espace)
+//     shrunk (an icon remains the fastest visual anchor for scanning
+//     a dense list, more useful than the space saved)
 //   - showSecondaryInfo: compact hides the subtitle (user/category info) to
 //     condense to a single line
 

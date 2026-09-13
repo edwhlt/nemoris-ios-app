@@ -1,22 +1,22 @@
 import SwiftUI
 
-/// Sélection multiple par plage — cmd+clic (bascule une ligne) et maj+clic
-/// (étend depuis la dernière ligne touchée), partagés par toute liste qui
-/// possède déjà son propre `Set<ID>` + `Bool` de sélection (Transactions,
-/// Tiers, Tags…). Fonctions PURES sur des `inout` plutôt qu'un nouveau type
-/// d'état à migrer : chaque écran garde ses `@State` existants et n'ajoute
-/// qu'une ancre (`@State private var …Anchor: Int? = nil`).
+/// Range-based multi-selection — cmd+click (toggles a row) and shift+click
+/// (extends from the last touched row), shared by any list that already
+/// has its own selection `Set<ID>` + `Bool` (Transactions,
+/// Payees, Tags…). PURE functions on `inout` rather than a new state
+/// type to migrate to: each screen keeps its existing `@State` and only
+/// adds an anchor (`@State private var …Anchor: Int? = nil`).
 enum RangeSelection {
-    /// Case à cocher / clic simple pendant que la sélection est déjà active :
-    /// bascule SEULEMENT cette ligne, pose l'ancre pour un futur maj+clic.
+    /// A checkbox / plain click while selection is already active:
+    /// toggles ONLY this row, sets the anchor for a future shift+click.
     static func toggle<ID: Hashable>(_ id: ID, index: Int, selected: inout Set<ID>, anchor: inout Int?) {
         if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
         anchor = index
     }
 
-    /// Maj+clic : sélectionne la plage entre l'ancre (dernière ligne
-    /// touchée) et l'index cliqué. Sans ancre encore posée (premier
-    /// maj+clic de la session), se comporte comme un clic simple.
+    /// Shift+click: selects the range between the anchor (the last
+    /// touched row) and the clicked index. With no anchor set yet
+    /// (the session's first shift+click), behaves like a plain click.
     static func extend<ID: Hashable>(to id: ID, index: Int, allIds: [ID], selected: inout Set<ID>, anchor: inout Int?) {
         guard let a = anchor, allIds.indices.contains(a) else {
             selected.insert(id)
@@ -32,13 +32,13 @@ enum RangeSelection {
 }
 
 extension View {
-    /// Superpose au tap normal d'une row la détection cmd+clic / maj+clic —
-    /// API SwiftUI native `TapGesture().modifiers(_:)` (clavier physique Mac
-    /// ET iPad clavier+trackpad ; no-op silencieux sur iPhone tactile pur,
-    /// donc aucune régression là où il n'y a pas de clavier). Le clic nu
-    /// garde le comportement historique de la row (`onOpen`) tant que la
-    /// sélection n'est pas active ; une fois active, il bascule la ligne
-    /// exactement comme la case à cocher.
+    /// Layers cmd+click / shift+click detection on top of a row's normal tap —
+    /// the native SwiftUI `TapGesture().modifiers(_:)` API (a physical Mac
+    /// keyboard AND an iPad with keyboard+trackpad; a silent no-op on pure
+    /// touch iPhone, so no regression where there's no keyboard). A plain
+    /// click keeps the row's historical behavior (`onOpen`) as long as
+    /// selection isn't active; once active, it toggles the row
+    /// exactly like the checkbox.
     func selectableRow<ID: Hashable>(
         id: ID,
         index: Int,
@@ -66,11 +66,11 @@ private struct SelectableRowModifier<ID: Hashable>: ViewModifier {
     func body(content: Content) -> some View {
         content
             .contentShape(Rectangle())
-            // `Gesture.modifiers(_:)` (détection cmd/maj au clic) n'existe
-            // QUE sur macOS — indisponible sur iOS/iPadOS même avec clavier
-            // physique. Le clic nu (`.onTapGesture` plus bas, cross-
-            // platform) reste le seul mécanisme sur ces plateformes ; c'est
-            // déjà l'idiome iOS natif (mode "Sélectionner" + tap).
+            // `Gesture.modifiers(_:)` (cmd/shift detection on click) only
+            // exists on macOS — unavailable on iOS/iPadOS even with a physical
+            // keyboard. A plain click (`.onTapGesture` below, cross-
+            // platform) stays the only mechanism on those platforms; that's
+            // already the native iOS idiom ("Select" mode + tap).
             #if os(macOS)
             .highPriorityGesture(
                 TapGesture().modifiers(.shift).onEnded {
@@ -96,15 +96,15 @@ private struct SelectableRowModifier<ID: Hashable>: ViewModifier {
     }
 }
 
-/// Entrées de sélection communes, à préfixer aux actions habituelles d'une
-/// row via `.rowActions(selection: …)` — right-click macOS / appui long iOS.
+/// Shared selection entries, to prefix a row's usual actions
+/// via `.rowActions(selection: …)` — a macOS right-click / iOS long press menu.
 ///
-/// - Hors sélection (ou ligne seule sélectionnée) : point d'entrée
-///   ("Sélectionner" / "Tout sélectionner").
-/// - Plusieurs lignes sélectionnées dont celle-ci : actions de GROUPE
-///   seulement — l'action "Supprimer" d'une seule ligne (fournie par
-///   ailleurs dans `trailing`) prêterait à confusion si les deux
-///   coexistaient dans le même menu.
+/// - Outside selection (or with only this row selected): an entry point
+///   ("Select" / "Select all").
+/// - Several rows selected including this one: GROUP actions
+///   only — a single row's "Delete" action (provided elsewhere
+///   in `trailing`) would be confusing if the two
+///   coexisted in the same menu.
 func selectionRowActions(
     isSelecting: Bool,
     isSelected: Bool,
@@ -127,15 +127,15 @@ func selectionRowActions(
     }
 }
 
-/// Raccourci ⌘A, scopé à l'écran qui l'attache (bouton de taille nulle —
-/// reste dans la chaîne de répondeurs donc le raccourci reste actif, sans
-/// occuper de place ni apparaître dans l'accessibilité). Sélectionne
-/// `allIds` dans `selected` et active `isSelecting`.
+/// A ⌘A shortcut, scoped to the screen that attaches it (a zero-size button —
+/// stays in the responder chain so the shortcut stays active, without
+/// taking up space or showing up in accessibility). Selects
+/// `allIds` into `selected` and turns on `isSelecting`.
 ///
-/// ⚠️ Portée volontairement limitée à ce qui est déjà CHARGÉ en mémoire
-/// (`allIds` doit être le jeu déjà matérialisé, pas re-fetché) — sur une
-/// liste paginée (Transactions), ⌘A ne ramène pas silencieusement des
-/// années d'historique non chargées.
+/// ⚠️ Deliberately limited in scope to what's already LOADED in memory
+/// (`allIds` must be the already-materialized set, not re-fetched) — on
+/// a paginated list (Transactions), ⌘A doesn't silently pull in
+/// years of unloaded history.
 struct SelectAllShortcut<ID: Hashable>: View {
     let isSelecting: Binding<Bool>
     let selected: Binding<Set<ID>>

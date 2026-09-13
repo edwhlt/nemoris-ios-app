@@ -73,10 +73,10 @@ extension View {
     /// `.insetGrouped`-like look most screens want. Set `false` for a short,
     /// curated list (a handful of settings/preferences, not a scrollable
     /// dataset) where the separator lines read as visual noise rather than
-    /// helping scan many rows — retour d'usage 2026-09 on
-    /// `ModulesSettingsView`/`DashboardCustomizeView` ("bien quand on a
-    /// énormément de données dans un scrollable, pas besoin de ça" pour ces
-    /// deux écrans courts). The row-to-row spacing (`.padding(.top/.bottom,
+    /// helping scan many rows — this is the case on
+    /// `ModulesSettingsView`/`DashboardCustomizeView` (separators help "when
+    /// there's a huge amount of data in a scrollable view, not needed" for
+    /// these two short screens). The row-to-row spacing (`.padding(.top/.bottom,
     /// … xs`) still applies either way, so rows stay visually separated —
     /// just without a hard rule between them.
     func macGroupedRow<Bg: View>(
@@ -135,19 +135,18 @@ extension View {
         // with TRAILING content (a count, a total — `sectionHeader`'s
         // `trailingNote`/`gainChip` in `PatrimoineView`) sat flush against
         // the window's own edge without the trailing half, only the eyebrow
-        // on the left ever got any breathing room (retour d'usage
-        // 2026-08-27, capture iOS vs macOS à l'appui). Headers with no
+        // on the left ever got any breathing room. Headers with no
         // trailing content (the common case elsewhere) just gain unused
         // right margin — invisible.
         //
-        // ⚠️ PAS de `.padding(.bottom, …)` ici (essayé puis retiré, 2026-09) :
-        // sur un écran court et curaté (`ModulesSettingsView`, quelques
-        // modules) le surcroît d'espace lisait comme une ligne parasite sous
-        // le header plutôt qu'une respiration voulue — retour d'usage direct.
-        // Un header + première carte visuellement proches reste le bon défaut
-        // ici ; un écran qui aurait vraiment besoin de plus d'air peut ajouter
-        // son propre `.padding(.bottom, …)` localement plutôt que de changer
-        // ce comportement partagé par tous les appelants.
+        // ⚠️ NO `.padding(.bottom, …)` here (tried then removed): on a short
+        // and curated screen (`ModulesSettingsView`, a handful of
+        // modules) the extra space read as a stray line under
+        // the header rather than an intended breathing room. A header +
+        // first card sitting visually close remains the right default
+        // here; a screen that genuinely needs more air can add
+        // its own `.padding(.bottom, …)` locally rather than changing
+        // this behavior shared by every caller.
         return self
             .padding(.leading, AppTheme.Spacing.xl)
             .padding(.trailing, AppTheme.Spacing.xl)

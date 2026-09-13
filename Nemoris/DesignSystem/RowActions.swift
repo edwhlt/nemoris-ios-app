@@ -48,8 +48,8 @@ extension View {
     /// Adaptive row actions (iOS swipe + long-press menu / macOS right-click
     /// menu). Apply to a `List` row. `leading` then `trailing` are merged
     /// into the context menu (separated by a `Divider`); `selection`, when
-    /// given, is PREPENDED above both — the sélection multiple entry points
-    /// ("Sélectionner" / "Tout sélectionner" / actions de groupe), always
+    /// given, is PREPENDED above both — the multi-selection entry points
+    /// ("Select" / "Select all" / group actions), always
     /// first because they answer a different question than the row's own
     /// actions.
     ///

@@ -189,10 +189,10 @@ struct SkeletonPositionRow: View {
 // MARK: Calendar grid (matches BudgetView.calendarGridContent)
 
 struct SkeletonCalendarGrid: View {
-    /// `false` quand un ancêtre rend déjà sa propre ligne de jours de la
-    /// semaine — cf. `BudgetView.calendarCarousel`, qui l'affiche UNE fois
-    /// au-dessus du carrousel plutôt que par page (les pages voisines pas
-    /// encore en cache l'auraient sinon dupliquée).
+    /// `false` when an ancestor already renders its own weekday-name row —
+    /// see `BudgetView.calendarCarousel`, which shows it ONCE
+    /// above the carousel rather than per page (neighboring pages not
+    /// yet cached would otherwise duplicate it).
     var showsHeader: Bool = true
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 1), count: 7)

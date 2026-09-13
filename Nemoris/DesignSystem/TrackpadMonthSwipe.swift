@@ -69,9 +69,9 @@ private struct TrackpadMonthSwipeModifier: ViewModifier {
             defer { accumulatedX = 0; accumulatedY = 0 }
             guard abs(accumulatedX) > Self.threshold,
                   abs(accumulatedX) > abs(accumulatedY) * Self.dominanceRatio else { return }
-            // Défilement naturel macOS (le contenu suit le doigt) : deux
-            // doigts vers la GAUCHE ⇒ deltaX négatif ⇒ le contenu "suivant"
-            // apparaît, comme un swipe gauche sur iOS.
+            // Natural macOS scrolling (content follows the finger): two
+            // fingers to the LEFT ⇒ a negative deltaX ⇒ the "next" content
+            // appears, like a left swipe on iOS.
             if accumulatedX < 0 {
                 onSwipeLeft()
             } else {
