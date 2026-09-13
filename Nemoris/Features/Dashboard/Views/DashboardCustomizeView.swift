@@ -2,47 +2,47 @@ import SwiftUI
 
 // MARK: - DashboardCustomizeView
 //
-// Écran de personnalisation de la grille : afficher/masquer, réordonner, changer la
-// taille de chaque carte.
+// The grid customization screen: show/hide, reorder, change the
+// size of each card.
 //
-// **Calque strictement sur « Ordre des onglets »** (`SettingsView`) : `Form` +
-// `ForEach` + `.onMove`, avec `editMode` forcé sur iOS uniquement.
+// **Strictly modeled on "Tab order"** (`SettingsView`): a `Form` +
+// `ForEach` + `.onMove`, with `editMode` forced on iOS only.
 //
-// ⚠️ Historique court : cet écran est brièvement passé par `List` +
-// `.macGroupedRow` (même recette que `ModulesSettingsView`) pour tenter de
-// réparer le réordonnancement macOS, qui ne marchait pas via `.onMove` seul
-// (`.onMove` a besoin d'une vraie `List`/`ForEach`, jamais d'un `Form` — cf.
-// doc `ModulesSettingsView`). Retour d'usage direct (2026-09) : le rendu
-// `List` (séparateurs internes entre rows, en-tête petite-caps façon liste de
-// données) rendait cet écran COURT ET CURATÉ moins lisible que l'ancien
-// `Form` — les lignes de séparation "c'est bien quand on a énormément de
-// données dans un scrollable […] on a pas besoin de ça" ici. Revenu au `Form`
-// d'origine.
+// ⚠️ A short history: this screen briefly went through `List` +
+// `.macGroupedRow` (the same recipe as `ModulesSettingsView`) to try to
+// fix macOS reordering, which didn't work via `.onMove` alone
+// (`.onMove` needs a real `List`/`ForEach`, never a `Form` — see
+// `ModulesSettingsView`'s docs). Direct feedback: the `List`
+// rendering (internal row separators, small-caps headers like a data
+// list) made this SHORT, CURATED screen less readable than the old
+// `Form` — separator lines are "nice when you have a huge amount of
+// data in a scrollable […] you don't need that" here. Reverted to the original
+// `Form`.
 //
-// Le réordonnancement macOS n'a PAS besoin de `List` pour autant :
-// `macReorderable` (`ReorderableRow.swift`) est bâti sur `onDrag`/`onDrop`,
-// des modifiers SwiftUI génériques qui fonctionnent sur N'IMPORTE QUELLE vue
-// — `Form` compris, pas seulement `List`. C'est `.onMove` spécifiquement (pas
-// le drag&drop en général) qui a besoin d'un vrai `List`. `ReorderHandle()`
-// (même fichier) rend le geste DÉCOUVRABLE — sans lui la row est glissable
-// mais rien à l'écran ne le suggère (retour d'usage 2026-09 : "on peut drag,
-// mais on ne voit pas qu'on peut le faire").
+// macOS reordering doesn't NEED `List` regardless:
+// `macReorderable` (`ReorderableRow.swift`) is built on `onDrag`/`onDrop`,
+// generic SwiftUI modifiers that work on ANY view
+// — `Form` included, not just `List`. It's `.onMove` specifically (not
+// drag&drop in general) that needs a real `List`. `ReorderHandle()`
+// (same file) makes the gesture DISCOVERABLE — without it the row is
+// draggable but nothing on screen suggests it ("you can drag,
+// but you can't see that you can").
 //
-// ⚠️ `Form { }.background(…)` et surtout PAS `ZStack { Color.ignoresSafeArea(); Form }` :
-// sur macOS le `Color.ignoresSafeArea()` rend le Form infiniment haut (fenêtre étirée
-// au maximum, contenu invisible) — piège documenté dans CLAUDE.md §N.1.
+// ⚠️ `Form { }.background(…)` and definitely NOT `ZStack { Color.ignoresSafeArea(); Form }`:
+// on macOS `Color.ignoresSafeArea()` makes the Form infinitely tall (a window stretched
+// to the max, invisible content) — the pitfall documented in CLAUDE.md §N.1.
 
 struct DashboardCustomizeView: View {
     @Environment(AppState.self) private var appState
     @Environment(PurchaseManager.self) private var purchaseManager
     @Environment(\.dismiss) private var dismiss
-    /// macOS : ferme la vue swap-par-état (cf. `DashboardView.body`) — la vue
-    /// remplace alors le dashboard sans passer par une sheet/push, donc
-    /// `dismiss()` seul n'aurait rien à fermer. nil sur iOS, où la vue reste
-    /// poussée dans la sheet du dashboard et `dismiss()` suffit.
+    /// macOS: closes the swap-by-state view (see `DashboardView.body`) — the
+    /// view then replaces the dashboard without going through a sheet/push, so
+    /// `dismiss()` alone would have nothing to close. nil on iOS, where the view stays
+    /// pushed inside the dashboard's sheet and `dismiss()` is enough.
     var onBack: (() -> Void)? = nil
     #if os(macOS)
-    /// Carte actuellement glissée — cf. `macReorderable` (`ReorderableRow.swift`).
+    /// The card currently being dragged — see `macReorderable` (`ReorderableRow.swift`).
     @State private var draggedCard: DashboardCardPreference?
     #endif
 
@@ -50,13 +50,13 @@ struct DashboardCustomizeView: View {
         @Bindable var appState = appState
         Form {
             Section {
-                // `$appState.dashboardLayout` directement : `dashboardLayout`
-                // est une propriété STOCKÉE (comme `mainTabOrder` depuis
-                // 2026-09 — un get/set calculé sur `UserDefaults` ne notifie
-                // aucun observateur `@Observable`, ce qui causait un freeze
-                // perçu à la fin d'un drag, cf. doc `AppState.mainTabOrder`),
-                // donc `macReorderable` peut réordonner en place sans mirroir
-                // `@State` local.
+                // `$appState.dashboardLayout` directly: `dashboardLayout`
+                // is a STORED property (like `mainTabOrder` since
+                // 2026-09 — a computed get/set over `UserDefaults` notifies
+                // no `@Observable` observer, which caused a perceived freeze
+                // at the end of a drag, see `AppState.mainTabOrder`'s docs),
+                // so `macReorderable` can reorder in place with no local
+                // `@State` mirror.
                 ForEach(appState.dashboardLayout) { preference in
                     row(for: preference)
                         #if os(macOS)
@@ -83,8 +83,8 @@ struct DashboardCustomizeView: View {
         .background(AppTheme.Colors.background.ignoresSafeArea())
         .localizedNavigationTitle("Personnaliser")
         #if os(iOS)
-        // Même choix que l'écran « Ordre des onglets » : le mode édition permanent
-        // évite un bouton « Modifier » pour une liste dont c'est la seule fonction.
+        // Same choice as the "Tab order" screen: permanent edit mode
+        // avoids an "Edit" button for a list whose only function that is.
         .environment(\.editMode, .constant(.active))
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -115,9 +115,9 @@ struct DashboardCustomizeView: View {
                         .font(AppTheme.Typography.bodyMedium)
                         .foregroundStyle(AppTheme.Colors.textPrimary)
                     if !isAvailable, let module = preference.card.requiredModule {
-                        // On n'efface JAMAIS la préférence d'une carte dont le module
-                        // est désactivé/l'abonnement expiré : réactiver le module ou
-                        // renouveler le Pro restitue sa place et sa taille.
+                        // The preference for a card whose module is disabled/subscription
+                        // expired is NEVER cleared: re-enabling the module or
+                        // renewing Pro restores its position and size.
                         Text(unavailableReason(module))
                             .font(AppTheme.Typography.labelMedium)
                             .foregroundStyle(AppTheme.Colors.warning)
@@ -141,9 +141,9 @@ struct DashboardCustomizeView: View {
                 #endif
             }
 
-            // Le sélecteur de taille n'a de sens que si la carte en supporte plusieurs :
-            // un graphe à 12 barres sur une demi-largeur d'iPhone est illisible, donc
-            // certaines cartes n'existent qu'en large.
+            // The size selector only makes sense if the card supports several:
+            // a 12-bar chart on half an iPhone's width is unreadable, so
+            // some cards only exist in the wide size.
             if preference.isVisible, isAvailable, preference.card.supportedSizes.count > 1 {
                 Picker("Taille", selection: Binding(
                     get: { preference.size },
@@ -161,10 +161,10 @@ struct DashboardCustomizeView: View {
         .opacity(isAvailable ? 1 : 0.55)
     }
 
-    /// N'est appelée que pour une carte déjà jugée indisponible : distingue le module
-    /// désactivé dans les Réglages (`showBudget` etc. à `false`) de l'abonnement Pro
-    /// qui a expiré (module toujours activé, mais `PurchaseManager` ne le déverrouille
-    /// plus) — même ordre de check que `AppState.isDashboardCardAvailable`.
+    /// Only called for a card already deemed unavailable: distinguishes a module
+    /// disabled in Settings (`showBudget` etc. set to `false`) from an
+    /// expired Pro subscription (the module still enabled, but `PurchaseManager`
+    /// no longer unlocks it) — the same check order as `AppState.isDashboardCardAvailable`.
     private func unavailableReason(_ module: MainTabItem) -> LocalizedStringKey {
         guard appState.availableTabsResolved.contains(module) else {
             return "Module « \(module.title) » désactivé"
@@ -180,9 +180,9 @@ struct DashboardCustomizeView: View {
         appState.dashboardLayout = layout
     }
 
-    /// Réécrit le tableau complet : `dashboardLayout` est une propriété **stockée**
-    /// observée par la grille, donc réassigner déclenche le rafraîchissement (et la
-    /// sauvegarde via son `didSet`).
+    /// Rewrites the full array: `dashboardLayout` is a **stored** property
+    /// observed by the grid, so reassigning it triggers a refresh (and
+    /// saving, via its `didSet`).
     private func update(_ card: DashboardCardID, _ mutate: (inout DashboardCardPreference) -> Void) {
         guard let index = appState.dashboardLayout.firstIndex(where: { $0.card == card }) else { return }
         var layout = appState.dashboardLayout

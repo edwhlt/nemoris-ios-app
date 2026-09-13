@@ -2,23 +2,23 @@ import Foundation
 
 // MARK: - AlertEngine
 //
-// Moteur d'alertes intelligentes — agrège plusieurs sources de données et
-// produit une liste d'`Alert` triée par sévérité. Affiché dans le `AlertsBanner`
-// en tête du Dashboard.
+// A smart-alerts engine — aggregates several data sources and
+// produces a list of `Alert`s sorted by severity. Shown in `AlertsBanner`
+// at the top of the Dashboard.
 //
-// **3 types d'alertes MVP** :
-//   1. **Goals en retard** — goal avec `deadline < now` et `ratio < 1.0`
-//   2. **Enveloppe budget dépassée** — Σ dépenses catégorie ce mois > montant envelope
-//   3. **Liens Patrimoine rompus** — assets dont le compte source a été supprimé
+// **3 MVP alert types**:
+//   1. **Overdue goals** — a goal with `deadline < now` and `ratio < 1.0`
+//   2. **Overspent budget envelope** — Σ category expenses this month > the envelope amount
+//   3. **Broken Patrimoine links** — assets whose source account was deleted
 //
-// **Pourquoi MVP minimaliste** : on commence par les alertes les plus actionnables
-// et où les data sont déjà disponibles. Les détections plus poussées (découvert
-// imminent, transaction inhabituelle via stat sur historique) seront ajoutées
-// dans une 2e passe une fois qu'on aura validé la UX de ce flux.
+// **Why a minimal MVP**: starting with the most actionable alerts and
+// where the data is already available. More advanced detections (an
+// imminent overdraft, an unusual transaction via history stats) will be added
+// in a 2nd pass once this flow's UX has been validated.
 //
-// **Pas de persistance** : les alertes sont **recalculées à chaque load Dashboard**.
-// Pas de "j'ai déjà vu cette alerte" — c'est volontaire pour MVP : un goal en
-// retard reste en retard, l'utilisateur le voit jusqu'à action.
+// **No persistence**: alerts are **recomputed on every Dashboard load**.
+// No "I've already seen this alert" — deliberate for the MVP: an overdue
+// goal stays overdue, the user sees it until they act.
 
 enum AlertSeverity: Int, Comparable {
     case info     = 0
@@ -29,9 +29,9 @@ enum AlertSeverity: Int, Comparable {
         lhs.rawValue < rhs.rawValue
     }
 
-    /// La couleur associée vit dans `AlertsBanner.swift`, son unique
-    /// consommateur : ce moteur ne dépend d'aucun type SwiftUI, ce qui le rend
-    /// compilable dans un harnais de tests pur.
+    /// The associated color lives in `AlertsBanner.swift`, its only
+    /// consumer: this engine depends on no SwiftUI type, which makes it
+    /// compilable in a pure test harness.
     var systemIcon: String {
         switch self {
         case .info:     return "info.circle.fill"
@@ -41,7 +41,7 @@ enum AlertSeverity: Int, Comparable {
     }
 }
 
-/// Tab cible pour le tap sur une alerte (deep-link léger).
+/// Target tab for a tap on an alert (a light deep link).
 enum AlertRoute {
     case patrimoine
     case budget
@@ -50,7 +50,7 @@ enum AlertRoute {
 }
 
 struct Alert: Identifiable, Hashable {
-    let id: String          // unique stable (= kind + ref) pour SwiftUI diff
+    let id: String          // a stable unique id (= kind + ref) for SwiftUI diffing
     let severity: AlertSeverity
     let title: LocalizedStringResource
     let message: LocalizedStringResource
@@ -66,26 +66,26 @@ struct Alert: Identifiable, Hashable {
     }
 }
 
-/// Contexte d'entrée du moteur. Toutes les données sont fournies par l'appelant —
-/// le moteur ne touche PAS la base.
+/// The engine's input context. All data is supplied by the caller —
+/// the engine does NOT touch the database.
 ///
-/// ⚠️ C'est ce qui évite le double chargement : avant, `AlertEngine` refaisait son
-/// propre `fetchTransactionsAllAccounts(limit: 5000)` sur le mois en cours alors que
-/// le Dashboard venait de charger exactement les mêmes lignes pour son bandeau Budget.
+/// ⚠️ This is what avoids double loading: before, `AlertEngine` re-ran its
+/// own `fetchTransactionsAllAccounts(limit: 5000)` for the current month even though
+/// the Dashboard had just loaded exactly the same rows for its Budget banner.
 struct AlertContext {
-    /// Progressions d'enveloppes déjà calculées par `EnvelopeSpendingCalculator`.
+    /// Envelope progressions already computed by `EnvelopeSpendingCalculator`.
     let envelopeProgresses: [EnvelopeProgress]
     let goals: [Goal]
     let assets: [PatrimoineAsset]
-    /// Ids des comptes qui existent réellement — sert à détecter les liens rompus.
+    /// IDs of accounts that actually exist — used to detect broken links.
     let bankAccountIds: Set<Int>
     let investmentAccountIds: Set<Int>
 }
 
 enum AlertEngine {
 
-    /// Calcule la liste d'alertes courantes. **Moteur pur** : tout vient du contexte,
-    /// donc testable et sans requête cachée.
+    /// Computes the current list of alerts. **A pure engine**: everything comes from
+    /// the context, so it's testable and free of hidden queries.
     static func compute(_ context: AlertContext) -> [Alert] {
         var alerts: [Alert] = []
 
@@ -97,7 +97,7 @@ enum AlertEngine {
             invIds: context.investmentAccountIds
         ))
 
-        // Tri : critical > warning > info, puis ordre d'insertion stable
+        // Sort order: critical > warning > info, then a stable insertion order
         return alerts.sorted { $0.severity > $1.severity }
     }
 
@@ -108,13 +108,13 @@ enum AlertEngine {
         var result: [Alert] = []
         for goal in goals {
             guard let deadline = goal.deadlineDate, deadline < now else { continue }
-            // On n'a pas le snapshot Patrimoine ici (le VM le fournit normalement
-            // au calculator). Pour éviter d'instancier un PatrimoineViewModel
-            // juste pour ça, on simplifie : on alerte sur les goals dont la
-            // deadline est passée. La fiche détaillée du goal montrera le ratio
-            // exact via le PatrimoineViewModel quand l'utilisateur clique.
-            // Filtrage des goals "atteints" (custom seulement, calculable
-            // localement sans snapshot) :
+            // The Patrimoine snapshot isn't available here (the VM normally
+            // supplies it to the calculator). To avoid instantiating a
+            // PatrimoineViewModel just for this, it's simplified: alerting on
+            // goals whose deadline has passed. The goal's detail sheet will show
+            // the exact ratio via PatrimoineViewModel when the user taps it.
+            // Filtering out "reached" goals (custom only, computable
+            // locally with no snapshot):
             if goal.kind == .custom && goal.customCurrentAmount >= goal.targetAmount {
                 continue
             }
@@ -131,22 +131,22 @@ enum AlertEngine {
         return result
     }
 
-    // MARK: - 2. Enveloppes budget dépassées
+    // MARK: - 2. Overspent budget envelopes
 
-    /// ⚠️ Le comportement a changé lors de la factorisation : les progressions
-    /// viennent désormais d'`EnvelopeSpendingCalculator`, donc une enveloppe
-    /// hiérarchique capte les dépenses de ses sous-catégories (avant : catégorie
-    /// exacte seulement) et une enveloppe annuelle est mensualisée (avant : jamais
-    /// dépassée car on comparait un budget d'un an à un mois de dépenses).
+    /// ⚠️ The behavior changed during the factoring: progressions
+    /// now come from `EnvelopeSpendingCalculator`, so a hierarchical
+    /// envelope captures its sub-categories' spending (before: the exact
+    /// category only) and a yearly envelope is turned monthly (before: never
+    /// exceeded because a one-year budget was compared to a month of spending).
     private static func overspentEnvelopesAlerts(progresses: [EnvelopeProgress]) -> [Alert] {
         progresses.compactMap { progress in
-            // Seulement quand vraiment dépassé. Le seuil "approche dépassement"
-            // (`.warning`) pourrait devenir une `.info` plus tard ; on reste simple.
+            // Only when genuinely over budget. The "approaching overspend"
+            // threshold (`.warning`) could become an `.info` later; kept simple for now.
             guard progress.healthState == .exceeded else { return nil }
             let overshoot = progress.spent - progress.allocated
-            // AlertEngine est pur (doctrine du projet), pas d'accès à l'environnement
-            // SwiftUI — AppLocalization relit la préférence de langue directement
-            // depuis UserDefaults, cf. commentaire équivalent dans InsightEngine.
+            // AlertEngine is pure (project doctrine), no access to the SwiftUI
+            // environment — AppLocalization re-reads the language preference directly
+            // from UserDefaults, see the equivalent comment in InsightEngine.
             let overshootStr = overshoot.formatted(.currency(code: "EUR").presentation(.narrow).locale(AppLocalization.locale))
             return Alert(
                 id: "env_overspent_\(progress.envelope.id)",
@@ -161,8 +161,8 @@ enum AlertEngine {
 
     // MARK: - 3. Liens Patrimoine rompus
 
-    /// Un lien est "rompu" quand l'asset référence un account/investment_account qui
-    /// n'existe plus (cascade SET NULL non propagée — cas edge mais possible).
+    /// A link is "broken" when the asset references an account/investment_account that
+    /// no longer exists (a SET NULL cascade not propagated — an edge case, but possible).
     private static func brokenPatrimoineLinksAlerts(
         assets: [PatrimoineAsset],
         bankIds: Set<Int>,

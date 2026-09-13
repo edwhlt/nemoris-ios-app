@@ -2,19 +2,19 @@ import Foundation
 
 // MARK: - DashboardCardID
 //
-// Registre des cartes du Dashboard. C'est une **énumération de données pure** (aucun
-// import SwiftUI) : elle décrit ce qu'est une carte, pas comment elle se dessine.
-// Le rendu se fait par un `switch` unique dans `DashboardCardHost`, comme le fait
-// déjà `MainTabView.tabView(for:)` pour les modules.
+// The Dashboard's card registry. This is a **pure data enum** (no
+// SwiftUI import): it describes what a card is, not how it's drawn.
+// Rendering happens via a single `switch` in `DashboardCardHost`, the same way
+// `MainTabView.tabView(for:)` already does for modules.
 //
-// **Pourquoi pas un protocole + registre type-erasé** : stocker des closures qui
-// retournent des `View` obligerait à isoler le registre sur `@MainActor` (une vue
-// n'est pas `Sendable`), et on perdrait la conformance `Sendable` gratuite dont on a
-// besoin pour que `dependencies` traverse la frontière du `Task.detached` du builder.
+// **Why not a protocol + a type-erased registry**: storing closures that
+// return a `View` would force isolating the registry on `@MainActor` (a view
+// isn't `Sendable`), and the free `Sendable` conformance would be lost —
+// needed for `dependencies` to cross the builder's `Task.detached` boundary.
 //
-// **Ajouter une carte** = un `case` ici + une ligne dans le `switch` de
-// `DashboardCardHost` + une vue de contenu. Rien d'autre : l'ordre par défaut, la
-// persistance et l'écran de personnalisation suivent automatiquement.
+// **Adding a card** = one `case` here + one line in `DashboardCardHost`'s
+// `switch` + one content view. Nothing else: the default order,
+// persistence and the customization screen follow automatically.
 
 enum DashboardCardSize: String, Codable, Sendable, CaseIterable {
     case compact
@@ -36,10 +36,10 @@ enum DashboardCardSize: String, Codable, Sendable, CaseIterable {
 }
 
 enum DashboardCardID: String, CaseIterable, Identifiable, Sendable, Codable {
-    // ⚠️ L'ORDRE DE DÉCLARATION EST L'ORDRE PAR DÉFAUT DE LA GRILLE.
-    // `DashboardLayoutStore.sanitize` ajoute toute carte inconnue en fin de liste,
-    // donc une carte ajoutée plus tard n'ira PAS se glisser au milieu de la mise en
-    // page déjà personnalisée par l'utilisateur.
+    // ⚠️ THE DECLARATION ORDER IS THE GRID'S DEFAULT ORDER.
+    // `DashboardLayoutStore.sanitize` appends any unknown card at the end of the
+    // list, so a card added later will NOT slide into the middle of a
+    // layout the user has already customized.
     case insightsCoach
     case budgetEnvelopes
     case netWorth
@@ -74,14 +74,14 @@ enum DashboardCardID: String, CaseIterable, Identifiable, Sendable, Codable {
         }
     }
 
-    /// Module dont la carte dépend. Si l'utilisateur l'a désactivé dans les Réglages,
-    /// la carte disparaît de la grille (mais sa préférence est conservée : la
-    /// réactivation restitue sa position et sa taille).
+    /// The module a card depends on. If the user disabled it in Settings,
+    /// the card disappears from the grid (but its preference is kept: re-enabling
+    /// it restores its position and size).
     ///
-    /// Volontairement **pas** de gating paywall en plus : dans cette app, c'est le
-    /// toggle module des Réglages qui porte l'entitlement, et les vues sensibles ont
-    /// déjà leur propre `paywallOverlay`. Ajouter une seconde barrière ici masquerait
-    /// des chiffres que l'utilisateur voit déjà dans le bandeau « Vue d'ensemble ».
+    /// Deliberately **no** additional paywall gate: in this app, it's the
+    /// Settings module toggle that carries the entitlement, and the sensitive
+    /// views already have their own `paywallOverlay`. Adding a second barrier here would
+    /// hide numbers the user already sees in the "Overview" banner.
     var requiredModule: MainTabItem? {
         switch self {
         case .budgetEnvelopes: return .budget
@@ -91,8 +91,8 @@ enum DashboardCardID: String, CaseIterable, Identifiable, Sendable, Codable {
         }
     }
 
-    /// Un graphe à 12 barres ou une liste d'insights sur une demi-largeur d'iPhone
-    /// (~170 pt) est illisible : ces cartes n'existent qu'en large.
+    /// A 12-bar chart or an insight list on half an iPhone's width
+    /// (~170pt) is unreadable: these cards only exist in the wide size.
     var supportedSizes: [DashboardCardSize] {
         switch self {
         case .insightsCoach, .monthlyFlow: return [.wide]
@@ -107,14 +107,14 @@ enum DashboardCardID: String, CaseIterable, Identifiable, Sendable, Codable {
         }
     }
 
-    /// Une carte de niche part masquée : sinon chaque nouvelle version ajouterait du
-    /// bruit chez tout le monde. `investments` est déjà résumé dans le bandeau fixe.
+    /// A niche card starts hidden: otherwise every new version would add
+    /// noise for everyone. `investments` is already summarized in the fixed banner.
     var isVisibleByDefault: Bool {
         self != .investments
     }
 
-    /// Les agrégats nécessaires au rendu de cette carte. C'est ce qui rend une carte
-    /// masquée réellement gratuite : ses agrégats ne sont pas calculés.
+    /// The aggregates needed to render this card. This is what makes a
+    /// hidden card truly free: its aggregates aren't computed.
     var dependencies: Set<DashboardAggregate> {
         switch self {
         case .insightsCoach:   return [.insights]
@@ -130,7 +130,7 @@ enum DashboardCardID: String, CaseIterable, Identifiable, Sendable, Codable {
 
 // MARK: - DashboardCardPreference
 
-/// Préférence utilisateur pour une carte. Encodée en JSON dans `UserDefaults`.
+/// A user preference for a card. Encoded as JSON in `UserDefaults`.
 struct DashboardCardPreference: Codable, Hashable, Sendable, Identifiable {
     var card: DashboardCardID
     var isVisible: Bool
@@ -144,7 +144,7 @@ struct DashboardCardPreference: Codable, Hashable, Sendable, Identifiable {
         self.size = size
     }
 
-    /// Réglage par défaut d'une carte, tel que défini par le registre.
+    /// A card's default setting, as defined by the registry.
     init(defaultsFor card: DashboardCardID) {
         self.init(card: card, isVisible: card.isVisibleByDefault, size: card.defaultSize)
     }

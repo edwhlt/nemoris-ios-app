@@ -2,26 +2,26 @@ import SwiftUI
 
 // MARK: - DashboardOverviewBanner
 //
-// Bande « Vue d'ensemble » : trois chiffres de modules côte à côte, chacun tappable
-// vers son onglet.
+// The "Overview" band: three module figures side by side, each tappable
+// toward its tab.
 //
-// **Remplace trois bandeaux pleine largeur** (Investissements, Patrimoine, Budget)
-// qui étaient trois copies quasi identiques du même agencement — icône 44pt en
-// cercle, eyebrow 10pt tracking 0.6, valeur, sous-titre, chevron, dégradé et
-// bordure — pour ~210 lignes dupliquées. Empilés, ils consommaient à eux seuls près
-// de trois écrans de scroll pour délivrer trois nombres.
+// **Replaces three full-width banners** (Investments, Patrimoine, Budget)
+// that were three near-identical copies of the same layout — a 44pt circular
+// icon, a 10pt tracking-0.6 eyebrow, a value, a subtitle, a chevron, a gradient and a
+// border — for ~210 duplicated lines. Stacked, they alone took up nearly
+// three screens of scroll to deliver three numbers.
 //
-// C'est un élément **fixe** du Dashboard : il n'entre pas dans la grille de cartes
-// configurables. Une colonne dont le module est désactivé (ou sans donnée) disparaît
-// et les autres se répartissent la largeur.
+// This is a **fixed** element of the Dashboard: it doesn't enter the configurable
+// card grid. A column whose module is disabled (or has no data) disappears
+// and the others share the width.
 
 struct DashboardOverviewBanner: View {
-    /// Lu pour le toggle de masquage global : `compact(_:)` court-circuite `MoneyText`,
-    /// il doit donc respecter le masquage lui-même. L'ancien bandeau Patrimoine
-    /// affichait le montant des dettes en clair même œil fermé.
+    /// Read for the global masking toggle: `compact(_:)` bypasses `MoneyText`,
+    /// so it must honor masking itself. The old Patrimoine banner
+    /// used to show the debt amount in plain view even with masking on.
     @Environment(AppState.self) private var appState
 
-    /// `nil` = colonne masquée (module désactivé ou aucune donnée à montrer).
+    /// `nil` = a hidden column (the module is disabled or there's no data to show).
     let investments: InvestmentsRecap?
     let patrimoine: PatrimoineSnapshot?
     let budget: BudgetRecap?
@@ -84,8 +84,8 @@ struct DashboardOverviewBanner: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
 
-                        // Le passif explique pourquoi le net peut être négatif — c'est
-                        // l'information la plus utile à côté du net.
+                        // Liabilities explain why the net can be negative — that's
+                        // the most useful information next to the net figure.
                         if patrimoine.totalLiabilities > 0 {
                             caption(
                                 appState.amountsHidden
@@ -209,8 +209,8 @@ struct DashboardOverviewBanner: View {
         return AppTheme.Colors.success
     }
 
-    /// Montant abrégé (« 300,8 k€ ») : sur un tiers de largeur d'iPhone, un passif à
-    /// six chiffres écrasé par `minimumScaleFactor` devient illisible.
+    /// An abbreviated amount ("€300.8k"): on a third of an iPhone's width, a
+    /// six-digit liability squashed by `minimumScaleFactor` becomes unreadable.
     private func compact(_ amount: Double) -> String {
         let value = abs(amount)
         if value >= 1_000_000 {
@@ -222,10 +222,10 @@ struct DashboardOverviewBanner: View {
         if value >= 1_000 {
             return String(format: "%.1f k€", value / 1_000)
         }
-        // Reste cohérent avec les 2 branches ci-dessus (abrégé maison, décimale
-        // à point) plutôt que `.formatted(.currency(...))` — qui, appelé hors
-        // d'un `Text(_:format:)`, ignore la locale forcée par l'app et bascule
-        // sur celle, réelle, de l'appareil (cf. fix Patrimoine).
+        // Stays consistent with the 2 branches above (a homegrown abbreviation, a
+        // decimal point) rather than `.formatted(.currency(...))` — which, called
+        // outside a `Text(_:format:)`, ignores the app-forced locale and falls
+        // back to the device's actual one (see the Patrimoine fix).
         return String(format: "%.2f €", value)
     }
 }

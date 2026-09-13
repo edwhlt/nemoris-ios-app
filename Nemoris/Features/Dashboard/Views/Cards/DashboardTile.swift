@@ -2,25 +2,25 @@ import SwiftUI
 
 // MARK: - DashboardTile
 //
-// Le conteneur unique de toutes les cartes de la grille : fond, en-tête, hauteur
-// plancher, squelette et état vide.
+// The single container for every card in the grid: background, header, a
+// floor height, a skeleton and an empty state.
 //
-// **Tout le chrome vit ici et nulle part ailleurs.** C'est ce qui garde le `switch`
-// de `DashboardCardHost` trivial (une ligne par carte) et ce qui garantit que les
-// cartes restent visuellement homogènes — le défaut de l'ancien Dashboard était
-// justement trois bandeaux copiés-collés qui avaient dérivé les uns des autres.
+// **All the chrome lives here and nowhere else.** This is what keeps
+// `DashboardCardHost`'s `switch` trivial (one line per card) and what guarantees
+// the cards stay visually consistent — the old Dashboard's flaw was
+// exactly three copy-pasted banners that had drifted apart from one another.
 //
-// ⚠️ L'en-tête seul est tappable quand la carte pointe vers un module, jamais la
-// tuile entière : plusieurs contenus ont leurs propres interactions (barres du
-// graphe mensuel, insights du coach, toggle « Parente »), qu'un `Button` englobant
-// avalerait.
+// ⚠️ Only the header is tappable when a card points to a module, never the
+// whole tile: several contents have their own interactions (the monthly
+// chart's bars, the coach's insights, the "Parent" toggle), which an enclosing
+// `Button` would swallow.
 
 struct DashboardTile<Content: View>: View {
     let card: DashboardCardID
     let size: DashboardCardSize
-    /// `nil` tant que l'agrégat de la carte n'est pas calculé → squelette.
+    /// `nil` as long as the card's aggregate isn't computed → a skeleton.
     var isLoading: Bool = false
-    /// Vrai quand l'agrégat est arrivé mais ne contient rien à montrer.
+    /// True when the aggregate arrived but holds nothing to show.
     var isEmpty: Bool = false
     var emptyMessage: String = "Aucune donnée"
     var subtitle: LocalizedStringResource? = nil
@@ -55,7 +55,7 @@ struct DashboardTile<Content: View>: View {
         )
     }
 
-    // MARK: - En-tête
+    // MARK: - Header
 
     @ViewBuilder private var header: some View {
         if let onOpenModule {
@@ -103,11 +103,11 @@ struct DashboardTile<Content: View>: View {
         .contentShape(Rectangle())
     }
 
-    // MARK: - États
+    // MARK: - States
 
-    /// Squelette **par carte** : chaque tuile attend son propre agrégat. C'est ce qui
-    /// remplace le squelette tout-ou-rien de l'écran entier — les cartes légères
-    /// s'affichent sans attendre le coach, qui scanne 180 jours.
+    /// A skeleton **per card**: each tile waits on its own aggregate. This is what
+    /// replaces the whole screen's all-or-nothing skeleton — light cards
+    /// show up without waiting on the coach, which scans 180 days.
     @ViewBuilder private var loadingContent: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             SkeletonLine(width: 120, height: 22)

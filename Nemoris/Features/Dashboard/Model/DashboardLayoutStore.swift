@@ -2,23 +2,23 @@ import Foundation
 
 // MARK: - DashboardLayoutStore
 //
-// Persistance de la mise en page du Dashboard (ordre, visibilité, taille par carte).
+// Persistence of the Dashboard's layout (order, visibility, size per card).
 //
-// Même doctrine que `AppState.mainTabOrder` — UserDefaults + une passe de
-// normalisation qui complète les entrées manquantes — mais **en JSON plutôt qu'en
-// `[String]` avec des suffixes** : la préférence porte trois informations par carte,
-// et un encodage positionnel deviendrait illisible dès qu'on voudra en ajouter une
-// quatrième (une période par carte, par exemple).
+// Same doctrine as `AppState.mainTabOrder` — UserDefaults + a normalization
+// pass that fills in missing entries — but **in JSON rather than a
+// `[String]` with suffixes**: the preference carries three pieces of information per card,
+// and a positional encoding would become unreadable as soon as a
+// fourth one is needed (a period per card, say).
 
 enum DashboardLayoutStore {
 
     static let storageKey = "dashboard.layout.v1"
 
-    // MARK: - Lecture / écriture
+    // MARK: - Read / write
 
     static func load(from defaults: UserDefaults = .standard) -> [DashboardCardPreference] {
         guard let data = defaults.data(forKey: storageKey) else {
-            return sanitize([])   // aucune préférence encore : mise en page par défaut
+            return sanitize([])   // no preference yet: the default layout
         }
         return sanitize(decode(data))
     }
@@ -28,12 +28,12 @@ enum DashboardLayoutStore {
         defaults.set(data, forKey: storageKey)
     }
 
-    // MARK: - Décodage tolérant
+    // MARK: - Tolerant decoding
 
-    /// Forme brute sur le disque. On décode d'abord en `String` **volontairement** :
-    /// si une version future retire une carte, décoder directement en
-    /// `[DashboardCardPreference]` ferait échouer le décodage de TOUT le tableau et
-    /// l'utilisateur perdrait sa mise en page entière au lieu d'une seule entrée.
+    /// The raw on-disk form. Decoded first as a `String`, DELIBERATELY:
+    /// if a future version removes a card, decoding directly into
+    /// `[DashboardCardPreference]` would fail to decode the WHOLE array and
+    /// the user would lose their entire layout instead of a single entry.
     private struct RawPreference: Codable {
         let card: String
         let isVisible: Bool
@@ -51,19 +51,19 @@ enum DashboardLayoutStore {
 
     // MARK: - Normalisation
 
-    /// Déduplique, corrige les tailles devenues invalides, et **ajoute en fin de liste**
-    /// toute carte absente — donc une carte ajoutée dans une future version n'ira pas
-    /// s'insérer au milieu d'une mise en page déjà personnalisée.
+    /// Deduplicates, fixes sizes that became invalid, and **appends at the end of the
+    /// list** any missing card — so a card added in a future version won't
+    /// insert itself into the middle of an already-customized layout.
     ///
-    /// Clone de `AppState.sanitizeTabOrder`, avec en plus le clamp de taille.
+    /// A clone of `AppState.sanitizeTabOrder`, plus the size clamp.
     static func sanitize(_ input: [DashboardCardPreference]) -> [DashboardCardPreference] {
         var result: [DashboardCardPreference] = []
         var seen: Set<DashboardCardID> = []
 
         for var preference in input where !seen.contains(preference.card) {
-            // Couvre le cas « on a retiré `.compact` des tailles supportées d'une
-            // carte dans une mise à jour » : sans ce clamp, la carte serait rendue
-            // dans une taille que son contenu ne sait pas honorer.
+            // Covers the case "a card's supported sizes had `.compact` removed
+            // in an update": without this clamp, the card would render
+            // in a size its content can't honor.
             if !preference.card.supportedSizes.contains(preference.size) {
                 preference.size = preference.card.defaultSize
             }

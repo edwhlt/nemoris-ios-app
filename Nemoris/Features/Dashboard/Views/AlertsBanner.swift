@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// Traduction d'une sévérité en couleur du thème.
+/// Translates a severity into a theme color.
 ///
-/// Vit ici plutôt que sur l'enum lui-même : `AlertEngine` est un moteur de
-/// calcul et ne doit dépendre d'aucun type SwiftUI. Ce bandeau en est le seul
-/// consommateur.
+/// Lives here rather than on the enum itself: `AlertEngine` is a
+/// computation engine and must not depend on any SwiftUI type. This banner is its
+/// only consumer.
 extension AlertSeverity {
     var color: Color {
         switch self {
@@ -17,25 +17,25 @@ extension AlertSeverity {
 
 // MARK: - AlertsBanner
 //
-// Bandeau d'alertes affiché en haut du Dashboard quand `AlertEngine.compute()`
-// renvoie au moins une alerte. Pattern UI :
-//   - 1 seule alerte → row complète avec icône + titre + message + chevron
-//   - 2-3 alertes → tap "Voir tout" ouvre une sheet listant tout
-//   - 4+ → on affiche la plus sévère + badge "N alertes au total"
+// An alert banner shown at the top of the Dashboard when `AlertEngine.compute()`
+// returns at least one alert. UI pattern:
+//   - only 1 alert → a full row with icon + title + message + chevron
+//   - 2-3 alerts → tapping "See all" opens a sheet listing everything
+//   - 4+ → the most severe one is shown + a "N alerts total" badge
 //
-// **Tap action** : route vers l'onglet pertinent via `appState.selectedTab`.
-// Pour MVP on n'ouvre pas la fiche exacte (deep-link complexe) — l'utilisateur
-// arrive sur l'onglet et trouve l'item facilement.
+// **Tap action**: routes to the relevant tab via `appState.selectedTab`.
+// For the MVP, the exact sheet isn't opened (a complex deep link) — the user
+// lands on the tab and finds the item easily.
 //
-// **Animation** : transition d'apparition douce (move + opacity), pour éviter
-// un "pop" brutal quand les alertes se rafraîchissent.
+// **Animation**: a gentle appearance transition (move + opacity), to avoid
+// a jarring "pop" when alerts refresh.
 
 struct AlertsBanner: View {
     @Environment(AppState.self) private var appState
     let alerts: [Alert]
     @State private var showAllSheet = false
 
-    /// L'alerte mise en avant — la plus sévère. Si 0 alerte la vue est invisible.
+    /// The highlighted alert — the most severe one. If there are 0 alerts the view is invisible.
     private var primary: Alert? { alerts.first }
 
     var body: some View {
@@ -47,8 +47,8 @@ struct AlertsBanner: View {
                     navigate(to: primary.route)
                 }
             } label: {
-                // Seul le bandeau replié porte le compteur : il annonce « il y en a
-                // N en tout, touchez pour voir ».
+                // Only the collapsed banner carries the counter: it announces "there
+                // are N in total, tap to see".
                 row(for: primary, showsTotalBadge: alerts.count > 1)
             }
             .buttonStyle(.plain)
@@ -61,10 +61,10 @@ struct AlertsBanner: View {
 
     // MARK: - Row
 
-    /// - Parameter showsTotalBadge: affiche le **nombre total d'alertes**. Réservé au
-    ///   bandeau replié. Dans la liste « Toutes les alertes », la même row était
-    ///   rendue avec ce badge sur CHAQUE ligne — cinq alertes affichaient donc cinq
-    ///   pastilles « 5 », qu'on lisait comme un compteur propre à chaque enveloppe.
+    /// - Parameter showsTotalBadge: shows the **total number of alerts**. Reserved for
+    ///   the collapsed banner. In the "All alerts" list, the same row used to be
+    ///   rendered with this badge on EVERY line — five alerts therefore showed five
+    ///   "5" badges, read as a counter specific to each envelope.
     @ViewBuilder
     private func row(for alert: Alert, showsTotalBadge: Bool) -> some View {
         HStack(spacing: AppTheme.Spacing.md) {
@@ -88,7 +88,7 @@ struct AlertsBanner: View {
             Spacer()
 
             if showsTotalBadge {
-                // Badge "N alertes au total" + chevron pour signaler qu'il y a + à voir
+                // A "N alerts total" badge + a chevron to signal there's more to see
                 Text("\(alerts.count)")
                     .font(.system(size: 11, weight: .bold))
                     .padding(.horizontal, 8)
@@ -109,7 +109,7 @@ struct AlertsBanner: View {
         )
     }
 
-    // MARK: - Sheet "toutes les alertes"
+    // MARK: - "All alerts" sheet
 
     @ViewBuilder private var allAlertsSheet: some View {
             ZStack {
@@ -118,8 +118,8 @@ struct AlertsBanner: View {
                     ForEach(alerts) { alert in
                         Button {
                             showAllSheet = false
-                            // Délai léger pour que la sheet dismiss soit fluide
-                            // avant le switch de tab.
+                            // A slight delay so the sheet dismisses smoothly
+                            // before the tab switch.
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                                 navigate(to: alert.route)
                             }

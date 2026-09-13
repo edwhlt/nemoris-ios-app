@@ -2,17 +2,17 @@ import Foundation
 
 // MARK: - DashboardPeriod
 //
-// Fenêtre temporelle affichée par le Dashboard. Remplace les helpers de dates qui
-// vivaient dans `AnnualDashboardViewModel`.
+// The time window shown by the Dashboard. Replaces the date helpers that
+// used to live in `AnnualDashboardViewModel`.
 //
-// ⚠️ Le mois est parsé À LA MAIN plutôt qu'avec le `dashboardMonthParser` global :
-// un `DateFormatter` est une classe mutable partagée, donc pas `Sendable`, et cette
-// structure traverse la frontière du `Task.detached` du builder.
+// ⚠️ The month is parsed BY HAND rather than with the global
+// `dashboardMonthParser`: a `DateFormatter` is a shared mutable class, so not
+// `Sendable`, and this structure crosses the builder's `Task.detached` boundary.
 
 struct DashboardPeriod: Hashable, Sendable {
-    /// Exercice affiché.
+    /// The displayed fiscal year.
     var year: Int
-    /// Filtre mois au format "yyyy-MM". `nil` = année entière.
+    /// Month filter in "yyyy-MM" format. `nil` = the whole year.
     var month: String?
 
     private var calendar: Calendar { Calendar.current }
@@ -33,8 +33,8 @@ struct DashboardPeriod: Hashable, Sendable {
         calendar.date(from: DateComponents(year: year - 1, month: 12, day: 31))
     }
 
-    /// Début de la fenêtre de détail (catégories / tags) : le mois filtré s'il y en
-    /// a un, l'année entière sinon.
+    /// Start of the detail window (categories / tags): the filtered month if
+    /// there is one, the whole year otherwise.
     var filterFrom: Date { monthStart ?? yearFrom }
 
     var filterTo: Date {
@@ -42,12 +42,12 @@ struct DashboardPeriod: Hashable, Sendable {
         return calendar.date(byAdding: DateComponents(month: 1, day: -1), to: start) ?? start
     }
 
-    /// Libellé lisible du mois filtré ("juillet 2026"), `nil` si pas de filtre.
+    /// Readable label of the filtered month ("July 2026"), `nil` if there's no filter.
     ///
-    /// Locale forcée en dur (fr_FR) : ce type est un struct pur sans accès à
-    /// l'environnement SwiftUI (doctrine du projet), donc `.formatted()` retomberait
-    /// sinon sur la locale RÉELLE de l'appareil au lieu du français — même
-    /// précédent que `PatrimoineView.swift`.
+    /// Locale hardcoded (fr_FR): this type is a pure struct with no access to
+    /// the SwiftUI environment (project doctrine), so `.formatted()` would
+    /// otherwise fall back to the device's ACTUAL locale instead of French — the
+    /// same precedent as `PatrimoineView.swift`.
     var monthLabel: String? {
         monthStart?.formatted(.dateTime.month(.wide).year().locale(AppLocalization.locale))
     }
@@ -65,13 +65,14 @@ struct DashboardPeriod: Hashable, Sendable {
 
 // MARK: - DashboardSource
 //
-// Une donnée BRUTE lue en base. C'est le grain de la déduplication : chaque source
-// est fetchée **exactement une fois** par passe, quel que soit le nombre d'agrégats
-// qui la consomment.
+// A RAW piece of data read from the database. This is the grain of deduplication: each
+// source is fetched **exactly once** per pass, regardless of how many aggregates
+// consume it.
 //
-// Avant ce découpage, les transactions du mois étaient chargées deux fois par
-// `load()` (bandeau Budget + AlertEngine) et `fetchAccounts()` des investissements
-// trois fois. La dédup n'était qu'une convention ; elle est désormais structurelle.
+// Before this split, the month's transactions were loaded twice per
+// `load()` (the Budget banner + AlertEngine) and investments'
+// `fetchAccounts()` three times. Deduplication was only a convention; it's now
+// structural.
 
 enum DashboardSource: String, Sendable, CaseIterable {
     case yearMonthlyTotals
@@ -83,8 +84,8 @@ enum DashboardSource: String, Sendable, CaseIterable {
     case categories
     case investmentAccounts
     case bankAccounts
-    /// Soldes des comptes liés à un asset Patrimoine. Dérivée : dépend de
-    /// `patrimoineAssets` + `bankAccounts`, donc fetchée après eux.
+    /// Balances of the accounts linked to a Patrimoine asset. Derived: depends on
+    /// `patrimoineAssets` + `bankAccounts`, so fetched after them.
     case bankBalances
     case patrimoineAssets
     case patrimoineRealEstate
@@ -94,12 +95,12 @@ enum DashboardSource: String, Sendable, CaseIterable {
 
 // MARK: - DashboardAggregate
 //
-// Une donnée PRÊTE À AFFICHER. C'est l'unité de demande : une carte déclare de quels
-// agrégats elle a besoin, et le builder ne calcule que ceux-là — une carte masquée ne
-// coûte donc aucune requête.
+// A piece of data READY TO DISPLAY. This is the unit of demand: a card declares which
+// aggregates it needs, and the builder only computes those — a hidden card
+// therefore costs no query at all.
 
 enum DashboardAggregate: String, Sendable, CaseIterable {
-    /// Série mensuelle de l'année + totaux + comparaison N-1 (hero et graphe mensuel).
+    /// The year's monthly series + totals + N-1 comparison (the hero and the monthly chart).
     case yearSeries
     case categoryBreakdown
     case tagBreakdown
@@ -108,22 +109,22 @@ enum DashboardAggregate: String, Sendable, CaseIterable {
     case patrimoine
     case alerts
     case insights
-    /// Dépenses Apple Pay en attente (automatisation Raccourcis, cf.
-    /// `PendingApplePayRepository`). Requête directe et déjà bon marché (une
-    /// poignée de lignes) : pas de `DashboardSource` dédiée, même traitement
-    /// que `.insights` qui fait aussi son propre accès direct.
+    /// Pending Apple Pay expenses (the Shortcuts automation, see
+    /// `PendingApplePayRepository`). A direct and already cheap query (a
+    /// handful of rows): no dedicated `DashboardSource`, the same treatment
+    /// as `.insights`, which also does its own direct access.
     case pendingApplePay
 
-    /// Agrégats lourds, calculés dans une seconde passe à priorité basse pour que le
-    /// reste de l'écran s'affiche sans les attendre.
+    /// Heavy aggregates, computed in a second, low-priority pass so the
+    /// rest of the screen can show up without waiting for them.
     var isExpensive: Bool {
         self == .insights
     }
 
-    /// Autres agrégats dont celui-ci a besoin (dépendance de niveau agrégat, pas source).
+    /// Other aggregates this one needs (an aggregate-level dependency, not a source one).
     var requires: Set<DashboardAggregate> {
         switch self {
-        case .alerts: return [.budgetEnvelopes]   // les alertes lisent les EnvelopeProgress
+        case .alerts: return [.budgetEnvelopes]   // alerts read EnvelopeProgress
         default:      return []
         }
     }
@@ -146,33 +147,33 @@ enum DashboardAggregate: String, Sendable, CaseIterable {
         case .alerts:
             return [.goals, .patrimoineAssets, .bankAccounts, .investmentAccounts]
         case .insights:
-            return []   // l'InsightEngine fait son propre scan sur 180 jours
+            return []   // InsightEngine does its own 180-day scan
         case .pendingApplePay:
-            return []   // requête directe sur pending_apple_pay_entries
+            return []   // a direct query on pending_apple_pay_entries
         }
     }
 
-    /// Ordre d'évaluation : les agrégats dont d'autres dépendent viennent d'abord.
+    /// Evaluation order: aggregates other ones depend on come first.
     static let evaluationOrder: [DashboardAggregate] = [
         .yearSeries, .categoryBreakdown, .tagBreakdown,
         .investments, .patrimoine,
-        .budgetEnvelopes,   // avant .alerts
+        .budgetEnvelopes,   // before .alerts
         .alerts, .insights, .pendingApplePay
     ]
 
-    /// Agrégats nécessaires aux éléments FIXES du Dashboard (hero, bandeau d'alertes,
-    /// bandeau « Vue d'ensemble »). Toujours demandés, quelles que soient les cartes
-    /// affichées.
+    /// Aggregates needed by the Dashboard's FIXED elements (the hero, the alert
+    /// banner, the "Overview" banner). Always requested, whatever cards
+    /// are shown.
     static let fixedElements: Set<DashboardAggregate> = [
         .yearSeries,        // hero : mois dominant + cumul annuel + variation N-1
         .alerts,            // AlertsBanner
-        .investments,       // colonne « Investi » du bandeau
-        .patrimoine,        // colonne « Patrimoine »
-        .budgetEnvelopes,   // colonne « Enveloppes » (et dépendance des alertes)
+        .investments,       // the "Invested" column of the banner
+        .patrimoine,        // the "Patrimoine" column
+        .budgetEnvelopes,   // the "Envelopes" column (and alerts' dependency)
         .pendingApplePay    // bandeau Apple Pay en attente
     ]
 
-    /// Complète un ensemble demandé avec ses dépendances transitives.
+    /// Completes a requested set with its transitive dependencies.
     static func expanded(_ units: Set<DashboardAggregate>) -> Set<DashboardAggregate> {
         var result = units
         var changed = true
@@ -192,9 +193,9 @@ enum DashboardAggregate: String, Sendable, CaseIterable {
 
 // MARK: - DashboardSnapshot
 //
-// Le résultat. **Un champ optionnel par agrégat** : `nil` signifie « pas demandé ou
-// pas encore calculé », ce qui permet à chaque carte d'afficher son propre squelette
-// au lieu du squelette tout-ou-rien de l'écran entier.
+// The result. **One optional field per aggregate**: `nil` means "not requested or
+// not computed yet", which lets each card show its own skeleton
+// instead of the whole screen's all-or-nothing skeleton.
 
 struct DashboardSnapshot: Sendable {
     var monthlySeries: [MonthlyTotals]?
@@ -202,21 +203,21 @@ struct DashboardSnapshot: Sendable {
     var previousYearStats: DashboardStats?
     var categoryTotals: [CategoryTotal]?
     var tagTotals: [TagTotal]?
-    /// Progressions d'enveloppes — consommées par le récap budget ET par les alertes.
+    /// Envelope progressions — consumed by both the budget recap AND the alerts.
     var envelopeProgresses: [EnvelopeProgress]?
     var budget: BudgetRecap?
     var investments: InvestmentsRecap?
     var patrimoine: PatrimoineSnapshot?
     var alerts: [Alert]?
     var insights: [Insight]?
-    /// Nombre et total (positif, déjà `abs`) des dépenses Apple Pay encore
-    /// `pending`. `nil` = pas encore calculé — distinct de `0` (aucune en attente).
+    /// Count and total (positive, already `abs`) of Apple Pay expenses still
+    /// `pending`. `nil` = not computed yet — distinct from `0` (none pending).
     var pendingApplePayCount: Int?
     var pendingApplePayTotal: Double?
 
-    /// Fusionne une passe partielle : seuls les champs renseignés écrasent les nôtres.
-    /// C'est ce qui permet à la passe lourde (insights) d'arriver après coup sans
-    /// effacer ce que la passe légère a déjà publié.
+    /// Merges a partial pass: only the fields that are set overwrite ours.
+    /// This is what lets the heavy pass (insights) arrive afterward without
+    /// erasing what the light pass has already published.
     func merging(_ other: DashboardSnapshot) -> DashboardSnapshot {
         var result = self
         if let v = other.monthlySeries      { result.monthlySeries = v }
@@ -238,29 +239,29 @@ struct DashboardSnapshot: Sendable {
 
 // MARK: - DashboardCacheKey
 
-/// Identifie une passe de calcul. Le `refreshToken` est `AppState.dataRefreshToken`,
-/// déjà bumpé par l'app à chaque mutation de données — rien de nouveau à inventer.
+/// Identifies a computation pass. The `refreshToken` is `AppState.dataRefreshToken`,
+/// already bumped by the app on every data mutation — nothing new to invent.
 ///
-/// ⚠️ Le Dashboard ne doit JAMAIS bumper ce token lui-même : précédent documenté de
-/// boucle infinie dans `InvestmentsView` (cf. commentaire :429).
+/// ⚠️ The Dashboard must NEVER bump this token itself: a documented infinite-loop
+/// precedent in `InvestmentsView`.
 struct DashboardCacheKey: Hashable, Sendable {
     let refreshToken: UUID
     let period: DashboardPeriod
 
-    /// Clé propre à un agrégat, restreinte à ce dont il dépend vraiment.
+    /// A key specific to an aggregate, restricted to what it actually depends on.
     func unitKey(for unit: DashboardAggregate) -> DashboardUnitKey {
         DashboardUnitKey(refreshToken: refreshToken, scope: unit.scope(for: period))
     }
 }
 
-/// Ce dont dépend réellement le résultat d'un agrégat.
+/// What an aggregate's result actually depends on.
 ///
-/// Sans cette distinction, basculer le filtre mois du graphe recalculerait aussi le
-/// budget, le patrimoine, les alertes et les insights — alors qu'aucun d'eux ne
-/// regarde le mois affiché. L'ancien `toggleMonth` ne refetchait d'ailleurs que les
-/// catégories et les tags ; ce découpage préserve ce comportement.
+/// Without this distinction, toggling the chart's month filter would also recompute
+/// the budget, the patrimoine, the alerts and the insights — even though none of them
+/// look at the displayed month. The old `toggleMonth` only ever refetched
+/// categories and tags; this split preserves that behavior.
 enum DashboardAggregateScope: Hashable, Sendable {
-    /// Indépendant de la période affichée (mois en cours, "maintenant", etc.).
+    /// Independent of the displayed period (the current month, "now", etc.).
     case global
     case year(Int)
     case period(DashboardPeriod)

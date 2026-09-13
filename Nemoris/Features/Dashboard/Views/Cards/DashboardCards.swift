@@ -2,26 +2,26 @@ import SwiftUI
 import Charts
 import TipKit
 
-// MARK: - Cartes du Dashboard
+// MARK: - Dashboard cards
 //
-// Chaque carte ne dessine QUE sa donnée : le fond, l'en-tête, le squelette et l'état
-// vide sont fournis par `DashboardTile`.
+// Each card draws ONLY its own data: the background, header, skeleton and
+// empty state are provided by `DashboardTile`.
 //
-// Convention commune : la donnée arrive en optionnel depuis le snapshot. `nil` = pas
-// encore calculée → squelette ; vide = calculée mais rien à montrer → état vide.
+// Shared convention: the data arrives as an optional from the snapshot. `nil` = not
+// computed yet → a skeleton; empty = computed but nothing to show → an empty state.
 
 // MARK: - Coach financier
 
-/// Les 3 recommandations les plus importantes, TOUS COACHS CONFONDUS.
+/// The 3 most important recommendations, ACROSS EVERY COACH.
 ///
-/// ⚠️ L'arbitrage entre « dépenses » et « investissement » ne se fait PAS ici :
-/// il vit dans `CoachRanker` (moteur pur), pour que le Dashboard et l'écran
-/// d'un coach classent exactement de la même façon.
+/// ⚠️ The arbitration between "spending" and "investment" does NOT happen here:
+/// it lives in `CoachRanker` (a pure engine), so the Dashboard and a
+/// coach's own screen rank things exactly the same way.
 ///
-/// Repli : tant qu'aucune analyse IA n'a tourné (pas de backend configuré,
-/// première utilisation), la carte affiche les insights déterministes de
-/// `InsightEngine`. C'est la doctrine offline-first de l'app — chaque
-/// fonctionnalité IA garde un chemin sans IA.
+/// Fallback: as long as no AI analysis has run (no backend configured,
+/// first use), the card shows `InsightEngine`'s deterministic insights. That's
+/// the app's offline-first doctrine — every AI feature keeps a
+/// path with no AI.
 struct InsightsCoachCard: View {
     let insights: [Insight]?
     let size: DashboardCardSize
@@ -51,8 +51,8 @@ struct InsightsCoachCard: View {
                     }
                 }
                 if top.isEmpty {
-                    // `showsHeader: false` — c'est la tuile qui porte le titre,
-                    // sinon on aurait deux en-têtes empilés.
+                    // `showsHeader: false` — the tile carries the title,
+                    // otherwise there'd be two stacked headers.
                     InsightsCoachSection(insights: insights ?? [], showsHeader: false)
                 } else {
                     ForEach(top) { reco in
@@ -73,22 +73,22 @@ struct InsightsCoachCard: View {
         }
         .task {
             await coach.load()
-            // Relance automatique, non bloquante, uniquement si l'analyse est
-            // périmée ET qu'une IA est disponible. Le Dashboard ne DÉCLENCHE
-            // donc jamais de coût imprévu au simple affichage.
+            // An automatic, non-blocking relaunch, only if the analysis is
+            // stale AND an AI is available. The Dashboard therefore never
+            // TRIGGERS an unexpected cost just by being displayed.
             for domain in CoachDomain.allCases { coach.refreshIfStale(domain) }
         }
     }
 }
 
-// MARK: - Enveloppes budgétaires
+// MARK: - Budget envelopes
 
 struct BudgetEnvelopesCard: View {
     let progresses: [EnvelopeProgress]?
     let size: DashboardCardSize
     let context: DashboardCardContext
 
-    /// En compact on ne montre que ce qui demande une action, sinon les 4 premières.
+    /// In compact mode only what needs action is shown, otherwise the first 4.
     private var displayed: [EnvelopeProgress] {
         let all = (progresses ?? []).sorted { $0.rawRatio > $1.rawRatio }
         return Array(all.prefix(size == .compact ? 3 : 5))
@@ -118,8 +118,8 @@ struct BudgetEnvelopesCard: View {
                                 .foregroundStyle(tint(progress))
                                 .monospacedDigit()
                         }
-                        // `ratio` est clampé à 1.0 — c'est justement ce qu'on veut
-                        // pour une largeur de barre ; la couleur porte le dépassement.
+                        // `ratio` is clamped to 1.0 — that's exactly what's wanted
+                        // for a bar's width; the color carries the overspend.
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 RoundedRectangle(cornerRadius: 3)
@@ -285,8 +285,8 @@ struct MonthlyFlowCard: View {
                     }
                     .foregroundStyle(AppTheme.Colors.accent)
                     .onTapGesture {
-                        // Le `.task(id: cacheKey)` du Dashboard relance le calcul :
-                        // seuls les agrégats liés au mois sont recalculés.
+                        // The Dashboard's `.task(id: cacheKey)` relaunches the computation:
+                        // only the aggregates tied to the month are recomputed.
                         withAnimation(AppTheme.Animations.spring) {
                             context.period.month = nil
                         }
@@ -297,15 +297,15 @@ struct MonthlyFlowCard: View {
     }
 }
 
-// MARK: - Top dépenses
+// MARK: - Top expenses
 
 struct TopCategoriesCard: View {
     let totals: [CategoryTotal]?
     let size: DashboardCardSize
     let context: DashboardCardContext
 
-    /// Regroupement par catégorie parente. Local à la carte : c'est une préférence
-    /// d'affichage momentanée, pas un réglage à persister.
+    /// Grouping by parent category. Local to the card: it's a momentary
+    /// display preference, not a setting to persist.
     @State private var groupByParent = false
 
     private var expenses: [CategoryTotal] {
@@ -431,11 +431,11 @@ struct TagsCard: View {
     }
 }
 
-// MARK: - DashboardFlowLayout (chips avec retour à la ligne)
+// MARK: - DashboardFlowLayout (chips that wrap to a new line)
 
-/// Layout horizontal avec retour à la ligne automatique. Utilisé par la carte Tags.
-/// Implémentation minimaliste basée sur `Layout` (iOS 16+). Vivait dans
-/// `DashboardView` avant l'extraction des sections en cartes.
+/// A horizontal layout with automatic line wrapping. Used by the Tags card.
+/// A minimal implementation based on `Layout` (iOS 16+). Used to live in
+/// `DashboardView` before sections were extracted into cards.
 struct DashboardFlowLayout: Layout {
     var spacing: CGFloat = 8
 
@@ -480,8 +480,8 @@ struct DashboardFlowLayout: Layout {
 
 // MARK: - Onboarding empty state
 
-/// ⚠️ `internal` et non `private` : la carte est déclarée ici mais utilisée par
-/// `DashboardView` (elle a suivi `FlowLayout` lors de l'extraction des sections).
+/// ⚠️ `internal`, not `private`: the card is declared here but used by
+/// `DashboardView` (it followed `FlowLayout` when sections were extracted).
 struct OnboardingImportCard: View {
     let action: () -> Void
 

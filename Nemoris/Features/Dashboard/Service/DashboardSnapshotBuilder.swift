@@ -2,20 +2,20 @@ import Foundation
 
 // MARK: - DashboardSnapshotBuilder
 //
-// Assemble un `DashboardSnapshot` à partir de la base. C'est la couche qui LIT ;
-// les calculs eux-mêmes sont délégués aux moteurs purs partagés avec les modules
-// (`EnvelopeSpendingCalculator`, `PatrimoineSnapshotBuilder`, `AlertEngine`,
-// `InsightEngine`), pour que le Dashboard ne puisse plus diverger de leurs écrans.
+// Assembles a `DashboardSnapshot` from the database. This is the layer that READS;
+// the computations themselves are delegated to the pure engines shared with the
+// modules' own screens (`EnvelopeSpendingCalculator`, `PatrimoineSnapshotBuilder`, `AlertEngine`,
+// `InsightEngine`), so the Dashboard can no longer diverge from them.
 //
-// **Tout est `nonisolated`** : ce code tourne dans un `Task.detached`, jamais sur le
-// main thread. C'est sûr parce que les repositories sont des `struct` sans état et
-// que chaque méthode ouvre sa propre connexion SQLite (aucune connexion partagée).
-// Avant, `AnnualDashboardViewModel.load()` était intégralement synchrone sur le main
-// thread : ~15 requêtes, dont un scan de 180 jours pouvant atteindre 10 000 lignes.
+// **Everything is `nonisolated`**: this code runs in a `Task.detached`, never on the
+// main thread. It's safe because the repositories are stateless `struct`s and
+// each method opens its own SQLite connection (no shared connection).
+// Before, `AnnualDashboardViewModel.load()` was entirely synchronous on the main
+// thread: ~15 queries, one of them a 180-day scan that could reach 10,000 rows.
 
 enum DashboardSnapshotBuilder {
 
-    /// Données brutes d'une passe. Chaque champ est rempli **au plus une fois**.
+    /// Raw data for one pass. Each field is filled in **at most once**.
     private struct Sources {
         var yearMonthly: [MonthlyTotals] = []
         var previousYearMonthly: [MonthlyTotals] = []
@@ -33,10 +33,10 @@ enum DashboardSnapshotBuilder {
         var goals: [Goal] = []
     }
 
-    /// Calcule les agrégats demandés. Les dépendances entre agrégats sont supposées
-    /// déjà résolues par `DashboardAggregate.expanded(_:)` côté appelant.
-    /// `store` a une valeur par défaut visant la base de l'application :
-    /// aucun site d'appel ne change. Les tests injectent une base temporaire.
+    /// Computes the requested aggregates. Dependencies between aggregates are assumed
+    /// to already be resolved by `DashboardAggregate.expanded(_:)` on the caller's side.
+    /// `store` defaults to the app's database:
+    /// no call site needs to change. Tests inject a temporary database.
     nonisolated static func build(units: Set<DashboardAggregate>, period: DashboardPeriod,
                                   store: SQLiteStore = SQLiteStore()) -> DashboardSnapshot {
         guard !units.isEmpty else { return DashboardSnapshot() }
@@ -51,7 +51,7 @@ enum DashboardSnapshotBuilder {
         return snapshot
     }
 
-    // MARK: - Lecture
+    // MARK: - Reading
 
     private nonisolated static func fetchSources(_ needed: Set<DashboardSource>, period: DashboardPeriod,
                                                  store: SQLiteStore) -> Sources {
@@ -75,8 +75,8 @@ enum DashboardSnapshotBuilder {
         if needed.contains(.activeEnvelopes) {
             s.activeEnvelopes = BudgetRepository.shared.fetchEnvelopes().filter { $0.isActive }
         }
-        // Sans enveloppe active, personne n'a besoin des transactions du mois ni du
-        // référentiel catégories : on évite un chargement de 5000 lignes pour rien.
+        // With no active envelope, nobody needs the month's transactions or the
+        // category reference data: a pointless 5000-row load is avoided.
         if !s.activeEnvelopes.isEmpty {
             if needed.contains(.monthTransactions) {
                 s.monthTransactions = fetchCurrentMonthTransactions(using: transactions)
@@ -98,9 +98,9 @@ enum DashboardSnapshotBuilder {
         if needed.contains(.patrimoineRealEstate) { s.realEstates = patrimoine.fetchRealEstate() }
         if needed.contains(.patrimoineLoans)      { s.loans = patrimoine.fetchLoans() }
 
-        // Dérivée : après assets + bankAccounts. Un `fetchAccountBalance` est un SUM
-        // sur toute la table transactions → uniquement pour les comptes réellement
-        // liés à un asset, et qui existent encore.
+        // Derived: after assets + bankAccounts. A `fetchAccountBalance` is a SUM
+        // over the whole transactions table → only for the accounts actually
+        // linked to an asset, and that still exist.
         if needed.contains(.bankBalances), !s.assets.isEmpty {
             let existing = Set(s.bankAccounts.map(\.id))
             for id in PatrimoineSnapshotBuilder.linkedBankAccountIds(in: s.assets) where existing.contains(id) {
@@ -114,7 +114,7 @@ enum DashboardSnapshotBuilder {
         return s
     }
 
-    /// Transactions du mois en cours (1er du mois → maintenant), tous comptes.
+    /// This month's transactions (the 1st of the month → now), all accounts.
     private nonisolated static func fetchCurrentMonthTransactions(
         using repository: TransactionRepository
     ) -> [FinanceTransaction] {
@@ -126,7 +126,7 @@ enum DashboardSnapshotBuilder {
         return repository.fetchTransactionsAllAccounts(from: monthStart, to: now, limit: 5000, offset: 0)
     }
 
-    // MARK: - Calcul
+    // MARK: - Computation
 
     private nonisolated static func apply(
         _ unit: DashboardAggregate,

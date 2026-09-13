@@ -4,32 +4,32 @@ import TipKit
 
 // MARK: - DashboardView (Annual)
 
-/// Dashboard en **page éditoriale** (refonte 2026-06-01, restructuré 2026-07-29).
+/// Dashboard as an **editorial page**.
 ///
-/// Avant 2026-06 : pile de cards uniformes qui hiérarchisait tout au même niveau
-/// visuel → effet "tableau de bord d'admin". Les composants `AppChartCard` et
-/// `PremiumDashboardSummaryCard` ne sont donc plus utilisés ici — l'impact vient de
-/// la typo, du dégradé et de l'espacement, pas du fond blanc/encadré.
+/// Before: a stack of uniform cards that ranked everything at the same
+/// visual level → an "admin dashboard" look. The `AppChartCard` and
+/// `PremiumDashboardSummaryCard` components are therefore no longer used here — the
+/// impact comes from typography, the gradient and spacing, not a white/boxed background.
 ///
-/// Restructuration 2026-07 :
-///   • les données viennent de `DashboardSnapshotStore` (calcul hors main thread,
-///     cache par agrégat) — cette vue ne fait plus aucune requête ;
-///   • le hero est à **deux niveaux** : mois dominant + cumul annuel discret ;
-///   • les trois bandeaux Investissements / Patrimoine / Budget, qui étaient trois
-///     copies quasi identiques empilées sur ~3 écrans de scroll, ont fusionné dans
+/// Restructuring:
+///   • data comes from `DashboardSnapshotStore` (computed off the main thread,
+///     cached per aggregate) — this view no longer runs any query at all;
+///   • the hero has **two levels**: the dominant month + a discreet yearly total;
+///   • the three Investments / Patrimoine / Budget banners, which were three
+///     near-identical copies stacked over ~3 screens of scroll, merged into
 ///     `DashboardOverviewBanner`.
 struct DashboardView: View {
     @Environment(AppState.self) private var appState
-    /// Injecté une seule fois dans `NemorisApp` — cette vue est instanciée deux fois
-    /// (TabView iOS + volet détail de la sidebar macOS) et deux `@State` voudraient
-    /// dire deux caches, donc tout calculé deux fois.
+    /// Injected once in `NemorisApp` — this view is instantiated twice
+    /// (the iOS TabView + the macOS sidebar's detail pane) and two `@State`s would
+    /// mean two caches, so everything computed twice.
     @Environment(DashboardSnapshotStore.self) private var store
-    /// Entitlement Pro — pour que la disponibilité des cartes (bandeau + grille +
-    /// écran de personnalisation) reflète l'abonnement réel, pas seulement le flag
-    /// module persisté (cf. `AppState.isDashboardCardAvailable`).
+    /// The Pro entitlement — so the availability of cards (banner + grid +
+    /// customization screen) reflects the actual subscription, not just the
+    /// persisted module flag (see `AppState.isDashboardCardAvailable`).
     @Environment(PurchaseManager.self) private var purchaseManager
-    /// Sélection de l'utilisateur (exercice + filtre mois). Seul état local restant :
-    /// les données, elles, vivent dans le store.
+    /// The user's selection (fiscal year + month filter). The only remaining local
+    /// state: the data itself lives in the store.
     @State private var period = DashboardPeriod(
         year: Calendar.current.component(.year, from: Date()),
         month: nil
@@ -39,9 +39,9 @@ struct DashboardView: View {
     @State private var showCustomize = false
     @State private var showApplePayPending = false
     #if os(macOS)
-    /// macOS : pour fermer le panneau au moment où « Personnaliser » remplace
-    /// le dashboard (cf. `body`) — sinon un panneau Import/Recherche déjà
-    /// ouvert resterait affiché, orphelin, par-dessus l'écran de personnalisation.
+    /// macOS: to close the pane at the moment "Customize" replaces
+    /// the dashboard (see `body`) — otherwise an already-open Import/Search pane
+    /// would stay shown, orphaned, on top of the customization screen.
     @Environment(InspectorPaneCenter.self) private var paneCenter: InspectorPaneCenter?
     #endif
 
@@ -52,11 +52,11 @@ struct DashboardView: View {
 
     var isEmbedded: Bool = false
 
-    // MARK: - Accès aux données du snapshot
+    // MARK: - Reading the snapshot's data
     //
-    // `nil` dans le snapshot = pas encore calculé. On retombe sur la valeur vide, ce
-    // qui reproduit exactement le rendu précédent (les sections se masquent seules
-    // quand leur collection est vide).
+    // `nil` in the snapshot = not computed yet. It falls back to the empty
+    // value, which reproduces exactly the previous rendering (sections hide
+    // themselves when their collection is empty).
 
     private var monthlyData: [MonthlyTotals]      { store.snapshot.monthlySeries ?? [] }
     private var stats: DashboardStats             { store.snapshot.stats ?? .empty }
@@ -66,11 +66,11 @@ struct DashboardView: View {
     private var patrimoineSnapshot: PatrimoineSnapshot { store.snapshot.patrimoine ?? .empty }
     private var budgetRecap: BudgetRecap          { store.snapshot.budget ?? .empty }
 
-    // MARK: - Colonnes du bandeau « Vue d'ensemble »
+    // MARK: - "Overview" banner columns
     //
-    // Une colonne n'apparaît que si le module est activé ET qu'il y a une donnée à
-    // montrer. Gater sur l'activation est nouveau : avant, un bandeau pouvait mener
-    // vers un onglet que l'utilisateur avait désactivé dans les Réglages.
+    // A column only appears if the module is enabled AND there's data to
+    // show. Gating on the module being enabled is new: before, a banner could
+    // lead to a tab the user had disabled in Settings.
 
     private func isModuleAvailable(_ tab: MainTabItem) -> Bool {
         guard appState.availableTabsResolved.contains(tab) else { return false }
@@ -93,9 +93,9 @@ struct DashboardView: View {
         return budgetRecap
     }
 
-    /// Agrégats à calculer : ceux des éléments fixes + ceux des cartes réellement
-    /// affichées. **Une carte masquée ne coûte donc aucune requête** — c'est tout
-    /// l'intérêt d'avoir déclaré les dépendances dans le registre.
+    /// Aggregates to compute: those of the fixed elements + those of the cards
+    /// actually shown. **A hidden card therefore costs no query at all** — that's
+    /// the whole point of declaring dependencies in the registry.
     private var requiredUnits: Set<DashboardAggregate> {
         var units = DashboardAggregate.fixedElements
         for preference in appState.visibleDashboardCards(purchaseManager: purchaseManager) {
@@ -108,9 +108,9 @@ struct DashboardView: View {
         DashboardCacheKey(refreshToken: appState.dataRefreshToken, period: period)
     }
 
-    /// Identité de la `.task` : la clé de cache **et** les agrégats demandés. Sans les
-    /// unités, réafficher une carte masquée ne relancerait aucun calcul et la carte
-    /// resterait sur son squelette.
+    /// Identity of the `.task`: the cache key **and** the requested
+    /// aggregates. Without the units, showing a hidden card again wouldn't trigger
+    /// any computation and the card would stay on its skeleton.
     private struct LoadIdentity: Hashable {
         let key: DashboardCacheKey
         let units: Set<DashboardAggregate>
@@ -120,12 +120,12 @@ struct DashboardView: View {
         LoadIdentity(key: cacheKey, units: requiredUnits)
     }
 
-    /// La carte d'accueil « importez un CSV » ne concerne qu'un utilisateur sans
-    /// données. On la restreint à l'exercice courant : sur un exercice passé et vide,
-    /// c'est un résultat normal, pas un état d'onboarding.
+    /// The "import a CSV" welcome card only applies to a user with no
+    /// data. It's restricted to the current fiscal year: on a past, empty
+    /// fiscal year, that's a normal result, not an onboarding state.
     private var showsOnboardingCard: Bool {
-        // `nil` = pas encore calculé : sans cette garde, l'écran d'accueil
-        // clignoterait pendant la première passe.
+        // `nil` = not computed yet: without this guard, the welcome
+        // screen would flicker during the first pass.
         guard let series = store.snapshot.monthlySeries else { return false }
         return series.isEmpty && period.year == Calendar.current.component(.year, from: Date())
     }
@@ -136,13 +136,13 @@ struct DashboardView: View {
 
     var body: some View {
         #if os(macOS)
-        // macOS : personnalisation en navigation PAR ÉTAT, pas un push. Le
-        // dashboard reste accessible (toolbar propre) pendant qu'un panneau
-        // Import/Recherche est ouvert (volet non modal) — un push ici masquait
-        // ce panneau derrière l'écran de personnalisation jusqu'au retour à la
-        // racine (AppKit/NavigationStack « Panneau
-        // macOS masqué par du contenu poussé »). Même remède que Réglages/
-        // Investissements/Tricount.
+        // macOS: customization via STATE-DRIVEN navigation, not a push. The
+        // dashboard stays accessible (its own toolbar) while an
+        // Import/Search pane is open (a non-modal side pane) — a push here used to
+        // mask that pane behind the customization screen until returning to
+        // the root (an AppKit/NavigationStack issue: "macOS
+        // pane masked by pushed content"). The same fix as Settings/
+        // Investments/Tricount.
         if showCustomize {
             DashboardCustomizeView(onBack: {
                 paneCenter?.dismissCurrent()
@@ -161,10 +161,10 @@ struct DashboardView: View {
     }
 
     @ViewBuilder private var navBody: some View {
-        // GeometryReader **à la racine, hors du ScrollView** : c'est lui qui donne le
-        // nombre de colonnes de la grille. À l'intérieur du ScrollView il recevrait
-        // une hauteur proposée dégénérée. `onGeometryChange` serait plus élégant mais
-        // demande macOS 15+, or la cible du projet est macOS 14.
+        // A GeometryReader **at the root, outside the ScrollView**: it's what gives
+        // the grid's column count. Inside the ScrollView it would receive
+        // a degenerate proposed height. `onGeometryChange` would be cleaner but
+        // needs macOS 15+, while the project targets macOS 14.
         GeometryReader { geometry in
             scrollBody(availableWidth: geometry.size.width)
         }
@@ -173,8 +173,8 @@ struct DashboardView: View {
     @ViewBuilder private func scrollBody(availableWidth: CGFloat) -> some View {
         ZStack(alignment: .top) {
             AppTheme.Colors.background.ignoresSafeArea()
-            // Dégradé éditorial du top : accent → background. Sur 360pt seulement
-            // pour ne pas baigner toute la scroll view dans la teinte verte.
+            // The editorial gradient at the top: accent → background. Only 360pt
+            // tall so as not to bathe the whole scroll view in the green tint.
             heroBackdrop
 
             ScrollView {
@@ -183,20 +183,20 @@ struct DashboardView: View {
                         .padding(.horizontal, AppTheme.Spacing.lg)
                         .padding(.top, AppTheme.Spacing.sm)
 
-                    // Chargement PROGRESSIF : chaque bloc décide lui-même s'il a de
-                    // quoi s'afficher. Plus de squelette global qui masquerait tout
-                    // l'écran en attendant l'agrégat le plus lent.
+                    // PROGRESSIVE loading: each block decides for itself whether it has
+                    // something to show. No more single global skeleton that would mask
+                    // the whole screen while waiting for the slowest aggregate.
 
-                    // Alertes — visibles seulement si l'engine a remonté quelque chose
-                    // d'actionnable. En tête pour maximiser la visibilité.
+                    // Alerts — only visible if the engine surfaced something
+                    // actionable. At the top to maximize visibility.
                     if !alerts.isEmpty {
                         AlertsBanner(alerts: alerts)
                             .padding(.horizontal, AppTheme.Spacing.lg)
                             .padding(.top, AppTheme.Spacing.md)
                     }
 
-                    // Affiché à part des totaux — jamais dans le hero/les
-                    // enveloppes tant que ces dépenses n'ont pas été résolues.
+                    // Shown apart from the totals — never in the hero/the
+                    // envelopes as long as these expenses haven't been resolved.
                     if let count = store.snapshot.pendingApplePayCount, count > 0 {
                         ApplePayPendingBanner(
                             count: count,
@@ -218,17 +218,17 @@ struct DashboardView: View {
                     .padding(.top, AppTheme.Spacing.xl)
 
                     if showsOnboardingCard {
-                        // Comme Investissements : c'est la navigation RACINE qui
-                        // décide où afficher l'outil d'import (destination à
-                        // part entière sur desktop, pane sur iPhone) — pas un
-                        // panneau collé au Dashboard (retour d'usage).
+                        // Like Investments: it's the ROOT navigation that
+                        // decides where to show the import tool (a full
+                        // destination on desktop, a pane on iPhone) — not a
+                        // pane stuck onto the Dashboard.
                         OnboardingImportCard { appState.openImportTool(destination: .transactions) }
                             .padding(.horizontal, AppTheme.Spacing.lg)
                             .padding(.top, AppTheme.Spacing.xxxl)
                     } else {
-                        // Vue d'ensemble : une seule bande pour les 3 modules, au
-                        // lieu de 3 bandeaux pleine largeur empilés. Se masque seule
-                        // tant qu'aucune colonne n'a de donnée.
+                        // Overview: a single band for the 3 modules, instead
+                        // of 3 stacked full-width banners. Hides itself
+                        // as long as no column has data.
                         DashboardOverviewBanner(
                             investments: overviewInvestments,
                             patrimoine: overviewPatrimoine,
@@ -250,20 +250,20 @@ struct DashboardView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                // Recherche globale cross-modules (cmd-K style).
-                // ⚠️ iOS UNIQUEMENT : sur macOS, la loupe vit
-                // maintenant à côté du toggle de sidebar (`MainTabView`,
-                // toujours visible quel que soit le module affiché) — la
-                // garder ICI AUSSI faisait apparaître DEUX loupes dans la
-                // même fenêtre dès que Dashboard était le module courant.
-                // Sur iOS, Dashboard reste le seul point d'entrée (pas de
-                // sidebar), donc inchangé.
+                // Global cross-module search (cmd-K style).
+                // ⚠️ iOS ONLY: on macOS, the magnifying glass now
+                // lives next to the sidebar toggle (`MainTabView`,
+                // always visible whatever module is shown) — keeping
+                // it HERE TOO made TWO magnifying glasses show up in
+                // the same window as soon as Dashboard was the current module.
+                // On iOS, Dashboard stays the only entry point (no
+                // sidebar), so unchanged.
                 #if !os(macOS)
                 PaneToggleButton(label: "Rechercher", systemImage: "magnifyingglass", isOn: $showSearch)
                 #endif
-                // Toggle rapide de masquage — discret mais toujours accessible
-                // depuis le hub principal de l'app. Animation snappy pour confirmer
-                // visuellement que le toggle a bien été pris en compte.
+                // A quick masking toggle — discreet but always accessible
+                // from the app's main hub. A snappy animation to visually confirm
+                // the toggle was registered.
                 Button {
                     HapticService.shared.toggle()
                     withAnimation(AppTheme.Animations.springSnappy) {
@@ -273,8 +273,8 @@ struct DashboardView: View {
                     Image(systemName: appState.amountsHidden ? "eye.slash.fill" : "eye")
                         .foregroundStyle(appState.amountsHidden ? AppTheme.Colors.accent : AppTheme.Colors.textSecondary)
                 }
-                // Un Menu plutôt qu'un 4ᵉ bouton : trois icônes tiennent déjà tout
-                // juste dans la barre sur iPhone.
+                // A Menu rather than a 4th button: three icons already barely
+                // fit in the bar on iPhone.
                 Menu {
                     Button {
                         showCustomize = true
@@ -283,10 +283,10 @@ struct DashboardView: View {
                     }
                     Button {
                         #if os(macOS)
-                        // macOS : les Réglages existent déjà comme destination de la
-                        // sidebar. Les présenter en sheet les rendait non bornés (plus
-                        // grands que la fenêtre) et infermables (pas de swipe-down). On
-                        // route vers le volet détail à la place.
+                        // macOS: Settings already exists as a sidebar destination.
+                        // Presenting it as a sheet made it unbounded (bigger
+                        // than the window) and unclosable (no swipe-down). It's
+                        // routed to the detail pane instead.
                         appState.selectedTab = AppState.sidebarSettingsTag
                         #else
                         showSettings = true
@@ -301,14 +301,14 @@ struct DashboardView: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            // Cf. CLAUDE.md §5 : ré-injection \.locale obligatoire pour toute
-            // `.sheet()` niveau 2+ atteignable sur macOS.
+            // See CLAUDE.md §5: re-injecting \.locale is required for any
+            // level-2+ `.sheet()` reachable on macOS.
             SettingsView().environment(appState)
                 .environment(\.locale, AppLocalization.locale)
         }
-        // macOS : géré par `body` (navigation par état — cf. commentaire dessus).
-        // iOS : sheet classique, `DashboardCustomizeView` reste poussable/dismissable
-        // nativement via son propre `dismiss()`.
+        // macOS: handled by `body` (state-driven navigation — see the comment above).
+        // iOS: a classic sheet, `DashboardCustomizeView` stays natively
+        // pushable/dismissable via its own `dismiss()`.
         #if !os(macOS)
         .sheet(isPresented: $showCustomize) {
             NavigationStack {
@@ -324,16 +324,16 @@ struct DashboardView: View {
         .adaptivePane(isPresented: $showApplePayPending) {
             PendingApplePayListView().environment(appState)
         }
-        // Une seule clé pour les 3 dimensions (données mutées, exercice, filtre mois)
-        // plutôt que trois `.task(id:)` empilés. Le store ne recalcule que les
-        // agrégats dont la clé restreinte a réellement changé.
+        // A single key for the 3 dimensions (mutated data, fiscal year, month filter)
+        // rather than three stacked `.task(id:)`s. The store only recomputes
+        // aggregates whose restricted key actually changed.
         //
-        // ⚠️ Ce chargement ne doit JAMAIS bumper `appState.dataRefreshToken` : ce
-        // serait une boucle infinie (précédent documenté dans `InvestmentsView`).
+        // ⚠️ This load must NEVER bump `appState.dataRefreshToken`: that
+        // would be an infinite loop (a documented precedent in `InvestmentsView`).
         .task(id: loadIdentity) {
-            // 1-frame guard : laisse le skeleton se peindre au moins une fois avant
-            // que le premier snapshot ne le remplace, sinon sur une base déjà chaude
-            // on aurait un flash de la layout vide.
+            // A 1-frame guard: lets the skeleton paint at least once before
+            // the first snapshot replaces it, otherwise on an already-warm database
+            // there'd be a flash of the empty layout.
             await Task.yield()
             await store.load(units: requiredUnits, key: cacheKey)
         }
@@ -341,9 +341,9 @@ struct DashboardView: View {
 
     // MARK: - Grille de cartes
 
-    /// Les cartes choisies par l'utilisateur, réparties en lignes par
-    /// `DashboardGridPlanner` : une carte large occupe sa ligne, les compactes se
-    /// groupent jusqu'au nombre de colonnes autorisé par la largeur.
+    /// The cards the user chose, arranged into rows by
+    /// `DashboardGridPlanner`: a wide card takes its own row, compact ones
+    /// group together up to the number of columns the width allows.
     @ViewBuilder private func cardGrid(width: CGFloat) -> some View {
         let columns = DashboardLayoutMetrics.columnCount(for: width)
         let rows = DashboardGridPlanner.rows(appState.visibleDashboardCards(purchaseManager: purchaseManager), columns: columns)
@@ -367,11 +367,11 @@ struct DashboardView: View {
         }
     }
 
-    // MARK: - Hero backdrop (gradient subtil sur le top)
+    // MARK: - Hero backdrop (a subtle gradient at the top)
 
-    /// Dégradé accent → background sur 360pt en haut de l'écran. Donne l'impression
-    /// que le hero "émerge" du chrome de l'app, sans introduire un bandeau coloré
-    /// brutal. Opacité 0.18 en dark, 0.12 en light pour rester sobre.
+    /// An accent → background gradient over 360pt at the top of the screen. Gives
+    /// the impression the hero "emerges" from the app's chrome, without introducing a
+    /// harsh colored band. Opacity 0.18 in dark, 0.12 in light to stay understated.
     @ViewBuilder private var heroBackdrop: some View {
         LinearGradient(
             colors: [
@@ -388,11 +388,11 @@ struct DashboardView: View {
 
     // MARK: - Skeleton
 
-    /// Squelette du **hero seul**. Le reste de l'écran n'en a plus besoin : le bandeau
-    /// « Vue d'ensemble » se masque tant qu'il n'a rien à montrer, et chaque tuile de
-    /// la grille porte son propre squelette. C'est ce que permet le snapshot à champs
-    /// optionnels — avant, un squelette unique masquait tout l'écran jusqu'à ce que
-    /// le dernier agrégat (le coach, qui scanne 180 jours) soit arrivé.
+    /// A skeleton for the **hero alone**. The rest of the screen no longer needs one: the
+    /// "Overview" banner hides itself as long as it has nothing to show, and each grid
+    /// tile carries its own skeleton. That's what an optionally-fielded snapshot
+    /// enables — before, a single skeleton masked the whole screen until
+    /// the last aggregate (the coach, which scans 180 days) arrived.
     @ViewBuilder private var heroSkeleton: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             SkeletonLine(width: 120, height: 11)
@@ -426,16 +426,16 @@ struct DashboardView: View {
 
     // MARK: - Editorial Hero (double niveau)
 
-    /// Le bloc dominant de l'écran, sur **deux niveaux de lecture** :
-    ///   1. le gros chiffre = la période la plus fine sélectionnée — le mois en cours
-    ///      par défaut, le mois filtré si l'utilisateur en a choisi un ;
-    ///   2. une ligne secondaire discrète = le cumul de l'exercice + la variation N-1.
+    /// The screen's dominant block, on **two reading levels**:
+    ///   1. the big number = the finest selected period — the current month
+    ///      by default, the filtered month if the user chose one;
+    ///   2. a discreet secondary line = the fiscal year's total + the N-1 variation.
     ///
-    /// Pourquoi : un bilan **annuel** en chiffre dominant ne dit pas quoi faire
-    /// aujourd'hui. En juillet, « −5 144 € sur 2026 » est un constat ; « −412 € ce
-    /// mois-ci » est actionnable. Le cumul annuel reste à un coup d'œil dessous.
+    /// Why: an **annual** total as the dominant figure doesn't say what to do
+    /// today. In July, "−€5,144 for 2026" is an observation; "−€412 this
+    /// month" is actionable. The annual total stays a glance below.
     ///
-    /// **Pas de card**, pas de fond — le dégradé du backdrop fait le travail.
+    /// **No card**, no background — the backdrop's gradient does the work.
     @ViewBuilder private var editorialHero: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             heroEyebrow
@@ -444,7 +444,7 @@ struct DashboardView: View {
                 .tracking(0.8)
                 .foregroundStyle(AppTheme.Colors.textSecondary)
 
-            // Big number — via MoneyText pour respecter le masquage global.
+            // The big number — via MoneyText to respect global masking.
             MoneyText(
                 amount: heroNet,
                 font: .system(size: 44, weight: .bold, design: .default),
@@ -456,8 +456,8 @@ struct DashboardView: View {
 
             heroSecondaryLine
 
-            // Pied : Recettes · Dépenses de la MÊME période que le big number, sinon
-            // les trois chiffres du hero ne parleraient pas de la même chose.
+            // Footer: Income · Expenses for the SAME period as the big number, otherwise
+            // the hero's three figures wouldn't be talking about the same thing.
             HStack(spacing: AppTheme.Spacing.lg) {
                 heroStatPill(
                     icon: "arrow.down.right",
@@ -477,9 +477,9 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Second niveau : cumul de l'exercice quand le gros chiffre est mensuel, puis la
-    /// variation vs N-1 quand elle a du sens. Volontairement en 13pt : c'est un
-    /// repère, pas une information concurrente du big number.
+    /// The second level: the fiscal year's total when the big number is monthly, then the
+    /// N-1 variation when it makes sense. Deliberately 13pt: it's a
+    /// reference point, not information competing with the big number.
     @ViewBuilder private var heroSecondaryLine: some View {
         let prevNet = previousYearStats.netBalance
         let delta = stats.netBalance - prevNet
@@ -530,11 +530,12 @@ struct DashboardView: View {
         }
     }
 
-    // MARK: - Période dominante du hero
+    // MARK: - The hero's dominant period
 
-    /// Mois mis en avant : celui filtré par l'utilisateur, sinon le mois en cours
-    /// quand on regarde l'exercice courant. `nil` sur un exercice passé — « ce
-    /// mois-ci » n'aurait alors aucun sens, on retombe sur le bilan annuel.
+    /// The month highlighted: the one filtered by the user, otherwise the current
+    /// month when looking at the current fiscal year. `nil` on a past
+    /// fiscal year — "this month" would then make no sense, falling back to
+    /// the annual total.
     private var heroMonthKey: String? {
         if let month = period.month { return month }
         let calendar = Calendar.current
@@ -545,9 +546,9 @@ struct DashboardView: View {
 
     private var isMonthDominant: Bool { heroMonthKey != nil }
 
-    /// Totaux du mois dominant. Un mois sans transaction n'est pas une absence de
-    /// donnée : c'est un mois à 0 €, et l'afficher est plus juste que de retomber
-    /// silencieusement sur l'année.
+    /// Totals for the dominant month. A month with no transaction isn't a lack of
+    /// data: it's a €0 month, and showing it is more accurate than silently
+    /// falling back to the year.
     private var heroMonthTotals: MonthlyTotals? {
         guard let key = heroMonthKey else { return nil }
         return monthlyData.first { $0.month == key }
@@ -568,9 +569,9 @@ struct DashboardView: View {
         return Text("Bilan annuel · \(period.year)")
     }
 
-    /// Petite "pilule" stat utilisée dans le pied du hero. Reste alignée gauche,
-    /// pas de fond pour ne pas concurrencer le big number. Juste icône colorée +
-    /// montant en `moneySmall` + label en très petit.
+    /// A small stat "pill" used in the hero's footer. Left-aligned,
+    /// no background so as not to compete with the big number. Just a colored icon +
+    /// an amount in `moneySmall` + a tiny label.
     @ViewBuilder
     private func heroStatPill(icon: String, label: LocalizedStringKey, value: Double, color: Color) -> some View {
         HStack(alignment: .center, spacing: AppTheme.Spacing.sm) {

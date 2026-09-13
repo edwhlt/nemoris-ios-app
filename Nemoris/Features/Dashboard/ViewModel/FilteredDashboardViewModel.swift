@@ -10,7 +10,7 @@ enum ChartGranularity: String, CaseIterable {
 }
 
 struct PeriodTotal: Identifiable {
-    let id: Date        // début de la période
+    let id: Date        // start of the period
     let income: Double  // ≥ 0
     let expense: Double // ≤ 0
 }
@@ -37,13 +37,13 @@ final class FilteredDashboardViewModel {
     private var allTransactions: [FinanceTransaction] = []
     private let repository: TransactionRepository
 
-    /// La valeur par défaut vise la base de l'application : aucun site d'appel
-    /// ne change. Les tests injectent une base temporaire.
+    /// The default value targets the app's database: no call site
+    /// needs to change. Tests inject a temporary database.
     init(store: SQLiteStore = SQLiteStore()) {
         repository = TransactionRepository(store: store)
     }
 
-    // MARK: - Computed: données agrégées par granularité (réactif)
+    // MARK: - Computed: data aggregated by granularity (reactive)
 
     var periodData: [PeriodTotal] {
         let cal = Calendar.current
@@ -74,10 +74,10 @@ final class FilteredDashboardViewModel {
 
     func load(filter: TransactionFilter) {
         isLoading = true
-        // Écran d'analyse (cumuls/totaux) : exclut les comptes "autres" — mais
-        // seulement quand l'agrégat porte sur "tous les comptes" (accountId == 0).
-        // Un compte précis explicitement choisi par l'utilisateur (même "autre")
-        // affiche son analyse normalement, il l'a demandée lui-même.
+        // The analysis screen (totals/sums): excludes "other" accounts — but
+        // only when the aggregate covers "all accounts" (accountId == 0).
+        // A specific account explicitly chosen by the user (even an "other" one)
+        // shows its analysis normally, since they asked for it themselves.
         allTransactions = repository.fetchAllFilteredTransactions(
             filter: filter,
             excludeInternalTransfers: true,

@@ -2,25 +2,25 @@ import Foundation
 
 // MARK: - DashboardGridPlanner
 //
-// Répartit les cartes en lignes. **Fonction pure**, donc testable sans UI.
+// Splits cards into rows. **A pure function**, so testable with no UI.
 //
-// **Pourquoi pas un `LazyVGrid`** : il ne sait pas faire de span — `gridCellColumns()`
-// n'existe que sur `Grid`, qui n'est pas lazy (tout le contenu serait monté d'un
-// coup). Et `GridItem(.adaptive(minimum:))` ne permet pas d'imposer qu'une carte
-// occupe toute la largeur. On planifie donc les lignes nous-mêmes et on les rend
-// dans un `LazyVStack` de `HStack`.
+// **Why not a `LazyVGrid`**: it can't span — `gridCellColumns()`
+// only exists on `Grid`, which isn't lazy (all content would be mounted at
+// once). And `GridItem(.adaptive(minimum:))` can't force a card to
+// occupy the whole width. So rows are planned by hand and rendered
+// in a `LazyVStack` of `HStack`s.
 
 enum DashboardGridPlanner {
 
-    /// Découpe les cartes en lignes en respectant l'ordre de l'utilisateur.
+    /// Splits cards into rows, respecting the user's order.
     ///
-    /// - Une carte `.wide` occupe sa propre ligne, seule.
-    /// - Les cartes `.compact` s'accumulent jusqu'à `columns`, et la ligne en cours
-    ///   est fermée dès qu'on rencontre une `.wide` ou que la ligne est pleine.
+    /// - A `.wide` card occupies its own row, alone.
+    /// - `.compact` cards accumulate up to `columns`, and the current row
+    ///   closes as soon as a `.wide` one is met or the row is full.
     ///
-    /// L'ordre est **toujours** préservé : on ne comble pas un trou avec une carte
-    /// située plus bas, sinon réordonner dans l'écran de personnalisation donnerait
-    /// un résultat imprévisible.
+    /// Order is **always** preserved: a gap is never filled with a card
+    /// further down, otherwise reordering in the customization screen would give
+    /// an unpredictable result.
     static func rows(
         _ cards: [DashboardCardPreference],
         columns: Int
@@ -37,8 +37,8 @@ enum DashboardGridPlanner {
         }
 
         for card in cards {
-            // Une carte compacte sur une grille à 1 colonne occupe la largeur pleine :
-            // inutile de la distinguer d'une large.
+            // A compact card on a 1-column grid takes up the full width:
+            // no point distinguishing it from a wide one.
             if card.size == .wide || columns == 1 {
                 flush()
                 rows.append([card])
@@ -56,18 +56,18 @@ enum DashboardGridPlanner {
 
 enum DashboardLayoutMetrics {
 
-    /// Nombre de colonnes selon la largeur disponible.
+    /// Number of columns depending on the available width.
     ///
-    /// ⚠️ Mesurée par un `GeometryReader` classique et non par `onGeometryChange` :
-    /// ce dernier demande macOS 15+, or la cible du projet est macOS 14.0.
+    /// ⚠️ Measured by a classic `GeometryReader`, not `onGeometryChange`:
+    /// the latter needs macOS 15+, while the project targets macOS 14.0.
     static func columnCount(for width: CGFloat) -> Int {
-        if width >= 900 { return 4 }   // Mac (fenêtre par défaut 1100×760), iPad paysage
-        if width >= 500 { return 3 }   // iPad portrait, Mac étroit
+        if width >= 900 { return 4 }   // Mac (default 1100×760 window), iPad landscape
+        if width >= 500 { return 3 }   // iPad portrait, a narrow Mac window
         return 2                       // iPhone
     }
 
-    /// Hauteur plancher d'une tuile. Les cartes d'une même ligne s'égalisent ensuite
-    /// sur la plus haute (`maxHeight: .infinity` dans la tuile + alignement `.top`).
+    /// A tile's floor height. Cards on the same row are then equalized
+    /// on the tallest one (`maxHeight: .infinity` in the tile + `.top` alignment).
     static func minHeight(for size: DashboardCardSize) -> CGFloat {
         switch size {
         case .compact: return 132

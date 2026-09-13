@@ -2,16 +2,16 @@ import SwiftUI
 
 // MARK: - DashboardCardContext
 //
-// Ce dont une carte a besoin **en plus** du snapshot : la période affichée (que
-// certaines cartes montrent en sous-titre ou pilotent, comme le filtre mois du
-// graphe) et la navigation vers les modules.
+// What a card needs **in addition to** the snapshot: the displayed period (which
+// some cards show as a subtitle or drive, like the chart's month filter)
+// and navigation to the modules.
 
 struct DashboardCardContext {
     @Binding var period: DashboardPeriod
     let onNavigate: (MainTabItem) -> Void
 
-    /// Sous-titre de période, partagé par les cartes qui affichent un agrégat borné
-    /// dans le temps (« Sur juillet 2026 » / « Sur l'année 2026 »).
+    /// A period subtitle, shared by cards that show a time-bounded aggregate
+    /// ("For July 2026" / "For the year 2026").
     var periodSubtitle: LocalizedStringResource {
         period.monthLabel.map { "Sur \($0)" } ?? "Sur l'année \(period.year.yearLabel)"
     }
@@ -19,11 +19,11 @@ struct DashboardCardContext {
 
 // MARK: - DashboardCardHost
 //
-// **Le** point de dispatch carte → vue. Une ligne par carte : tout le chrome (fond,
-// en-tête, squelette, état vide, hauteur) est dans `DashboardTile`, et chaque
-// contenu ne fait que dessiner sa donnée.
+// **The** card → view dispatch point. One line per card: all the chrome (background,
+// header, skeleton, empty state, height) is in `DashboardTile`, and each
+// content just draws its own data.
 //
-// Même convention que `MainTabView.tabView(for:)` pour les modules.
+// The same convention as `MainTabView.tabView(for:)` for modules.
 
 struct DashboardCardHost: View {
     let preference: DashboardCardPreference

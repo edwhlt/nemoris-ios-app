@@ -69,11 +69,11 @@ struct MonthlyBarChartView: View {
             BarPointType.expense: AppTheme.Colors.danger
         ])
         .chartXAxis {
-            // Sécurité générale contre les labels illisibles (cf.
-            // PeriodBarChartView plus bas) : même une plage "raisonnable" en
-            // apparence (plusieurs années de mois) peut en accumuler trop
-            // pour la largeur réelle — `.automatic` les espace au lieu d'en
-            // poser un par mois sans condition.
+            // A general safeguard against unreadable labels (see
+            // PeriodBarChartView below): even a range that looks
+            // "reasonable" (several years of months) can accumulate too
+            // many for the actual width — `.automatic` spaces them out instead of
+            // placing one per month unconditionally.
             AxisMarks(values: .automatic(desiredCount: 8)) { _ in
                 AxisValueLabel(format: .dateTime.month(.narrow))
                     .foregroundStyle(AppTheme.Colors.textSecondary)
@@ -363,13 +363,13 @@ struct BalanceTimeChart: View {
             BarPointType.expense: AppTheme.Colors.danger
         ])
         .chartXAxis {
-            // `.stride(by: calUnit)` posait UNE marque PAR JOUR en granularité
-            // "jour" — sur une plage de plusieurs mois/un an, ça empile des
-            // centaines de labels qui se chevauchent en un bloc illisible
-            // (retour d'usage). `.automatic(desiredCount:)` laisse Swift
-            // Charts espacer les labels selon la largeur réellement
-            // disponible au lieu d'en poser un par unité — même remède que
-            // les charts Investments (cf. positionChart/EvolutionChart).
+            // `.stride(by: calUnit)` placed ONE mark PER DAY at "day"
+            // granularity — over a range of several months/a year, that stacks
+            // hundreds of labels overlapping into an unreadable block.
+            // `.automatic(desiredCount:)` lets Swift
+            // Charts space labels out based on the width actually
+            // available instead of placing one per unit — the same fix as
+            // the Investments charts (see positionChart/EvolutionChart).
             AxisMarks(values: .automatic(desiredCount: 6)) { _ in
                 AxisValueLabel(format: xAxisFormat)
                     .foregroundStyle(AppTheme.Colors.textSecondary)
