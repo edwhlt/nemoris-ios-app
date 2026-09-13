@@ -3,20 +3,20 @@ import UniformTypeIdentifiers
 
 // MARK: - OnboardingFlowView
 //
-// Parcours guidé au 1er launch. Remplace l'ancien `OnboardingView` minimaliste
-// par 5 étapes qui couvrent : pédagogie philosophique, choix base, premier compte,
-// activation modules opt-in, récap final.
+// A guided flow on the 1st launch. Replaces the old, minimal `OnboardingView`
+// with 5 steps covering: philosophical framing, choosing a database, the first account,
+// opt-in module activation, a final recap.
 //
-// **Gate** : ce flow ne s'affiche que si `hasDatabase == false` côté NemorisApp.
-// Une fois la DB créée (étape `database`), on a déjà atteint un état "no return"
-// — l'utilisateur peut quitter l'app, au prochain launch il aura `hasDatabase == true`
-// et n'aura plus le flow. Mais on lui propose quand même les étapes restantes
-// (modules + ready) tant qu'il est dans le flow courant. S'il quitte au step
-// modules, c'est OK : il pourra activer les modules plus tard dans Settings.
+// **Gate**: this flow only shows if `hasDatabase == false` on the NemorisApp side.
+// Once the DB is created (the `database` step), a "no return" state is already
+// reached — the user can quit the app, and on the next launch `hasDatabase == true`
+// and the flow won't show again. But the remaining steps (modules + ready) are still
+// offered while in the current flow. If the user quits at the
+// modules step, that's fine: they can enable modules later in Settings.
 //
-// **Pas d'intrusion users existants** : ce flow ne se redéclenche jamais une
-// fois la DB initialisée. Les users existants qui veulent voir les modules
-// opt-in passent par Settings → Modules (existant).
+// **No intrusion for existing users**: this flow never re-triggers once the
+// DB is initialized. Existing users who want to see the opt-in modules
+// go through Settings → Modules (existing).
 
 struct OnboardingFlowView: View {
     let onDone: () -> Void
@@ -25,22 +25,22 @@ struct OnboardingFlowView: View {
     // MARK: - Steps
 
     private enum Step: Int, CaseIterable {
-        case welcome       // Pédagogie + 3 promesses
-        case database      // Créer une DB neuve ou importer un .sqlite
-        case createAccount // Premier compte (seulement si "Créer")
-        case modules       // Choix des modules opt-in (Invest / Budget / Patrimoine / Tricount)
-        case ready         // Récap + "Ouvrir Nemoris"
+        case welcome       // framing + 3 promises
+        case database      // Create a fresh DB or import a .sqlite
+        case createAccount // The first account (only if "Create")
+        case modules       // Choosing opt-in modules (Invest / Budget / Patrimoine / Tricount)
+        case ready         // A recap + "Open Nemoris"
     }
 
     @State private var step: Step = .welcome
     @State private var showFilePicker = false
     @State private var errorMessage: String?
 
-    // Détection restauration : au 1er lancement on scanne les
-    // snapshots iCloud de BackupService (ils survivent à la désinstallation). Si
-    // une sauvegarde existe, on la propose EN PREMIER, avec un badge de fraîcheur
-    // — pour ne plus jamais laisser un user repartir de zéro alors qu'une
-    // sauvegarde l'attendait.
+    // Restore detection: on the 1st launch, BackupService's iCloud
+    // snapshots are scanned (they survive uninstalling). If
+    // a backup exists, it's offered FIRST, with a freshness badge
+    // — so a user never starts from scratch again while a
+    // backup was waiting for them.
     @State private var restoreSnapshots: [BackupService.Snapshot] = []
     @State private var isRestoring = false
 
@@ -48,9 +48,9 @@ struct OnboardingFlowView: View {
     @State private var accountName: String = ""
     @State private var accountType: String = "COURANT"
 
-    // Modules opt-in (step .modules)
-    // Préchargés depuis UserDefaults : si l'utilisateur a déjà ouvert l'app avant, on
-    // respecte ses choix précédents au lieu de tout remettre à false.
+    // Opt-in modules (the .modules step)
+    // Preloaded from UserDefaults: if the user already opened the app before, their
+    // previous choices are respected instead of resetting everything to false.
     @State private var enableInvestments: Bool = UserDefaults.standard.bool(forKey: "featureInvestments")
     @State private var enableBudget: Bool      = UserDefaults.standard.bool(forKey: "featureBudget")
     @State private var enablePatrimoine: Bool  = UserDefaults.standard.bool(forKey: "featurePatrimoine")
@@ -108,8 +108,8 @@ struct OnboardingFlowView: View {
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             }
 
-            // 3 promesses différenciantes — ce qui fait que l'utilisateur CHOISIT Nemoris
-            // plutôt que Bankin' ou un Excel. Plus parlant qu'une liste de features.
+            // 3 differentiating promises — what makes the user CHOOSE Nemoris
+            // over Bankin' or a spreadsheet. More compelling than a feature list.
             VStack(spacing: AppTheme.Spacing.lg) {
                 promiseRow(
                     icon: "wifi.slash",
@@ -174,7 +174,7 @@ struct OnboardingFlowView: View {
                     .padding(.horizontal, AppTheme.Spacing.xl)
             }
 
-            // Sauvegarde iCloud détectée → proposée EN PREMIER (badge fraîcheur).
+            // An iCloud backup detected → offered FIRST (a freshness badge).
             if let latest = restoreSnapshots.first {
                 VStack(spacing: AppTheme.Spacing.sm) {
                     restoreCard(latest)
@@ -217,8 +217,8 @@ struct OnboardingFlowView: View {
                 do {
                     _ = url.startAccessingSecurityScopedResource()
                     try DatabaseManager.shared.linkExternalFile(from: url)
-                    // Import direct → on saute la création de compte (la DB importée
-                    // a déjà ses comptes) et on file aux modules.
+                    // A direct import → skips account creation (the imported
+                    // DB already has its accounts) and heads straight to modules.
                     step = .modules
                 } catch {
                     errorMessage = error.localizedDescription
@@ -230,7 +230,7 @@ struct OnboardingFlowView: View {
         .task { await loadSnapshotsForRestore() }
     }
 
-    // MARK: - Step 3 : Premier compte (suite d'une création neuve)
+    // MARK: - Step 3: The first account (following a fresh creation)
 
     private var createAccountStep: some View {
         VStack(spacing: 0) {
@@ -285,9 +285,9 @@ struct OnboardingFlowView: View {
 
             ScrollView {
                 VStack(spacing: AppTheme.Spacing.md) {
-                    // Investissements — module gratuit (comme Patrimoine/Tricount) ;
-                    // seul le Live Sync (exchanges/wallets) reste Pro, découvert
-                    // plus tard dans le module lui-même.
+                    // Investments — a free module (like Patrimoine/Tricount);
+                    // only Live Sync (exchanges/wallets) stays Pro, discovered
+                    // later within the module itself.
                     moduleCard(
                         icon: "chart.line.uptrend.xyaxis",
                         title: "Investissements",
@@ -321,10 +321,10 @@ struct OnboardingFlowView: View {
             }
 
             primaryButton("Continuer") {
-                // Persist les choix dans UserDefaults via les setters AppState.
-                // On ne peut pas accéder à appState ici (pas dans l'env), donc on
-                // écrit directement aux mêmes clés UserDefaults — c'est la source de
-                // vérité de toute façon (cf. AppState.show* getters).
+                // Persists the choices to UserDefaults via AppState's setters.
+                // appState can't be accessed here (not in the environment), so the
+                // same UserDefaults keys are written directly — that's the source of
+                // truth anyway (see AppState's show* getters).
                 UserDefaults.standard.set(enableInvestments, forKey: "featureInvestments")
                 UserDefaults.standard.set(enableBudget,      forKey: "featureBudget")
                 UserDefaults.standard.set(enablePatrimoine,  forKey: "featurePatrimoine")
@@ -350,8 +350,8 @@ struct OnboardingFlowView: View {
                         .font(AppTheme.Typography.titleSmall)
                         .foregroundStyle(AppTheme.Colors.textPrimary)
                     if isPro {
-                        // Badge "Pro" discret — l'utilisateur voit que l'activation
-                        // déclenchera le paywall plus tard (depuis Settings).
+                        // A discreet "Pro" badge — the user sees that enabling it
+                        // will trigger the paywall later (from Settings).
                         Text("PRO")
                             .font(.system(size: 9, weight: .bold))
                             .tracking(0.6)
@@ -400,7 +400,7 @@ struct OnboardingFlowView: View {
                     .padding(.horizontal, AppTheme.Spacing.xl)
             }
 
-            // Tips éditoriaux pour orienter sans imposer un parcours rigide.
+            // Editorial tips to guide without imposing a rigid flow.
             VStack(spacing: AppTheme.Spacing.sm) {
                 tipRow(icon: "square.and.arrow.down", text: "Dashboard → menu → Importation")
                 tipRow(icon: "lock.shield.fill", text: "Réglages → Sécurité pour activer Face ID")
@@ -440,7 +440,7 @@ struct OnboardingFlowView: View {
         }
     }
 
-    /// Base vierge sans seed : l'utilisateur activera la sync iCloud dans Réglages.
+    /// A blank database with no seed: the user will enable iCloud sync in Settings.
     private func createForICloud() {
         do {
             try DatabaseManager.shared.createNewDatabase(seedDefaults: false)
@@ -450,11 +450,11 @@ struct OnboardingFlowView: View {
         }
     }
 
-    // MARK: - Restauration depuis une sauvegarde iCloud
+    // MARK: - Restoring from an iCloud backup
 
-    /// Charge les snapshots BackupService. iCloud peut mettre quelques secondes à
-    /// exposer son conteneur après un cold start / une réinstallation → on
-    /// réessaie jusqu'à 5 fois (1 s d'intervalle) avant d'abandonner en silence.
+    /// Loads BackupService's snapshots. iCloud can take a few seconds to
+    /// expose its container after a cold start / a reinstall → up to 5
+    /// retries (1s apart) before silently giving up.
     @MainActor
     private func loadSnapshotsForRestore() async {
         for attempt in 0..<5 {
@@ -467,9 +467,9 @@ struct OnboardingFlowView: View {
         }
     }
 
-    /// Restaure la sauvegarde la plus récente puis file aux modules (la base
-    /// restaurée a déjà ses comptes). Le download iCloud peut bloquer quelques
-    /// secondes → on affiche un état "Restauration…".
+    /// Restores the most recent backup then heads to modules (the restored
+    /// database already has its accounts). The iCloud download can block for a
+    /// few seconds → a "Restoring…" state is shown.
     private func restoreLatest() {
         guard let snap = restoreSnapshots.first, !isRestoring else { return }
         isRestoring = true
@@ -486,8 +486,8 @@ struct OnboardingFlowView: View {
         }
     }
 
-    /// Niveau d'alerte selon l'âge de la sauvegarde : plus elle est vieille, plus
-    /// on prévient qu'en restaurant on perd les données saisies depuis.
+    /// An alert level based on the backup's age: the older it is, the more
+    /// strongly it warns that restoring loses data entered since then.
     private func restoreFreshness(_ snap: BackupService.Snapshot) -> (tint: Color, icon: String, message: String) {
         let days = Calendar.current.dateComponents([.day], from: snap.createdAt, to: Date()).day ?? 0
         switch days {
