@@ -13,16 +13,16 @@ struct PaywallView: View {
 
     @State private var selectedProductID: String? = nil
 
-    /// `true` si l'utilisateur a un abonnement récurrent actif (mensuel/annuel) —
-    /// PAS Lifetime, qui n'a rien à "changer". C'est ce qui bascule l'écran de
-    /// "vendre l'offre" à "gérer sa formule".
+    /// `true` if the user has an active recurring subscription (monthly/yearly) —
+    /// NOT Lifetime, which has nothing to "change". This is what switches the screen
+    /// from "selling the offer" to "managing your plan".
     private var hasActiveSubscription: Bool {
         store.activeSubscriptionProductID != nil
     }
 
-    /// Lifetime acheté EN PLUS d'un abonnement encore actif — StoreKit n'annule
-    /// jamais automatiquement un abonnement d'un autre groupe/type quand on achète
-    /// un non-consommable, donc rien ne le fait à la place de l'utilisateur.
+    /// Lifetime bought IN ADDITION to a still-active subscription — StoreKit never
+    /// automatically cancels a subscription from another group/type when a
+    /// non-consumable is bought, so nothing does it in the user's place.
     private var hasRedundantSubscription: Bool {
         store.accessLevel == .lifetime && hasActiveSubscription
     }
@@ -49,8 +49,8 @@ struct PaywallView: View {
         .onChange(of: store.products) { _, _ in selectDefaultProduct() }
     }
 
-    /// Sélection par défaut : la formule déjà active (pour "gérer sa formule" plutôt
-    /// que revendre l'existant), sinon annuel (meilleur rapport qualité/prix).
+    /// The default selection: the already-active plan (for "manage your plan" rather
+    /// than re-selling what's already owned), otherwise yearly (the best value).
     private func selectDefaultProduct() {
         guard selectedProductID == nil else { return }
         selectedProductID = store.activeSubscriptionProductID
@@ -195,12 +195,12 @@ struct PaywallView: View {
         }
     }
 
-    /// `nil` tant qu'aucune sélection ; sinon le produit correspondant à `selectedProductID`.
+    /// `nil` while nothing is selected; otherwise the product matching `selectedProductID`.
     private var selectedProduct: Product? {
         store.products.first { $0.id == selectedProductID }
     }
 
-    /// La sélection pointe EXACTEMENT vers la formule déjà active — rien à faire.
+    /// The selection points EXACTLY to the already-active plan — nothing to do.
     private var isSelectionCurrentPlan: Bool {
         selectedProductID != nil && selectedProductID == store.activeSubscriptionProductID
     }
@@ -208,10 +208,10 @@ struct PaywallView: View {
     private var actionButtonTitle: String {
         guard let product = selectedProduct else { return "Continuer" }
         if isSelectionCurrentPlan { return "Formule actuelle" }
-        // Changement de formule (mensuel ↔ annuel, ou vers Lifetime) : StoreKit
-        // gère nativement la proratisation puisque mensuel et annuel partagent le
-        // même groupe d'abonnement — le même appel `purchase(_:)` suffit, Apple
-        // affiche sa propre confirmation de changement.
+        // Changing plans (monthly ↔ yearly, or to Lifetime): StoreKit
+        // natively handles the proration since monthly and yearly share the
+        // same subscription group — the same `purchase(_:)` call is enough, Apple
+        // shows its own change-confirmation UI.
         if hasActiveSubscription {
             return "Changer pour ce plan · \(product.displayPrice)"
         }
@@ -241,7 +241,7 @@ struct PaywallView: View {
             .controlSize(.large)
             .disabled(selectedProductID == nil || store.isLoading || store.products.isEmpty || isSelectionCurrentPlan)
 
-            // Erreur éventuelle
+            // A possible error
             if let error = store.purchaseError {
                 Text(error)
                     .font(.caption)
@@ -257,8 +257,8 @@ struct PaywallView: View {
             .foregroundStyle(AppTheme.Colors.textSecondary)
             .disabled(store.isLoading)
 
-            // Déjà abonné : renvoi vers Apple pour résilier / changer de moyen de
-            // paiement — StoreKit ne l'expose pas depuis l'app.
+            // Already subscribed: redirects to Apple to cancel / change the
+            // payment method — StoreKit doesn't expose that from within the app.
             if hasActiveSubscription {
                 Button("Gérer l'abonnement depuis les Réglages Apple") { openAppleSubscriptionManagement() }
                     .font(.caption)
@@ -287,7 +287,7 @@ struct PaywallView: View {
 
     private func badgeFor(_ product: Product) -> String? {
         guard product.id == AppConstants.Store.yearlyID else { return nil }
-        // Calcule l'économie par rapport au mensuel × 12
+        // Computes the savings vs. monthly × 12
         if let monthly = store.monthlyProduct {
             let yearlyMonthly = product.price / 12
             let savingDecimal = (1 - yearlyMonthly / monthly.price) * 100
@@ -297,8 +297,8 @@ struct PaywallView: View {
         return "Populaire"
     }
 
-    /// StoreKit ne permet ni de résilier ni de changer de moyen de paiement depuis
-    /// l'app — seule la page Réglages Apple le fait.
+    /// StoreKit allows neither canceling nor changing the payment method from
+    /// within the app — only Apple's own Settings page can do that.
     private func openAppleSubscriptionManagement() {
         let url = AppConstants.Store.manageSubscriptionsURL
         #if os(iOS)
@@ -324,8 +324,8 @@ private struct ProductRowView: View {
                     Text(product.displayName)
                         .font(.headline)
                     if isCurrentPlan {
-                        // Prend le pas sur le badge marketing (-17%, Populaire) :
-                        // une fois qu'on l'a déjà, l'argument de vente n'a plus lieu d'être.
+                        // Takes priority over the marketing badge (-17%, Popular):
+                        // once it's already owned, the sales pitch no longer applies.
                         Text("Formule actuelle")
                             .font(.caption2)
                             .fontWeight(.bold)
@@ -384,9 +384,9 @@ private struct ProductRowView: View {
 
 // MARK: - Paywall Overlay Modifier
 
-/// Superpose un écran de verrouillage sur la vue si l'utilisateur n'a pas accès
-/// à la fonctionnalité. L'état est lu depuis `PurchaseManager.shared` via
-/// l'environnement — impossible à contourner côté client.
+/// Overlays a lock screen on the view if the user doesn't have access
+/// to the feature. The state is read from `PurchaseManager.shared` via
+/// the environment — impossible to bypass client-side.
 struct PaywallOverlay: ViewModifier {
     let feature: AppFeature
     @Environment(PurchaseManager.self) private var store
@@ -443,7 +443,7 @@ struct PaywallOverlay: ViewModifier {
 }
 
 extension View {
-    /// Verrouille la vue derrière un paywall si l'utilisateur n'a pas le niveau requis.
+    /// Locks the view behind a paywall if the user doesn't have the required level.
     func paywallOverlay(for feature: AppFeature) -> some View {
         modifier(PaywallOverlay(feature: feature))
     }
@@ -451,7 +451,7 @@ extension View {
 
 // MARK: - ProBadge
 
-/// Petit badge "PRO" avec une couronne, à afficher à côté des fonctionnalités payantes.
+/// A small "PRO" badge with a crown, to show next to paid features.
 struct ProBadge: View {
     var body: some View {
         HStack(spacing: 3) {
@@ -469,16 +469,16 @@ struct ProBadge: View {
 
 // MARK: - ToolbarPaywallGate
 
-/// Verrouille une action de `.toolbar` derrière le paywall.
+/// Locks a `.toolbar` action behind the paywall.
 ///
-/// `.paywallOverlay` ne suffit pas pour une action de toolbar : c'est un
-/// `.overlay {}` posé sur le CONTENU, et les items de `.toolbar` (barre de
-/// navigation) vivent dans une couche à part que cet overlay ne recouvre
-/// jamais — ils restent tapables même quand l'écran affiche le cadenas.
-/// Incident réel : le menu "⋯" d'Investissements et le "+" de
-/// la Console SQL restaient pleinement fonctionnels derrière l'écran
-/// verrouillé. Toujours passer une action de toolbar par ce wrapper plutôt
-/// que de l'exposer nue à côté d'un `paywallOverlay` sur le contenu.
+/// `.paywallOverlay` isn't enough for a toolbar action: it's an
+/// `.overlay {}` set on the CONTENT, and `.toolbar` items (the
+/// navigation bar) live in a separate layer this overlay never
+/// covers — they stay tappable even when the screen shows the padlock.
+/// A real incident: Investments' "⋯" menu and the SQL Console's "+"
+/// stayed fully functional behind the locked screen. Always route a
+/// toolbar action through this wrapper rather than exposing it bare
+/// next to a `paywallOverlay` on the content.
 struct ToolbarPaywallGate<Content: View>: View {
     let feature: AppFeature
     @Environment(PurchaseManager.self) private var store

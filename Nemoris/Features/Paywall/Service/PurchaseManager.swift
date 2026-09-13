@@ -5,9 +5,9 @@ import WidgetKit
 
 // MARK: - Access Level
 
-/// Niveau d'accès de l'utilisateur, du plus bas au plus élevé.
-/// Jamais stocké en UserDefaults — toujours dérivé des transactions StoreKit vérifiées
-/// cryptographiquement. Un utilisateur ne peut pas tricher en modifiant les préférences.
+/// The user's access level, from lowest to highest.
+/// Never stored in UserDefaults — always derived from cryptographically
+/// verified StoreKit transactions. A user can't cheat by editing preferences.
 enum AccessLevel: Int, Comparable {
     case free = 0
     case pro = 1
@@ -36,15 +36,15 @@ enum AccessLevel: Int, Comparable {
 
 // MARK: - App Feature
 
-/// Fonctionnalités de l'application pouvant être verrouillées derrière un niveau d'accès.
+/// App features that can be locked behind an access level.
 ///
-/// Doctrine : Transactions, Patrimoine, Investissements et Tricount sont
-/// des modules GRATUITS dans leur ensemble — la promesse de base de chacun reste
-/// utilisable sans payer. Seule leur couche "avancée / automatisée" est Pro
-/// (`investmentsLiveSync`, `patrimoineProjection`), au même titre que l'analyse
-/// filtrée au sein de Transactions (`filteredDashboard`). Budget et Console SQL
-/// restent des murs complets : ce sont des modules "métier sérieux" où la promesse
-/// claire (payer = tout le module) vend mieux qu'un accès bridé.
+/// Doctrine: Transactions, Patrimoine, Investments and Tricount are
+/// FREE modules as a whole — each one's core promise stays
+/// usable without paying. Only their "advanced/automated" layer is Pro
+/// (`investmentsLiveSync`, `patrimoineProjection`), on the same footing as
+/// filtered analysis within Transactions (`filteredDashboard`). Budget and the SQL
+/// Console stay full walls: they're "serious business" modules where a
+/// clear promise (pay = the whole module) sells better than a throttled access.
 enum AppFeature: CaseIterable {
     case investmentsLiveSync
     case patrimoineProjection
@@ -53,7 +53,7 @@ enum AppFeature: CaseIterable {
     case sqlConsole
     case budget
 
-    /// Niveau minimum requis pour accéder à la fonctionnalité.
+    /// The minimum level required to access the feature.
     var requiredLevel: AccessLevel { .pro }
 
     var title: String {
@@ -71,7 +71,7 @@ enum AppFeature: CaseIterable {
         switch self {
         case .investmentsLiveSync:  return "Synchronisation automatique de vos exchanges et wallets crypto"
         case .patrimoineProjection: return "Prévision de votre patrimoine net dans le temps"
-        //case .tricount:            return "Partage de dépenses en groupe"
+        //case .tricount:            return "Group expense sharing"
         case .filteredDashboard:    return "Analyses par période, compte ou catégorie"
         case .sqlConsole:           return "Requêtes SQL directes sur votre base de données"
         case .budget:               return "Prévisions, récurrents, enveloppes et calendrier"
@@ -102,13 +102,13 @@ enum StoreError: LocalizedError {
 
 // MARK: - PurchaseManager
 
-/// Gestionnaire centralisé des achats in-app (StoreKit 2).
+/// A centralized manager for in-app purchases (StoreKit 2).
 ///
-/// **Anti-triche** : le niveau d'accès (`accessLevel`) n'est JAMAIS persisté en
-/// UserDefaults ni dans un fichier. Il est calculé à chaque lancement en interrogeant
-/// `Transaction.currentEntitlements`, dont les reçus sont signés par Apple et
-/// vérifiés cryptographiquement par `checkVerified(_:)`. Toute tentative de
-/// manipulation locale (édition de plist, tweak jailbreak, etc.) est sans effet.
+/// **Anti-cheat**: the access level (`accessLevel`) is NEVER persisted in
+/// UserDefaults or a file. It's computed on every launch by querying
+/// `Transaction.currentEntitlements`, whose receipts are signed by Apple and
+/// cryptographically verified by `checkVerified(_:)`. Any local
+/// manipulation attempt (editing a plist, a jailbreak tweak, etc.) has no effect.
 @Observable
 @MainActor
 final class PurchaseManager {
@@ -117,12 +117,11 @@ final class PurchaseManager {
     // MARK: State (read-only publiquement)
 
     private(set) var accessLevel: AccessLevel = .free
-    /// ID du produit d'abonnement récurrent actif (mensuel/annuel), `nil` si aucun
-    /// abonnement en cours (gratuit, ou Lifetime acheté sans abonnement en parallèle).
-    /// Comme `accessLevel` : jamais persisté, recalculé à chaque `refreshEntitlements()`
-    /// depuis `Transaction.currentEntitlements`. Sert à l'écran Paywall pour proposer
-    /// un changement de formule (mensuel ↔ annuel) plutôt que de re-vendre l'offre déjà
-    /// possédée.
+    /// The ID of the active recurring subscription product (monthly/yearly), `nil` if there's no
+    /// ongoing subscription (free, or Lifetime bought with no subscription running in parallel).
+    /// Like `accessLevel`: never persisted, recomputed on every `refreshEntitlements()`
+    /// from `Transaction.currentEntitlements`. Used by the Paywall screen to offer
+    /// a plan change (monthly ↔ yearly) instead of re-selling an offer already owned.
     private(set) var activeSubscriptionProductID: String?
     private(set) var products: [Product] = []
     private(set) var isLoading = false
@@ -131,10 +130,10 @@ final class PurchaseManager {
     private(set) var purchaseError: String?
 
     #if DEBUG
-    /// Override développeur : force l'accès Lifetime sans achat réel.
-    /// Jamais compilé en production (Release).
-    /// Propriété STOCKÉE (pas de get/set custom) : `@Observable` n'instrumente que
-    /// les propriétés stockées, sinon le Toggle de SettingsView ne se rafraîchit jamais.
+    /// A developer override: forces Lifetime access with no real purchase.
+    /// Never compiled in production (Release).
+    /// A STORED property (no custom get/set): `@Observable` only instruments
+    /// stored properties, otherwise SettingsView's Toggle would never refresh.
     var devOverrideEnabled: Bool = UserDefaults.standard.bool(forKey: "devOverride") {
         didSet {
             UserDefaults.standard.set(devOverrideEnabled, forKey: "devOverride")
@@ -149,22 +148,22 @@ final class PurchaseManager {
 
     // MARK: - Public API
 
-    /// À appeler au lancement de l'app via `.task` : charge les produits et
-    /// démarre l'écoute des transactions.
+    /// Call at app launch via `.task`: loads the products and
+    /// starts listening for transactions.
     ///
-    /// Ordre voulu :
-    /// 1. Écoute des transactions (instantané).
-    /// 2. `refreshEntitlements` : LOCAL (cache StoreKit iOS), quasi-instantané →
-    ///    permet d'avoir le bon `accessLevel` avant le 1er rendu UI.
-    /// 3. `loadProducts` : RÉSEAU, peut prendre 1-3 s. Concerne uniquement le
-    ///    contenu de la Paywall, pas l'état d'accès des features déjà activées.
+    /// The intended order:
+    /// 1. Listening for transactions (instant).
+    /// 2. `refreshEntitlements`: LOCAL (the iOS StoreKit cache), near-instant →
+    ///    lets the right `accessLevel` be ready before the 1st UI render.
+    /// 3. `loadProducts`: NETWORK, can take 1-3s. Only affects
+    ///    the Paywall's content, not already-active features' access state.
     func initialize() async {
         startTransactionListener()
         await refreshEntitlements()
         await loadProducts()
     }
 
-    /// Lance l'achat du produit sélectionné.
+    /// Starts purchasing the selected product.
     func purchase(_ product: Product) async {
         isLoading = true
         purchaseError = nil
@@ -186,7 +185,7 @@ final class PurchaseManager {
         }
     }
 
-    /// Restaure les achats précédents (non-consommables + abonnements actifs).
+    /// Restores previous purchases (non-consumables + active subscriptions).
     func restorePurchases() async {
         isLoading = true
         purchaseError = nil
@@ -199,7 +198,7 @@ final class PurchaseManager {
         }
     }
 
-    /// Retourne `true` si l'utilisateur a accès à la fonctionnalité donnée.
+    /// Returns `true` if the user has access to the given feature.
     func isUnlocked(_ feature: AppFeature) -> Bool {
         accessLevel >= feature.requiredLevel
     }
@@ -218,7 +217,7 @@ final class PurchaseManager {
         products.first { $0.id == AppConstants.Store.lifetimeID }
     }
 
-    /// Le produit d'abonnement actif (mensuel ou annuel), s'il y en a un.
+    /// The active subscription product (monthly or yearly), if there is one.
     var activeSubscriptionProduct: Product? {
         guard let id = activeSubscriptionProductID else { return nil }
         return products.first { $0.id == id }
@@ -238,7 +237,7 @@ final class PurchaseManager {
             ]
             let fetched = try await Product.products(for: ids)
             products = fetched.sorted { $0.price < $1.price }
-            // Produits introuvables = non configurés dans ASC (métadonnées manquantes)
+            // Products not found = not configured in ASC (missing metadata)
             if fetched.isEmpty { productsLoadFailed = true }
         } catch {
             productsLoadFailed = true
@@ -249,8 +248,8 @@ final class PurchaseManager {
         await loadProducts()
     }
 
-    /// Recalcule `accessLevel` à partir des transactions actuelles vérifiées par Apple.
-    /// Jamais persisté — appelé à chaque lancement et à chaque mise à jour de transaction.
+    /// Recomputes `accessLevel` from currently Apple-verified transactions.
+    /// Never persisted — called on every launch and every transaction update.
     func refreshEntitlements() async {
         #if DEBUG
         if devOverrideEnabled {
@@ -263,7 +262,7 @@ final class PurchaseManager {
         var highest = AccessLevel.free
         var subscriptionID: String?
 
-        // 1. Transactions StoreKit vérifiées cryptographiquement (anti-triche)
+        // 1. Cryptographically verified StoreKit transactions (anti-cheat)
         for await result in Transaction.currentEntitlements {
             guard let tx = try? checkVerified(result) else { continue }
             guard tx.revocationDate == nil else { continue }
@@ -283,17 +282,17 @@ final class PurchaseManager {
         let changed = accessLevel != highest
         accessLevel = highest
 
-        // Le widget Budget lit son propre accès Pro via `Transaction.currentEntitlements`
-        // dans l'extension (cf. `WidgetAccessGate`), mais ne le recalcule que quand
-        // WidgetKit relance sa timeline — jamais spontanément après un achat/une
-        // restauration. Sans ce reload, un widget déjà posé restait verrouillé (ou
-        // déverrouillé) jusqu'à sa prochaine actualisation planifiée (30 min).
+        // The Budget widget reads its own Pro access via `Transaction.currentEntitlements`
+        // in the extension (see `WidgetAccessGate`), but only recomputes it when
+        // WidgetKit relaunches its timeline — never spontaneously after a purchase/a
+        // restore. Without this reload, an already-placed widget stayed locked (or
+        // unlocked) until its next scheduled refresh (30 min).
         if changed {
             WidgetCenter.shared.reloadAllTimelines()
         }
     }
 
-    /// Écoute les mises à jour en temps réel (renouvellements automatiques, révocations).
+    /// Listens for real-time updates (automatic renewals, revocations).
     private func startTransactionListener() {
         Task { [weak self] in
             for await result in Transaction.updates {
@@ -306,8 +305,8 @@ final class PurchaseManager {
         }
     }
 
-    /// Vérifie la signature cryptographique du reçu Apple.
-    /// Lance `StoreError.failedVerification` si le reçu est altéré.
+    /// Verifies the cryptographic signature of an Apple receipt.
+    /// Throws `StoreError.failedVerification` if the receipt is tampered with.
     private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
         switch result {
         case .unverified:
