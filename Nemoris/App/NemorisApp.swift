@@ -35,7 +35,7 @@ struct NemorisApp: App {
         // `DatabaseManager.fallbackURL()` — never touches a real user database,
         // notably on native macOS) and unlocks every paid module so XCUITest can
         // navigate the whole app headlessly. Debug-only, opt-in via a launch
-        // argument, mirrors the existing `-nemorisCrashRepro` convention.
+        // argument.
         // (Feature-flag enabling lives further down: it touches `self.appState`,
         // which isn't definitely initialized yet at this point in a struct init.)
         let screenshotMode = CommandLine.arguments.contains("-nemorisScreenshotMode")

@@ -70,48 +70,7 @@ struct InvestmentsView: View {
 
     var body: some View {
         Group {
-            if isEmbedded { navContent } else { NavigationStack { navContent } }
-        }
-    }
-
-    @ViewBuilder private var navContent: some View {
-        // ── Debug (macOS position sheet navigation) ──
-        // Launched with the -nemorisCrashRepro argument: replays the REAL path
-        // programmatically (account push at 0.8 s, then position push at 2.3 s).
-        // Without the argument: strictly no change.
-        if CommandLine.arguments.contains("-nemorisCrashRepro"),
-           let acc = viewModel.accounts.first,
-           let pos = viewModel.fetchPositions(accountId: acc.id).first {
-            CrashReproDriver(viewModel: viewModel, account: acc, position: pos)
-        } else {
-            dashboardContent
-        }
-    }
-
-    // ── Debug — goes with the -nemorisCrashRepro branch ──
-    // Replays the real path at depth 2 without interaction: root →
-    // push InvestmentAccountDetailView → push InvestmentPositionDetailView.
-    private struct CrashReproDriver: View {
-        @Bindable var viewModel: InvestmentsViewModel
-        let account: InvestmentAccount
-        let position: InvestmentPosition
-        @State private var pushAccount = false
-        @State private var pushPosition = false
-
-        var body: some View {
-            Text("REPRO — parcours réel programmé (compte 0,8 s → position 2,3 s)")
-                .navigationDestination(isPresented: $pushAccount) {
-                    InvestmentAccountDetailView(viewModel: viewModel, account: account)
-                        .navigationDestination(isPresented: $pushPosition) {
-                            InvestmentPositionDetailView(viewModel: viewModel, account: account, position: position)
-                        }
-                }
-                .task {
-                    try? await Task.sleep(nanoseconds: 800_000_000)
-                    pushAccount = true
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    pushPosition = true
-                }
+            if isEmbedded { dashboardContent } else { NavigationStack { dashboardContent } }
         }
     }
 

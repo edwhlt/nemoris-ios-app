@@ -67,12 +67,7 @@ final class AppState {
     static let sidebarImportTag = "sidebar_import"
     static let sidebarSettingsTag = "sidebar_settings"
 
-    // With the `-nemorisCrashRepro` launch argument, opens the Investments
-    // tab directly for a scripted repro with no interaction. Without the
-    // argument: dashboard.
-    var selectedTab: String = CommandLine.arguments.contains("-nemorisCrashRepro")
-        ? MainTabItem.investments.rawValue
-        : MainTabItem.dashboard.rawValue
+    var selectedTab: String = MainTabItem.dashboard.rawValue
     var selectedAccountId: Int? = nil
     var selectedAccountName: String = ""
     /// A payee name to inject into `TransactionsView`'s "Payee" filter
