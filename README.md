@@ -18,8 +18,15 @@ and nothing is sent to a server the user does not choose.
 - **Budget** — envelopes per category, recurring pattern detection, forecasts.
 - **Investments** — positions derived from orders, live sync with Binance and
   with Bitcoin, Ethereum-compatible and Solana wallets, market history charts.
+- **AI coach** — two on-demand analyses (spending, investments) built from a
+  structured briefing of the user's own numbers rather than a generic prompt,
+  ranked and shown as cards, dismissible and re-editable.
+- **Financial goals** — savings targets, debt payoff, free-form progress
+  tracked against the current net worth.
 - **Shared expenses** — split bills, per-member balances, settlements.
 - **Net worth** — assets, real estate, loans, projections.
+- **Tax report** — a French capital-gains and rental-income recap, pre-filled
+  from transactions and investment orders.
 - **Sync** — optional end-to-end encrypted CloudKit mirror across devices.
 
 ## Design decisions worth knowing
@@ -32,29 +39,33 @@ is a disposable mirror, rebuilt by turning sync off and on. Snapshots to iCloud
 Drive are the safety net that survives an app deletion.
 
 **AI is optional and per-feature.** Each feature that can use a model —
-merchant identification, statement import, insights — picks its own backend:
-Apple Foundation Models, a local HTTP server, a cloud provider, or none. The
-app is fully usable with no AI at all.
+merchant identification, statement import, the coach — picks its own backend:
+Apple Foundation Models, a local HTTP server (LM Studio, Ollama…), a model
+downloaded once and run in-process (GGUF via llama.cpp, or MLX on Apple
+Silicon), a cloud provider, or none. The app is fully usable with no AI at all.
 
 **Pure engines.** The calculations that would be expensive to get wrong —
-portfolio valuation, envelope spending, statement extraction, query planning —
-live in files that import nothing but `Foundation`. They take their inputs as
-parameters instead of reaching for a database or the network, which is what
-makes them testable.
+portfolio valuation, envelope spending, statement extraction, query planning,
+the coach's briefing construction and response parsing — live in files that
+import nothing but `Foundation`. They take their inputs as parameters instead
+of reaching for a database or the network, which is what makes them testable.
 
 ## Building
 
 Requires Xcode 16 or later. iOS 18 / macOS 14 minimum.
 
 ```bash
-git clone https://github.com/edwhlt/personal-finance-tracker-ios-app.git
-cd personal-finance-tracker-ios-app
+git clone https://github.com/edwhlt/nemoris-ios-app.git
+cd nemoris-ios-app
 open Nemoris.xcodeproj
 ```
 
 The merchant identification engine (`../NemorisEngine`) is referenced as a
 local Swift package and embeds an ONNX model, which makes the first build
-slower than later ones.
+slower than later ones. Two more remote packages (`swift-llama-cpp`,
+`mlx-swift-lm`, plus `swift-transformers` for local tokenization) back the
+optional in-process AI backend — they add to the first resolve but nothing
+downloads a model until the user pastes a Hugging Face link in Settings.
 
 A single target builds for both platforms — there is no separate macOS target.
 Platform differences are absorbed by shims rather than by branching the code.
@@ -65,29 +76,29 @@ Platform differences are absorbed by shims rather than by branching the code.
 # Unit and integration tests
 xcodebuild test -scheme Nemoris -destination 'platform=iOS Simulator,name=iPhone 16'
 
-# Pure-engine harnesses (no Xcode, ~2 s)
-cd Tests && for s in run_*.sh; do ./$s; done
+# Import-boundary guard (a grep, not a compile — runs in well under a second)
+./Tests/check_purity.sh
 
 # Coverage, split by layer
 ./Tests/coverage.sh
 ```
 
-**Two test systems, on purpose.** The XCTest suite covers repositories, view
-models and engines against a real SQLite database built by the actual migration
-chain. Alongside it, shell harnesses compile the pure engines standalone with
-`swiftc` — they run in about two seconds and act as a purity guard: a pure
-engine that starts importing SwiftUI or PDFKit breaks them immediately.
+**One test system, one lint.** Pure engines — the ones listed by
+`check_purity.sh` — are tested directly inside the XCTest target (`NemorisTests/`,
+mostly under `Engines/`), as `Testing` suites that `@testable import Nemoris`
+and exercise the real production files. `check_purity.sh` doesn't run any of
+that logic; it only greps each listed engine for a forbidden import
+(`SwiftUI`, `PDFKit`, `CloudKit`…) so a pure file that starts reaching for the
+UI, disk, or network breaks the check immediately, independently of whether
+its tests still pass.
 
-One harness is deliberately not part of the suite. `run_merchant_corpus_tests.sh`
-measures a *spectrum* — how many of 984 bank labels the query planner handles
-correctly — against a floor of 85 %. Its result legitimately moves when
-extraction improves, so keeping it out of the always-green suite preserves the
-signal.
-
-**On the coverage number.** The reported figure counts only what XCTest
-executes. The measurement is honest but incomplete: `xccov` cannot see the
-engines the harnesses compile separately, so a file may read 0 % while being
-among the best tested in the repository.
+One harness sits outside the XCTest target on purpose:
+`Tests/run_merchant_corpus_tests.sh` compiles the query-planning engines
+standalone with `swiftc` and measures a *spectrum* — how many of 984 bank
+labels the planner handles correctly — against a floor of 85 %. Its result
+legitimately moves when extraction improves, so keeping it out of the
+always-green suite preserves the signal instead of forcing a binary pass/fail
+on a number that's meant to trend, not gate.
 
 ## Test data
 
@@ -110,8 +121,8 @@ Nemoris/
     Model/        domain types
     Service/      pure engines
     Data/         the feature's repository
-NemorisTests/     XCTest suite
-Tests/            pure-engine harnesses and fixtures
+NemorisTests/     XCTest suite (unit, integration, pure engines)
+Tests/            purity lint, corpus spectrum harness, fixtures
 ```
 
 `Views/` is the boundary: a file outside it that imports SwiftUI is a bug, and
@@ -119,10 +130,12 @@ CI checks for it.
 
 ## Language
 
-Code comments are in French, matching the app's interface. They document the
-reasoning behind a decision, and the ⚠️ marked ones record a trap already paid
-for — a regex that eats a newline, an alignment that means something, an API
-whose parameter order is significant.
+Code comments are in English. The app's own interface is French-first (it
+started as a personal tool before being open-sourced), so UI strings, prompts
+sent to AI backends, and displayed error messages stay in French — comments
+document the reasoning behind a decision for a reader of the source, and the
+⚠️ marked ones record a trap already paid for: a regex that eats a newline, an
+alignment that means something, an API whose parameter order is significant.
 
 ## License
 
