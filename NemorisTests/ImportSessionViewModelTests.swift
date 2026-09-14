@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Session d'import : tri, regroupement par libellé et cascade de décisions.
+/// An import session: sorting, grouping by label, and the decision cascade.
 ///
-/// La cascade est le mécanisme qui rend l'import supportable — décider sur une
-/// ligne l'applique à toutes ses jumelles. C'est aussi le plus dangereux : une
-/// cascade trop large écraserait des décisions déjà prises par l'utilisateur,
-/// silencieusement, au milieu de centaines de lignes.
+/// The cascade is what makes import bearable — deciding on one
+/// row applies it to all its twins. It's also the most dangerous part: a
+/// cascade that's too broad would overwrite decisions the user already
+/// made, silently, in the middle of hundreds of rows.
 @MainActor
 @Suite("ImportSessionViewModel")
 struct ImportSessionViewModelTests {
@@ -26,7 +26,7 @@ struct ImportSessionViewModelTests {
         return (db, ImportSessionViewModel(session: session, store: db.store))
     }
 
-    // MARK: - Regroupement par libellé
+    // MARK: - Grouping by label
 
     @Test("Le regroupement ignore la casse, les accents et les espaces de bord")
     func cleDeRegroupement() {
@@ -76,9 +76,9 @@ struct ImportSessionViewModelTests {
         let (db, vm) = try fixture(rows)
         defer { db.destroy() }
 
-        // L'utilisateur écarte volontairement une ligne du groupe…
+        // The user deliberately dismisses a row from the group…
         _ = vm.skip(rowId: rows[1].id, cascade: false)
-        // …puis confirme une autre. Sa décision antérieure doit survivre.
+        // …then confirms another one. Their earlier decision must survive.
         _ = vm.confirm(rowId: rows[0].id)
 
         let etats = Dictionary(uniqueKeysWithValues: vm.displayedRows.map { ($0.sourceRowNumber, $0.userAction) })
@@ -116,7 +116,7 @@ struct ImportSessionViewModelTests {
         defer { db.destroy() }
         _ = vm.confirm(rowId: rows[0].id)
 
-        // Volontaire : on doit pouvoir réviser UNE ligne sans défaire le groupe.
+        // Deliberate: it must be possible to revise ONE row without undoing the group.
         vm.resetAction(rowId: rows[0].id)
 
         let etats = Dictionary(uniqueKeysWithValues: vm.displayedRows.map { ($0.sourceRowNumber, $0.userAction) })
@@ -134,7 +134,7 @@ struct ImportSessionViewModelTests {
         #expect(vm.displayedRows[0].userAction == .pending)
     }
 
-    // MARK: - Tri
+    // MARK: - Sorting
 
     @Test("Le tri par statut remonte les lignes en attente en premier")
     func triParStatut() throws {
@@ -145,7 +145,7 @@ struct ImportSessionViewModelTests {
         _ = vm.skip(rowId: rows[1].id, cascade: false)
 
         vm.sortMode = .byStatus
-        // Ce qui reste à traiter doit être en tête : c'est le travail restant.
+        // What's left to handle must be first: that's the remaining work.
         #expect(vm.displayedRows.first?.sourceRowNumber == 3,
                 "obtenu : \(vm.displayedRows.map(\.sourceRowNumber))")
     }
@@ -174,7 +174,7 @@ struct ImportSessionViewModelTests {
         defer { db.destroy() }
 
         vm.sortMode = .byAmountAbs
-        // Une recette de 500 € pèse autant qu'une dépense de 500 € dans la revue.
+        // A €500 income weighs as much as a €500 expense in the review.
         #expect(vm.displayedRows.map(\.sourceRowNumber) == [2, 3, 1])
     }
 

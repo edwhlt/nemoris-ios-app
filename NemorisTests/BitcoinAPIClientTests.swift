@@ -2,14 +2,14 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Client Bitcoin — première suite bâtie sur la couture réseau.
+/// The Bitcoin client — the first suite built on the network seam.
 ///
-/// Un client d'API se trompe de deux façons : il convertit mal ce qu'il reçoit,
-/// ou il interprète mal un échec. La première donne un solde faux, la seconde
-/// un message qui n'aide pas l'utilisateur à comprendre quoi corriger.
+/// An API client goes wrong in two ways: it misconverts what it
+/// receives, or it misinterprets a failure. The first gives a wrong balance, the second
+/// a message that doesn't help the user understand what to fix.
 ///
-/// `.serialized` est obligatoire : l'interception réseau est un état global du
-/// processus, deux tests parallèles se disputeraient la table des réponses.
+/// `.serialized` is mandatory: network interception is process-global
+/// state, two parallel tests would fight over the response table.
 extension NetworkSeam {
 
 @Suite("BitcoinAPIClient")
@@ -29,7 +29,7 @@ struct BitcoinAPIClientTests {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
 
-        // 150 000 000 sats reçus, 50 000 000 dépensés → 1 BTC.
+        // 150,000,000 sats received, 50,000,000 spent → 1 BTC.
         StubURLProtocol.on("blockstream.info",
                            .json(reponse(confirme: (150_000_000, 50_000_000))))
 
@@ -42,8 +42,8 @@ struct BitcoinAPIClientTests {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
 
-        // Une transaction en cours d'inclusion doit apparaître : sans elle,
-        // l'utilisateur qui vient de recevoir des fonds ne les verrait pas.
+        // A transaction still being confirmed must show up: without it,
+        // a user who just received funds wouldn't see them.
         StubURLProtocol.on("blockstream.info",
                            .json(reponse(confirme: (100_000_000, 0), mempool: (50_000_000, 0))))
 
@@ -56,8 +56,8 @@ struct BitcoinAPIClientTests {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
 
-        // Dépensé plus que reçu — incohérent, mais un solde négatif afficherait
-        // une dette en bitcoins, ce qui n'a aucun sens.
+        // Spent more than received — inconsistent, but a negative balance would show
+        // a debt in bitcoins, which makes no sense.
         StubURLProtocol.on("blockstream.info",
                            .json(reponse(confirme: (100_000, 200_000))))
 
@@ -70,14 +70,14 @@ struct BitcoinAPIClientTests {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
 
-        // 1 satoshi = 0,000 000 01 BTC. Un arrondi le ferait disparaître.
+        // 1 satoshi = 0.00000001 BTC. Rounding would make it disappear.
         StubURLProtocol.on("blockstream.info", .json(reponse(confirme: (1, 0))))
 
         let solde = try await BitcoinAPIClient().fetchBalance(address: "bc1qtest")
         #expect(solde == 0.000_000_01, "solde : \(solde)")
     }
 
-    // MARK: - L'adresse demandée
+    // MARK: - The requested address
 
     @Test("L'adresse demandée figure dans l'URL appelée")
     func urlAppelee() async throws {
@@ -92,7 +92,7 @@ struct BitcoinAPIClientTests {
                 "URLs appelées : \(urls)")
     }
 
-    // MARK: - Interprétation des échecs
+    // MARK: - Interpreting failures
 
     @Test("Un 400 est présenté comme une adresse invalide")
     func adresseMalFormee() async throws {
@@ -111,8 +111,8 @@ struct BitcoinAPIClientTests {
         defer { StubURLProtocol.stop() }
         StubURLProtocol.on("blockstream.info", .status(429))
 
-        // Distinguer ce cas compte : c'est le seul où réessayer plus tard a du
-        // sens, plutôt que de demander à l'utilisateur de corriger sa saisie.
+        // Distinguishing this case matters: it's the only one where retrying later makes
+        // sense, rather than asking the user to fix their input.
         do {
             _ = try await BitcoinAPIClient().fetchBalance(address: "bc1qtest")
             Issue.record("une limitation de débit aurait dû être signalée")
@@ -145,7 +145,7 @@ struct BitcoinAPIClientTests {
         defer { StubURLProtocol.stop() }
         StubURLProtocol.on("blockstream.info", .networkFailure())
 
-        // Rendre 0 en cas de coupure ferait croire à un portefeuille vidé.
+        // Returning 0 on an outage would make it look like an emptied wallet.
         await #expect(throws: (any Error).self) {
             _ = try await BitcoinAPIClient().fetchBalance(address: "bc1qtest")
         }

@@ -2,16 +2,16 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Suggestions d'enveloppes budgétaires à partir de l'historique.
+/// Budget envelope suggestions from historical data.
 ///
-/// Ce service propose à l'utilisateur des budgets qu'il n'a pas demandés. Trop
-/// permissif, il noie l'écran de suggestions marginales ; trop strict, il ne
-/// propose rien et la fonctionnalité paraît cassée. Les seuils sont donc ce
-/// qu'il faut verrouiller.
+/// This service proposes budgets the user didn't ask for. Too
+/// permissive, it drowns the screen in marginal suggestions; too strict, it
+/// suggests nothing and the feature looks broken. The thresholds are therefore what
+/// needs to be locked down.
 @Suite("EnvelopeSuggestionService")
 struct EnvelopeSuggestionServiceTests {
 
-    /// Date d'évaluation fixe : la fenêtre de 90 jours doit être reproductible.
+    /// A fixed evaluation date: the 90-day window must be reproducible.
     private let maintenant = date("2026-04-01")
 
     private func fixture() throws -> (TestDatabase, TransactionRepository) {
@@ -21,7 +21,7 @@ struct EnvelopeSuggestionServiceTests {
         return (db, repo)
     }
 
-    /// Ajoute `count` dépenses de `montant` dans la catégorie donnée.
+    /// Adds `count` expenses of `amount` in the given category.
     private func depenses(_ repo: TransactionRepository, categorie: Int?,
                           montant: Double, count: Int, depuis: String = "2026-03-01") {
         let compte = repo.fetchAccounts()[0]
@@ -64,8 +64,8 @@ struct EnvelopeSuggestionServiceTests {
         let (db, repo) = try fixture()
         defer { db.destroy() }
         let c = categorie(repo, "Électroménager")
-        // Deux achats à 400 € : le montant est élevé, mais deux points ne font
-        // pas une habitude. Proposer un budget mensuel là-dessus n'a aucun sens.
+        // Two purchases at €400: the amount is high, but two data points don't make
+        // a habit. Suggesting a monthly budget on this makes no sense.
         depenses(repo, categorie: c.id, montant: -400, count: 2)
 
         #expect(suggestions(repo, categories: [c]).isEmpty)
@@ -76,7 +76,7 @@ struct EnvelopeSuggestionServiceTests {
         let (db, repo) = try fixture()
         defer { db.destroy() }
         let c = categorie(repo, "Presse")
-        // Fréquent mais marginal : 5 × 2 € = 10 €, sous le plancher de 30 €.
+        // Frequent but marginal: 5 × €2 = €10, below the €30 floor.
         depenses(repo, categorie: c.id, montant: -2, count: 5)
 
         #expect(suggestions(repo, categories: [c]).isEmpty,
@@ -97,7 +97,7 @@ struct EnvelopeSuggestionServiceTests {
         #expect(suggestions(repo, categories: [c], enveloppes: [existante]).isEmpty)
     }
 
-    // MARK: - Ce qui est ignoré
+    // MARK: - What gets ignored
 
     @Test("Les transactions sans catégorie sont ignorées")
     func sansCategorie() throws {
@@ -125,28 +125,28 @@ struct EnvelopeSuggestionServiceTests {
         let (db, repo) = try fixture()
         defer { db.destroy() }
         let c = categorie(repo, "Vacances")
-        // Six mois avant la date d'évaluation : hors des 90 jours glissants.
+        // Six months before the evaluation date: outside the 90-day rolling window.
         depenses(repo, categorie: c.id, montant: -200, count: 5, depuis: "2025-09-01")
 
         #expect(suggestions(repo, categories: [c]).isEmpty,
                 "un train de vie ancien ne doit pas dicter le budget actuel")
     }
 
-    // MARK: - Calcul du montant
+    // MARK: - Amount calculation
 
     @Test("Le budget suggéré dépasse la moyenne observée et tombe sur une dizaine")
     func arrondiEtMarge() throws {
         let (db, repo) = try fixture()
         defer { db.destroy() }
         let c = categorie(repo, "Alimentation")
-        // 300 € sur la fenêtre de 90 jours → 100 €/mois de moyenne.
+        // €300 over the 90-day window → an average of €100/month.
         depenses(repo, categorie: c.id, montant: -60, count: 5)
 
         let s = suggestions(repo, categories: [c])[0]
         #expect(abs(s.averageMonthly - 100) < 0.01, "moyenne : \(s.averageMonthly)")
 
-        // Marge de 10 % puis arrondi à la dizaine supérieure : un budget calé au
-        // centime près mettrait l'utilisateur en dépassement dès le premier mois.
+        // A 10% margin then rounded up to the nearest ten: a budget set to the
+        // exact cent would put the user over budget from the first month.
         #expect(s.suggestedBudget >= s.averageMonthly,
                 "budget \(s.suggestedBudget) sous la moyenne \(s.averageMonthly)")
         #expect(s.suggestedBudget.truncatingRemainder(dividingBy: 10) == 0,
@@ -183,8 +183,8 @@ struct EnvelopeSuggestionServiceTests {
         let c = categorie(repo, "Alimentation")
         depenses(repo, categorie: c.id, montant: -60, count: 6)
 
-        // Le référentiel passé ne contient pas cette catégorie : sans son nom
-        // ni son icône, la suggestion serait inaffichable.
+        // The past reference data doesn't contain this category: without its
+        // name or icon, the suggestion would be undisplayable.
         #expect(suggestions(repo, categories: []).isEmpty)
     }
 }

@@ -3,8 +3,8 @@ import SQLite3
 import Testing
 @testable import Nemoris
 
-/// Le socle d'accès SQLite : injection, délai d'attente sur verrou, et surtout
-/// remontée des erreurs.
+/// The SQLite access layer: injection, lock timeout, and above all
+/// surfacing errors.
 @Suite("SQLiteStore")
 struct SQLiteStoreTests {
 
@@ -28,7 +28,7 @@ struct SQLiteStoreTests {
         let db = try TestDatabase()
         defer { db.destroy() }
 
-        // `uuid` porte un index unique : la seconde insertion doit être refusée.
+        // `uuid` carries a unique index: the second insert must be rejected.
         func insere() -> SQLiteFailure? {
             db.store.writeSingleReportingFailure(
                 sql: "INSERT INTO accounts (name, type, uuid) VALUES (?, ?, 'meme-uuid');") { stmt in
@@ -43,10 +43,10 @@ struct SQLiteStoreTests {
         #expect(echec != nil, "la seconde insertion aurait dû être refusée")
         #expect(echec?.stage == .execution)
         #expect(echec?.code == SQLITE_CONSTRAINT)
-        // Le code étendu est ce qui distingue une unicité d'une clé étrangère,
-        // là où le code de base vaut SQLITE_CONSTRAINT dans les deux cas.
-        // Le module SQLite3 de Swift n'expose pas les constantes étendues :
-        // SQLITE_CONSTRAINT_UNIQUE vaut SQLITE_CONSTRAINT | (8 << 8) = 2067.
+        // The extended code is what distinguishes a uniqueness violation from a
+        // foreign-key one, where the base code is SQLITE_CONSTRAINT in both cases.
+        // Swift's SQLite3 module doesn't expose the extended constants:
+        // SQLITE_CONSTRAINT_UNIQUE equals SQLITE_CONSTRAINT | (8 << 8) = 2067.
         let contrainteUnique = SQLITE_CONSTRAINT | (8 << 8)
         #expect(echec?.extendedCode == contrainteUnique,
                 "code étendu reçu : \(echec?.extendedCode ?? -1)")

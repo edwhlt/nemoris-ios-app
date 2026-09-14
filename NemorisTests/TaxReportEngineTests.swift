@@ -2,15 +2,15 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Calcul des éléments fiscaux annuels.
+/// Computing annual tax figures.
 ///
-/// C'est le seul moteur de l'application dont les chiffres sont recopiés sur
-/// une déclaration officielle. Une plus-value fausse n'est pas une gêne
-/// d'affichage : elle se retrouve dans une case du formulaire.
+/// This is the only engine in the app whose numbers get copied onto
+/// an official tax return. A wrong capital gain isn't a display
+/// glitch: it ends up in a box on the form.
 ///
-/// Le cœur est le FIFO — chaque vente consomme les achats les plus anciens.
-/// C'est la méthode que l'administration impose pour un compte-titres, et
-/// elle donne un résultat différent du prix de revient moyen.
+/// The core is FIFO — each sale consumes the oldest purchases first.
+/// It's the method the tax authorities require for a securities account, and
+/// it gives a different result than the average cost basis.
 @Suite("TaxReportEngine")
 struct TaxReportEngineTests {
 
@@ -19,7 +19,7 @@ struct TaxReportEngineTests {
         return (db, InvestmentRepository(store: db.store), TransactionRepository(store: db.store))
     }
 
-    /// Crée un compte, une position, et rend l'identifiant de la position.
+    /// Creates an account, a position, and returns the position's id.
     private func position(_ repo: InvestmentRepository, type: String = "CTO",
                           nom: String = "Total") -> Int {
         let compteId = repo.addAccountAndGetId(name: "Mon \(type)", broker: "Courtier",
@@ -46,10 +46,10 @@ struct TaxReportEngineTests {
         defer { db.destroy() }
         let pos = position(inv)
 
-        // Achat 10 à 100 €, puis 10 à 50 €. Vente de 10 à 120 €.
-        // FIFO consomme le premier lot : prix de revient 100, gain 20/titre.
-        // Le prix de revient MOYEN donnerait 75 et un gain de 45 — donc une
-        // plus-value déclarée plus de deux fois trop élevée.
+        // A purchase of 10 at €100, then 10 at €50. A sale of 10 at €120.
+        // FIFO consumes the first lot: cost basis €100, gain €20/share.
+        // The AVERAGE cost basis would give €75 and a gain of €45 — so a
+        // declared capital gain more than twice too high.
         ordre(inv, pos, .buy, qty: 10, prix: 100, jour: "2024-03-01")
         ordre(inv, pos, .buy, qty: 10, prix: 50, jour: "2024-06-01")
         ordre(inv, pos, .sell, qty: 10, prix: 120, jour: "2026-02-01")
@@ -69,8 +69,8 @@ struct TaxReportEngineTests {
         defer { db.destroy() }
         let pos = position(inv)
 
-        // 10 à 100 puis 10 à 200. Vente de 15 : 10 du premier lot + 5 du second.
-        // Revient pondéré = (10×100 + 5×200) / 15 = 2000/15 = 133,33.
+        // 10 at 100 then 10 at 200. A sale of 15: 10 from the first lot + 5 from the second.
+        // Weighted cost basis = (10×100 + 5×200) / 15 = 2000/15 = 133.33.
         ordre(inv, pos, .buy, qty: 10, prix: 100, jour: "2024-03-01")
         ordre(inv, pos, .buy, qty: 10, prix: 200, jour: "2024-06-01")
         ordre(inv, pos, .sell, qty: 15, prix: 250, jour: "2026-02-01")
@@ -87,8 +87,8 @@ struct TaxReportEngineTests {
         defer { db.destroy() }
         let pos = position(inv)
 
-        // 10 titres à 100 € avec 50 € de frais : revient unitaire 105 €.
-        // Les oublier gonflerait la plus-value déclarée de 50 €.
+        // 10 shares at €100 with €50 in fees: unit cost basis €105.
+        // Ignoring them would inflate the declared capital gain by €50.
         ordre(inv, pos, .buy, qty: 10, prix: 100, frais: 50, jour: "2024-03-01")
         ordre(inv, pos, .sell, qty: 10, prix: 130, jour: "2026-02-01")
 
@@ -102,7 +102,7 @@ struct TaxReportEngineTests {
         defer { db.destroy() }
         let pos = position(inv)
 
-        // 20 à 100. Vente de 5, puis de 5 : les deux au revient de 100.
+        // 20 at 100. A sale of 5, then of 5: both at a cost basis of 100.
         ordre(inv, pos, .buy, qty: 20, prix: 100, jour: "2024-03-01")
         ordre(inv, pos, .sell, qty: 5, prix: 150, jour: "2026-02-01")
         ordre(inv, pos, .sell, qty: 5, prix: 160, jour: "2026-05-01")
@@ -114,7 +114,7 @@ struct TaxReportEngineTests {
         }
     }
 
-    // MARK: - Périmètre
+    // MARK: - Scope
 
     @Test("Seules les ventes de l'année déclarée sont retenues")
     func filtreAnnuel() throws {
@@ -130,8 +130,8 @@ struct TaxReportEngineTests {
         let gains = TaxReportEngine.generate(year: 2026, invRepo: inv, txRepo: tx).ctoGains
         #expect(gains.count == 1, "obtenu \(gains.count) cessions pour 2026")
 
-        // Les ventes antérieures doivent quand même avoir consommé leurs lots :
-        // les ignorer complètement fausserait le prix de revient de l'année.
+        // Earlier sales must still have consumed their lots:
+        // ignoring them entirely would throw off the year's cost basis.
         #expect(abs(gains[0].weightedBuyPrice - 100) < 0.01)
     }
 
@@ -175,7 +175,7 @@ struct TaxReportEngineTests {
         #expect(rapport.year == 2026)
     }
 
-    // MARK: - Revenus fonciers
+    // MARK: - Real estate income
 
     @Test("Les loyers de l'année sont sommés, les dépenses écartées")
     func revenusFonciers() throws {
@@ -190,7 +190,7 @@ struct TaxReportEngineTests {
                                   paymentTypeId: nil, information: "", amount: 750,
                                   date: date(mois))
         }
-        // Une dépense portant le même mot ne doit pas être comptée comme un revenu.
+        // An expense carrying the same word must not be counted as income.
         _ = tx.addTransaction(accountId: compte.id, tiersId: locataire, categoryId: nil,
                               paymentTypeId: nil, information: "", amount: -200,
                               date: date("2026-04-05"))

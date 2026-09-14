@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Métadonnées libres posées sur les transactions.
+/// Free-form metadata attached to transactions.
 ///
-/// Ces clés remplacent le mode de paiement imposé : l'utilisateur définit
-/// lui-même ce qu'il veut suivre. Le rôle `payment_method` est exclusif, et
-/// c'est lui que l'import renseigne — s'il n'existe pas, l'indice déduit doit
-/// être ignoré plutôt que d'inventer une clé dans le dos de l'utilisateur.
+/// These keys replace the previously imposed payment method: the user
+/// defines what they want to track themselves. The `payment_method` role is
+/// exclusive, and it's the one import fills in — if it doesn't exist, the
+/// deduced hint must be ignored rather than inventing a key behind the user's back.
 @Suite("TransactionMetadataRepository")
 struct TransactionMetadataRepositoryTests {
 
@@ -17,7 +17,7 @@ struct TransactionMetadataRepositoryTests {
                 TransactionRepository(store: db.store))
     }
 
-    /// Crée un compte et une transaction, et rend son identifiant.
+    /// Creates an account and a transaction, and returns its id.
     private func transaction(_ repo: TransactionRepository, montant: Double = -30) -> Int {
         if repo.fetchAccounts().isEmpty { _ = repo.addAccount(name: "Courant") }
         let compte = repo.fetchAccounts()[0]
@@ -26,7 +26,7 @@ struct TransactionMetadataRepositoryTests {
                                    date: date("2026-03-01"))!
     }
 
-    // MARK: - Clés
+    // MARK: - Keys
 
     @Test("Une clé créée est relue avec son icône et son rôle")
     func creationDeCle() throws {
@@ -69,9 +69,9 @@ struct TransactionMetadataRepositoryTests {
         _ = meta.addKey(name: "Ancienne", icon: nil, role: .paymentMethod)
         _ = meta.addKey(name: "Nouvelle", icon: nil, role: .paymentMethod)
 
-        // Un index UNIQUE partiel garde le rôle exclusif. Sans libération
-        // explicite du précédent porteur, l'insertion échouerait sur une
-        // contrainte que l'utilisateur ne peut pas comprendre.
+        // A partial UNIQUE index keeps the role exclusive. Without
+        // explicitly releasing it from its previous holder, the insert would fail on
+        // a constraint the user couldn't understand.
         let porteurs = meta.fetchKeys().filter { $0.role == .paymentMethod }
         #expect(porteurs.count == 1, "porteurs du rôle : \(porteurs.map(\.name))")
         #expect(porteurs.first?.name == "Nouvelle")
@@ -130,8 +130,8 @@ struct TransactionMetadataRepositoryTests {
         let txId = transaction(repo)
 
         #expect(meta.setValue("Cuisine", keyId: cleId, transactionId: txId))
-        // Cet appel passe par un UPSERT sur une table synchronisée — le motif
-        // exact qui échouait avant le correctif des triggers de mise en file.
+        // This call goes through an UPSERT on a synced table — the exact
+        // pattern that used to fail before the enqueue-trigger fix.
         #expect(meta.setValue("Salle de bain", keyId: cleId, transactionId: txId),
                 "la seconde écriture ne doit pas être refusée")
 
@@ -149,7 +149,7 @@ struct TransactionMetadataRepositoryTests {
         let txId = transaction(repo)
         #expect(meta.setValue("Cuisine", keyId: cleId, transactionId: txId))
 
-        // C'est ainsi que l'utilisateur retire une métadonnée : il vide le champ.
+        // This is how the user removes a metadata value: by clearing the field.
         #expect(meta.setValue("   ", keyId: cleId, transactionId: txId))
         #expect(meta.fetchValues(transactionId: txId).isEmpty)
     }
@@ -212,8 +212,8 @@ struct TransactionMetadataRepositoryTests {
         defer { db.destroy() }
         let txId = transaction(repo)
 
-        // Sans clé portant le rôle, l'indice est ignoré : on ne crée pas une
-        // métadonnée dans le dos de l'utilisateur.
+        // Without a key carrying the role, the hint is ignored: no
+        // metadata is created behind the user's back.
         #expect(meta.applyImportHint("CB", transactionId: txId, paymentMethodKeyId: nil) == false)
         #expect(meta.fetchValues(transactionId: txId).isEmpty)
 

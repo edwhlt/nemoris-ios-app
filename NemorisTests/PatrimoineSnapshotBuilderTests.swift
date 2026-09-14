@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Résolution de la valeur des actifs et agrégation du patrimoine.
+/// Resolving asset value and aggregating net worth.
 ///
-/// L'enjeu central de ce moteur tient en une phrase de sa propre
-/// documentation : un solde à zéro ne permet pas de distinguer un compte
-/// supprimé d'un compte bien vivant mais vide. Confondre les deux fait
-/// disparaître un actif du patrimoine sans le moindre signal.
+/// This engine's central concern is captured in one sentence from its
+/// own documentation: a zero balance can't distinguish a
+/// deleted account from one that's alive and well but empty. Conflating the two makes
+/// an asset disappear from net worth with no signal at all.
 @Suite("PatrimoineSnapshotBuilder")
 struct PatrimoineSnapshotBuilderTests {
 
@@ -25,12 +25,12 @@ struct PatrimoineSnapshotBuilderTests {
                           openedAt: date("2026-01-01"), cashBalance: cash)
     }
 
-    // MARK: - La distinction qui compte
+    // MARK: - The distinction that matters
 
     @Test("Un compte vivant à solde nul rend zéro, pas la dernière valeur connue")
     func compteVivantASoldeNul() {
-        // Le compte existe et vaut réellement 0 : c'est la vérité, il faut
-        // l'afficher. Retomber sur lastKnownValue mentirait sur le patrimoine.
+        // The account exists and is genuinely worth 0: that's the truth, it must
+        // be shown. Falling back to lastKnownValue would misrepresent net worth.
         let (valeur, source) = PatrimoineSnapshotBuilder.resolveValue(
             for: actif(id: 1, compte: 10, dernierConnu: 5_000),
             existingBankAccountIds: [10],
@@ -43,8 +43,8 @@ struct PatrimoineSnapshotBuilderTests {
 
     @Test("Un compte supprimé retombe sur la dernière valeur connue et se signale")
     func compteSupprime() {
-        // Même solde absent, mais le compte n'existe plus. Afficher 0 ferait
-        // disparaître l'actif du patrimoine sans que l'utilisateur comprenne.
+        // Same missing balance, but the account no longer exists. Showing 0 would
+        // make the asset disappear from net worth with no way for the user to understand why.
         let (valeur, source) = PatrimoineSnapshotBuilder.resolveValue(
             for: actif(id: 1, compte: 10, dernierConnu: 5_000),
             existingBankAccountIds: [],
@@ -57,8 +57,8 @@ struct PatrimoineSnapshotBuilderTests {
 
     @Test("Un compte existant mais sans solde fetché garde la dernière valeur connue")
     func soldeNonFetche() {
-        // Le compte existe, mais son solde n'a pas été chargé. Ce n'est pas un
-        // lien rompu — on ne doit pas alerter — mais on ne connaît pas la valeur.
+        // The account exists, but its balance hasn't loaded yet. It's not a
+        // broken link — no alert should fire — but the value is unknown.
         let (valeur, source) = PatrimoineSnapshotBuilder.resolveValue(
             for: actif(id: 1, compte: 10, dernierConnu: 3_200),
             existingBankAccountIds: [10],
@@ -83,7 +83,7 @@ struct PatrimoineSnapshotBuilderTests {
 
     @Test("Un compte-titres additionne ses positions et ses liquidités")
     func compteTitres() {
-        // Oublier le cash sous-évaluerait le patrimoine du montant non investi.
+        // Forgetting cash would undervalue net worth by the uninvested amount.
         let (valeur, source) = PatrimoineSnapshotBuilder.resolveValue(
             for: actif(id: 1, investissement: 7),
             existingBankAccountIds: [], bankBalances: [:],
@@ -105,8 +105,8 @@ struct PatrimoineSnapshotBuilderTests {
 
     @Test("Le lien bancaire prime sur le lien d'investissement")
     func prioriteDesLiens() {
-        // Cas de saisie incohérente : les deux liens sont renseignés. L'ordre de
-        // priorité doit être stable, sinon la valeur affichée change au hasard.
+        // An inconsistent input case: both links are set. The priority
+        // order must be stable, otherwise the displayed value changes at random.
         let (valeur, source) = PatrimoineSnapshotBuilder.resolveValue(
             for: actif(id: 1, compte: 10, investissement: 7),
             existingBankAccountIds: [10], bankBalances: [10: 4_000],
@@ -116,7 +116,7 @@ struct PatrimoineSnapshotBuilderTests {
         #expect(source == .linkedAccount)
     }
 
-    // MARK: - Résolution en lot
+    // MARK: - Batch resolution
 
     @Test("La résolution en lot traite chaque actif selon sa propre source")
     func resolutionEnLot() {
@@ -144,13 +144,13 @@ struct PatrimoineSnapshotBuilderTests {
         #expect(ids == [10, 20], "obtenu : \(ids.sorted())")
     }
 
-    // MARK: - Agrégation
+    // MARK: - Aggregation
 
     @Test("Un actif non résolu ne disparaît pas silencieusement du total")
     func filetDeSecurite() {
-        // Le filet documenté : si un actif n'a pas été résolu, on prend sa
-        // dernière valeur connue plutôt que de l'omettre. Une ligne manquante
-        // dans un patrimoine ne se remarque pas.
+        // The documented safety net: if an asset wasn't resolved, its
+        // last known value is used rather than omitting it. A missing line
+        // in a net-worth statement goes unnoticed.
         let total = PatrimoineSnapshotBuilder.totalAssetsValue(
             assets: [actif(id: 1, dernierConnu: 300), actif(id: 2, dernierConnu: 700)],
             resolvedValues: [1: 500])
@@ -166,7 +166,7 @@ struct PatrimoineSnapshotBuilderTests {
                                   insuranceMonthly: 0, linkedRealEstateId: nil,
                                   notes: nil, createdAt: date("2026-01-01"))
 
-        // Sans état, on ne minimise pas la dette : on prend le principal.
+        // With no history, debt isn't minimized: the principal is used.
         #expect(PatrimoineSnapshotBuilder.totalLiabilities(loans: [pret], loanStates: [:]) == 100_000)
     }
 

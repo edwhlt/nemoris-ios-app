@@ -1,23 +1,23 @@
 import Foundation
 
-/// Interception des requêtes réseau pour les tests.
+/// Intercepting network requests for tests.
 ///
-/// Enregistré globalement, ce `URLProtocol` court-circuite `URLSession.shared`
-/// avant que la requête ne parte — les clients d'API n'ont donc AUCUNE
-/// modification à subir pour devenir testables. C'est la différence avec
-/// l'injection de repository : là il fallait toucher le code, ici non.
+/// Registered globally, this `URLProtocol` short-circuits `URLSession.shared`
+/// before the request leaves — so API clients need NO
+/// modification at all to become testable. That's the difference from
+/// repository injection: there the code had to be touched, here it doesn't.
 ///
-/// ⚠️ L'enregistrement est un état GLOBAL du processus. Toute suite qui
-/// l'utilise doit être marquée `.serialized`, sinon deux tests parallèles se
-/// disputent la table des réponses et se répondent mutuellement.
+/// ⚠️ Registration is process-GLOBAL state. Any suite that
+/// uses it must be marked `.serialized`, otherwise two parallel tests will
+/// fight over the response table and answer each other's requests.
 final class StubURLProtocol: URLProtocol, @unchecked Sendable {
 
-    /// Réponse à servir pour une requête donnée.
+    /// The response to serve for a given request.
     struct Stub {
         let statusCode: Int
         let body: Data
-        /// Erreur réseau à lever au lieu de répondre — pour éprouver les
-        /// chemins d'échec, qui sont la moitié de l'intérêt d'un client d'API.
+        /// A network error to throw instead of responding — to exercise
+        /// failure paths, which are half the point of testing an API client.
         let failure: Error?
 
         init(statusCode: Int = 200, body: Data = Data(), failure: Error? = nil) {
@@ -37,10 +37,10 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         }
     }
 
-    // MARK: - Table des réponses
+    // MARK: - Response table
 
-    /// Requête telle qu'elle est réellement partie — ce qui permet de vérifier
-    /// non seulement OÙ un client appelle, mais COMMENT il s'annonce.
+    /// The request as it actually went out — this lets you verify
+    /// not just WHERE a client calls, but HOW it identifies itself.
     struct Capture {
         let url: URL
         let headers: [String: String]
@@ -53,32 +53,32 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     private static let lock = NSLock()
-    /// Prédicat sur l'URL → réponse. Le premier qui matche gagne.
+    /// A predicate on the URL → response. The first match wins.
     nonisolated(unsafe) private static var stubs: [(match: (URL) -> Bool, stub: Stub)] = []
-    /// Requêtes réellement émises, dans l'ordre.
+    /// Requests actually emitted, in order.
     nonisolated(unsafe) private static var captures: [Capture] = []
 
-    /// Arme l'interception et vide la table. À appeler au début de chaque test.
+    /// Arms interception and clears the table. Call at the start of each test.
     static func start() {
         lock.lock(); stubs = []; captures = []; lock.unlock()
         URLProtocol.registerClass(StubURLProtocol.self)
     }
 
-    /// Désarme. À appeler en `defer`, sinon l'interception fuit sur les tests
-    /// suivants et les fait échouer de façon incompréhensible.
+    /// Disarms it. Call it in a `defer`, otherwise interception leaks into the
+    /// following tests and makes them fail incomprehensibly.
     static func stop() {
         URLProtocol.unregisterClass(StubURLProtocol.self)
         lock.lock(); stubs = []; captures = []; lock.unlock()
     }
 
-    /// Sert `stub` à toute URL dont le texte contient `fragment`.
+    /// Serves `stub` to any URL whose text contains `fragment`.
     static func on(_ fragment: String, _ stub: Stub) {
         lock.lock()
         stubs.append((match: { $0.absoluteString.contains(fragment) }, stub: stub))
         lock.unlock()
     }
 
-    /// Sert `stub` à toute requête non déjà couverte.
+    /// Serves `stub` to any request not already covered.
     static func onAny(_ stub: Stub) {
         lock.lock()
         stubs.append((match: { _ in true }, stub: stub))
@@ -90,7 +90,7 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         return captures.map(\.url)
     }
 
-    /// Requêtes émises, avec leurs en-têtes et leur corps.
+    /// Requests emitted, with their headers and body.
     static var requests: [Capture] {
         lock.lock(); defer { lock.unlock() }
         return captures
@@ -104,10 +104,10 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         return stubs.first { $0.match(url) }?.stub
     }
 
-    /// ⚠️ `URLProtocol` reçoit le corps sous forme de FLUX, pas de `Data` :
-    /// `httpBody` est presque toujours `nil` ici, même quand l'appelant l'a
-    /// renseigné. Sans cette lecture du flux, toute vérification portant sur le
-    /// corps passerait à côté et ne testerait rien.
+    /// ⚠️ `URLProtocol` receives the body as a STREAM, not `Data`:
+    /// `httpBody` is almost always `nil` here, even when the caller set it.
+    /// Without reading this stream, any check on the
+    /// body would miss it and test nothing.
     private static func corps(de requete: URLRequest) -> Data? {
         if let direct = requete.httpBody { return direct }
         guard let flux = requete.httpBodyStream else { return nil }
@@ -134,9 +134,9 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let stub = Self.stub(for: request, url: url) else {
-            // Aucune réponse prévue : on échoue explicitement plutôt que de
-            // laisser la requête partir sur le vrai réseau. Un test qui appelle
-            // une URL non prévue doit le savoir.
+            // No response planned: fail explicitly rather than
+            // letting the request go out over the real network. A test that calls
+            // an unplanned URL needs to know about it.
             client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
             return
         }

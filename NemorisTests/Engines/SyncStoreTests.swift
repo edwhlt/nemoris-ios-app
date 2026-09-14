@@ -1,8 +1,8 @@
 
-// Harness de tests SyncPayloadStore — compilé standalone via run_sync_tests.sh
-// avec les fichiers RÉELS SyncSchema.swift + SyncPayloadStore.swift (aucune
-// copie de logique). Couvre les régressions de la session L.1 (overflow
-// limit .max) et les sémantiques de conflit L.2.
+// SyncPayloadStore test harness — compiled standalone via run_sync_tests.sh
+// against the REAL files SyncSchema.swift + SyncPayloadStore.swift (no
+// logic copied). Covers the L.1 session regressions (limit .max
+// overflow) and the L.2 conflict semantics.
 
 private let TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -11,17 +11,17 @@ import SQLite3
 import Testing
 @testable import Nemoris
 
-/// Couche SQLite de la synchronisation CloudKit.
+/// The SQLite layer of CloudKit sync.
 ///
-/// ⚠️ Les quinze scénarios partagent DEUX bases (un appareil source, un
-/// appareil récepteur) et s'enchaînent dans un ordre imposé — chacun s'appuie
-/// sur l'état laissé par les précédents. Les séparer en tests indépendants
-/// changerait leur sémantique, ce qu'on ne peut pas se permettre sur la couche
-/// qui décide quelles données survivent à une fusion entre appareils.
+/// ⚠️ The fifteen scenarios share TWO databases (a source device, a
+/// receiving device) and run in a fixed order — each one relies
+/// on the state left by the previous ones. Splitting them into independent tests
+/// would change their semantics, which isn't an option on the layer
+/// that decides which data survives a merge between devices.
 @Suite("Synchronisation — couche SQLite")
 struct SyncStoreEngineTests {
 
-    /// Raccourci de portée : les scénarios sont statiques et s'appellent entre eux.
+    /// A scoping shortcut: the scenarios are static and call each other.
     private typealias S = SyncStoreEngineTests
 
     @Test("Les quinze scénarios de synchronisation, dans l'ordre")
@@ -31,12 +31,12 @@ struct SyncStoreEngineTests {
         try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        // Base "B" = appareil local qui reçoit les changements distants.
+        // Database "B" = the local device receiving remote changes.
         let urlB = dir.appendingPathComponent("deviceB.sqlite")
         S.makeDevice(urlB)
         let storeB = SyncPayloadStore(databaseURL: urlB)
 
-        // Base "A" = appareil source des payloads.
+        // Database "A" = the source device for the payloads.
         let urlA = dir.appendingPathComponent("deviceA.sqlite")
         S.makeDevice(urlA)
         let storeA = SyncPayloadStore(databaseURL: urlA)
@@ -61,8 +61,8 @@ struct SyncStoreEngineTests {
 
     // MARK: - Setup
 
-    /// Crée une base reproduisant les 7 tables cœur + infra sync + triggers,
-    /// via les VRAIS statements de SyncSchema (mêmes DDL que la migration v40).
+    /// Creates a database reproducing the 7 core tables + sync infra + triggers,
+    /// via the REAL SyncSchema statements (the same DDL as migration v40).
     static func makeDevice(_ url: URL) {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK, let db else { fatalError("open \(url)") }
@@ -92,7 +92,7 @@ struct SyncStoreEngineTests {
                 PRIMARY KEY (transaction_id, tag_id)
             );
             """,
-            // — Sous-ensemble L.3 : tricount (tag-link généralisé) + investments (adoption external_id)
+            // — L.3 subset: tricount (generalized tag-link) + investments (external_id adoption)
             "CREATE TABLE tricount_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, tricount_key TEXT NOT NULL, title TEXT NOT NULL, my_name TEXT NOT NULL DEFAULT '', fetched_at TEXT NOT NULL DEFAULT '');",
             "CREATE TABLE tricount_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER NOT NULL REFERENCES tricount_groups(id) ON DELETE CASCADE, who_paid TEXT NOT NULL DEFAULT '', total REAL NOT NULL DEFAULT 0, date TEXT NOT NULL DEFAULT '', user_category_id INTEGER, linked_transaction_id INTEGER REFERENCES transactions(id));",
             """
@@ -102,7 +102,7 @@ struct SyncStoreEngineTests {
                 PRIMARY KEY (entry_id, tag_id)
             );
             """,
-            // — Remboursement unifié (v44, AXE R) : XOR transaction_id/tricount_entry_id.
+            // — Unified reimbursement (v44, AXE R): transaction_id/tricount_entry_id XOR.
             """
             CREATE TABLE reimbursements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,10 +115,10 @@ struct SyncStoreEngineTests {
             """,
             "CREATE UNIQUE INDEX idx_reimbursements_transaction ON reimbursements(transaction_id) WHERE transaction_id IS NOT NULL;",
             "CREATE UNIQUE INDEX idx_reimbursements_tricount ON reimbursements(tricount_entry_id, payee_id) WHERE tricount_entry_id IS NOT NULL;",
-            // — Métadonnées de transaction libres (v46).
-            // ⚠️ Les DEUX FK sont NOT NULL : c'est le cas qui avait fait PERDRE
-            // des records en L.7 (un INSERT rejeté n'est jamais re-livré par
-            // CloudKit). Le report par `sync_deferred_rows` doit les rattraper.
+            // — Free-form transaction metadata (v46).
+            // ⚠️ BOTH FKs are NOT NULL: this is the case that caused records to be LOST
+            // in L.7 (a rejected INSERT is never re-delivered by
+            // CloudKit). Deferral via `sync_deferred_rows` must catch them.
             "CREATE TABLE transaction_metadata_keys (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, icon TEXT, sort_order INTEGER NOT NULL DEFAULT 0, role TEXT, created_at TEXT NOT NULL DEFAULT '');",
             "CREATE UNIQUE INDEX idx_tmk_name ON transaction_metadata_keys(name COLLATE NOCASE);",
             "CREATE TABLE transaction_metadata_values (id INTEGER PRIMARY KEY AUTOINCREMENT, transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE, key_id INTEGER NOT NULL REFERENCES transaction_metadata_keys(id) ON DELETE CASCADE, value TEXT NOT NULL);",
@@ -144,10 +144,10 @@ struct SyncStoreEngineTests {
 
     // MARK: - Tests
 
-    /// Fix "683 ordres perdus" : un record dont une FK NOT NULL pointe une
-    /// cible pas encore descendue (batchs CloudKit sans ordre garanti) doit
-    /// être DIFFÉRÉ puis rejoué quand la cible arrive — pas perdu. Cascade
-    /// complète : l'ordre attend sa position, qui attend son compte.
+    /// The "683 lost orders" fix: a record whose NOT NULL FK points to a
+    /// target that hasn't arrived yet (CloudKit batches with no guaranteed order) must
+    /// be DEFERRED then replayed once the target arrives — not lost. A
+    /// full cascade: the order waits on its position, which waits on its account.
     static func t13_deferredNotNullFK(_ storeA: SyncPayloadStore, _ urlA: URL,
                                       _ storeB: SyncPayloadStore, _ urlB: URL) {
         var accUuid = "", posUuid = "", ordUuid = ""
@@ -165,7 +165,7 @@ struct SyncStoreEngineTests {
             S.check("T13 payloads générés", false, "payloadJSON nil"); return
         }
 
-        // Batch 1 : l'ORDRE seul — sa position n'existe pas encore sur B.
+        // Batch 1: the ORDER alone — its position doesn't exist on B yet.
         storeB.applyRemoteBatch(
             modifications: [.init(table: "investment_orders", uuid: ordUuid, payloadData: ordP, systemFields: Data([9]))],
             deletions: [])
@@ -178,9 +178,9 @@ struct SyncStoreEngineTests {
                   S.query(db, "SELECT length(system_fields) FROM sync_deferred_rows WHERE row_uuid='\(ordUuid)';") == "1", "")
         }
 
-        // Batch 2 : position et compte VOLONTAIREMENT dans le désordre — le
-        // tri interne (référencées d'abord) applique compte → position, puis
-        // le rejeu de fin de batch débloque l'ordre différé.
+        // Batch 2: position and account DELIBERATELY out of order — the
+        // internal sort (referenced-first) applies account → position, then
+        // the end-of-batch replay unblocks the deferred order.
         storeB.applyRemoteBatch(
             modifications: [
                 .init(table: "investment_positions", uuid: posUuid, payloadData: posP, systemFields: Data([8])),
@@ -199,13 +199,13 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// v46 : une valeur de métadonnée a DEUX FK NOT NULL (transaction + clé).
+    /// v46: a metadata value has TWO NOT NULL FKs (transaction + key).
     ///
-    /// ⚠️ C'est la configuration qui avait fait PERDRE 683 ordres en L.7 : un
-    /// record dont la FK NOT NULL n'est pas encore résolue voit son INSERT
-    /// rejeté, et CloudKit ne re-livre JAMAIS un record fetché non appliqué.
-    /// Le report (`sync_deferred_rows`, v43) doit donc le rattraper — et ici il
-    /// faut que les DEUX cibles arrivent avant qu'il ne passe.
+    /// ⚠️ This is the exact configuration that caused 683 orders to be LOST in L.7: a
+    /// record whose NOT NULL FK isn't resolved yet has its INSERT
+    /// rejected, and CloudKit NEVER re-delivers an unapplied fetched record.
+    /// Deferral (`sync_deferred_rows`, v43) must therefore catch it — and here
+    /// BOTH targets must arrive before it goes through.
     static func t15_metadataDoubleNotNullFK(_ storeA: SyncPayloadStore, _ urlA: URL,
                                             _ storeB: SyncPayloadStore, _ urlB: URL) {
         var keyUuid = "", txUuid = "", valueUuid = ""
@@ -228,7 +228,7 @@ struct SyncStoreEngineTests {
             S.check("T15 payloads générés", false, "payloadJSON nil"); return
         }
 
-        // Batch 1 : la valeur SEULE — ni sa transaction ni sa clé n'existent sur B.
+        // Batch 1: the value ALONE — neither its transaction nor its key exist on B.
         storeB.applyRemoteBatch(
             modifications: [.init(table: "transaction_metadata_values", uuid: valueUuid,
                                   payloadData: valueP, systemFields: Data([7]))],
@@ -240,7 +240,7 @@ struct SyncStoreEngineTests {
                   S.query(db, "SELECT COUNT(*) FROM sync_deferred_rows WHERE row_uuid='\(valueUuid)';") == "1", "")
         }
 
-        // Batch 2 : la clé seule — une seule des deux cibles, donc TOUJOURS bloqué.
+        // Batch 2: the key alone — only one of the two targets, so STILL blocked.
         storeB.applyRemoteBatch(
             modifications: [.init(table: "transaction_metadata_keys", uuid: keyUuid,
                                   payloadData: keyP, systemFields: Data([6]))],
@@ -250,8 +250,8 @@ struct SyncStoreEngineTests {
                   S.query(db, "SELECT COUNT(*) FROM transaction_metadata_values WHERE uuid='\(valueUuid)';") == "0", "")
         }
 
-        // Batch 3 : la transaction arrive — les deux cibles sont là, le rejeu
-        // de fin de batch débloque la valeur.
+        // Batch 3: the transaction arrives — both targets are there, the
+        // end-of-batch replay unblocks the value.
         storeB.applyRemoteBatch(
             modifications: [.init(table: "transactions", uuid: txUuid, payloadData: txP, systemFields: Data([5]))],
             deletions: [])
@@ -271,12 +271,12 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// v44 AXE R : le CHECK XOR (transaction_id / tricount_entry_id) n'est pas
-    /// qu'une contrainte d'intégrité — il permet au mécanisme de report (v43)
-    /// de rattraper une ligne `reimbursements` dont la transaction cible
-    /// arrive APRÈS (batchs CloudKit sans ordre garanti). Sans lui, l'INSERT
-    /// réussirait avec transaction_id ET tricount_entry_id à NULL (ligne
-    /// fantôme jamais réparée) au lieu d'échouer et d'être différée.
+    /// v44 AXE R: the XOR CHECK (transaction_id / tricount_entry_id) isn't
+    /// just an integrity constraint — it lets the deferral mechanism (v43)
+    /// catch a `reimbursements` row whose target transaction
+    /// arrives LATER (CloudKit batches with no guaranteed order). Without it, the INSERT
+    /// would succeed with BOTH transaction_id AND tricount_entry_id NULL (a phantom
+    /// row never repaired) instead of failing and being deferred.
     static func t14_reimbursementXorDeferral(_ storeA: SyncPayloadStore, _ urlA: URL,
                                              _ storeB: SyncPayloadStore, _ urlB: URL) {
         var payeeUuid = "", txUuid = "", reimbUuid = ""
@@ -294,13 +294,13 @@ struct SyncStoreEngineTests {
             S.check("T14 payloads générés", false, "payloadJSON nil"); return
         }
 
-        // Précondition : le payee existe déjà côté B (FK payee_id résolue OK)
-        // — seule la FK transaction_id doit poser problème.
+        // Precondition: the payee already exists on B (payee_id FK resolves OK)
+        // — only the transaction_id FK should be a problem.
         S.setSuppress(urlB, true)
         S.check("T14 apply payee (précondition)", storeB.applyRemoteRecord(table: "payees", payloadData: payeeP) == .applied, "")
         S.setSuppress(urlB, false)
 
-        // Batch 1 : le remboursement seul — sa transaction n'existe pas encore sur B.
+        // Batch 1: the reimbursement alone — its transaction doesn't exist on B yet.
         storeB.applyRemoteBatch(
             modifications: [.init(table: "reimbursements", uuid: reimbUuid, payloadData: reimbP, systemFields: Data([9]))],
             deletions: [])
@@ -311,8 +311,8 @@ struct SyncStoreEngineTests {
                   S.query(db, "SELECT COUNT(*) FROM sync_deferred_rows WHERE row_uuid='\(reimbUuid)';") == "1", "")
         }
 
-        // Batch 2 : la transaction arrive — le rejeu de fin de batch débloque
-        // le remboursement différé.
+        // Batch 2: the transaction arrives — the end-of-batch replay unblocks
+        // the deferred reimbursement.
         storeB.applyRemoteBatch(
             modifications: [.init(table: "transactions", uuid: txUuid, payloadData: txP, systemFields: Data([8]))],
             deletions: [])
@@ -328,8 +328,8 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// Régression session L.1 : `Int32(Int.max)` crashait. Le clamp doit
-    /// rendre TOUTES les rows sans surflow.
+    /// L.1 session regression: `Int32(Int.max)` used to crash. The clamp must
+    /// make EVERY row overflow-free.
     static func t1_limitMax(_ store: SyncPayloadStore, _ url: URL) {
         S.withDB(url) { db in
             S.exec(db, "INSERT INTO tags (name) VALUES ('a'), ('b'), ('c');")
@@ -344,8 +344,8 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// Roundtrip A→B : payee + transaction + tag. Sur B les ids locaux
-    /// diffèrent (décalés exprès) — la FK doit être résolue via uuid.
+    /// A→B roundtrip: payee + transaction + tag. On B the local ids
+    /// differ (deliberately shifted) — the FK must resolve via uuid.
     static func t2_roundtripFKTags(_ storeA: SyncPayloadStore, _ urlA: URL,
                                    _ storeB: SyncPayloadStore, _ urlB: URL) {
         var payeeUuid = "", txUuid = "", tagUuid = ""
@@ -363,12 +363,12 @@ struct SyncStoreEngineTests {
               let tagPayload = storeA.payloadJSON(table: "tags", uuid: tagUuid) else {
             S.check("T2 payloads générés", false, "payloadJSON nil"); return
         }
-        // Vérifie le format : FK en uuid dans "r", tags dans "g".
+        // Verifies the format: FK as uuid in "r", tags in "g".
         let obj = try! JSONSerialization.jsonObject(with: txPayload) as! [String: Any]
         S.check("T2 FK sérialisée en uuid", (obj["r"] as? [String: String])?["payee_id"] == payeeUuid, "r=\(String(describing: obj["r"]))")
         S.check("T2 tags embarqués", (obj["g"] as? [String]) == [tagUuid], "g=\(String(describing: obj["g"]))")
 
-        // Décale les ids sur B pour prouver que la résolution passe par uuid.
+        // Shifts the ids on B to prove resolution goes through uuid.
         S.withDB(urlB) { db in
             S.exec(db, "INSERT INTO sync_meta (key, value) VALUES ('suppress_triggers', '1') ON CONFLICT(key) DO UPDATE SET value='1';")
             S.exec(db, "INSERT INTO payees (id, name, uuid, updated_at) VALUES (77, 'décalage', lower(hex(randomblob(16))), '2020-01-01T00:00:00.000Z');")
@@ -387,7 +387,7 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// LWW : un payload plus VIEUX que la row locale est ignoré.
+    /// LWW: a payload OLDER than the local row is ignored.
     static func t3_lww(_ store: SyncPayloadStore, _ url: URL) {
         var uuid = ""
         S.withDB(url) { db in
@@ -405,7 +405,7 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// FK vers une cible pas encore arrivée → NULL + unresolved, résolue après.
+    /// A FK to a target that hasn't arrived yet → NULL + unresolved, resolved later.
     static func t4_unresolvedRefs(_ store: SyncPayloadStore, _ url: URL) {
         let payeeUuid = String(repeating: "1", count: 32)
         let txUuid = String(repeating: "2", count: 32)
@@ -428,7 +428,7 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// Suppression distante d'une row propre : appliquée, liens tags nettoyés.
+    /// A remote deletion of a clean row: applied, tag links cleaned up.
     static func t5_deletion(_ store: SyncPayloadStore, _ url: URL) {
         var txUuid = "", txId = ""
         S.withDB(url) { db in
@@ -438,7 +438,7 @@ struct SyncStoreEngineTests {
             txId = query(db, "SELECT id FROM transactions WHERE uuid='\(txUuid)';")
             let tagId = query(db, "SELECT id FROM tags WHERE name='t5tag';")
             S.exec(db, "INSERT INTO transaction_tags VALUES (\(txId), \(tagId));")
-            S.exec(db, "DELETE FROM sync_pending;")   // row "propre" (déjà synchronisée)
+            S.exec(db, "DELETE FROM sync_pending;")   // a "clean" row (already synced)
         }
         S.setSuppress(url, true)
         store.applyRemoteDeletion(table: "transactions", uuid: txUuid)
@@ -449,8 +449,8 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// Delete-vs-update : la row a une édition locale PENDING → la
-    /// suppression distante est ignorée, l'édition survit.
+    /// Delete-vs-update: the row has a PENDING local edit → the
+    /// remote deletion is ignored, the edit survives.
     static func t6_deleteVsUpdate(_ store: SyncPayloadStore, _ url: URL) {
         var uuid = ""
         S.withDB(url) { db in
@@ -467,8 +467,8 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// Adoption : tag 'vacances' créé indépendamment des deux côtés →
-    /// fusion d'identités sur l'uuid distant + tombstone de l'ancien.
+    /// Adoption: a 'vacances' tag created independently on both sides →
+    /// identity merge on the remote uuid + tombstone for the old one.
     static func t7_tagAdoption(_ store: SyncPayloadStore, _ url: URL) {
         var oldUuid = ""
         S.withDB(url) { db in
@@ -476,8 +476,8 @@ struct SyncStoreEngineTests {
             S.exec(db, "INSERT INTO tags (name) VALUES ('vacances');")   // → pending, uuid local
             oldUuid = query(db, "SELECT uuid FROM tags WHERE name = 'vacances';")
         }
-        // Règle déterministe : le plus PETIT uuid gagne — remote "000…1" bat
-        // n'importe quel uuid local aléatoire.
+        // A deterministic rule: the SMALLEST uuid wins — remote "000…1" beats
+        // any random local uuid.
         let remoteUuid = String(repeating: "0", count: 31) + "1"
         let remote: [String: Any] = ["u": remoteUuid, "t": "2999-01-01T00:00:00.000Z",
                                      "v": ["name": "Vacances", "color": "#00FF00"]]
@@ -493,8 +493,8 @@ struct SyncStoreEngineTests {
             S.check("T7 pending de l'ancien uuid purgé", query(db, "SELECT COUNT(*) FROM sync_pending WHERE row_uuid='\(oldUuid)';") == "0", "")
         }
 
-        // Sens inverse : un remote au uuid PLUS GRAND ne vole pas l'identité
-        // (anti ping-pong — c'est l'autre appareil qui adoptera notre uuid).
+        // The reverse case: a remote with a LARGER uuid doesn't steal
+        // identity (anti ping-pong — it's the other device that will adopt our uuid).
         let bigUuid = String(repeating: "f", count: 32)
         let big: [String: Any] = ["u": bigUuid, "t": "2999-06-01T00:00:00.000Z", "v": ["name": "vacances"]]
         S.setSuppress(url, true)
@@ -507,7 +507,7 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// L.3 : le mécanisme "g" généralisé fonctionne pour tricount_entries.
+    /// L.3: the generalized "g" mechanism works for tricount_entries.
     static func t8_tricountTagLinks(_ storeA: SyncPayloadStore, _ urlA: URL,
                                     _ storeB: SyncPayloadStore, _ urlB: URL) {
         var groupUuid = "", entryUuid = "", tagUuid = ""
@@ -542,8 +542,8 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// L.3 : deux appareils qui importent le même trade Binance (même
-    /// external_id) → adoption au lieu d'un échec d'INSERT en boucle.
+    /// L.3: two devices importing the same Binance trade (same
+    /// external_id) → adoption instead of a looping INSERT failure.
     static func t9_orderExternalIdAdoption(_ store: SyncPayloadStore, _ url: URL) {
         var posUuid = "", oldUuid = ""
         S.withDB(url) { db in
@@ -571,11 +571,11 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// Purge du seed sur base vierge (flux "Rejoindre via iCloud") : les
-    /// catégories/payment_types usine d'une base SANS transaction sont
-    /// retirées avant la descente du coffre — pas de doublons de seed.
+    /// Purging the seed on a virgin database (the "Join via iCloud" flow): the
+    /// factory-seeded categories/payment_types of a database with NO transactions are
+    /// removed before the vault comes down — no seed duplicates.
     static func t10_purgeVirginSeed(_ storeB: SyncPayloadStore, _ urlB: URL) {
-        // Base C fraîche : seed usine, zéro transaction.
+        // A fresh database C: factory seed, zero transactions.
         let urlC = urlB.deletingLastPathComponent().appendingPathComponent("deviceC.sqlite")
         S.makeDevice(urlC)
         let storeC = SyncPayloadStore(databaseURL: urlC)
@@ -591,13 +591,13 @@ struct SyncStoreEngineTests {
             S.check("T10 la catégorie perso survit", query(db, "SELECT COUNT(*) FROM categories WHERE name='Ma catégorie perso';") == "1", "")
             S.check("T10 seed usine retiré", query(db, "SELECT COUNT(*) FROM categories WHERE name IN ('Transport','Carburant');") == "0", "")
         }
-        // Base B (a des transactions) : purge = no-op.
+        // Database B (has transactions): the purge is a no-op.
         let purgedB = storeB.purgeVirginSeedReferenceData()
         S.check("T10 no-op si base utilisée", purgedB == 0, "purgé=\(purgedB)")
     }
 
-    /// Adoption PROACTIVE par nom : catégorie seed présente des deux côtés
-    /// (aucune contrainte UNIQUE) → fusion au lieu d'un doublon silencieux.
+    /// PROACTIVE adoption by name: a seed category present on both sides
+    /// (no UNIQUE constraint) → merged instead of a silent duplicate.
     static func t11_categoryNameAdoption(_ store: SyncPayloadStore, _ url: URL) {
         var oldUuid = ""
         S.withDB(url) { db in
@@ -618,8 +618,8 @@ struct SyncStoreEngineTests {
             S.check("T11 tombstone ancien uuid", query(db, "SELECT COUNT(*) FROM sync_tombstones WHERE row_uuid='\(oldUuid)';") == "1", "")
         }
 
-        // Chemin proactif, sens inverse : remote homonyme au uuid plus grand
-        // → PAS d'insert (doublon évité), pas d'adoption (local gagne).
+        // The proactive path, reversed: a same-named remote with a larger uuid
+        // → NO insert (duplicate avoided), no adoption (local wins).
         let bigUuid = String(repeating: "f", count: 32)
         let big: [String: Any] = ["u": bigUuid, "t": "2999-06-01T00:00:00.000Z", "v": ["name": "Santé"]]
         S.setSuppress(url, true)
@@ -632,8 +632,8 @@ struct SyncStoreEngineTests {
         }
     }
 
-    /// Réparation one-shot des doublons seed (post-L.1) : keeper = plus petit
-    /// uuid, FK remappées, tombstones propagées — hiérarchie parent incluse.
+    /// One-shot seed-duplicate repair (post-L.1): keeper = smallest
+    /// uuid, FKs remapped, tombstones propagated — parent hierarchy included.
     static func t12_dedupReferenceDuplicates(_ store: SyncPayloadStore, _ url: URL) {
         let keepUuid = String(repeating: "a", count: 32)
         let dupeUuid = String(repeating: "f", count: 32)
@@ -646,10 +646,10 @@ struct SyncStoreEngineTests {
             S.exec(db, "INSERT INTO categories (name, uuid, updated_at) VALUES ('Courses', '\(dupeUuid)', '2026-01-01T00:00:00.000Z');")
             keepId = query(db, "SELECT id FROM categories WHERE uuid='\(keepUuid)';")
             dupeId = query(db, "SELECT id FROM categories WHERE uuid='\(dupeUuid)';")
-            // Sous-catégorie "Bio" sous CHAQUE doublon → même clé (nom+parent).
+            // A "Bio" subcategory under EACH duplicate → the same key (name+parent).
             S.exec(db, "INSERT INTO categories (name, parent_id, uuid, updated_at) VALUES ('Bio', \(keepId), '\(keepChildUuid)', '2026-01-01T00:00:00.000Z');")
             S.exec(db, "INSERT INTO categories (name, parent_id, uuid, updated_at) VALUES ('Bio', \(dupeId), '\(dupeChildUuid)', '2026-01-01T00:00:00.000Z');")
-            // Une transaction rattachée au DOUBLON → doit être remappée.
+            // A transaction attached to the DUPLICATE → must be remapped.
             S.exec(db, "INSERT INTO transactions (category_id, amount) VALUES (\(dupeId), -12.5);")
             // Doublon payment_types.
             S.exec(db, "INSERT INTO payment_types (name, uuid, updated_at) VALUES ('CB test', '\(keepUuid)', '2026-01-01T00:00:00.000Z');")
@@ -671,8 +671,8 @@ struct SyncStoreEngineTests {
 
     // MARK: - Helpers
 
-    /// `sourceLocation` propage la position de l'appelant : sans lui, tout
-    /// échec pointerait vers cette ligne au lieu du scénario concerné.
+    /// `sourceLocation` propagates the caller's position: without it, every
+    /// failure would point to this line instead of the actual scenario.
     static func check(_ label: String, _ ok: Bool, _ detail: String,
                       sourceLocation: SourceLocation = #_sourceLocation) {
         #expect(ok, "\(label)\(detail.isEmpty ? "" : " — \(detail)")",

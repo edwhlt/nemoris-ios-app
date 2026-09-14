@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Client Solana (JSON-RPC).
+/// The Solana client (JSON-RPC).
 ///
-/// Deux pièges propres à ce protocole : les quantités arrivent en **chaînes**
-/// (les entiers dépassent la précision d'un JSON number) et une erreur métier
-/// est renvoyée avec un **statut HTTP 200**, dans le corps. Un client qui ne
-/// regarde que le code HTTP conclurait au succès sur une adresse invalide.
+/// Two traps specific to this protocol: quantities arrive as **strings**
+/// (integers exceed a JSON number's precision), and a business error
+/// is returned with an **HTTP 200 status**, inside the body. A client that
+/// only looks at the HTTP code would conclude success on an invalid address.
 extension NetworkSeam {
 
 @Suite("SolanaAPIClient")
@@ -54,7 +54,7 @@ struct SolanaAPIClientTests {
     func decimalesAppliquees() async throws {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
-        // USDC a 6 décimales : 1 500 000 unités brutes valent 1,50 USDC.
+        // USDC has 6 decimals: 1,500,000 raw units are worth 1.50 USDC.
         StubURLProtocol.on(hote, .json(reponseTokens([
             compteSPL(mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
                       brut: "1500000", decimales: 6)
@@ -70,8 +70,8 @@ struct SolanaAPIClientTests {
     func comptesVidesEcartes() async throws {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
-        // Le RPC renvoie les comptes fermés avec un solde nul : les afficher
-        // remplirait le portefeuille de lignes à 0 que l'utilisateur ne détient plus.
+        // The RPC returns closed accounts with a zero balance: displaying them
+        // would fill the portfolio with 0-value lines the user no longer holds.
         StubURLProtocol.on(hote, .json(reponseTokens([
             compteSPL(mint: "MintActif", brut: "1000000", decimales: 6),
             compteSPL(mint: "MintVide", brut: "0", decimales: 6)
@@ -85,8 +85,8 @@ struct SolanaAPIClientTests {
     func grandeQuantite() async throws {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
-        // C'est pour ce cas que le protocole transporte la quantité en chaîne :
-        // un mème-coin à 5 décimales dépasse vite la précision d'un entier JSON.
+        // This is exactly why the protocol carries the quantity as a string:
+        // a meme-coin with 5 decimals quickly exceeds a JSON integer's precision.
         StubURLProtocol.on(hote, .json(reponseTokens([
             compteSPL(mint: "MintBonk", brut: "123456789000000", decimales: 5)
         ])))
@@ -105,13 +105,13 @@ struct SolanaAPIClientTests {
         #expect(try await SolanaAPIClient().fetchTokenAccounts(address: "AdresseTest").isEmpty)
     }
 
-    // MARK: - Échecs
+    // MARK: - Failures
 
     @Test("Une erreur RPC servie en HTTP 200 est bien détectée")
     func erreurDansUnSucces() async throws {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
-        // Le piège central de ce protocole : le statut HTTP dit « tout va bien ».
+        // The central trap of this protocol: the HTTP status says "everything's fine".
         StubURLProtocol.on(hote, .json(
             "{\"error\":{\"code\":-32602,\"message\":\"Invalid param: WrongSize\"}}"))
 

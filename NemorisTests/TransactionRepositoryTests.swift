@@ -2,18 +2,18 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Tests du repository central : c'est lui qui écrit les données que
-/// l'utilisateur ne peut pas reconstituer s'il les perd.
+/// Tests of the central repository: it's the one that writes the data
+/// the user can't reconstruct if it's lost.
 @Suite("TransactionRepository")
 struct TransactionRepositoryTests {
 
-    /// Base neuve + repository branché dessus, pour chaque test.
+    /// A fresh database + a repository wired to it, for each test.
     private func fixture() throws -> (TestDatabase, TransactionRepository) {
         let db = try TestDatabase()
         return (db, TransactionRepository(store: db.store))
     }
 
-    // MARK: - Référentiel
+    // MARK: - Reference data
 
     @Test("Un compte créé est relu avec son nom et son type")
     func compte() throws {
@@ -60,7 +60,7 @@ struct TransactionRepositoryTests {
         #expect(repo.moveCategory(id: feuille.id, toParentId: b.id))
         #expect(repo.fetchCategories().first { $0.id == feuille.id }?.parentId == b.id)
 
-        // Remonter à la racine
+        // Going back up to the root
         #expect(repo.moveCategory(id: feuille.id, toParentId: nil))
         #expect(repo.fetchCategories().first { $0.id == feuille.id }?.parentId == nil)
     }
@@ -185,13 +185,13 @@ struct TransactionRepositoryTests {
                                             paymentTypeId: nil, information: "x", amount: -1,
                                             date: date("2026-03-01"))!
 
-        // SQLite répond SQLITE_DONE à un DELETE qui ne touche aucune ligne :
-        // compter les instructions réussies surestimerait le total. Le cas se
-        // produit dès que deux appareils synchronisés suppriment en parallèle.
+        // SQLite returns SQLITE_DONE for a DELETE that touches no row:
+        // counting successful statements would overstate the total. This happens
+        // as soon as two synced devices delete in parallel.
         #expect(repo.deleteTransactions(ids: [existante, 999_998, 999_999]) == 1)
         #expect(db.count("transactions") == 0)
 
-        // Rejouer la même suppression ne compte plus rien.
+        // Replaying the same deletion counts nothing more.
         #expect(repo.deleteTransactions(ids: [existante]) == 0)
     }
 
@@ -203,7 +203,7 @@ struct TransactionRepositoryTests {
         #expect(repo.deleteTransactions(ids: []) == 0)
     }
 
-    // MARK: - Intégrité référentielle
+    // MARK: - Referential integrity
 
     @Test("Un compte portant des transactions ne peut pas être supprimé")
     func compteProtegeParSesTransactions() throws {
@@ -216,8 +216,8 @@ struct TransactionRepositoryTests {
                                        paymentTypeId: nil, information: "x", amount: -1,
                                        date: date("2026-03-01"))!
 
-        // Garde-fou délibéré : supprimer le compte détruirait un historique que
-        // l'utilisateur ne peut pas reconstituer. Il doit d'abord vider le compte.
+        // A deliberate safeguard: deleting the account would destroy history the
+        // user can't reconstruct. They must empty the account first.
         #expect(repo.deleteAccount(id: compte.id) == false)
         #expect(repo.fetchAccounts().count == 1)
         #expect(db.count("transactions") == 1)
@@ -285,7 +285,7 @@ struct TransactionRepositoryTests {
                                     paymentTypeId: nil, information: "t\(i)", amount: -10,
                                     date: date("2026-03-0\(i)"))
         }
-        // Une transaction sans catégorie ni tiers : elle ne doit compter nulle part.
+        // A transaction with no category or payee: it must count toward nothing.
         _ = repo.addTransaction(accountId: compte.id, tiersId: nil, categoryId: nil,
                                 paymentTypeId: nil, information: "orpheline", amount: -1,
                                 date: date("2026-03-04"))
@@ -295,7 +295,7 @@ struct TransactionRepositoryTests {
         #expect(repo.countTransactionsByPayee()[payeeId] == 3)
     }
 
-    // MARK: - Étiquettes
+    // MARK: - Tags
 
     @Test("findOrCreateTag ne crée pas de doublon")
     func tagIdempotent() throws {

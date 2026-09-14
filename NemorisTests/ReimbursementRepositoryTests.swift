@@ -3,13 +3,13 @@ import SQLite3
 import Testing
 @testable import Nemoris
 
-/// Tests de la table unifiée `reimbursements` (migration v44).
+/// Tests for the unified `reimbursements` table (migration v44).
 ///
-/// Elle porte une contrainte XOR : une ligne est rattachée soit à une
-/// transaction, soit à une entrée Tricount, jamais aux deux ni à aucune. Cette
-/// contrainte n'est pas décorative — c'est elle qui fait échouer l'insertion
-/// d'une ligne orpheline quand un lot de synchronisation arrive dans le
-/// désordre, permettant au mécanisme de report de la rejouer plus tard.
+/// It carries an XOR constraint: a row is attached to either a
+/// transaction or a Tricount entry, never both nor neither. This
+/// constraint isn't decorative — it's what makes inserting an orphan
+/// row fail when a sync batch arrives out of
+/// order, letting the deferral mechanism replay it later.
 @Suite("ReimbursementRepository")
 struct ReimbursementRepositoryTests {
 
@@ -18,7 +18,7 @@ struct ReimbursementRepositoryTests {
         return (db, TransactionRepository(store: db.store), ReimbursementRepository(store: db.store))
     }
 
-    /// Compte + transaction + tiers créancier, socle commun aux tests.
+    /// An account + transaction + creditor payee, the common fixture for these tests.
     private func contexte(_ repo: TransactionRepository) -> (transactionId: Int, payeeId: Int) {
         _ = repo.addAccount(name: "Courant")
         let compte = repo.fetchAccounts()[0]
@@ -59,23 +59,23 @@ struct ReimbursementRepositoryTests {
         #expect(rembours.fetchReimbursement(forTransaction: txId) == nil)
     }
 
-    /// Désactivé tant que la cause n'est pas établie — un test rouge dont on
-    /// ignore la cause finit par être ignoré, et le reste de la suite avec lui.
+    /// Disabled until the cause is established — a red test whose
+    /// cause is unknown ends up being ignored, and the rest of the suite with it.
     ///
-    /// Symptôme : réassigner un créancier sur une même transaction passe quand
-    /// ce test tourne SEUL, et échoue dès que d'autres tests tournent dans le
-    /// même processus. Reproduit trois fois sur trois. Sérialiser la suite n'y
-    /// change rien : ce n'est donc pas une course entre tests parallèles, alors
-    /// que chacun possède pourtant sa propre base temporaire.
+    /// Symptom: reassigning a creditor on the same transaction passes when
+    /// this test runs ALONE, and fails as soon as other tests run in the
+    /// same process. Reproduced three times out of three. Serializing the suite
+    /// changes nothing: so it isn't a race between parallel tests, even
+    /// though each one has its own temp database.
     ///
-    /// Écartés par lecture du code : le verrouillage SQLite (busy_timeout est
-    /// désormais posé partout), la clause ON CONFLICT sur index partiel (bien
-    /// formée, sinon le premier assignement échouerait aussi), et la récursion
-    /// des déclencheurs de synchronisation (désactivée par défaut).
+    /// Ruled out by reading the code: SQLite locking (busy_timeout is
+    /// now set everywhere), the ON CONFLICT clause on a partial index (well
+    /// formed, otherwise the first assignment would also fail), and sync
+    /// trigger recursion (disabled by default).
     ///
-    /// Prochaine étape : `SQLiteStore.writeSingle` ne renvoie qu'un booléen et
-    /// masque le code d'erreur SQLite. Remonter `sqlite3_errmsg` devrait trancher
-    /// immédiatement — ici comme sur les cas suivants.
+    /// Next step: `SQLiteStore.writeSingle` only returns a boolean and
+    /// hides the SQLite error code. Surfacing `sqlite3_errmsg` should settle it
+    /// immediately — here as with the following cases.
     @Test("Une transaction ne porte qu'un seul remboursement")
     func cardinaliteUnAUn() throws {
         let (db, repo, rembours) = try fixture()
@@ -93,8 +93,8 @@ struct ReimbursementRepositoryTests {
         #expect(apresPremier == 1, "après le premier : \(apresPremier) ligne(s)")
         #expect(second, "réassignement refusé (papa=\(papa), maman=\(maman))")
 
-        // L'index unique partiel sur transaction_id impose le remplacement,
-        // pas l'accumulation.
+        // The partial unique index on transaction_id enforces replacement,
+        // not accumulation.
         #expect(apresSecond == 1, "après le second : \(apresSecond) ligne(s)")
         #expect(lu?.payeeId == maman,
                 "tiers relu : \(lu.map { String($0.payeeId) } ?? "aucun") au lieu de \(maman)")
@@ -139,13 +139,13 @@ struct ReimbursementRepositoryTests {
             } ?? false
         }
 
-        // Aucune origine : doit être rejeté.
+        // No origin at all: must be rejected.
         #expect(insere("""
             INSERT INTO reimbursements (transaction_id, tricount_entry_id, payee_id, status, uuid, updated_at)
             VALUES (NULL, NULL, 1, 'PENDING', 'u1', '2026-03-01T00:00:00.000Z');
             """) == false, "une ligne sans origine doit violer le CHECK")
 
-        // Les deux origines : doit être rejeté également.
+        // Both origins: must also be rejected.
         #expect(insere("""
             INSERT INTO reimbursements (transaction_id, tricount_entry_id, payee_id, status, uuid, updated_at)
             VALUES (1, 1, 1, 'PENDING', 'u2', '2026-03-01T00:00:00.000Z');

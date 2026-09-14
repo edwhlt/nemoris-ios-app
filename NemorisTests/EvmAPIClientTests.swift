@@ -2,11 +2,11 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Client EVM (Etherscan V2, six chaînes derrière un seul point d'entrée).
+/// The EVM client (Etherscan V2, six chains behind a single entry point).
 ///
-/// La chaîne visée voyage en paramètre `chainid` : une erreur à cet endroit
-/// interrogerait le bon portefeuille sur la mauvaise chaîne et rendrait un
-/// solde parfaitement plausible — donc invérifiable à l'œil.
+/// The target chain travels in the `chainid` parameter: a mistake here
+/// would query the right wallet on the wrong chain and return a
+/// perfectly plausible balance — so unverifiable by eye.
 extension NetworkSeam {
 
 @Suite("EvmAPIClient")
@@ -46,7 +46,7 @@ struct EvmAPIClientTests {
     func soldeIllisible() async throws {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
-        // Etherscan répond en texte quand l'adresse est mal formée.
+        // Etherscan responds in plain text when the address is malformed.
         StubURLProtocol.on(hote, .json(
             "{\"status\":\"0\",\"message\":\"NOTOK\",\"result\":\"Invalid address format\"}"))
 
@@ -55,7 +55,7 @@ struct EvmAPIClientTests {
         }
     }
 
-    // MARK: - La chaîne visée
+    // MARK: - The target chain
 
     @Test("La chaîne demandée est transmise dans la requête")
     func chaineTransmise() async throws {
@@ -80,7 +80,7 @@ struct EvmAPIClientTests {
         #expect(EvmAPIClient.internalChainID(forEtherscanChainID: 999_999) == nil)
     }
 
-    // MARK: - Clé d'API
+    // MARK: - API key
 
     @Test("Une clé vide est traitée comme une absence de clé")
     func cleVide() async throws {
@@ -88,8 +88,8 @@ struct EvmAPIClientTests {
         defer { StubURLProtocol.stop() }
         StubURLProtocol.on(hote, .json(soldeBrut("0")))
 
-        // Envoyer `apikey=` ferait rejeter la requête, alors que le service
-        // fonctionne parfaitement sans clé — à débit réduit.
+        // Sending `apikey=` would get the request rejected, whereas the service
+        // works perfectly fine without a key — at a reduced rate.
         #expect(EvmAPIClient(apiKey: "   ").apiKey == nil)
         _ = try await EvmAPIClient(apiKey: "").fetchNativeBalance(address: "0xabc", chainId: 1)
         #expect(!StubURLProtocol.requestedURLs.contains { $0.absoluteString.contains("apikey") })
@@ -107,14 +107,14 @@ struct EvmAPIClientTests {
                 "URLs : \(StubURLProtocol.requestedURLs.map(\.absoluteString))")
     }
 
-    // MARK: - Découverte des jetons
+    // MARK: - Token discovery
 
     @Test("Les contrats sont dédupliqués, la première occurrence gagne")
     func contratsDedupliques() async throws {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
-        // L'historique des transferts contient plusieurs mouvements d'un même
-        // jeton : sans déduplication on interrogerait N fois le même solde.
+        // The transfer history contains several movements of the same
+        // token: without deduplication, the same balance would be queried N times.
         StubURLProtocol.on(hote, .json(reponseTransferts([
             transfert(contrat: "0xAAA", symbole: "USDC", decimales: "6"),
             transfert(contrat: "0xaaa", symbole: "USDC", decimales: "6"),
@@ -152,7 +152,7 @@ struct EvmAPIClientTests {
     func soldeJetonBrut() async throws {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
-        // La conversion appartient à l'appelant, qui seul connaît les décimales.
+        // The conversion belongs to the caller, who alone knows the decimals.
         StubURLProtocol.on(hote, .json(soldeBrut("123456789012345678901234567890")))
 
         let brut = try await EvmAPIClient().fetchTokenBalance(
@@ -161,7 +161,7 @@ struct EvmAPIClientTests {
                 "un passage par Double perdrait des chiffres significatifs")
     }
 
-    // MARK: - Échecs
+    // MARK: - Failures
 
     @Test("Un 429 est reconnu comme une limitation de débit")
     func limitationDeDebit() async throws {

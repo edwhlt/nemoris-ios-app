@@ -2,28 +2,28 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Échelle verticale des graphiques d'investissement.
+/// The vertical scale of investment charts.
 ///
-/// Le symptôme que ce moteur existe pour empêcher : changer de plage
-/// temporelle fait bien varier l'abscisse, mais l'ordonnée reste étirée par
-/// une valeur hors champ — la courbe se tasse sur quelques pixels et se lit
-/// comme une droite alors qu'elle bouge.
+/// The symptom this engine exists to prevent: switching time
+/// ranges does move the x-axis, but the y-axis stays stretched by
+/// an out-of-range value — the curve squeezes into a few pixels and reads
+/// like a flat line even though it's moving.
 @Suite("ChartYDomain")
 struct ChartYDomainTests {
 
-    // MARK: - Le cas qui a motivé le moteur
+    // MARK: - The case that motivated the engine
 
     @Test("Un PRU très éloigné n'impose pas l'échelle")
     func pruHorsPlageIgnoré() {
-        // Titre acheté 250 €, qui cote aujourd'hui autour de 40 €.
+        // A security bought at €250, trading today around €40.
         let domaine = ChartYDomain.compute(values: [39, 40, 41],
                                            references: [250],
                                            padding: 0.08,
                                            clampToZero: true)
 
         #expect(!domaine.contains(250))
-        // L'amplitude reste celle de la courbe (2 €) plus un padding modeste,
-        // pas les 211 € que le PRU imposerait.
+        // The amplitude stays that of the curve (€2) plus a modest padding,
+        // not the €211 the cost basis would impose.
         #expect(domaine.upperBound - domaine.lowerBound < 3)
         #expect(domaine.contains(39))
         #expect(domaine.contains(41))
@@ -31,8 +31,8 @@ struct ChartYDomainTests {
 
     @Test("Un PRU proche élargit bien le domaine")
     func pruProcheRetenu() {
-        // Ici le PRU est à portée : il doit rester visible, c'est son intérêt
-        // (seuil de break-even lisible sous la courbe).
+        // Here the cost basis is within range: it must stay visible, that's its point
+        // (a readable break-even threshold under the curve).
         let domaine = ChartYDomain.compute(values: [39, 40, 41],
                                            references: [38.5],
                                            padding: 0.08,
@@ -44,9 +44,9 @@ struct ChartYDomainTests {
 
     @Test("Le padding suit l'amplitude, pas la valeur absolue")
     func paddingProportionnelÀLAmplitude() {
-        // Régression du second défaut : un padding `lo * 0.92 ... hi * 1.08`
-        // sur une série 39–41 € donnait 35,9–44,3 — un padding valant quatre
-        // fois l'amplitude réelle, qui écrasait la courbe à lui seul.
+        // A regression of the second defect: a padding of `lo * 0.92 ... hi * 1.08`
+        // on a €39–41 series gave 35.9–44.3 — a padding worth four
+        // times the real amplitude, which crushed the curve all by itself.
         let domaine = ChartYDomain.compute(values: [39, 40, 41], padding: 0.08)
 
         let amplitudeSérie = 2.0
@@ -58,8 +58,8 @@ struct ChartYDomainTests {
 
     @Test("Changer de plage rééquilibre l'échelle")
     func échelleSuitLaPlage() {
-        // Même titre, deux fenêtres : la fenêtre courte doit obtenir une
-        // échelle serrée, sinon son mouvement propre reste invisible.
+        // The same security, two windows: the short window must get a
+        // tight scale, otherwise its own movement stays invisible.
         let longue = ChartYDomain.compute(values: [10, 55, 40, 41, 39, 40])
         let courte = ChartYDomain.compute(values: [41, 39, 40])
 
@@ -67,7 +67,7 @@ struct ChartYDomainTests {
                 < (longue.upperBound - longue.lowerBound) / 10)
     }
 
-    // MARK: - Séries dégénérées
+    // MARK: - Degenerate series
 
     @Test("Une série parfaitement plate garde une bande lisible")
     func sériePlate() {
@@ -80,8 +80,8 @@ struct ChartYDomainTests {
 
     @Test("Une série vide retombe sur les repères, puis sur le repli")
     func sérieVide() {
-        // Sans série, le repère redevient la seule information disponible et
-        // reprend à ce titre le droit de fixer l'échelle.
+        // Without a series, the reference point becomes the only information available and
+        // so regains the right to set the scale.
         let avecRepère = ChartYDomain.compute(values: [], references: [42])
         #expect(avecRepère.contains(42))
 
@@ -109,8 +109,8 @@ struct ChartYDomainTests {
 
     @Test("Une série entièrement nulle produit une plage valide")
     func sérieNulle() {
-        // Garde-fou : `ClosedRange` exige lower <= upper, un clamp à zéro sur
-        // une série elle-même à zéro pourrait sinon inverser la plage.
+        // A safeguard: `ClosedRange` requires lower <= upper, a clamp to zero on
+        // a series that's itself at zero could otherwise invert the range.
         let domaine = ChartYDomain.compute(values: [0, 0], clampToZero: true)
         #expect(domaine.lowerBound <= domaine.upperBound)
     }
@@ -126,8 +126,8 @@ struct ChartYDomainTests {
 
     @Test("La tolérance se mesure en fraction de l'amplitude")
     func toléranceRelative() {
-        // Amplitude 10 (40→50), tolérance 0,6 ⇒ un repère est retenu jusqu'à
-        // 6 unités sous la courbe, pas au-delà.
+        // Amplitude 10 (40→50), tolerance 0.6 ⇒ a reference point is kept up to
+        // 6 units below the curve, no further.
         let retenu = ChartYDomain.compute(values: [40, 50], references: [35],
                                           referenceTolerance: 0.6)
         #expect(retenu.contains(35))

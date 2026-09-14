@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Logique de présentation du budget.
+/// The budget's presentation logic.
 ///
-/// Le ViewModel est `@MainActor` et son `refresh()` lance une tâche détachée,
-/// donc non attendable de l'extérieur. Les tests visent ce qui est
-/// déterministe : les transformations d'état en mémoire, la navigation entre
-/// mois, et les écritures qui, elles, sont synchrones.
+/// The ViewModel is `@MainActor` and its `refresh()` launches a detached
+/// task, so it can't be awaited from outside. The tests target what's
+/// deterministic: in-memory state transformations, navigation between
+/// months, and writes, which are synchronous.
 @MainActor
 @Suite("BudgetViewModel")
 struct BudgetViewModelTests {
@@ -75,9 +75,9 @@ struct BudgetViewModelTests {
         let (db, vm, _) = try fixture()
         defer { db.destroy() }
 
-        // Les trois sources portent un didSet qui reconstruit la liste. C'est ce
-        // qui garantit qu'elle ne peut pas devenir obsolète, quel que soit
-        // l'ordre d'affectation — chargement, rafraîchissement, skip.
+        // The three sources each carry a didSet that rebuilds the list. That's
+        // what guarantees it can never go stale, whatever
+        // the assignment order — loading, refresh, skip.
         vm.previsions = [prevision(id: 10, motifId: 1)]
         #expect(vm.enrichedPrevisions[0].patternName == "Manuel", "aucun motif connu encore")
 
@@ -114,7 +114,7 @@ struct BudgetViewModelTests {
         #expect(vm.pendingPrevisions.map(\.prevision.id) == [1])
     }
 
-    // MARK: - Navigation entre mois
+    // MARK: - Navigation between months
 
     @Test("La navigation avance et recule d'un mois exactement")
     func navigationMensuelle() throws {
@@ -143,7 +143,7 @@ struct BudgetViewModelTests {
         #expect(cal.component(.month, from: vm.displayedMonth) == 1)
     }
 
-    // MARK: - Résumé mensuel
+    // MARK: - Monthly summary
 
     @Test("Le prévu fixe somme les prévisions de dépense, en ignorant les ignorées")
     func previsionnelFixe() throws {
@@ -165,9 +165,9 @@ struct BudgetViewModelTests {
         let (db, vm, _) = try fixture()
         defer { db.destroy() }
 
-        // Un récurrent de 950 € et une enveloppe de 1 100 € sur la même
-        // catégorie : le prévu doit valoir 1 100 € et non 2 050 €. Sans cette
-        // déduction, le budget afficherait un prévisionnel du double du réel.
+        // A €950 recurring pattern and a €1,100 envelope on the same
+        // category: the forecast must be €1,100, not €2,050. Without this
+        // deduction, the budget would show a forecast double the real amount.
         vm.categories = [Nemoris.Category(id: 3, name: "Logement")]
         vm.patterns = [motif(id: 1, nom: "Loyer", categorie: 3, montant: -950)]
         vm.previsions = [prevision(id: 10, motifId: 1, montant: -950)]
@@ -183,7 +183,7 @@ struct BudgetViewModelTests {
         let (db, vm, _) = try fixture()
         defer { db.destroy() }
 
-        // 1 200 € par an doivent peser 100 € sur le mois affiché.
+        // €1,200 a year must weigh €100 on the displayed month.
         vm.envelopes = [enveloppe(id: 1, categorie: nil, montant: 1_200, periode: .yearly)]
 
         let resume = vm.monthlySummary(transactions: [])
@@ -201,7 +201,7 @@ struct BudgetViewModelTests {
         #expect(vm.monthlySummary(transactions: []).forecastedExpenses == 0)
     }
 
-    // MARK: - Écritures
+    // MARK: - Writes
 
     @Test("Ignorer une prévision la marque comme telle en base")
     func ignorerUnePrevision() throws {

@@ -1,15 +1,15 @@
 import Testing
 
-/// Suite parente de tous les tests qui passent par `StubURLProtocol`.
+/// The parent suite for every test that goes through `StubURLProtocol`.
 ///
-/// ⚠️ `.serialized` posé sur une suite ne sérialise QUE ses propres tests —
-/// deux suites distinctes tournent en parallèle. Or l'interception réseau est
-/// un état global du processus : `start()` vide la table, donc une suite qui
-/// démarre efface les réponses armées par une autre. Symptôme observé : le
-/// premier test de chaque suite passe, tous les suivants échouent.
+/// ⚠️ `.serialized` set on a suite only serializes ITS OWN tests —
+/// two distinct suites run in parallel. But network interception is
+/// process-global state: `start()` clears the table, so a suite that
+/// starts wipes out the responses armed by another. Observed symptom: the
+/// first test of each suite passes, every following one fails.
 ///
-/// Regrouper les suites réseau SOUS ce parent règle le problème par
-/// construction — le trait se propage à toute la descendance, et un futur
-/// contributeur n'a rien à savoir : il lui suffit de nicher sa suite ici.
+/// Grouping network suites UNDER this parent fixes the problem by
+/// construction — the trait propagates to the whole descendant hierarchy, and a
+/// future contributor needs to know nothing: they just need to nest their suite here.
 @Suite("Réseau", .serialized)
 struct NetworkSeam {}

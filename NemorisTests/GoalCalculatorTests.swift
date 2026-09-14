@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Résolution de l'avancement d'un objectif.
+/// Resolving a goal's progress.
 ///
-/// La subtilité tient au fait que « où j'en suis » ne se lit pas au même
-/// endroit selon la nature de l'objectif : dans les actifs liquides, dans le
-/// patrimoine net, dans la dette remboursée, ou dans une valeur saisie à la
-/// main. Se tromper de source donne un pourcentage crédible mais faux.
+/// The subtlety is that "where I stand" isn't read from the same
+/// place depending on the goal's nature: liquid assets, net
+/// worth, debt repaid, or a manually entered value. Reading the wrong
+/// source gives a believable but wrong percentage.
 @Suite("GoalCalculator")
 struct GoalCalculatorTests {
 
@@ -23,7 +23,7 @@ struct GoalCalculatorTests {
                            assetsCount: 1, realEstateCount: 0, loansCount: 1)
     }
 
-    // MARK: - Où se lit l'avancement
+    // MARK: - Where progress is read from
 
     @Test("Un objectif d'épargne se lit dans les actifs liquides, pas dans le patrimoine")
     func sourceEpargne() {
@@ -50,7 +50,7 @@ struct GoalCalculatorTests {
 
     @Test("Un objectif de remboursement mesure ce qui a été remboursé")
     func sourceRemboursement() {
-        // Dette initiale 200 000, il en reste 150 000 : 50 000 remboursés.
+        // Initial debt 200,000, 150,000 remains: 50,000 repaid.
         let p = GoalCalculator.progress(
             for: objectif(.debtPayoff, cible: 200_000),
             snapshot: patrimoine(actifs: 0, dettes: 150_000),
@@ -63,8 +63,8 @@ struct GoalCalculatorTests {
 
     @Test("Une dette qui a augmenté ne produit pas d'avancement négatif")
     func detteAugmentee() {
-        // Un nouveau prêt après création de l'objectif : la dette dépasse
-        // l'initiale. Un avancement négatif casserait la barre de progression.
+        // A new loan after the goal was created: the debt exceeds
+        // the initial amount. Negative progress would break the progress bar.
         let p = GoalCalculator.progress(
             for: objectif(.debtPayoff, cible: 100_000),
             snapshot: patrimoine(actifs: 0, dettes: 130_000),
@@ -100,8 +100,8 @@ struct GoalCalculatorTests {
 
     @Test("Un objectif à cible nulle n'affiche pas 100 % par accident")
     func cibleNulle() {
-        // Saisie incohérente : sans garde, la division par zéro afficherait
-        // « atteint » sur un objectif vide.
+        // Inconsistent input: without a guard, dividing by zero would show
+        // "reached" on an empty goal.
         let p = GoalCalculator.progress(
             for: objectif(.savings, cible: 0),
             snapshot: .empty, totalAssetsValue: 0)
@@ -119,7 +119,7 @@ struct GoalCalculatorTests {
             snapshot: .empty, totalAssetsValue: 6_000,
             asOf: date("2026-01-01"))
 
-        // 6 000 restants sur 6 mois.
+        // 6,000 remaining over 6 months.
         let effort = GoalCalculator.monthlyContributionNeeded(for: p, asOf: date("2026-01-01"))
         #expect(effort != nil)
         #expect(abs((effort ?? 0) - 1_000) < 0.01, "effort : \(effort ?? -1)")
@@ -146,8 +146,8 @@ struct GoalCalculatorTests {
             snapshot: .empty, totalAssetsValue: 2_000,
             asOf: date("2026-06-01"))
 
-        // Le nombre de mois est planché à 1 : sans ce garde, une échéance
-        // passée donnerait une division par zéro ou un montant négatif.
+        // The number of months is floored at 1: without this guard, a past
+        // deadline would give a division by zero or a negative amount.
         let effort = GoalCalculator.monthlyContributionNeeded(for: p, asOf: date("2026-06-01"))
         #expect(effort != nil)
         #expect((effort ?? 0) > 0 && (effort ?? 0).isFinite, "effort : \(effort ?? -1)")

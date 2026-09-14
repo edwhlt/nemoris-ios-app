@@ -2,13 +2,13 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Couche instantané du tableau de bord : bornes de période, dépendances
-/// entre agrégats, et surtout le CACHE PAR PORTÉE.
+/// The dashboard's snapshot layer: period bounds, dependencies
+/// between aggregates, and above all the CACHE BY SCOPE.
 ///
-/// Sans ce cache, changer le mois affiché recalculerait le budget, le
-/// patrimoine, les alertes et les analyses — alors qu'aucun d'eux ne regarde
-/// le mois affiché. Les deux tests d'invalidation sont là pour empêcher ce
-/// retour en arrière, invisible autrement qu'à la lenteur de l'écran.
+/// Without this cache, changing the displayed month would recompute the budget, net
+/// worth, alerts, and insights — even though none of them look at
+/// the displayed month. The two invalidation tests exist to prevent this
+/// regression, otherwise invisible except as sluggishness on screen.
 @Suite("Instantané du tableau de bord")
 struct DashboardSnapshotEngineTests {
 
@@ -17,7 +17,7 @@ struct DashboardSnapshotEngineTests {
         return (c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
-    // MARK: - Bornes de période
+    // MARK: - Period bounds
 
     @Test("L'exercice couvre du 1er janvier au 31 décembre")
     func bornesDeLExercice() throws {
@@ -43,19 +43,19 @@ struct DashboardSnapshotEngineTests {
         #expect(jour(juillet.filterTo) == (2026, 7, 31))
         #expect(juillet.monthLabel != nil)
 
-        // Le calcul « +1 mois −1 jour » doit rester dans l'année.
+        // The "+1 month −1 day" calculation must stay within the year.
         let decembre = DashboardPeriod(year: 2026, month: "2026-12")
         #expect(jour(decembre.filterTo) == (2026, 12, 31), "décembre ne déborde pas sur janvier")
 
-        // Aucune durée de mois n'est codée en dur : le calendrier fait le travail.
+        // No month length is hardcoded: the calendar does the work.
         let fevrier = DashboardPeriod(year: 2024, month: "2024-02")
         #expect(jour(fevrier.filterTo) == (2024, 2, 29), "année bissextile")
     }
 
     @Test("Un mois mal formé retombe sur l'année entière")
     func moisMalForme() {
-        // Le parsing est manuel — un DateFormatter n'est pas Sendable — donc il
-        // faut vérifier qu'une entrée invalide ne produit pas une date aberrante.
+        // Parsing is manual — a DateFormatter isn't Sendable — so it's
+        // necessary to verify an invalid input doesn't produce a bogus date.
         for entree in ["2026-13", "n'importe quoi", "2026", "2026-07-15", ""] {
             let periode = DashboardPeriod(year: 2026, month: entree)
             #expect(jour(periode.filterFrom) == (2026, 1, 1), "« \(entree) »")
@@ -63,7 +63,7 @@ struct DashboardSnapshotEngineTests {
         }
     }
 
-    // MARK: - Dépendances entre agrégats
+    // MARK: - Dependencies between aggregates
 
     @Test("Un agrégat tire ses dépendances avec lui")
     func dependancesResolues() {
@@ -84,13 +84,13 @@ struct DashboardSnapshotEngineTests {
             guard let rang = ordre.firstIndex(of: agregat) else { continue }
             for requis in agregat.requires {
                 guard let rangRequis = ordre.firstIndex(of: requis) else { continue }
-                // Sinon un consommateur lirait un instantané encore vide.
+                // Otherwise a consumer would read a snapshot that's still empty.
                 #expect(rangRequis < rang, "\(requis.rawValue) doit précéder \(agregat.rawValue)")
             }
         }
     }
 
-    // MARK: - Cache par portée
+    // MARK: - Cache by scope
 
     @Test("Changer de mois n'invalide que les catégories et les tags")
     func invalidationParMois() {
@@ -120,8 +120,8 @@ struct DashboardSnapshotEngineTests {
         })
         #expect(invalides.contains(.yearSeries))
         #expect(invalides.contains(.categoryBreakdown) && invalides.contains(.tagBreakdown))
-        // Budget, patrimoine, investissements, alertes et analyses portent sur
-        // « maintenant » : l'exercice affiché ne les concerne pas.
+        // Budget, net worth, investments, alerts, and insights all pertain to
+        // "now": the displayed fiscal year doesn't affect them.
         #expect(invalides.isDisjoint(with: [.patrimoine, .budgetEnvelopes,
                                             .insights, .investments, .alerts]),
                 "invalidés : \(invalides.map(\.rawValue).sorted())")
@@ -139,7 +139,7 @@ struct DashboardSnapshotEngineTests {
         #expect(stables.isEmpty, "aucun agrégat ne survit : \(stables.map(\.rawValue))")
     }
 
-    // MARK: - Fusion des deux passes
+    // MARK: - Merging the two passes
 
     @Test("La passe lourde complète la passe légère sans l'effacer")
     func fusionDesPasses() {
@@ -157,8 +157,8 @@ struct DashboardSnapshotEngineTests {
         #expect(fusion.stats != nil, "les statistiques de la passe légère survivent")
         #expect(fusion.budget != nil)
         #expect(fusion.insights?.count == 1)
-        // `nil` n'est pas « zéro » : c'est « pas encore calculé », ce qui fait
-        // afficher le squelette de la carte plutôt qu'un écran vide.
+        // `nil` isn't "zero": it's "not computed yet", which shows
+        // the card's skeleton rather than an empty screen.
         #expect(fusion.patrimoine == nil)
     }
 
@@ -171,14 +171,14 @@ struct DashboardSnapshotEngineTests {
         #expect(inchange.stats != nil, "un agrégat sans donnée ne doit pas effacer l'existant")
     }
 
-    // MARK: - Coût des agrégats
+    // MARK: - Aggregate cost
 
     @Test("Seules les analyses sont différées en seconde passe")
     func agregatsCouteux() {
         let couteux = DashboardAggregate.allCases.filter(\.isExpensive)
         #expect(couteux == [.insights], "trouvés : \(couteux.map(\.rawValue))")
-        // Elles font leur propre balayage sur 180 jours : partager une source
-        // la ferait charger deux fois, une par passe.
+        // They do their own 180-day scan: sharing a source would
+        // load it twice, once per pass.
         #expect(DashboardAggregate.insights.sources.isEmpty)
     }
 }

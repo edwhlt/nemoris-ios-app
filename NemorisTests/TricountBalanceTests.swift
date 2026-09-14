@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Calcul des soldes d'un Tricount : qui doit quoi à qui.
+/// Computing a Tricount's balances: who owes what to whom.
 ///
-/// C'est le seul endroit de l'application où un chiffre faux se traduit
-/// directement par une somme d'argent réclamée à tort, ou jamais réclamée.
-/// La fonction est pure — elle prend les écritures, les parts et le nom de
-/// l'utilisateur — donc entièrement vérifiable sans base.
+/// This is the only place in the app where a wrong number translates
+/// directly into money wrongly claimed, or never claimed at all.
+/// The function is pure — it takes the entries, the shares, and the
+/// user's name — so it's fully verifiable with no database.
 @Suite("Soldes Tricount")
 struct TricountBalanceTests {
 
@@ -30,7 +30,7 @@ struct TricountBalanceTests {
 
     @Test("Une dépense partagée en deux crée une dette de la moitié")
     func partageSimple() {
-        // Edwin paie 100, partagé à parts égales avec Anne.
+        // Edwin pays 100, split evenly with Anne.
         let entries = [ecriture(id: 1, paye: "Edwin", total: 100)]
         let shares = [part(1, 1, "Edwin", 50), part(2, 1, "Anne", 50)]
 
@@ -53,7 +53,7 @@ struct TricountBalanceTests {
         let anneVueEdwin = vuEdwin.first { $0.memberName == "Anne" }?.net ?? 0
         let edwinVueAnne = vuAnne.first { $0.memberName == "Edwin" }?.net ?? 0
 
-        // Le même fait vu des deux côtés doit donner des montants opposés.
+        // The same fact seen from both sides must give opposite amounts.
         #expect(abs(anneVueEdwin + edwinVueAnne) < 0.01,
                 "\(anneVueEdwin) et \(edwinVueAnne) devraient s'annuler")
     }
@@ -72,7 +72,7 @@ struct TricountBalanceTests {
 
     @Test("Deux dépenses croisées se compensent")
     func compensationCroisee() {
-        // Edwin paie 100 partagé, puis Anne paie 60 partagé : 50 − 30 = 20.
+        // Edwin pays a shared 100, then Anne pays a shared 60: 50 − 30 = 20.
         let entries = [ecriture(id: 1, paye: "Edwin", total: 100),
                        ecriture(id: 2, paye: "Anne", total: 60)]
         let shares = [part(1, 1, "Edwin", 50), part(2, 1, "Anne", 50),
@@ -102,14 +102,14 @@ struct TricountBalanceTests {
 
     @Test("Les positions nettes de tous les membres s'annulent entre elles")
     func positionsSAnnulent() {
-        // Invariant fondamental d'un partage de dépenses : l'argent ne se crée
-        // ni ne disparaît. Attention à ce qu'on somme — computeBalances rend les
-        // soldes DU POINT DE VUE d'une personne, donc la somme de SA liste vaut
-        // sa propre position nette, et non zéro. C'est en additionnant les
-        // positions nettes de TOUS les membres qu'on doit retomber sur zéro.
+        // The fundamental invariant of an expense split: money is neither created
+        // nor destroyed. Careful what you sum — computeBalances returns
+        // balances FROM ONE PERSON'S point of view, so the sum of THEIR list equals
+        // their own net position, not zero. It's by adding up the
+        // net positions of EVERY member that the total must come out to zero.
         //
-        // Ici : Edwin paie 90 et doit 60 (+30), Anne paie 60 et doit 60 (0),
-        // Marc paie 30 et doit 60 (−30).
+        // Here: Edwin pays 90 and owes 60 (+30), Anne pays 60 and owes 60 (0),
+        // Marc pays 30 and owes 60 (−30).
         let entries = [ecriture(id: 1, paye: "Edwin", total: 90),
                        ecriture(id: 2, paye: "Anne", total: 60),
                        ecriture(id: 3, paye: "Marc", total: 30)]
@@ -133,7 +133,7 @@ struct TricountBalanceTests {
 
     @Test("Un groupe équilibré ne réclame rien à personne")
     func groupeEquilibre() {
-        // Chacun paie exactement sa part : aucune dette ne doit apparaître.
+        // Everyone pays exactly their share: no debt should appear.
         let entries = [ecriture(id: 1, paye: "Edwin", total: 30),
                        ecriture(id: 2, paye: "Anne", total: 30)]
         let shares = [part(1, 1, "Edwin", 30), part(2, 2, "Anne", 30)]
@@ -150,8 +150,8 @@ struct TricountBalanceTests {
 
     @Test("Une écriture sans part associée ne fait pas dériver les soldes")
     func ecritureSansPart() {
-        // Cas réel : une écriture importée dont les parts n'ont pas suivi.
-        // Elle ne doit pas créer de dette fantôme.
+        // A real case: an imported entry whose shares weren't updated.
+        // It must not create a phantom debt.
         let entries = [ecriture(id: 1, paye: "Edwin", total: 100),
                        ecriture(id: 2, paye: "Anne", total: 999)]
         let shares = [part(1, 1, "Edwin", 50), part(2, 1, "Anne", 50)]
@@ -165,8 +165,8 @@ struct TricountBalanceTests {
 
     @Test("Les centimes ne se perdent pas sur un partage à trois")
     func partageInegal() {
-        // 100 € à trois : 33,34 + 33,33 + 33,33. La somme doit rester nulle
-        // malgré l'arrondi, sinon un centime se crée à chaque dépense.
+        // €100 among three: 33.34 + 33.33 + 33.33. The sum must stay zero
+        // despite the rounding, otherwise a cent gets created on every expense.
         let entries = [ecriture(id: 1, paye: "Edwin", total: 100)]
         let shares = [part(1, 1, "Edwin", 33.34),
                       part(2, 1, "Anne", 33.33),

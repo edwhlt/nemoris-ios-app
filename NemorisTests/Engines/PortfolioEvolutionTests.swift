@@ -2,21 +2,21 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Agrégation des courbes de portefeuille.
+/// Aggregating portfolio evolution curves.
 ///
-/// La règle cardinale tient en une phrase : **le prix de revient n'entre
-/// jamais dans une courbe de valorisation**. C'est un coût d'acquisition, pas
-/// un cours, et il peut être sur une tout autre échelle — un titre acheté
-/// 250 € qui en cote 40 faisait bondir le total à chaque pas sans cours.
-/// D'où les dents de scie mesurées à 218 % d'amplitude avant ce moteur.
+/// The cardinal rule fits in one sentence: **cost basis never enters
+/// a valuation curve**. It's an acquisition cost, not a
+/// market price, and can sit on a completely different scale — a security bought
+/// at €250 that trades at €40 made the total spike at every step with no price.
+/// Hence the sawtooth measured at 218% amplitude before this engine.
 @Suite("Évolution de portefeuille")
 struct PortfolioEvolutionEngineTests {
 
     private let calendrier = Calendar.current
     private let maintenant = Date()
 
-    /// Amplitude relative creux-à-pic, en %. Sur des cours stables, une valeur
-    /// élevée est la signature du dentelé.
+    /// Relative trough-to-peak amplitude, in %. On stable prices, a high
+    /// value is the signature of a sawtooth.
     private func amplitude(_ points: [PortfolioEvolutionPoint]) -> Double {
         guard let bas = points.map(\.value).min(),
               let haut = points.map(\.value).max(), bas > 0 else { return 0 }
@@ -31,11 +31,11 @@ struct PortfolioEvolutionEngineTests {
                                     identifier: identifiant, date: date, close: cours)
     }
 
-    /// Deux positions d'un même PEA synchronisées à des heures DIFFÉRENTES
-    /// (9 h et 17 h), donc sur des grilles d'horodatage désalignées — la
-    /// configuration qui produisait le dentelé.
-    ///   30 parts à ~84 € (prix de revient 71) et 45 parts à ~40 € (revient 250).
-    ///   Valeur de marché ≈ 4 350 €, total au prix de revient = 13 380 €.
+    /// Two positions in the same PEA synced at DIFFERENT times
+    /// (9am and 5pm), so on misaligned timestamp grids — the
+    /// configuration that produced the sawtooth.
+    ///   30 shares at ~€84 (cost basis €71) and 45 shares at ~€40 (cost basis €250).
+    ///   Market value ≈ €4,350, total at cost basis = €13,380.
     private func portefeuilleRealiste() -> [PortfolioSeriesInput] {
         var premiere: [InvestmentPricePoint] = []
         var seconde: [InvestmentPricePoint] = []
@@ -51,7 +51,7 @@ struct PortfolioEvolutionEngineTests {
                 PortfolioSeriesInput(positionId: 2, quantity: 45, history: seconde)]
     }
 
-    // MARK: - La régression du dentelé
+    // MARK: - The sawtooth regression
 
     @Test("Des séries désalignées ne produisent pas de dents de scie")
     func seriesDesalignees() {
@@ -60,8 +60,8 @@ struct PortfolioEvolutionEngineTests {
 
         let amp = amplitude(resultat.points)
         #expect(amp < 10, "amplitude = \(amp) %")
-        // 13 380 € est le total au prix de revient : la courbe ne doit jamais
-        // s'en approcher, c'était exactement la hauteur des pics.
+        // €13,380 is the total at cost basis: the curve must never
+        // approach it, that was exactly the height of the spikes.
         let sommet = resultat.points.map(\.value).max() ?? 0
         #expect(sommet < 6_000, "sommet = \(sommet) €")
         #expect(resultat.unpricedPositionIds.isEmpty)
@@ -75,15 +75,15 @@ struct PortfolioEvolutionEngineTests {
             inputs: portefeuilleRealiste() + [orpheline],
             range: .threeMonth, now: maintenant)
 
-        // Elle est SIGNALÉE à l'interface plutôt que silencieusement absente :
-        // l'utilisateur doit savoir que sa courbe ne couvre pas tout.
+        // It's REPORTED to the UI rather than silently absent:
+        // the user must know their curve doesn't cover everything.
         #expect(resultat.unpricedPositionIds == [99],
                 "obtenu : \(resultat.unpricedPositionIds.sorted())")
         let sommet = resultat.points.map(\.value).max() ?? 0
         #expect(sommet < 6_000, "sommet = \(sommet) €")
     }
 
-    // MARK: - Forme de la série
+    // MARK: - Series shape
 
     @Test("La grille est régulière, triée et sans date en double")
     func grilleReguliere() {
@@ -91,8 +91,8 @@ struct PortfolioEvolutionEngineTests {
                                                        range: .threeMonth, now: maintenant)
         let dates = resultat.points.map(\.date)
 
-        // Deux valeurs au même instant créent un segment vertical dans une aire :
-        // c'est le rendu « code-barres ».
+        // Two values at the same instant create a vertical segment in an area:
+        // that's the "barcode" rendering.
         #expect(dates == dates.sorted())
         #expect(Set(dates).count == dates.count,
                 "\(dates.count) points, \(Set(dates).count) uniques")
@@ -113,13 +113,13 @@ struct PortfolioEvolutionEngineTests {
                      PortfolioSeriesInput(positionId: 2, quantity: 10, history: tardive)],
             range: .threeMonth, now: maintenant)
 
-        // 10×100 + 10×50 = 1 500 sur toute la plage, le premier cours connu de
-        // B étant reporté en arrière plutôt que remplacé par son prix de revient.
+        // 10×100 + 10×50 = 1,500 across the whole range, B's first known price
+        // being carried backward rather than replaced by its cost basis.
         let amp = amplitude(resultat.points)
         #expect(amp < 1, "amplitude = \(amp) %")
     }
 
-    // MARK: - Vue à la journée
+    // MARK: - Day view
 
     @Test("La vue 1J reste utilisable quand une seule position a de l'intraday")
     func vueJournaliereMixte() {
@@ -137,17 +137,17 @@ struct PortfolioEvolutionEngineTests {
                      quotidienSeul],
             range: .oneDay, now: maintenant)
 
-        // Auparavant : 2 points seulement, l'union des horodatages étant quasi
-        // vide sur 24 h. L'autre position est maintenue à son dernier cours réel.
+        // Before: only 2 points, the union of timestamps being nearly
+        // empty over 24h. The other position is kept at its last real price.
         #expect(resultat.points.count >= 40, "\(resultat.points.count) points")
         #expect(amplitude(resultat.points) < 10)
     }
 
     @Test("La vue 1J consultée hors séance montre la dernière cotation")
     func vueJournaliereHorsSeance() {
-        // Un samedi : la dernière cotation date de vendredi 17 h 30, soit 46 h
-        // plus tôt. Une grille bornée à [maintenant − 24 h] ne contiendrait
-        // aucun point réel et la courbe s'aplatirait sur une valeur reportée.
+        // A Saturday: the last quote dates from Friday 5:30pm, 46h
+        // earlier. A grid bounded to [now − 24h] would contain
+        // no real point and the curve would flatten to a carried-forward value.
         var seance: [InvestmentPricePoint] = []
         let derniereCotation = maintenant.addingTimeInterval(-46 * 3600)
         for pas in stride(from: 15, through: 0, by: -1) {
@@ -183,7 +183,7 @@ struct PortfolioEvolutionEngineTests {
             inputs: [PortfolioSeriesInput(positionId: 1, quantity: 10, history: series)],
             range: .threeMonth, now: maintenant)
 
-        // Une valeur non finie propagée jusqu'au graphe casse tout le rendu.
+        // A non-finite value propagated to the chart breaks the whole render.
         #expect(resultat.points.allSatisfy { $0.value.isFinite })
         #expect(amplitude(resultat.points) < 1, "aucun pic créé par les valeurs invalides")
     }

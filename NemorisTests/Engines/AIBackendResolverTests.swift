@@ -2,11 +2,11 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Règle de choix du backend IA, fonctionnalité par fonctionnalité.
+/// The rule for choosing the AI backend, feature by feature.
 ///
-/// L'état réel de l'appareil — Apple Intelligence disponible ? clé en
-/// trousseau ? — n'est pas testable. Il est donc DONNÉ au résolveur en
-/// paramètre, ce qui rend la règle elle-même vérifiable.
+/// The device's real state — is Apple Intelligence available? a key in
+/// the keychain? — isn't testable. It's therefore GIVEN to the resolver as
+/// a parameter, which makes the rule itself verifiable.
 @Suite("AIBackendResolver")
 struct AIBackendResolverTests {
 
@@ -14,7 +14,7 @@ struct AIBackendResolverTests {
         foundationModels: true, foundationModelsReadsImages: true,
         localServer: true, configuredCloudProviders: [.claude, .openAI])
 
-    // MARK: - « Automatique » : le plus privé d'abord
+    // MARK: - "Automatic": the most private option first
 
     @Test("Apple Intelligence est retenu quand tout est disponible")
     func ordreDePreference() {
@@ -40,7 +40,7 @@ struct AIBackendResolverTests {
                 "l'app reste entièrement fonctionnelle sans IA")
     }
 
-    // MARK: - Le cas qui a motivé le réglage par fonctionnalité
+    // MARK: - The case that motivated the per-feature setting
 
     @Test("En iOS 26 Apple lit le texte mais pas les images")
     func appleAveugleEnIOS26() {
@@ -48,9 +48,9 @@ struct AIBackendResolverTests {
             foundationModels: true, foundationModelsReadsImages: false,
             localServer: true, configuredCloudProviders: [])
 
-        // L'import de documents ne REQUIERT pas l'image (il océrise) : l'en
-        // priver ici serait une régression pour tout appareil en iOS 26, où il
-        // travaille très bien sur du texte.
+        // Document import doesn't REQUIRE images (it falls back to OCR): depriving it
+        // of them here would be a regression for any device on iOS 26, where it
+        // works very well on text.
         #expect(AIBackendResolver.resolve(choice: .automatic, feature: .transactionImport,
                                           availability: ios26) == .foundationModels)
         #expect(AIBackendResolver.readsImages(.foundationModels, availability: ios26) == false,
@@ -65,21 +65,21 @@ struct AIBackendResolverTests {
             foundationModels: true, foundationModelsReadsImages: false,
             localServer: true, configuredCloudProviders: [])
 
-        // C'est exactement ce qu'un réglage global ne savait pas exprimer.
+        // This is exactly what a global setting couldn't express.
         #expect(AIBackendResolver.resolve(choice: .localServer, feature: .transactionImport,
                                           availability: ios26) == .localServer)
         #expect(AIBackendResolver.readsImages(.localServer, availability: ios26),
                 "le serveur local, lui, peut lire l'image")
     }
 
-    // MARK: - Backend imposé : jamais de repli
+    // MARK: - An imposed backend: never a fallback
 
     @Test("Un backend imposé mais absent ne bascule pas ailleurs")
     func aucunRepliSilencieux() {
         let sansApple = AIBackendAvailability(localServer: true,
                                               configuredCloudProviders: [.claude])
-        // Tout l'intérêt d'imposer un backend est de DIAGNOSTIQUER : un repli
-        // ferait croire qu'Apple répond alors que la requête part ailleurs.
+        // The whole point of forcing a backend is to DIAGNOSE: a fallback
+        // would make it look like Apple is answering when the request goes elsewhere.
         #expect(AIBackendResolver.resolve(choice: .foundationModels, feature: .insights,
                                           availability: sansApple) == nil)
 
@@ -106,7 +106,7 @@ struct AIBackendResolverTests {
         }
     }
 
-    // MARK: - Capacités déclarées
+    // MARK: - Declared capabilities
 
     @Test("Une capacité optionnelle n'exclut pas un backend qui en manque")
     func capacitesRequisesEtOptionnelles() {
@@ -118,8 +118,8 @@ struct AIBackendResolverTests {
 
     @Test("L'assistant SQL exige le multi-tours")
     func assistantSQLMultiTours() {
-        // Il s'appuie sur l'état conservé entre deux questions, qu'un backend
-        // HTTP sans gestion d'historique ne fournit pas.
+        // It relies on state kept between two questions, which an
+        // HTTP backend with no history management doesn't provide.
         #expect(AIFeature.sqlAssistant.requiredCapabilities.contains(.multiTurn))
     }
 
@@ -130,15 +130,15 @@ struct AIBackendResolverTests {
                 "une fonctionnalité sans libellé serait invisible dans les Réglages")
     }
 
-    // MARK: - Ce qui quitte l'appareil
+    // MARK: - What leaves the device
 
     @Test("Seul le cloud fait sortir les données")
     func sortieDesDonnees() {
         #expect(AIBackendChoice.cloud(.claude).leavesDevice)
         #expect(AIBackendChoice.cloud(.openAI).leavesDevice)
-        // Le serveur local ne « sort » pas au sens qui compte ici : il reste sur
-        // le réseau de l'utilisateur. Le classer autrement noierait
-        // l'avertissement qui compte vraiment.
+        // The local server doesn't "leave" in the sense that matters here: it stays on
+        // the user's own network. Classifying it otherwise would drown out
+        // the warning that really matters.
         #expect(!AIBackendChoice.localServer.leavesDevice)
         #expect(!AIBackendChoice.foundationModels.leavesDevice)
         #expect(!AIBackendChoice.automatic.leavesDevice)
@@ -149,21 +149,21 @@ struct AIBackendResolverTests {
     func toutesLesOptionsProposees() {
         #expect(AIBackendChoice.allChoices.contains(.cloud(.claude)))
         #expect(AIBackendChoice.allChoices.contains(.cloud(.openAI)))
-        // ⚠️ Le compte était resté à 4 quand le modèle EMBARQUÉ a rejoint le
-        // sélecteur : un backend qu'on peut choisir mais qu'aucun test ne
-        // connaît est exactement ce que cette assertion existe pour empêcher.
+        // ⚠️ The count had stayed at 4 when the EMBEDDED model joined the
+        // selector: a backend you can pick but that no test
+        // knows about is exactly what this assertion exists to prevent.
         #expect(AIBackendChoice.allChoices.contains(.embeddedModel))
-        // automatique + Apple + modèle embarqué + serveur local + N cloud + désactivée
+        // automatic + Apple + embedded model + local server + N cloud + disabled
         #expect(AIBackendChoice.allChoices.count == 5 + AICloudProvider.allCases.count,
                 "obtenu : \(AIBackendChoice.allChoices.count)")
     }
 
-    // MARK: - Reprise de l'ancien réglage global
+    // MARK: - Migrating the old global setting
 
     @Test("Un choix à valeur associée survit à l'encodage")
     func encodageDuChoix() throws {
-        // Un simple `rawValue` d'énumération ne saurait pas porter le
-        // fournisseur associé au cas cloud.
+        // A plain enum `rawValue` couldn't carry the
+        // provider associated with the cloud case.
         let encode = try JSONEncoder().encode(AIBackendChoice.cloud(.claude))
         let decode = try JSONDecoder().decode(AIBackendChoice.self, from: encode)
         #expect(decode == .cloud(.claude))
@@ -175,8 +175,8 @@ struct AIBackendResolverTests {
         let defaults = try #require(UserDefaults(suiteName: nom))
         defer { defaults.removePersistentDomain(forName: nom) }
 
-        // Sans reprise, un utilisateur ayant choisi son serveur repartirait en
-        // « Automatique » — donc sur Apple Intelligence — après la mise à jour.
+        // Without migration, a user who had chosen their server would end up back on
+        // "Automatic" — so on Apple Intelligence — after the update.
         let encode = try JSONEncoder().encode(AIBackendChoice.localServer)
         for fonctionnalite in AIFeature.allCases {
             defaults.set(encode, forKey: "ai.backend.\(fonctionnalite.rawValue)")

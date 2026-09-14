@@ -2,11 +2,11 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Agrégations et opérations groupées sur les transactions.
+/// Aggregations and grouped operations on transactions.
 ///
-/// Ce sont les chiffres que l'utilisateur lit en premier : totaux du mois,
-/// répartition par catégorie, solde d'un compte. Une erreur ici ne se voit
-/// jamais — elle donne un montant plausible.
+/// These are the numbers the user reads first: monthly totals,
+/// the breakdown by category, an account's balance. A mistake here never
+/// shows — it gives a plausible amount.
 @Suite("Agrégations des transactions")
 struct TransactionAggregationTests {
 
@@ -59,19 +59,19 @@ struct TransactionAggregationTests {
     func virementInterneExclu() throws {
         let c = try fixture()
         defer { c.db.destroy() }
-        // Un tiers « virement interne » pointe vers un autre compte de l'utilisateur.
+        // A payee marked "internal transfer" points to another of the user's accounts.
         let tiersInterne = try #require(c.repo.addTiersAndGetId(name: "Vers Livret", regex: ""))
         var tiers = try #require(c.repo.fetchTiers().first { $0.id == tiersInterne })
         tiers.linkedCompteId = c.livret
         #expect(c.repo.updatePayeeFull(tiers))
 
-        transaction(c, montant: -1_000, jour: "2026-03-10")                      // vraie dépense
-        transaction(c, tiers: tiersInterne, montant: -5_000, jour: "2026-03-11") // déplacement
+        transaction(c, montant: -1_000, jour: "2026-03-10")                      // a real expense
+        transaction(c, tiers: tiersInterne, montant: -5_000, jour: "2026-03-11") // a transfer
 
         let mars = try #require(c.repo.fetchMonthlyTotals(from: date("2026-03-01"),
                                                           to: date("2026-03-31")).first)
-        // Déplacer son propre argent n'appauvrit personne : le compter
-        // gonflerait les dépenses du mois de 5 000 €.
+        // Moving your own money doesn't make anyone poorer: counting it
+        // would inflate the month's expenses by €5,000.
         #expect(abs(mars.expense + 1_000) < 0.005, "obtenu : \(mars.expense)")
     }
 
@@ -86,7 +86,7 @@ struct TransactionAggregationTests {
         #expect(abs((normal.first?.expense ?? 0) + 30) < 0.005,
                 "les deux bornes sont incluses")
 
-        // Bornes inversées : rendre une liste vide serait un piège pour l'appelant.
+        // Reversed bounds: returning an empty list would be a trap for the caller.
         let inverse = c.repo.fetchMonthlyTotals(from: date("2026-03-31"), to: date("2026-03-01"))
         #expect(abs((inverse.first?.expense ?? 0) + 30) < 0.005)
     }
@@ -103,7 +103,7 @@ struct TransactionAggregationTests {
         #expect(abs((courant.first?.expense ?? 0) + 100) < 0.005)
     }
 
-    // MARK: - Répartition par catégorie
+    // MARK: - Breakdown by category
 
     @Test("Les dépenses se cumulent par catégorie")
     func totauxParCategorie() throws {
@@ -128,7 +128,7 @@ struct TransactionAggregationTests {
 
         let totaux = c.repo.fetchCategoryTotals(from: date("2026-03-01"), to: date("2026-03-31"))
 
-        // Les faire disparaître ferait mentir la somme de la répartition.
+        // Making them disappear would make the breakdown's sum a lie.
         #expect(totaux.contains { $0.category == "Non catégorisé" },
                 "catégories trouvées : \(totaux.map(\.category))")
     }
@@ -170,8 +170,8 @@ struct TransactionAggregationTests {
         transaction(c, montant: 1_000, jour: "2026-01-05")
         transaction(c, montant: -300, jour: "2026-06-01")
 
-        // C'est ce qui permet d'afficher le solde tel qu'il était à une date
-        // passée, sans que les mouvements postérieurs le contaminent.
+        // This is what lets the balance be shown as it was on a
+        // past date, without later movements contaminating it.
         #expect(abs(c.repo.fetchAccountBalance(accountId: c.courant,
                                                upToDate: date("2026-03-01")) - 1_000) < 0.005)
     }
@@ -195,7 +195,7 @@ struct TransactionAggregationTests {
         #expect(c.repo.fetchAccountBalance(accountId: c.livret) == 0)
     }
 
-    // MARK: - Opérations groupées
+    // MARK: - Grouped operations
 
     @Test("Recatégoriser en lot ne touche que les transactions visées")
     func recategorisationGroupee() throws {
@@ -227,7 +227,7 @@ struct TransactionAggregationTests {
         #expect(c.repo.fetchTransaction(id: id)?.categoryId == nil)
     }
 
-    // MARK: - Hiérarchie des catégories
+    // MARK: - Category hierarchy
 
     @Test("Une catégorie peut être rattachée puis détachée d'un parent")
     func deplacementDeCategorie() throws {
@@ -254,7 +254,7 @@ struct TransactionAggregationTests {
         defer { c.db.destroy() }
         let tiers = try #require(c.repo.addTiersAndGetId(name: "Netflix", regex: ""))
         transaction(c, tiers: tiers, montant: -12, jour: "2026-03-01")
-        transaction(c, montant: -30, jour: "2026-03-02")   // sans tiers
+        transaction(c, montant: -30, jour: "2026-03-02")   // no payee
 
         let parTiers = c.repo.countTransactionsByPayee()
         #expect(parTiers[tiers] == 1)

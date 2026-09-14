@@ -2,14 +2,14 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Garde-fou de la Console SQL / assistant IA : une instruction qui
-/// modifierait le SCHÉMA doit être bloquée, une qui modifie des DONNÉES doit
-/// demander confirmation, tout le reste (lecture, transaction, maintenance)
-/// s'exécute sans friction.
+/// The SQL Console / AI assistant safeguard: a statement that would
+/// modify the SCHEMA must be blocked, one that modifies DATA must
+/// require confirmation, everything else (reads, transactions, maintenance)
+/// runs without friction.
 @Suite("SQLStatementGuard")
 struct SQLStatementGuardTests {
 
-    // MARK: - Lecture, sans friction
+    // MARK: - Reads, no friction
 
     @Test("SELECT simple est une query")
     func selectSimple() {
@@ -39,7 +39,7 @@ struct SQLStatementGuardTests {
         #expect(SQLStatementGuard.classify("ROLLBACK").kind == .transactionControl)
     }
 
-    // MARK: - Données : confirmation, jamais un blocage
+    // MARK: - Data: confirmation, never a block
 
     @Test("INSERT / UPDATE / DELETE / REPLACE demandent confirmation, jamais un blocage")
     func dataModification() {
@@ -64,7 +64,7 @@ struct SQLStatementGuardTests {
         #expect(SQLStatementGuard.classify("DELETE FROM transactions WHERE id = 1").target == "transactions")
     }
 
-    // MARK: - Schéma : bloqué, jamais une simple confirmation
+    // MARK: - Schema: blocked, never just a confirmation
 
     @Test("CREATE / ALTER / DROP sont bloqués")
     func schemaModificationBloquee() {
@@ -96,9 +96,9 @@ struct SQLStatementGuardTests {
 
     @Test("PRAGMA user_version = X est un déguisement de modification de schéma")
     func pragmaUserVersionEcriture() {
-        // DatabaseManager s'appuie sur PRAGMA user_version pour savoir quelles
-        // migrations appliquer — l'écraser à la main désynchronise l'app de
-        // son propre schéma, exactement comme un ALTER TABLE non tracé.
+        // DatabaseManager relies on PRAGMA user_version to know which
+        // migrations to apply — overwriting it by hand desynchronizes the app from
+        // its own schema, exactly like an untracked ALTER TABLE.
         let c = SQLStatementGuard.classify("PRAGMA user_version = 999")
         #expect(c.kind == .schemaModification)
     }
@@ -155,7 +155,7 @@ struct SQLStatementGuardTests {
 
     @Test("WITH ... DROP reste bloqué comme n'importe quel DROP")
     func cteDrop() {
-        // Cas adversarial : un CTE ne doit jamais servir à déguiser un DDL.
+        // An adversarial case: a CTE must never be used to disguise a DDL statement.
         let sql = "WITH x AS (SELECT 1) DROP TABLE payees"
         #expect(SQLStatementGuard.classify(sql).kind == .schemaModification)
     }
@@ -168,7 +168,7 @@ struct SQLStatementGuardTests {
         #expect(c.keyword == "UPDATE")
     }
 
-    // MARK: - Instructions non reconnues : jamais auto-approuvées
+    // MARK: - Unrecognized statements: never auto-approved
 
     @Test("Une instruction non reconnue n'est jamais silencieusement approuvée")
     func nonReconnu() {
@@ -184,7 +184,7 @@ struct SQLStatementGuardTests {
         #expect(SQLStatementGuard.classify("   \n  ").kind == .unrecognized)
     }
 
-    // MARK: - Évaluation par lot
+    // MARK: - Batch evaluation
 
     @Test("Un lot avec au moins un DDL est bloqué dans son ensemble")
     func lotBloqueSiUnSeulDDL() {
@@ -195,8 +195,8 @@ struct SQLStatementGuardTests {
         ])
         #expect(assessment.isBlocked)
         #expect(assessment.blockedStatements.count == 1)
-        // Un lot bloqué n'a pas besoin de confirmation séparée pour l'UPDATE :
-        // rien ne s'exécute de toute façon.
+        // A blocked batch doesn't need separate confirmation for the UPDATE:
+        // nothing runs anyway.
         #expect(!assessment.needsConfirmation)
     }
 
@@ -223,7 +223,7 @@ struct SQLStatementGuardTests {
         #expect(!assessment.needsConfirmation)
     }
 
-    // MARK: - Messages partagés (Console SQL + assistant IA)
+    // MARK: - Shared messages (SQL Console + AI assistant)
 
     @Test("Le message de blocage cite le mot-clé et la cible")
     func messageBloque() {
@@ -241,7 +241,7 @@ struct SQLStatementGuardTests {
             "DELETE FROM tags WHERE id = 3"
         ])
         let message = SQLGuardMessages.confirmation(classifications)
-        // "payees" ne doit apparaître qu'une fois pour les deux UPDATE (regroupés).
+        // "payees" must appear only once for the two (grouped) UPDATE statements.
         #expect(message.contains("UPDATE sur payees"))
         #expect(message.contains("DELETE sur tags"))
     }

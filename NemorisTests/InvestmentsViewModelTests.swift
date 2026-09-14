@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Agrégats du module investissements.
+/// The Investments module's aggregates.
 ///
-/// Le point de conception à protéger est explicite dans le code : tout est
-/// dérivé de `allPositions`, l'état réel, et non de `account.currentValue` —
-/// un cache jamais resynchronisé qui restait à zéro. Revenir à ce cache
-/// afficherait un portefeuille vide sans que rien ne le signale.
+/// The design point to protect is explicit in the code: everything is
+/// derived from `allPositions`, the real state, not from `account.currentValue` —
+/// a cache never resynced that stayed at zero. Falling back to this cache
+/// would show an empty portfolio with nothing signaling it.
 @MainActor
 @Suite("InvestmentsViewModel")
 struct InvestmentsViewModelTests {
@@ -32,14 +32,14 @@ struct InvestmentsViewModelTests {
                            purchaseDate: date("2024-06-01"))
     }
 
-    // MARK: - Le point de conception à ne pas perdre
+    // MARK: - The design point not to lose
 
     @Test("La valorisation vient des positions, jamais du cache du compte")
     func valorisationDepuisLesPositions() throws {
         let (db, vm, _) = try fixture()
         defer { db.destroy() }
 
-        // Le cache du compte annonce 0 — c'est justement le défaut historique.
+        // The account's cache reports 0 — that's exactly the historical defect.
         vm.accounts = [compte(id: 1, nom: "CTO", valeurCache: 0)]
         vm.allPositions = [position(id: 1, compteId: 1, qty: 10, pru: 100, valeur: 1_500)]
 
@@ -135,7 +135,7 @@ struct InvestmentsViewModelTests {
         #expect(d.byAssetType.isEmpty)
     }
 
-    // MARK: - Sélection
+    // MARK: - Selection
 
     @Test("Le compte sélectionné est résolu depuis son identifiant")
     func compteSelectionne() throws {
@@ -147,7 +147,7 @@ struct InvestmentsViewModelTests {
         vm.selectedAccountId = 2
         #expect(vm.selectedAccount?.name == "CTO")
 
-        // Un identifiant périmé — compte supprimé ailleurs — ne doit pas planter.
+        // A stale id — an account deleted elsewhere — must not crash.
         vm.selectedAccountId = 99
         #expect(vm.selectedAccount == nil)
 
@@ -155,7 +155,7 @@ struct InvestmentsViewModelTests {
         #expect(vm.selectedAccount == nil)
     }
 
-    // MARK: - Chargement
+    // MARK: - Loading
 
     @Test("Le chargement sélectionne le premier compte et agrège toutes les positions")
     func chargement() throws {

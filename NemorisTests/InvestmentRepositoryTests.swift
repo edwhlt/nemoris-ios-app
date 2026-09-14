@@ -2,13 +2,13 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Dépôt des investissements.
+/// The investment repository.
 ///
-/// Le point à protéger est un choix de conception : depuis la migration v30,
-/// la quantité, le prix de revient et la date d'achat d'une position ne sont
-/// plus STOCKÉS mais DÉRIVÉS de ses ordres, à la lecture. Écrire ces champs
-/// n'a donc aucun effet — un appelant qui l'ignorerait croirait avoir corrigé
-/// une position sans que rien ne change.
+/// The point to protect is a design choice: since migration v30,
+/// a position's quantity, cost basis, and purchase date are no longer
+/// STORED but DERIVED from its orders, on read. Writing these fields therefore
+/// has no effect — a caller unaware of this would believe they've fixed
+/// a position when nothing changed.
 @Suite("Dépôt des investissements")
 struct InvestmentRepositoryTests {
 
@@ -29,7 +29,7 @@ struct InvestmentRepositoryTests {
                         notes: nil, externalId: identifiantExterne)
     }
 
-    // MARK: - Quantité et prix de revient dérivés
+    // MARK: - Derived quantity and cost basis
 
     @Test("Une position sans ordre a une quantité nulle")
     func positionSansOrdre() throws {
@@ -40,8 +40,8 @@ struct InvestmentRepositoryTests {
                                      purchaseDate: date("2025-01-01"))
 
         let position = try #require(repo.fetchPositions(accountId: compte).first)
-        // C'est le bug qu'avait l'import CSV : créer la position sans ordre
-        // donnait une ligne à « 0,0000 @ 0,00 € » dans le portefeuille.
+        // This was the CSV import bug: creating a position with no order
+        // gave a "0.0000 @ €0.00" line in the portfolio.
         #expect(position.quantity == 0)
         #expect(position.averageBuyPrice == 0)
     }
@@ -54,8 +54,8 @@ struct InvestmentRepositoryTests {
             accountId: compte, assetType: "STOCK", assetName: "Titre",
             ticker: "T", purchaseDate: date("2025-01-01")))
 
-        // 10 à 100 € puis 30 à 60 € : la moyenne simple donnerait 80 €,
-        // la moyenne pondérée 70 €. C'est cette dernière qui reflète le coût.
+        // 10 at €100 then 30 at €60: a simple average would give €80,
+        // the weighted average €70. It's the latter that reflects the actual cost.
         #expect(repo.addOrder(ordre(position, .buy, quantite: 10, prix: 100)))
         #expect(repo.addOrder(ordre(position, .buy, quantite: 30, prix: 60)))
 
@@ -72,7 +72,7 @@ struct InvestmentRepositoryTests {
             accountId: compte, assetType: "STOCK", assetName: "Titre",
             ticker: "T", purchaseDate: date("2025-01-01")))
 
-        // 10 × 100 € + 5 € de frais = 1 005 € pour 10 titres.
+        // 10 × €100 + €5 in fees = €1,005 for 10 shares.
         #expect(repo.addOrder(ordre(position, .buy, quantite: 10, prix: 100, frais: 5)))
 
         let relu = try #require(repo.fetchPositions(accountId: compte).first)
@@ -92,7 +92,7 @@ struct InvestmentRepositoryTests {
 
         let relu = try #require(repo.fetchPositions(accountId: compte).first)
         #expect(relu.quantity == 60)
-        // Vendre ne change pas ce qu'on a payé pour ce qui reste.
+        // Selling doesn't change what was paid for what remains.
         #expect(abs(relu.averageBuyPrice - 50) < 0.005, "obtenu : \(relu.averageBuyPrice)")
     }
 
@@ -119,11 +119,11 @@ struct InvestmentRepositoryTests {
             accountId: compte, assetType: "STOCK", assetName: "Titre",
             ticker: "T", purchaseDate: date("2025-01-01")))
         #expect(repo.addOrder(ordre(position, .buy, quantite: 10, prix: 50)))
-        // Saisie incohérente : vendre plus qu'on ne détient.
+        // Inconsistent input: selling more than what's held.
         #expect(repo.addOrder(ordre(position, .sell, quantite: 25, prix: 60)))
 
         let relu = try #require(repo.fetchPositions(accountId: compte).first)
-        // Une quantité négative afficherait une position fantôme à valeur négative.
+        // A negative quantity would display a phantom position with negative value.
         #expect(relu.quantity == 0, "obtenu : \(relu.quantity)")
     }
 
@@ -139,12 +139,12 @@ struct InvestmentRepositoryTests {
 
         let relu = try #require(repo.fetchPositions(accountId: compte).first)
         let composants = Calendar.current.dateComponents([.year, .month], from: relu.purchaseDate)
-        // C'est le point d'entrée marqué sur le graphique de la position.
+        // This is the entry point marked on the position's chart.
         #expect(composants.year == 2025 && composants.month == 2,
                 "obtenu : \(relu.purchaseDate)")
     }
 
-    // MARK: - Ce que l'écriture ne peut plus faire
+    // MARK: - What writing can no longer do
 
     @Test("Écrire quantité et prix de revient sur une position n'a aucun effet")
     func champsDerivesNonEcrivables() throws {
@@ -155,8 +155,8 @@ struct InvestmentRepositoryTests {
             ticker: "T", purchaseDate: date("2025-01-01")))
         #expect(repo.addOrder(ordre(id, .buy, quantite: 10, prix: 100)))
 
-        // Un appelant qui tenterait de « corriger » la position ainsi croirait
-        // avoir agi : les valeurs sont silencieusement ignorées.
+        // A caller trying to "fix" the position this way would believe they
+        // succeeded: the values are silently ignored.
         _ = repo.updatePosition(InvestmentPosition(
             id: id, accountId: compte, assetType: "STOCK", assetName: "Renommé",
             ticker: "T", isin: "", quantity: 9_999, averageBuyPrice: 1,
@@ -169,7 +169,7 @@ struct InvestmentRepositoryTests {
         #expect(abs(relu.averageBuyPrice - 100) < 0.005)
     }
 
-    // MARK: - Ordres
+    // MARK: - Orders
 
     @Test("Un identifiant externe empêche le doublon à la resynchronisation")
     func dedupParIdentifiantExterne() throws {
@@ -182,7 +182,7 @@ struct InvestmentRepositoryTests {
         let externe = "binance_BTCUSDT_3848291"
         #expect(repo.addOrder(ordre(position, .buy, quantite: 1, prix: 40_000,
                                     identifiantExterne: externe)))
-        // Une seconde synchronisation rejoue les mêmes transactions.
+        // A second sync replays the same transactions.
         _ = repo.addOrder(ordre(position, .buy, quantite: 1, prix: 40_000,
                                 identifiantExterne: externe))
 
@@ -200,8 +200,8 @@ struct InvestmentRepositoryTests {
             accountId: compte, assetType: "STOCK", assetName: "Titre",
             ticker: "T", purchaseDate: date("2025-01-01")))
 
-        // Deux achats réels du même titre, le même jour, au même cours : les
-        // fusionner ferait disparaître la moitié du portefeuille.
+        // Two real purchases of the same security, the same day, at the same price:
+        // merging them would make half the portfolio disappear.
         #expect(repo.addOrder(ordre(position, .buy, quantite: 5, prix: 20)))
         #expect(repo.addOrder(ordre(position, .buy, quantite: 5, prix: 20)))
 
@@ -242,7 +242,7 @@ struct InvestmentRepositoryTests {
         #expect(repo.deletePosition(id: position))
 
         #expect(repo.fetchPositions(accountId: compte).isEmpty)
-        // Des ordres orphelins fausseraient tout recalcul ultérieur.
+        // Orphan orders would throw off any later recalculation.
         #expect(repo.fetchOrders(positionId: position).isEmpty)
     }
 
@@ -260,7 +260,7 @@ struct InvestmentRepositoryTests {
         #expect(repo.fetchPositions(accountId: compte).isEmpty)
     }
 
-    // MARK: - Isolation entre comptes
+    // MARK: - Isolation between accounts
 
     @Test("Les positions d'un compte n'apparaissent pas dans un autre")
     func isolationDesComptes() throws {

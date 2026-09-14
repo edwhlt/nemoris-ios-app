@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Détection automatique des dépenses et revenus récurrents.
+/// Automatic detection of recurring expenses and income.
 ///
-/// Ce moteur propose à l'utilisateur de créer des récurrents à partir de son
-/// historique. Deux erreurs symétriques y coûtent cher : rater un abonnement
-/// évident laisse le budget incomplet, et en inventer un à partir d'achats
-/// sans lien pollue le calendrier de prévisions fantômes.
+/// This engine offers to create recurring patterns from the user's
+/// history. Two symmetric mistakes are costly here: missing an
+/// obvious subscription leaves the budget incomplete, and inventing one from
+/// unrelated purchases pollutes the forecast calendar with phantom entries.
 @Suite("RecurringDetector")
 struct RecurringDetectorTests {
 
@@ -29,7 +29,7 @@ struct RecurringDetectorTests {
                          startDate: date("2026-01-01"), endDate: nil)
     }
 
-    // MARK: - Détection
+    // MARK: - Detection
 
     @Test("Un abonnement mensuel régulier est détecté")
     func abonnementMensuel() {
@@ -53,8 +53,8 @@ struct RecurringDetectorTests {
 
     @Test("Des achats sans régularité ne produisent pas de candidat")
     func achatsIrreguliers() {
-        // Même marchand, mais des dates et des montants sans structure.
-        // C'est le faux positif le plus coûteux : il pollue le calendrier.
+        // The same merchant, but dates and amounts with no structure.
+        // This is the most costly false positive: it pollutes the calendar.
         let historique = [
             tx(id: 1, tiers: "Carrefour", montant: -12.30, jour: "2026-01-03"),
             tx(id: 2, tiers: "Carrefour", montant: -87.50, jour: "2026-01-19"),
@@ -84,8 +84,8 @@ struct RecurringDetectorTests {
 
     @Test("Un montant qui varie trop rejette le candidat, même à date et tiers identiques")
     func montantVariableRejette() {
-        // Même tiers, mêmes jours du mois, mais un montant qui dérive de plus
-        // de 8 % — ce n'est pas un "prix identique", donc pas un récurrent.
+        // The same payee, the same days of the month, but an amount that drifts by more
+        // than 8% — that's not "the same price", so not a recurring pattern.
         let historique = [
             tx(id: 1, montant: -10.00, jour: "2026-01-05"),
             tx(id: 2, montant: -14.00, jour: "2026-02-05"),
@@ -97,10 +97,10 @@ struct RecurringDetectorTests {
 
     @Test("Une date qui dérive trop dans le mois rejette le candidat, même avec des écarts ~mensuels")
     func dateVariableRejette() {
-        // Même tiers, même montant, des écarts tous dans la fenêtre "mensuel"
-        // (33-36j) — donc la fréquence seule laisserait passer — mais le jour
-        // du mois glisse progressivement de 5 à 20 : ce n'est pas la même
-        // échéance d'un mois sur l'autre.
+        // The same payee, the same amount, gaps all within the "monthly" window
+        // (33-36 days) — so frequency alone would let it through — but the day
+        // of the month gradually shifts from 5 to 20: it's not the same
+        // due date from one month to the next.
         let historique = [
             tx(id: 1, jour: "2026-01-05"),
             tx(id: 2, jour: "2026-02-10"),
@@ -113,8 +113,8 @@ struct RecurringDetectorTests {
 
     @Test("Un écart irrégulier entre occurrences (pas une vraie fréquence) rejette le candidat")
     func ecartsIrreguliersRejettent() {
-        // Même tiers, même montant, mais des écarts de 10j puis 90j : aucune
-        // fréquence canonique ne couvre les deux à la fois.
+        // The same payee, the same amount, but gaps of 10 days then 90 days: no
+        // canonical frequency covers both at once.
         let historique = [
             tx(id: 1, jour: "2026-01-01"),
             tx(id: 2, jour: "2026-01-11"),
@@ -126,9 +126,9 @@ struct RecurringDetectorTests {
 
     @Test("Un prélèvement carte qui oscille entre le 7 et le 9 du mois est détecté")
     func prelevementCarteOscillant() {
-        // Reproduction d'un retour terrain : même tiers, montant identique
-        // (14,71 €), mais le jour de prélèvement carte bancaire oscille entre
-        // le 7 et le 9 selon les mois (week-ends, jours fériés bancaires).
+        // Reproducing real-world feedback: the same payee, an identical amount
+        // (€14.71), but the card debit day oscillates between
+        // the 7th and the 9th depending on the month (weekends, bank holidays).
         let historique = [
             tx(id: 1, montant: -14.71, jour: "2026-04-08"),
             tx(id: 2, montant: -14.71, jour: "2026-05-07"),
@@ -145,8 +145,8 @@ struct RecurringDetectorTests {
 
     @Test("Exactement 3 occurrences (07/06, 07/07, 08/08) au minimum d'occurrences sont détectées")
     func troisOccurrencesPileAuMinimum() {
-        // Reproduction du retour terrain exact (correction : 3 occurrences,
-        // pas 5) — cas limite car minOccurrences == 3 pile.
+        // Reproducing the exact real-world feedback (correction: 3 occurrences,
+        // not 5) — an edge case since minOccurrences == 3 exactly.
         let historique = [
             tx(id: 1, montant: -14.71, jour: "2026-06-07"),
             tx(id: 2, montant: -14.71, jour: "2026-07-07"),
@@ -203,8 +203,8 @@ struct RecurringDetectorTests {
 
     @Test("Un prélèvement calé sur la fin du mois reste stable malgré les mois courts")
     func finDeMoisStable() {
-        // 31, 28 (février), 31, 30 : c'est la même échéance "fin de mois",
-        // pas une dérive de date.
+        // 31, 28 (February), 31, 30: it's the same "end of month" due date,
+        // not a date drift.
         let historique = [
             tx(id: 1, jour: "2026-01-31"),
             tx(id: 2, jour: "2026-02-28"),
@@ -231,7 +231,7 @@ struct RecurringDetectorTests {
         }
     }
 
-    // MARK: - Génération des échéances
+    // MARK: - Generating due dates
 
     @Test("Un récurrent mensuel engendre une échéance par mois")
     func occurrencesMensuelles() {
@@ -290,7 +290,7 @@ struct RecurringDetectorTests {
         }
     }
 
-    // MARK: - Motif déjà existant ("Déjà suivi")
+    // MARK: - An already-existing pattern ("Already tracked")
 
     @Test("Un candidat est lié à un motif existant par payee, ou à défaut par nom")
     func existingMatchParPayeeOuNom() {
@@ -302,7 +302,7 @@ struct RecurringDetectorTests {
 
         #expect(candidat.existingMatch(in: []) == nil, "aucun motif existant : pas de lien")
 
-        let memePayee = motif(frequence: .yearly) // payeeId 1, différent de tout sauf le payee
+        let memePayee = motif(frequence: .yearly) // payeeId 1, different from everything except the payee
         #expect(candidat.existingMatch(in: [memePayee]) != nil,
                 "même payeeId ⇒ lié, même si la fréquence stockée diffère")
 
@@ -335,7 +335,7 @@ struct RecurringDetectorTests {
         }
         #expect(abs(candidat.amountAvg - (-15.09)) < 0.01)
 
-        let motifADerive = motif(frequence: .monthly, ancre: 5) // amountAvg -50, très différent de -15.09
+        let motifADerive = motif(frequence: .monthly, ancre: 5) // amountAvg -50, very different from -15.09
         #expect(candidat.differsFrom(motifADerive), "14,71€ → 15,09€ (retour terrain) : écart réel, doit être signalé")
 
         let motifAJour = RecurringPattern(
@@ -364,7 +364,7 @@ struct RecurringDetectorTests {
 
     @Test("Le rapprochement accepte l'écart toléré et refuse au-delà")
     func toleranceDeMontant() {
-        let m = motif(frequence: .monthly, ancre: 5)   // tolérance 10 %
+        let m = motif(frequence: .monthly, ancre: 5)   // 10% tolerance
         let prev = BudgetPrevision(id: 1, recurringPatternId: 1, amount: -100,
                                    expectedDate: date("2026-03-05"), status: .pending,
                                    actualTransactionId: nil, notes: nil)

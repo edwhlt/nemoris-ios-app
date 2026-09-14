@@ -2,11 +2,11 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Dépôt des dépenses partagées.
+/// The shared-expense repository.
 ///
-/// Ici les montants ne sont pas indicatifs : ils disent qui doit combien à
-/// qui. Une erreur d'agrégation ne produit pas un écran cassé mais un chiffre
-/// crédible et faux, qu'aucune relecture ne rattrape.
+/// Here amounts aren't merely indicative: they say who owes how much to
+/// whom. An aggregation mistake doesn't produce a broken screen but a
+/// believable, wrong number that no proofreading catches.
 @Suite("Dépôt des dépenses partagées")
 struct TricountRepositoryTests {
 
@@ -29,7 +29,7 @@ struct TricountRepositoryTests {
                       category: "")
     }
 
-    // MARK: - Enregistrement d'un groupe
+    // MARK: - Recording a group
 
     @Test("Un groupe enregistré se relit avec ses dépenses et ses parts")
     func enregistrementInitial() throws {
@@ -62,8 +62,8 @@ struct TricountRepositoryTests {
             entries: [depense("e1", paye: "Moi", total: 90,
                               parts: [("Moi", 45), ("Alice", 45)])]))
 
-        // La clé du Tricount fait l'identité : sans upsert, chaque
-        // rafraîchissement créerait un groupe de plus et doublerait les dettes.
+        // The Tricount's key IS its identity: without an upsert, every
+        // refresh would create one more group and double the debts.
         #expect(premier == second, "l'identifiant local reste stable")
         #expect(repo.fetchGroups().count == 1)
         #expect(repo.fetchGroup(id: premier)?.title == "Vacances 2026", "le titre est rafraîchi")
@@ -96,9 +96,9 @@ struct TricountRepositoryTests {
         let entrees = repo.fetchEntries(groupId: id)
         let parts = repo.fetchShares(groupId: id)
 
-        // Les soldes sont exprimés du point de vue d'UNE personne ; on vérifie
-        // donc la propriété qui vaut pour le groupe entier : la somme des
-        // positions nettes de chacun est nulle, sinon de l'argent apparaît.
+        // Balances are expressed from ONE person's point of view; so what's
+        // checked is the property that holds for the whole group: the sum of
+        // everyone's net positions is zero, otherwise money appears from nowhere.
         var somme = 0.0
         for membre in ["Moi", "Alice", "Bob"] {
             let soldes = repo.computeBalances(entries: entrees, shares: parts, myName: membre)
@@ -158,7 +158,7 @@ struct TricountRepositoryTests {
                                           shares: repo.fetchShares(groupId: id),
                                           myName: "Moi")
 
-        // Chacun a avancé autant : personne ne doit rien.
+        // Everyone advanced the same amount: nobody should owe anything.
         let alice = soldes.first { $0.memberName == "Alice" }?.net ?? 0
         #expect(abs(alice) < 0.005, "solde attendu nul, obtenu : \(alice)")
     }
@@ -175,15 +175,15 @@ struct TricountRepositoryTests {
                                      myName: "Moi").isEmpty)
     }
 
-    // MARK: - Devise étrangère
+    // MARK: - Foreign currency
 
     @Test("Le montant converti est conservé à côté du montant d'origine")
     func deviseEtrangere() throws {
         let (db, repo) = try fixture()
         defer { db.destroy() }
 
-        // Un repas à 1 000 000 VND payé 40 € : garder les deux permet de
-        // dériver le taux réel plus tard, sans réinterroger un service.
+        // A meal at 1,000,000 VND paid as €40: keeping both lets the real
+        // rate be derived later, without re-querying a service.
         let id = try #require(repo.saveGroup(
             key: "k", title: "Vietnam", currency: "EUR", myName: "Moi",
             entries: [depense("e1", paye: "Moi", total: 1_000_000,
@@ -213,8 +213,8 @@ struct TricountRepositoryTests {
 
         #expect(repo.updateEntryCategory(entryId: entree.id, categoryId: categorie.id))
 
-        // La catégorie est un choix LOCAL : le service partagé n'en sait rien,
-        // elle doit donc survivre au prochain rafraîchissement.
+        // The category is a LOCAL choice: the shared service knows nothing about
+        // it, so it must survive the next refresh.
         #expect(repo.fetchEntries(groupId: id).first?.userCategoryId == categorie.id)
     }
 
@@ -230,12 +230,12 @@ struct TricountRepositoryTests {
         #expect(repo.updateLinkedTransaction(entryId: entree.id, transactionId: 42))
         #expect(repo.fetchEntries(groupId: id).first?.linkedTransactionId == 42)
 
-        // Le lien doit pouvoir être défait sans supprimer la dépense.
+        // The link must be removable without deleting the expense.
         #expect(repo.updateLinkedTransaction(entryId: entree.id, transactionId: nil))
         #expect(repo.fetchEntries(groupId: id).first?.linkedTransactionId == nil)
     }
 
-    // MARK: - Suppression
+    // MARK: - Deletion
 
     @Test("Supprimer un groupe emporte ses dépenses et leurs parts")
     func suppressionEnCascade() throws {
@@ -249,7 +249,7 @@ struct TricountRepositoryTests {
         repo.deleteGroup(id: id)
 
         #expect(repo.fetchGroups().isEmpty)
-        // Des parts orphelines fausseraient tout solde recalculé plus tard.
+        // Orphan shares would throw off any balance recalculated later.
         #expect(repo.fetchEntries(groupId: id).isEmpty)
         #expect(repo.fetchShares(groupId: id).isEmpty)
     }

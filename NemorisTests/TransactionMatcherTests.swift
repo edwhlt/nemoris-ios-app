@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Rapprochement entre une transaction réelle et une prévision budgétaire.
+/// Matching a real transaction against a budget forecast.
 ///
-/// Ce moteur décide seul, au-dessus de 0,60 de confiance. Une erreur ne
-/// produit pas de message : elle marque une échéance comme honorée alors
-/// qu'elle ne l'est pas, ou l'inverse — et le budget affiché devient faux
-/// sans que rien ne le signale.
+/// This engine decides on its own, above 0.60 confidence. A mistake
+/// produces no message: it marks a due date as honored when
+/// it isn't, or the reverse — and the displayed budget becomes wrong
+/// with nothing signaling it.
 @Suite("TransactionMatcher")
 struct TransactionMatcherTests {
 
@@ -38,7 +38,7 @@ struct TransactionMatcherTests {
                          startDate: date("2026-01-01"), endDate: nil)
     }
 
-    // MARK: - Normalisation des libellés
+    // MARK: - Label normalization
 
     @Test("Les mots bancaires parasites disparaissent du libellé")
     func normalisationMotsBancaires() {
@@ -51,9 +51,9 @@ struct TransactionMatcherTests {
 
     @Test("Les jetons purement numériques sont écartés")
     func normalisationChiffres() {
-        // Les numéros de carte et références varient d'un mois sur l'autre :
-        // les garder ferait chuter la similarité entre deux prélèvements
-        // pourtant identiques.
+        // Card numbers and references vary from one month to the next:
+        // keeping them would tank the similarity between two withdrawals
+        // that are actually identical.
         let a = TransactionMatcher.normalizeLabel("CB SPOTIFY 4567 12345678")
         let b = TransactionMatcher.normalizeLabel("CB SPOTIFY 8901 87654321")
         #expect(a == b, "« \(a) » vs « \(b) »")
@@ -64,7 +64,7 @@ struct TransactionMatcherTests {
         #expect(TransactionMatcher.normalizeLabel("VIR SEPA 12345 EUR").isEmpty)
     }
 
-    // MARK: - Similarité
+    // MARK: - Similarity
 
     @Test("Deux libellés identiques ont une similarité maximale, deux étrangers une nulle")
     func similariteBornes() {
@@ -76,20 +76,20 @@ struct TransactionMatcherTests {
 
     @Test("Une sous-chaîne est reconnue comme une ressemblance")
     func similariteSousChaine() {
-        // « netflix » dans « netflixcom » : le même marchand écrit autrement.
+        // "netflix" inside "netflixcom": the same merchant written differently.
         let s = TransactionMatcher.labelSimilarity("netflix", "netflixcom")
         #expect(s > 0, "similarité : \(s)")
         #expect(s <= 1.0, "la similarité ne doit jamais dépasser 1")
     }
 
-    // MARK: - Choix du libellé
+    // MARK: - Choosing the label
 
     @Test("Le nom du tiers prime sur le libellé brut")
     func choixDuLibelle() {
         #expect(TransactionMatcher.bestLabel(
             transaction(tiers: "Netflix", libelle: "PRLV SEPA NFLX 998877")) == "Netflix")
 
-        // Sans tiers résolu, on retombe sur le brut plutôt que sur du vide.
+        // With no resolved payee, we fall back to the raw label rather than nothing.
         #expect(TransactionMatcher.bestLabel(
             transaction(tiers: "", libelle: "PRLV SEPA NFLX")) == "PRLV SEPA NFLX")
     }
@@ -120,8 +120,8 @@ struct TransactionMatcherTests {
 
     @Test("Une prévision sans récurrent connu est ignorée")
     func previsionOrpheline() {
-        // Cas réel : le récurrent a été supprimé mais la prévision subsiste.
-        // La rapprocher n'aurait aucun sens, faute de référence de comparaison.
+        // A real case: the recurring pattern was deleted but the forecast remains.
+        // Matching it would make no sense, with no reference to compare against.
         let candidat = TransactionMatcher.findBestMatch(
             for: transaction(tiersId: 7, tiers: "Netflix"),
             in: [prevision(patternId: 42)],
@@ -176,9 +176,9 @@ struct TransactionMatcherTests {
                    transaction(id: 2, tiersId: 7, tiers: "Netflix", jour: "2026-03-10")]
         let previsions = [prevision(id: 1)]
 
-        // L'ordre d'entrée ne doit pas changer le résultat : le moteur trie par
-        // date. Sans ce tri, deux exécutions sur la même base pourraient
-        // rapprocher des transactions différentes.
+        // The input order must not change the result: the engine sorts by
+        // date. Without this sort, two runs on the same database could
+        // match different transactions.
         let premier = TransactionMatcher.autoMatch(transactions: txs, previsions: previsions,
                                                    patterns: [motif(payeeId: 7)])
         let second = TransactionMatcher.autoMatch(transactions: txs.reversed(),

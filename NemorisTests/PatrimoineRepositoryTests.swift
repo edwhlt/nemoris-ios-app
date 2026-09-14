@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Le patrimoine porte trois entités indépendantes — biens, prêts, actifs —
-/// reliées entre elles et au reste de l'application par des liens optionnels.
+/// Patrimoine holds three independent entities — real estate, loans, assets —
+/// linked to each other and to the rest of the app by optional relations.
 @Suite("PatrimoineRepository")
 struct PatrimoineRepositoryTests {
 
@@ -49,7 +49,7 @@ struct PatrimoineRepositoryTests {
         #expect(b.notes == nil)
     }
 
-    // MARK: - Prêts
+    // MARK: - Loans
 
     @Test("Chaque type de prêt fait l'aller-retour sans se dénaturer")
     func typesDePret() throws {
@@ -161,8 +161,8 @@ struct PatrimoineRepositoryTests {
         #expect(repo.assetIdLinkedTo(accountId: compte.id, investmentAccountId: nil,
                                      excludingAssetId: nil) == lie.id)
 
-        // En s'excluant soi-même, plus rien ne répond : c'est ce qui permet de
-        // vérifier qu'un compte n'est pas déjà pris lors d'une modification.
+        // By excluding itself, nothing responds anymore: that's what lets you
+        // verify an account isn't already taken during an edit.
         #expect(repo.assetIdLinkedTo(accountId: compte.id, investmentAccountId: nil,
                                      excludingAssetId: lie.id) == nil)
         #expect(repo.assetIdLinkedTo(accountId: 999_999, investmentAccountId: nil,

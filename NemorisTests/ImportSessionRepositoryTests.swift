@@ -2,13 +2,13 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Persistance d'une session d'import.
+/// Persisting an import session.
 ///
-/// C'est le seul dépôt dont un défaut fait perdre du TRAVAIL à
-/// l'utilisateur : classer les lignes d'un relevé prend de longues minutes, et
-/// une session mal relue renvoie à zéro. D'où deux exigences — l'aller-retour
-/// doit être fidèle, et le format déjà écrit sur disque doit rester lisible
-/// par les versions suivantes.
+/// This is the only repository whose defect makes the user LOSE
+/// work: classifying a statement's rows takes long minutes, and
+/// a poorly restored session resets to zero. Hence two requirements — the
+/// round-trip must be faithful, and the format already written to disk must stay
+/// readable by future versions.
 @Suite("Session d'import")
 struct ImportSessionRepositoryTests {
 
@@ -49,7 +49,7 @@ struct ImportSessionRepositoryTests {
         let (db, repo) = try fixture()
         defer { db.destroy() }
 
-        // Un bandeau « import en cours » sans rien à classer serait une impasse.
+        // An "import in progress" banner with nothing to classify would be a dead end.
         #expect(repo.createSession(rows: [], accountId: 1, sourceFile: "vide.csv") == nil)
         #expect(repo.fetchSummaries().isEmpty)
     }
@@ -67,7 +67,7 @@ struct ImportSessionRepositoryTests {
         session.rows[1].userAction = .skipped
         #expect(repo.saveSession(session))
 
-        // C'est exactement le travail que l'utilisateur ne doit pas refaire.
+        // This is exactly the work the user must not have to redo.
         let relue = try #require(repo.fetchSession(id: resume.id))
         #expect(relue.rows[0].userAction == .confirmed)
         #expect(relue.rows[1].userAction == .skipped)
@@ -87,8 +87,8 @@ struct ImportSessionRepositoryTests {
         session.rows[0].userAction = .confirmed
         #expect(repo.saveSession(session))
 
-        // Ce compteur alimente le bandeau et le rappel : il doit refléter le
-        // travail restant, pas le total.
+        // This counter feeds the banner and the reminder: it must reflect the
+        // work remaining, not the total.
         let apres = try #require(repo.fetchActiveSummary())
         #expect(apres.pendingRows == 2, "obtenu : \(apres.pendingRows)")
         #expect(apres.totalRows == 3)
@@ -117,7 +117,7 @@ struct ImportSessionRepositoryTests {
         session.status = .completed
         #expect(repo.saveSession(session))
 
-        // Sinon le bandeau « import en cours » survivrait au commit.
+        // Otherwise the "import in progress" banner would survive the commit.
         #expect(repo.fetchActiveSummary() == nil)
         #expect(repo.fetchSummaries(status: .completed).count == 1,
                 "elle reste consultable, simplement plus active")
@@ -162,8 +162,8 @@ struct ImportSessionRepositoryTests {
         let resume = try #require(repo.createSession(batch: lot, accountId: 3,
                                                      sourceFile: "avis.pdf"))
 
-        // Une analyse de relevé se compte en dizaines de secondes : la perdre
-        // au relancement de l'app était l'asymétrie que cette table corrige.
+        // Analyzing a statement takes tens of seconds: losing it
+        // on app relaunch was the asymmetry this table fixes.
         let session = try #require(repo.fetchSession(id: resume.id))
         #expect(session.destination == .investments)
         #expect(session.batch?.elements.count == 1)
@@ -185,13 +185,13 @@ struct ImportSessionRepositoryTests {
         defer { db.destroy() }
         _ = repo.createSession(rows: [ligne(1, "A")], accountId: 1, sourceFile: "tx.csv")
 
-        // Le contenu de `rows_json` diffère selon la destination : c'est la
-        // colonne qui tranche, jamais une tentative de décodage.
+        // The content of `rows_json` differs by destination: it's the
+        // column that decides, never a decoding attempt.
         let session = try #require(repo.fetchSummaries().first)
         #expect(session.destination == .transactions)
     }
 
-    // MARK: - Mémoire des formats de fichier
+    // MARK: - Remembering file formats
 
     @Test("Un format de colonnes déjà rencontré est retrouvé par sa signature")
     func memoireDuFormat() throws {
@@ -225,8 +225,8 @@ struct ImportSessionRepositoryTests {
                                                labelColumnIndex: 1, separator: ",",
                                                dateFormat: nil, amountDecimal: ".")))
 
-        // L'utilisateur a corrigé son mapping : c'est la correction qui doit
-        // être proposée au prochain import, pas la version d'origine.
+        // The user corrected their mapping: it's the correction that must
+        // be offered on the next import, not the original version.
         let relu = try #require(repo.findMapping(headerSignature: signature))
         #expect(relu.dateColumnIndex == 2)
         #expect(relu.separator == ",")
@@ -243,8 +243,8 @@ struct ImportSessionRepositoryTests {
     @Test("La signature d'en-tête ignore la casse et les accents")
     func signatureNormalisee() {
         let reference = ColumnMappingSignature.compute(headers: ["Date", "Libellé", "Montant"])
-        // Deux relevés du même établissement ne diffèrent souvent que par ça ;
-        // les traiter comme des formats distincts ferait remapper pour rien.
+        // Two statements from the same institution often only differ by
+        // this; treating them as distinct formats would force remapping for nothing.
         #expect(ColumnMappingSignature.compute(headers: ["date", "libelle", "montant"]) == reference)
         #expect(ColumnMappingSignature.compute(headers: ["DATE", "LIBELLE", "MONTANT"]) == reference)
         #expect(ColumnMappingSignature.compute(headers: ["Date", "Montant", "Libellé"]) != reference,

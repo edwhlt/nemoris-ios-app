@@ -3,11 +3,11 @@ import SQLite3
 import Testing
 @testable import Nemoris
 
-/// Vérifie la chaîne de migrations elle-même.
+/// Verifies the migration chain itself.
 ///
-/// Ces tests couvrent un angle mort : les migrations n'étaient jusqu'ici
-/// validées que par leur exécution sur l'appareil de l'utilisateur. Une
-/// migration fautive y est irréversible.
+/// These tests cover a blind spot: migrations used to be
+/// validated only by running on the user's own device. A faulty
+/// migration there is irreversible.
 @Suite("Schéma et migrations")
 struct SchemaTests {
 
@@ -38,8 +38,8 @@ struct SchemaTests {
         let db = try TestDatabase()
         defer { db.destroy() }
 
-        // Supprimées par les migrations v26 et v27. Leur réapparition
-        // signalerait une migration réintroduite par erreur.
+        // Dropped by migrations v26 and v27. Their reappearance
+        // would signal a migration reintroduced by mistake.
         let interdites: Set<String> = [
             "tiers", "comptes", "category", "mdp", "tiers_patterns",
             "budget_prevision_overrides", "budget_prevision_rules",

@@ -2,16 +2,16 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Mathématiques d'amortissement : moteur pur, sans base ni réseau.
+/// Amortization math: a pure engine, no database or network.
 ///
-/// C'est le calcul le plus coûteux à se tromper de toute l'application. Une
-/// erreur y est silencieuse — le capital restant dû affiché reste plausible —
-/// et se propage au patrimoine net, aux projections et aux objectifs.
+/// This is the most costly calculation in the whole app to get wrong. An
+/// error here is silent — the displayed remaining principal stays plausible —
+/// and propagates to net worth, projections, and goals.
 ///
-/// La stratégie est double : des INVARIANTS qui tiennent quels que soient les
-/// paramètres, plus un cas à taux nul dont le résultat est calculable
-/// exactement à la main. Un test qui se contenterait de figer la sortie
-/// actuelle du code ne vérifierait rien d'autre que sa propre reproduction.
+/// The strategy is twofold: INVARIANTS that hold regardless of
+/// the parameters, plus a zero-rate case whose result can be computed
+/// exactly by hand. A test that merely pinned down the code's current
+/// output would verify nothing beyond its own reproduction.
 @Suite("LoanCalculator")
 struct LoanCalculatorTests {
 
@@ -27,7 +27,7 @@ struct LoanCalculatorTests {
                        linkedRealEstateId: nil, notes: nil, createdAt: date(debut))
     }
 
-    /// Décale une date d'un nombre de mois entier.
+    /// Shifts a date by a whole number of months.
     private func apres(_ mois: Int, _ depart: String = "2020-01-01") -> Date {
         Calendar(identifier: .gregorian).date(byAdding: .month, value: mois, to: date(depart))!
     }
@@ -36,8 +36,8 @@ struct LoanCalculatorTests {
 
     @Test("À taux nul, l'amortissement est strictement linéaire")
     func tauxNul() {
-        // Sans intérêts, la formule se réduit à CR(k) = P · (1 − k/n).
-        // 12 000 € sur 12 mois : après 6 mois il doit rester exactement 6 000 €.
+        // With no interest, the formula reduces to RC(k) = P · (1 − k/n).
+        // €12,000 over 12 months: after 6 months exactly €6,000 must remain.
         let p = pret(.amortizing, principal: 12_000, taux: 0, mois: 12)
 
         let moitie = LoanCalculator.compute(loan: p, asOf: apres(6))
@@ -50,7 +50,7 @@ struct LoanCalculatorTests {
         #expect(abs(tiers.remainingCapital - 8_000) < 0.01)
     }
 
-    // MARK: - Invariants d'un prêt amortissable
+    // MARK: - Invariants of an amortizing loan
 
     @Test("Au premier jour, rien n'est remboursé ; à l'échéance, tout l'est")
     func bornesDuPret() {
@@ -97,8 +97,8 @@ struct LoanCalculatorTests {
         let doux = LoanCalculator.compute(loan: pret(.amortizing, taux: 0.01), asOf: apres(120))
         let fort = LoanCalculator.compute(loan: pret(.amortizing, taux: 0.05), asOf: apres(120))
 
-        // À mensualité recalculée, un taux plus fort amortit plus lentement au
-        // début : la part d'intérêts y est plus grande.
+        // With a recalculated installment, a higher rate amortizes more slowly at
+        // the start: the interest portion is larger there.
         #expect(fort.remainingCapital > doux.remainingCapital,
                 "doux \(doux.remainingCapital) vs fort \(fort.remainingCapital)")
         #expect(fort.interestsPaid > doux.interestsPaid)
@@ -114,7 +114,7 @@ struct LoanCalculatorTests {
         #expect(abs(milieu.remainingCapital - 150_000) < 0.01,
                 "le capital d'un in fine reste entier jusqu'au terme")
         #expect(abs(milieu.capitalPaid) < 0.01)
-        // Mensualité = intérêts seuls : P · taux mensuel.
+        // Installment = interest only: P · monthly rate.
         #expect(abs(milieu.monthlyPayment - 150_000 * 0.024 / 12) < 0.01,
                 "mensualité : \(milieu.monthlyPayment)")
 
@@ -155,7 +155,7 @@ struct LoanCalculatorTests {
     func revolving() {
         let p = pret(.revolving, principal: 3_500, mois: 12)
 
-        // Très au-delà de la durée nominale : un revolving n'a pas d'échéance.
+        // Well beyond the nominal term: revolving credit has no maturity date.
         let etat = LoanCalculator.compute(loan: p, asOf: apres(60))
         #expect(etat.remainingCapital == 3_500)
         #expect(etat.monthlyPayment == 0, "la mensualité varie selon l'usage, on ne l'invente pas")

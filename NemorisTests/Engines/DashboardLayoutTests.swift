@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Disposition du tableau de bord : registre des cartes, préférences
-/// persistées et planification de la grille.
+/// Dashboard layout: the card registry, persisted
+/// preferences, and grid planning.
 ///
-/// L'enjeu tient en une phrase : une disposition mal relue est une mise en
-/// page perdue. L'utilisateur qui a masqué et réordonné ses cartes ne doit
-/// jamais tout retrouver par défaut à cause d'une seule valeur inattendue.
+/// The stakes fit in one sentence: a poorly restored layout is a lost
+/// page setup. A user who hid and reordered their cards must
+/// never get everything back to default because of a single unexpected value.
 @Suite("Disposition du tableau de bord")
 struct DashboardLayoutTests {
 
@@ -21,7 +21,7 @@ struct DashboardLayoutTests {
         return (try #require(UserDefaults(suiteName: nom)), nom)
     }
 
-    // MARK: - Disposition par défaut
+    // MARK: - Default layout
 
     @Test("Sans préférence enregistrée, la disposition suit le registre")
     func dispositionParDefaut() {
@@ -53,13 +53,13 @@ struct DashboardLayoutTests {
 
     @Test("Une carte inconnue d'une ancienne disposition est ajoutée en fin")
     func ajoutEnFin() {
-        // Disposition héritée d'une version qui ne connaissait que deux cartes.
+        // A layout inherited from a version that only knew about two cards.
         let stockee = [preference(.tags, true, .wide),
                        preference(.monthlyFlow, true, .wide)]
 
         let layout = DashboardLayoutStore.sanitize(stockee)
 
-        // L'insérer ailleurs bousculerait un ordre choisi à la main.
+        // Inserting it elsewhere would disturb an order chosen by hand.
         #expect(layout.prefix(2).map(\.card) == [.tags, .monthlyFlow],
                 "l'ordre de l'utilisateur reste intact en tête")
         let ajoutees = layout.dropFirst(2).map(\.card)
@@ -71,7 +71,7 @@ struct DashboardLayoutTests {
 
     @Test("Une taille non supportée retombe sur la taille par défaut")
     func tailleInvalide() {
-        // Une liste d'analyses sur une demi-largeur d'iPhone serait illisible.
+        // A list of analyses on half an iPhone's width would be unreadable.
         #expect(DashboardCardID.insightsCoach.supportedSizes == [.wide],
                 "prérequis du scénario")
 
@@ -90,9 +90,9 @@ struct DashboardLayoutTests {
         let (defaults, nom) = try defaultsTemporaires()
         defer { defaults.removePersistentDomain(forName: nom) }
 
-        // Écrit par une version future contenant une carte qu'on ne connaît
-        // plus. Un décodage strict échouerait ici et rendrait une liste vide :
-        // la mise en page entière serait perdue pour un seul identifiant.
+        // Written by a future version containing a card we no longer
+        // recognize. Strict decoding would fail here and yield an empty list:
+        // the entire layout would be lost over a single unknown id.
         let json = """
         [{"card":"tags","isVisible":false,"size":"compact"},
          {"card":"carteQuiNExistePlus","isVisible":true,"size":"wide"},
@@ -130,7 +130,7 @@ struct DashboardLayoutTests {
         #expect(DashboardLayoutStore.load(from: defaults).map(\.card) == DashboardCardID.allCases)
     }
 
-    // MARK: - Planification de la grille
+    // MARK: - Grid planning
 
     @Test("Une carte large occupe sa ligne, les compactes se groupent")
     func planificationDesLignes() {
@@ -151,8 +151,8 @@ struct DashboardLayoutTests {
                 "la compacte restante ferme sa ligne avant la large")
         #expect(lignes[3].map(\.card) == [.monthlyFlow])
 
-        // On ne remonte JAMAIS une carte d'en dessous pour combler un trou :
-        // réordonner donnerait sinon un résultat imprévisible.
+        // A card from below is NEVER pulled up to fill a gap:
+        // reordering would otherwise give an unpredictable result.
         #expect(lignes.flatMap { $0 }.map(\.card) == cartes.map(\.card),
                 "l'ordre de l'utilisateur est préservé")
     }
@@ -165,7 +165,7 @@ struct DashboardLayoutTests {
         #expect(DashboardGridPlanner.rows(compactes, columns: 3).count == 2)
         #expect(DashboardGridPlanner.rows(compactes, columns: 2).count == 2)
         #expect(DashboardGridPlanner.rows(compactes, columns: 1).count == 4)
-        // Un nombre de colonnes absurde ne doit pas faire disparaître les cartes.
+        // An absurd column count must not make the cards disappear.
         #expect(DashboardGridPlanner.rows(compactes, columns: 0).count == 4)
         #expect(DashboardGridPlanner.rows([], columns: 2).isEmpty)
     }
@@ -177,7 +177,7 @@ struct DashboardLayoutTests {
         #expect(DashboardLayoutMetrics.columnCount(for: 1100) == 4, "fenêtre Mac")
     }
 
-    // MARK: - Cohérence du registre
+    // MARK: - Registry consistency
 
     @Test("Chaque carte déclare une taille tenable et ses agrégats")
     func coherenceDuRegistre() {
@@ -185,8 +185,8 @@ struct DashboardLayoutTests {
             #expect(!carte.supportedSizes.isEmpty, "\(carte.rawValue)")
             #expect(carte.supportedSizes.contains(carte.defaultSize),
                     "\(carte.rawValue) : sa taille par défaut doit être supportée")
-            // Sans dépendance déclarée, masquer la carte ne ferait économiser
-            // aucun calcul — c'est ce qui rend une carte masquée gratuite.
+            // Without a declared dependency, hiding the card wouldn't save
+            // any computation — that's what makes a hidden card free.
             #expect(!carte.dependencies.isEmpty, "\(carte.rawValue)")
         }
 

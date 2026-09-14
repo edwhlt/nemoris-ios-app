@@ -2,13 +2,13 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Recherche globale.
+/// Global search.
 ///
-/// Elle balaie une douzaine de tables et classe le tout par pertinence. Deux
-/// propriétés comptent plus que le reste : elle ne doit rien remonter d'un
-/// module que l'utilisateur a désactivé — un résultat menant vers un onglet
-/// masqué est une impasse — et elle ne doit pas se déclencher sur une lettre,
-/// sous peine de tout faire correspondre.
+/// It scans a dozen tables and ranks everything by relevance. Two
+/// properties matter more than the rest: it must never surface anything from a
+/// module the user has disabled — a result leading to a
+/// hidden tab is a dead end — and it must not trigger on a single letter,
+/// or it would match almost everything.
 @Suite("Recherche globale")
 struct SearchServiceTests {
 
@@ -17,7 +17,7 @@ struct SearchServiceTests {
         return (db, SearchService(store: db.store), TransactionRepository(store: db.store))
     }
 
-    // MARK: - Seuil de déclenchement
+    // MARK: - Trigger threshold
 
     @Test("Une requête d'une seule lettre ne renvoie rien")
     func requeteTropCourte() throws {
@@ -25,8 +25,8 @@ struct SearchServiceTests {
         defer { db.destroy() }
         _ = repo.addTiersAndGetId(name: "Alimentation", regex: "", categoryId: nil)
 
-        // Sans ce garde, la première frappe balaierait toute la base pour
-        // remonter presque tout.
+        // Without this guard, the first keystroke would scan the whole database to
+        // return almost everything.
         #expect(recherche.search("a").isEmpty)
         #expect(recherche.search("").isEmpty)
         #expect(recherche.search("  ").isEmpty, "les espaces ne comptent pas")
@@ -63,7 +63,7 @@ struct SearchServiceTests {
 
         let resultats = recherche.search("fnac")
 
-        // Celui qui cherche « fnac » veut « Fnac » en tête, pas une déclinaison.
+        // Someone searching "fnac" wants "Fnac" first, not a variant.
         if case .payee(let premier) = resultats.first {
             #expect(premier.name == "Fnac", "obtenu : \(premier.name)")
         } else {
@@ -95,7 +95,7 @@ struct SearchServiceTests {
         #expect(recherche.search("zzzzz").isEmpty)
     }
 
-    // MARK: - Portée par module
+    // MARK: - Scope by module
 
     @Test("Un module désactivé ne remonte aucun de ses résultats")
     func moduleDesactive() throws {
@@ -109,7 +109,7 @@ struct SearchServiceTests {
         #expect(!recherche.search("vacances", showBudget: true).isEmpty,
                 "prérequis : l'enveloppe est trouvable module actif")
 
-        // Un résultat menant vers un onglet masqué serait une impasse.
+        // A result leading to a hidden tab would be a dead end.
         let sansBudget = recherche.search("vacances", showBudget: false)
         #expect(!sansBudget.contains { if case .budgetEnvelope = $0 { return true }; return false },
                 "obtenu : \(sansBudget.count) résultats")
@@ -130,7 +130,7 @@ struct SearchServiceTests {
                 "le tiers doit rester trouvable")
     }
 
-    // MARK: - Couverture des domaines
+    // MARK: - Domain coverage
 
     @Test("Les tiers, comptes, catégories et étiquettes sont couverts")
     func domainesDeBase() throws {
@@ -167,8 +167,8 @@ struct SearchServiceTests {
                                          currentValue: 180_000, estimatedAt: nil,
                                          address: "12 rue Zenith", notes: nil))
 
-        // Chercher un bien par son adresse est le réflexe naturel quand on ne
-        // se souvient plus du nom qu'on lui a donné.
+        // Searching for a property by its address is the natural reflex when you
+        // no longer remember the name you gave it.
         let resultats = recherche.search("zenith")
         #expect(resultats.contains { if case .realEstate = $0 { return true }; return false })
     }
@@ -210,8 +210,8 @@ struct SearchServiceTests {
         let tiers = recherche.search("zenith").filter {
             if case .payee = $0 { return true }; return false
         }
-        // Sans borne, une requête courte noierait l'écran et les autres domaines
-        // deviendraient invisibles.
+        // Without a cap, a short query would flood the screen and the other
+        // domains would become invisible.
         #expect(tiers.count <= 8, "obtenu : \(tiers.count)")
     }
 }

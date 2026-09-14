@@ -3,16 +3,16 @@ import SQLite3
 import Testing
 @testable import Nemoris
 
-/// Chaîne de migrations du schéma.
+/// The schema's migration chain.
 ///
-/// C'est le seul code de l'application dont un défaut est IRRÉVERSIBLE chez
-/// l'utilisateur : une migration ratée s'applique à sa base réelle, et aucune
-/// mise à jour ultérieure ne peut reconstituer ce qu'elle a détruit. Elle
-/// n'était jusqu'ici vérifiée par rien.
+/// This is the only code in the app whose defect is IRREVERSIBLE for
+/// the user: a failed migration applies to their real database, and no
+/// later update can reconstitute what it destroyed. Until now
+/// nothing verified it.
 @Suite("Chaîne de migrations")
 struct MigrationChainTests {
 
-    /// Base vide dans un dossier temporaire, sans aucune migration appliquée.
+    /// An empty database in a temp directory, with no migration applied.
     private func baseVierge() throws -> (URL, URL) {
         let dossier = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("nemoris-migrations-\(UUID().uuidString)", isDirectory: true)
@@ -45,7 +45,7 @@ struct MigrationChainTests {
         } ?? []
     }
 
-    // MARK: - Application complète
+    // MARK: - Full application
 
     @Test("Une base vierge reçoit toute la chaîne sans erreur")
     func chaineComplete() throws {
@@ -64,7 +64,7 @@ struct MigrationChainTests {
         let apresPremier = version(url)
         let tablesAvant = tables(url)
 
-        // Chaque lancement de l'app rejoue ce chemin : il doit être un no-op.
+        // Every app launch replays this path: it must be a no-op.
         #expect(DatabaseManager.migrate(at: url) == nil)
 
         #expect(version(url) == apresPremier)
@@ -77,20 +77,20 @@ struct MigrationChainTests {
         defer { try? FileManager.default.removeItem(at: dossier) }
         #expect(DatabaseManager.migrate(at: url) == nil)
 
-        // Si une migration s'ajoute sans que la version suive, les appareils
-        // déjà à jour ne la recevront jamais.
+        // If a migration is added without bumping the version, devices
+        // already up to date will never receive it.
         let attendue = DatabaseManager.migrations.map(\.version).max() ?? 0
         #expect(version(url) == attendue, "obtenu : \(version(url)), attendu : \(attendue)")
     }
 
-    // MARK: - Cohérence de la chaîne
+    // MARK: - Chain consistency
 
     @Test("Les numéros de version sont uniques et strictement croissants")
     func numerotationCoherente() {
         let versions = DatabaseManager.migrations.map(\.version)
 
-        // Deux migrations au même numéro : la seconde ne s'appliquerait jamais
-        // sur un appareil ayant déjà passé la première.
+        // Two migrations at the same number: the second would never
+        // apply on a device that already went through the first.
         #expect(Set(versions).count == versions.count, "numéros en double : \(versions)")
         #expect(versions == versions.sorted(),
                 "la chaîne doit être ordonnée : \(versions)")
@@ -105,7 +105,7 @@ struct MigrationChainTests {
         }
     }
 
-    // MARK: - Le schéma produit
+    // MARK: - The resulting schema
 
     @Test("Les tables du cœur métier existent après migration")
     func tablesEssentielles() throws {
@@ -128,8 +128,8 @@ struct MigrationChainTests {
         #expect(DatabaseManager.migrate(at: url) == nil)
 
         let presentes = tables(url)
-        // Ces tables ont été renommées puis supprimées ; les voir réapparaître
-        // signalerait une migration remise dans le désordre.
+        // These tables were renamed then dropped; seeing them reappear
+        // would signal a migration reinserted out of order.
         for obsolete in ["tiers", "comptes", "category", "mdp", "tiers_patterns"] {
             #expect(!presentes.contains(obsolete), "table héritée toujours là : \(obsolete)")
         }
@@ -141,8 +141,8 @@ struct MigrationChainTests {
         defer { try? FileManager.default.removeItem(at: dossier) }
         #expect(DatabaseManager.migrate(at: url) == nil)
 
-        // Une table déclarée synchronisée mais absente du schéma ferait échouer
-        // la synchronisation au premier envoi, sur l'appareil de l'utilisateur.
+        // A table declared as synced but missing from the schema would fail
+        // sync on the first send, on the user's device.
         let presentes = tables(url)
         for table in SyncSchema.syncedTables {
             #expect(presentes.contains(table), "table synchronisée absente : \(table)")
@@ -164,13 +164,13 @@ struct MigrationChainTests {
 
     // MARK: - Reprise partielle
 
-    /// Fabrique une base au schéma d'une version DONNÉE, en n'appliquant que les
-    /// migrations jusqu'à elle.
+    /// Builds a database at the schema of a GIVEN version, applying only the
+    /// migrations up to it.
     ///
-    /// ⚠️ Redescendre `user_version` sur une base déjà à jour ne simule PAS un
-    /// appareil en retard : ça produit un état impossible (schéma récent,
-    /// marqueur ancien) où une migration rejouée référence une table qu'une
-    /// migration ultérieure a remplacée. Il faut vraiment s'arrêter en chemin.
+    /// ⚠️ Rolling `user_version` back on an already-up-to-date database does NOT
+    /// simulate a lagging device: it produces an impossible state (a recent
+    /// schema, an old marker) where a replayed migration references a table a
+    /// later migration has replaced. It really needs to stop midway.
     private func base(auSchemaDe cible: Int) throws -> (URL, URL) {
         let (dossier, url) = try baseVierge()
         _ = SQLiteStore(databaseURL: url).write { db in
@@ -189,8 +189,8 @@ struct MigrationChainTests {
         let versions = DatabaseManager.migrations.map(\.version)
         let tete = try #require(versions.max())
 
-        // Chaque version a pu être installée chez un utilisateur : la chaîne
-        // doit mener de n'importe laquelle jusqu'à la tête, sans intervention.
+        // Every version may have been installed by a user: the chain
+        // must lead from any of them to the head, with no manual step.
         for depart in versions {
             let (dossier, url) = try base(auSchemaDe: depart)
             defer { try? FileManager.default.removeItem(at: dossier) }
@@ -211,14 +211,14 @@ struct MigrationChainTests {
         defer { try? FileManager.default.removeItem(at: dossierAncien) }
         #expect(DatabaseManager.migrate(at: urlAncien) == nil)
 
-        // Un utilisateur de longue date et un nouveau doivent avoir exactement
-        // le même schéma : sinon une requête marche chez l'un et pas chez
-        // l'autre, et le défaut ne se voit jamais en développement.
+        // A long-time user and a new one must end up with exactly
+        // the same schema: otherwise a query works for one and not for
+        // the other, and the defect never shows up in development.
         #expect(tables(urlAncien) == tables(urlNeuf),
                 "écart : \(tables(urlAncien).symmetricDifference(tables(urlNeuf)).sorted())")
     }
 
-    // MARK: - Détection de dérive de schéma
+    // MARK: - Schema drift detection
 
     @Test("Un commentaire SQL différent dans une table déjà migrée n'est pas une dérive")
     func commentaireSeulNestPasUneDerive() throws {
@@ -226,11 +226,11 @@ struct MigrationChainTests {
         defer { try? FileManager.default.removeItem(at: dossier) }
         #expect(DatabaseManager.migrate(at: url) == nil)
 
-        // Reproduit une base migrée AVANT un simple passage de traduction des
-        // commentaires (FR → EN, ou l'inverse) : la table a déjà été créée
-        // une fois, `CREATE TABLE IF NOT EXISTS` ne la retouche jamais — sa
-        // colonne `sql` dans sqlite_master garde le texte, commentaire
-        // compris, du jour où elle a été créée pour de vrai.
+        // Reproduces a database migrated BEFORE a plain comment-translation
+        // pass (FR → EN, or the reverse): the table was already created
+        // once, `CREATE TABLE IF NOT EXISTS` never touches it again — its
+        // `sql` column in sqlite_master keeps the text, comments
+        // included, from the day it was actually created.
         _ = SQLiteStore(databaseURL: url).write { db in
             sqlite3_exec(db, "DROP TABLE transaction_metadata_keys;", nil, nil, nil)
             sqlite3_exec(db, """
@@ -260,9 +260,9 @@ struct MigrationChainTests {
         defer { try? FileManager.default.removeItem(at: dossier) }
         #expect(DatabaseManager.migrate(at: url) == nil)
 
-        // Contre-épreuve du test précédent : un vrai écart structurel (ici,
-        // la colonne `role` a disparu) doit rester détecté malgré le
-        // nettoyage des commentaires.
+        // A counter-check for the previous test: a real structural mismatch (here,
+        // the `role` column has disappeared) must still be detected despite
+        // the comment cleanup.
         _ = SQLiteStore(databaseURL: url).write { db in
             sqlite3_exec(db, "DROP TABLE transaction_metadata_keys;", nil, nil, nil)
             sqlite3_exec(db, """

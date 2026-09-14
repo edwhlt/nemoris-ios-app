@@ -2,16 +2,16 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Client du registre des entreprises (recherche-entreprises.api.gouv.fr).
+/// The business registry client (recherche-entreprises.api.gouv.fr).
 ///
-/// Ce client porte deux règles qui ne se voient nulle part à l'exécution si on
-/// les casse : l'ordre imposé de deux paramètres, et l'interdiction de mettre
-/// la localité dans le terme recherché. Dans les deux cas l'appel réussit et
-/// rend zéro résultat — indiscernable d'une entreprise réellement inconnue.
+/// This client carries two rules that show up nowhere at runtime if they're
+/// broken: the imposed order of two parameters, and the ban on putting
+/// the locality inside the search term. In both cases the call succeeds and
+/// returns zero results — indistinguishable from a genuinely unknown business.
 ///
-/// ⚠️ Aucun test n'y simule un 429 : ce client passe par le disjoncteur partagé
-/// de `ResilientHTTP`, dont l'état est global au processus. Un 429 simulé ici
-/// ouvrirait le disjoncteur et ferait échouer les tests suivants sans rapport.
+/// ⚠️ No test here simulates a 429: this client goes through `ResilientHTTP`'s
+/// shared circuit breaker, whose state is global to the process. A simulated 429 here
+/// would open the breaker and make unrelated later tests fail.
 extension NetworkSeam {
 
 @Suite("CompanyRegistryClient")
@@ -37,7 +37,7 @@ struct CompanyRegistryClientTests {
             .queryItems?.map { ($0.name, $0.value ?? "") } ?? []
     }
 
-    // MARK: - Les deux règles invisibles
+    // MARK: - The two invisible rules
 
     @Test("Le paramètre de réponse minimale précède celui des champs inclus")
     func ordreDesParametres() async throws {
@@ -51,9 +51,9 @@ struct CompanyRegistryClientTests {
         let rangMinimal = noms.firstIndex(of: "minimal")
         let rangInclude = noms.firstIndex(of: "include")
         #expect(rangMinimal != nil && rangInclude != nil, "paramètres : \(noms)")
-        // L'API refuse `include` posé avant `minimal` et renvoie une erreur de
-        // validation ; l'ordre d'insertion est donc porteur de sens, malgré
-        // l'intuition qu'une chaîne de requête n'est pas ordonnée.
+        // The API refuses `include` placed before `minimal` and returns a
+        // validation error; insertion order therefore carries meaning, despite
+        // the intuition that a query string is unordered.
         #expect((rangMinimal ?? 99) < (rangInclude ?? 0),
                 "ordre obtenu : \(noms)")
     }
@@ -68,14 +68,14 @@ struct CompanyRegistryClientTests {
             CompanyRegistryQuery(q: "srom", codeCommune: "69385"))
 
         let params = Dictionary(uniqueKeysWithValues: parametres(de: StubURLProtocol.requestedURLs[0]))
-        // Mesuré sur l'API réelle : « carrefour market flanches » rend 0 résultat
-        // quand « carrefour market » en rend 1411. Le nom de lieu ne restreint
-        // pas la recherche, il la fait échouer.
+        // Measured against the real API: "carrefour market flanches" returns 0 results
+        // while "carrefour market" returns 1411. The place name doesn't narrow
+        // the search, it makes it fail.
         #expect(params["q"] == "srom", "terme envoyé : \(params["q"] ?? "nil")")
         #expect(params["code_commune"] == "69385")
     }
 
-    // MARK: - Filtres
+    // MARK: - Filters
 
     @Test("Un filtre géographique absent n'est pas envoyé")
     func filtresOptionnels() async throws {
@@ -86,8 +86,8 @@ struct CompanyRegistryClientTests {
         _ = try await CompanyRegistryClient().search(CompanyRegistryQuery(q: "boulangerie"))
 
         let noms = parametres(de: StubURLProtocol.requestedURLs[0]).map(\.0)
-        // Envoyer `code_postal=` vide filtrerait sur la chaîne vide et ne
-        // rendrait jamais rien.
+        // Sending an empty `code_postal=` would filter on the empty string and
+        // never return anything.
         #expect(!noms.contains("code_commune"))
         #expect(!noms.contains("code_postal"))
         #expect(!noms.contains("departement"))
@@ -106,7 +106,7 @@ struct CompanyRegistryClientTests {
         let valeurs = StubURLProtocol.requestedURLs.compactMap { url in
             parametres(de: url).first { $0.0 == "per_page" }?.1
         }
-        // Hors bornes, l'API rejette la requête entière plutôt que de corriger.
+        // Out of bounds, the API rejects the whole request rather than correcting it.
         #expect(valeurs == ["25", "1"], "obtenu : \(valeurs)")
     }
 
@@ -168,7 +168,7 @@ struct CompanyRegistryClientTests {
         #expect(StubURLProtocol.requestedURLs.count == 2)
     }
 
-    // MARK: - Lecture de la réponse
+    // MARK: - Reading the response
 
     @Test("Les entreprises de la réponse sont converties en résultats")
     func lectureDesResultats() async throws {
@@ -189,13 +189,13 @@ struct CompanyRegistryClientTests {
         defer { StubURLProtocol.stop() }
         StubURLProtocol.on(hote, .json(reponse()))
 
-        // « Aucune entreprise de ce nom » est une réponse valide : c'est ce qui
-        // fait passer le planificateur à sa tentative suivante.
+        // "No business by this name" is a valid response: it's what
+        // makes the planner move on to its next attempt.
         #expect(try await CompanyRegistryClient()
             .search(CompanyRegistryQuery(q: "inexistant")).isEmpty)
     }
 
-    // MARK: - Recherche par proximité
+    // MARK: - Proximity search
 
     @Test("La recherche par proximité envoie le point et le rayon")
     func rechercheParProximite() async throws {

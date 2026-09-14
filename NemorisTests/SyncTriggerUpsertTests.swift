@@ -3,16 +3,16 @@ import SQLite3
 import Testing
 @testable import Nemoris
 
-/// Non-régression : un UPSERT doit rester possible sur une table synchronisée.
+/// Non-regression: an UPSERT must remain possible on a synced table.
 ///
-/// SQLite documente que si l'instruction déclenchant un trigger porte une clause
-/// `ON CONFLICT`, la politique de résolution de cette instruction externe
-/// remplace celle écrite dans le corps du trigger. Le `INSERT OR REPLACE INTO
-/// sync_pending` des triggers de synchronisation y perdait donc son `OR REPLACE`
-/// et échouait sur la contrainte d'unicité, faisant échouer l'UPSERT entier.
+/// SQLite documents that if the statement triggering a trigger carries an
+/// `ON CONFLICT` clause, that outer statement's conflict-resolution policy
+/// overrides the one written in the trigger's body. The sync triggers'
+/// `INSERT OR REPLACE INTO sync_pending` therefore lost its `OR REPLACE`
+/// and failed on the uniqueness constraint, making the whole UPSERT fail.
 ///
-/// Symptôme côté utilisateur avant correctif : changer le créancier d'un
-/// remboursement déjà assigné ne faisait rien, sans message d'erreur.
+/// The user-facing symptom before the fix: changing the creditor on an
+/// already-assigned reimbursement did nothing, with no error message.
 @Suite("Triggers de synchronisation et UPSERT")
 struct SyncTriggerUpsertTests {
 
@@ -36,7 +36,7 @@ struct SyncTriggerUpsertTests {
             DO UPDATE SET payee_id = excluded.payee_id;
             """
 
-        /// Rend le message d'erreur de SQLite, ou `nil` si l'écriture a réussi.
+        /// Returns SQLite's error message, or `nil` if the write succeeded.
         func upsert(_ payeeId: Int) -> String? {
             db.store.write { handle -> String? in
                 var stmt: OpaquePointer?
@@ -55,8 +55,8 @@ struct SyncTriggerUpsertTests {
 
         #expect(upsert(papa) == nil)
 
-        // Le premier passage a mis la ligne en file. C'est ce second UPSERT qui
-        // échouait, sur « UNIQUE constraint failed: sync_pending ».
+        // The first pass enqueued the row. It's this second UPSERT that was
+        // failing, on "UNIQUE constraint failed: sync_pending".
         let erreur = upsert(maman)
         #expect(erreur == nil, "second UPSERT refusé : \(erreur ?? "")")
 

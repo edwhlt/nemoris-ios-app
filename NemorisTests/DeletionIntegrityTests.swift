@@ -2,18 +2,18 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Ce qu'une suppression doit emporter avec elle.
+/// What a deletion must take with it.
 ///
-/// Le schéma déclare `ON DELETE CASCADE` sur seize relations, mais SQLite
-/// ignore les clés étrangères tant que `PRAGMA foreign_keys = ON` n'a pas été
-/// posé — et ce réglage vaut **par connexion**, pas par base. Une déclaration
-/// de schéma n'est donc pas une garantie : chaque chemin de suppression doit
-/// être vérifié individuellement.
+/// The schema declares `ON DELETE CASCADE` on sixteen relations, but SQLite
+/// ignores foreign keys unless `PRAGMA foreign_keys = ON` has been
+/// set — and that setting is **per connection**, not per database. A schema
+/// declaration is therefore not a guarantee: each deletion path must
+/// be verified individually.
 ///
-/// Les lignes orphelines ne sont pas seulement du poids mort. Elles portent
-/// toutes un `uuid` et un `updated_at`, donc elles partent en synchronisation
-/// et arrivent sur les autres appareils en référençant une ligne qui n'y
-/// existe plus.
+/// Orphan rows aren't just dead weight. They all carry a `uuid` and
+/// `updated_at`, so they get synced and
+/// arrive on other devices referencing a row that no longer
+/// exists there.
 @Suite("Intégrité des suppressions")
 struct DeletionIntegrityTests {
 
@@ -22,8 +22,8 @@ struct DeletionIntegrityTests {
         return (db, TransactionRepository(store: db.store))
     }
 
-    /// Transaction dotée d'un tag, d'un remboursement suivi et d'une
-    /// métadonnée — les trois enfants déclarés en cascade.
+    /// A transaction with a tag, a tracked reimbursement, and a
+    /// metadata entry — the three children declared as cascading.
     private func transactionAvecEnfants(
         _ db: TestDatabase,
         _ repo: TransactionRepository
@@ -46,7 +46,7 @@ struct DeletionIntegrityTests {
         let cleId = try #require(meta.addKey(name: "Projet", icon: nil, role: nil))
         #expect(meta.setValue("Déménagement", keyId: cleId, transactionId: txId))
 
-        // La fixture doit être complète, sinon le test qui suit ne prouve rien.
+        // The fixture must be complete, otherwise the following test proves nothing.
         #expect(db.count("transaction_tags") == 1)
         #expect(db.count("reimbursements") == 1)
         #expect(db.count("transaction_metadata_values") == 1)
@@ -67,8 +67,8 @@ struct DeletionIntegrityTests {
         #expect(db.count("transaction_tags") == 0)
         #expect(db.count("reimbursements") == 0)
         #expect(db.count("transaction_metadata_values") == 0)
-        // Le tag lui-même survit : c'est une entité du référentiel, partagée
-        // par d'autres transactions. Seule la LIAISON disparaît.
+        // The tag itself survives: it's a reference entity, shared
+        // by other transactions. Only the LINK disappears.
         #expect(db.count("tags") == 1)
     }
 
@@ -78,9 +78,9 @@ struct DeletionIntegrityTests {
         defer { db.destroy() }
         let txId = try transactionAvecEnfants(db, repo)
 
-        // Le chemin par lot est distinct du chemin unitaire : il réutilise un
-        // seul statement pour toute la sélection. Vérifier l'un ne dit rien
-        // de l'autre.
+        // The batch path is distinct from the single-row path: it reuses a
+        // single statement for the whole selection. Verifying one says nothing
+        // about the other.
         #expect(repo.deleteTransactions(ids: [txId]) == 1)
 
         #expect(db.count("transaction_tags") == 0)
@@ -94,7 +94,7 @@ struct DeletionIntegrityTests {
         defer { db.destroy() }
         let supprimee = try transactionAvecEnfants(db, repo)
 
-        // Une cascade trop large est aussi grave qu'une cascade absente.
+        // A cascade that's too broad is just as serious as a missing one.
         let compte = try #require(repo.fetchAccounts().first)
         let gardee = try #require(repo.addTransaction(
             accountId: compte.id, tiersId: nil, categoryId: nil, paymentTypeId: nil,
@@ -124,9 +124,9 @@ struct DeletionIntegrityTests {
             information: "Train", amount: -80, date: Date()))
         #expect(repo.setTags([tagId], forTransaction: txId))
 
-        // Un tag est posable sur une dépense Tricount comme sur une
-        // transaction : la suppression doit couvrir les DEUX tables de
-        // liaison, pas seulement celle du module d'où l'on supprime.
+        // A tag can be applied to a Tricount expense just as to a
+        // transaction: deletion must cover BOTH link tables, not just
+        // the one for the module it's deleted from.
         let tricount = TricountRepository(store: db.store)
         let groupeId = try #require(tricount.saveGroup(
             key: "wk1", title: "Week-end", currency: "EUR", myName: "Moi",

@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Agrégats du module patrimoine.
+/// The Patrimoine module's aggregates.
 ///
-/// Le ViewModel compose trois sources — actifs résolus, immobilier, prêts —
-/// pour produire les chiffres du hero et du bandeau du tableau de bord. Une
-/// erreur d'agrégation y est invisible : un patrimoine net faux reste un
-/// montant plausible.
+/// The ViewModel composes three sources — resolved assets, real estate, loans —
+/// to produce the dashboard's hero and banner figures. An
+/// aggregation mistake here is invisible: a wrong net worth still looks
+/// like a plausible amount.
 @MainActor
 @Suite("PatrimoineViewModel")
 struct PatrimoineViewModelTests {
@@ -40,7 +40,7 @@ struct PatrimoineViewModelTests {
                        createdAt: date("2024-01-01"))
     }
 
-    // MARK: - Agrégats
+    // MARK: - Aggregates
 
     @Test("Le patrimoine net additionne liquide et immobilier, moins les dettes")
     func patrimoineNet() throws {
@@ -52,7 +52,7 @@ struct PatrimoineViewModelTests {
         vm.realEstates = [bien(id: 1, achat: 150_000, actuel: 180_000)]
         vm.loans = [pret(id: 1, principal: 120_000)]
 
-        // Sans état de prêt calculé, le capital initial fait office de filet.
+        // Without a computed loan state, the initial principal acts as a safety net.
         #expect(vm.snapshot.totalAssets == 200_000)
         #expect(vm.snapshot.totalLiabilities == 120_000)
         #expect(vm.snapshot.netWorth == 80_000)
@@ -78,7 +78,7 @@ struct PatrimoineViewModelTests {
         vm.realEstates = [bien(id: 1, achat: 150_000, actuel: 180_000),
                           bien(id: 2, achat: 90_000, actuel: 85_000)]
 
-        // Une moins-value doit se soustraire, pas être ignorée.
+        // A loss must be subtracted, not ignored.
         #expect(abs(vm.totalRealEstateCapitalGain - 25_000) < 0.01,
                 "plus-value : \(vm.totalRealEstateCapitalGain)")
         #expect(vm.totalRealEstateValue == 265_000)
@@ -105,7 +105,7 @@ struct PatrimoineViewModelTests {
 
         vm.loans = [pret(id: 1, principal: 50_000)]
 
-        // Sans garde, la division par zéro remplirait la barre du hero d'infini.
+        // Without a guard, dividing by zero would fill the hero's bar with infinity.
         #expect(vm.leverageRatio == 0, "ratio : \(vm.leverageRatio)")
         #expect(vm.leverageRatio.isFinite)
     }
@@ -115,7 +115,7 @@ struct PatrimoineViewModelTests {
         let (db, vm, _) = try fixture()
         defer { db.destroy() }
 
-        // Dette dix fois supérieure au patrimoine : la barre doit rester bornée.
+        // Debt ten times greater than net worth: the bar must stay bounded.
         vm.assets = [actif(id: 1, manuel: 10_000)]
         vm.resolvedAssetValues = [1: 10_000]
         vm.loans = [pret(id: 1, principal: 100_000)]
@@ -150,7 +150,7 @@ struct PatrimoineViewModelTests {
         #expect(vm.linkedInvestmentAccountIds == [7])
     }
 
-    // MARK: - Chargement
+    // MARK: - Loading
 
     @Test("Le chargement remonte ce qui est en base")
     func chargement() throws {

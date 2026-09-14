@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Projection du patrimoine net mois par mois.
+/// Projecting net worth month by month.
 ///
-/// Ce moteur produit une courbe sur cinq ans à partir d'hypothèses. Une erreur
-/// n'y est jamais visible : une trajectoire fausse reste une trajectoire
-/// crédible. Les tests portent donc sur les propriétés de la courbe et sur les
-/// relations entre scénarios, pas sur des valeurs qu'il faudrait recalculer.
+/// This engine produces a five-year curve from a set of assumptions. A mistake
+/// here is never visible: a wrong trajectory still looks like a
+/// believable one. The tests therefore target the curve's properties and the
+/// relationships between scenarios, not values that would need recomputing.
 @Suite("ProjectionEngine")
 struct ProjectionEngineTests {
 
@@ -38,7 +38,7 @@ struct ProjectionEngineTests {
             months: mois, startDate: depart)
     }
 
-    // MARK: - Forme de la courbe
+    // MARK: - Curve shape
 
     @Test("La projection produit un point par mois, plus le point de départ")
     func nombreDePoints() {
@@ -71,7 +71,7 @@ struct ProjectionEngineTests {
         #expect(points.count == 1)
     }
 
-    // MARK: - Effet des entrées
+    // MARK: - Effect of inputs
 
     @Test("Un flux mensuel positif fait croître le patrimoine")
     func fluxPositif() {
@@ -82,8 +82,8 @@ struct ProjectionEngineTests {
 
     @Test("Un flux mensuel négatif le fait décroître")
     func fluxNegatif() {
-        // Vivre au-dessus de ses moyens doit se voir sur la courbe. Un moteur
-        // qui ne saurait que monter serait rassurant et faux.
+        // Living beyond one's means must show up on the curve. An engine
+        // that could only go up would be reassuring and wrong.
         let points = projette(liquide: 50_000, flux: -900, scenario: .conservative)
         #expect(points.last!.netWorth < points.first!.netWorth,
                 "\(points.first!.netWorth) → \(points.last!.netWorth)")
@@ -104,8 +104,8 @@ struct ProjectionEngineTests {
 
     @Test("L'immobilier est tenu constant, conformément à l'hypothèse assumée")
     func immobilierConstant() {
-        // Le moteur documente qu'il n'extrapole aucune plus-value immobilière.
-        // Sans flux ni rendement, les actifs ne doivent donc pas bouger.
+        // The engine documents that it doesn't extrapolate any real-estate
+        // appreciation. With no cash flow or return, assets must therefore not move.
         let points = ProjectionEngine.project(
             snapshot: patrimoine(actifs: 300_000, dettes: 0),
             totalAssetsLiquid: 0, realEstateValue: 300_000,
@@ -116,7 +116,7 @@ struct ProjectionEngineTests {
                 "\(points.first!.totalAssets) → \(points.last!.totalAssets)")
     }
 
-    // MARK: - Relations entre scénarios
+    // MARK: - Relationships between scenarios
 
     @Test("Le scénario d'épargne renforcée dépasse le statu quo")
     func optimismeSuperieur() {

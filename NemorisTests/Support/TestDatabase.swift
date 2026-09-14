@@ -3,21 +3,21 @@ import SQLite3
 import Testing
 @testable import Nemoris
 
-/// Base SQLite jetable, au schéma courant, dans un dossier temporaire.
+/// A disposable SQLite database, at the current schema, in a temp directory.
 ///
-/// Fabriquée en appliquant la vraie chaîne de migrations via
-/// `DatabaseManager.migrate(at:)` : les tests portent donc sur le schéma que
-/// l'application produit réellement, et non sur un schéma recopié à la main qui
-/// dériverait à la première migration oubliée.
+/// Built by applying the real migration chain via
+/// `DatabaseManager.migrate(at:)`: tests therefore run against the schema
+/// the app actually produces, not a hand-copied schema that would
+/// drift on the first forgotten migration.
 ///
-/// La base de l'application n'est jamais touchée — c'est tout l'objet de
-/// l'injection de `SQLiteStore` dans les repositories.
+/// The app's own database is never touched — that's the whole point of
+/// injecting `SQLiteStore` into the repositories.
 struct TestDatabase {
 
     let directory: URL
     let url: URL
 
-    /// Store branché sur cette base, à passer aux repositories.
+    /// A store wired to this database, to pass to the repositories.
     var store: SQLiteStore { SQLiteStore(databaseURL: url) }
 
     init() throws {
@@ -26,8 +26,8 @@ struct TestDatabase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         url = directory.appendingPathComponent("finance.sqlite")
-        // Un fichier vide est une base SQLite valide et vide : les migrations
-        // partent donc de user_version = 0 et créent tout le schéma.
+        // An empty file is a valid, empty SQLite database: migrations
+        // therefore start from user_version = 0 and create the whole schema.
         FileManager.default.createFile(atPath: url.path, contents: nil)
 
         if let errors = DatabaseManager.migrate(at: url) {
@@ -39,7 +39,7 @@ struct TestDatabase {
         try? FileManager.default.removeItem(at: directory)
     }
 
-    /// Version du schéma effectivement appliquée.
+    /// The schema version actually applied.
     var schemaVersion: Int {
         store.read { db in
             var stmt: OpaquePointer?
@@ -49,7 +49,7 @@ struct TestDatabase {
         } ?? 0
     }
 
-    /// Noms des tables présentes.
+    /// The names of the tables present.
     var tables: Set<String> {
         store.read { db in
             var stmt: OpaquePointer?
@@ -64,7 +64,7 @@ struct TestDatabase {
         } ?? []
     }
 
-    /// Nombre de lignes d'une table, `-1` si la table est absente.
+    /// The row count of a table, `-1` if the table doesn't exist.
     func count(_ table: String) -> Int {
         store.read { db in
             var stmt: OpaquePointer?
@@ -85,7 +85,7 @@ enum TestDatabaseError: Error, CustomStringConvertible {
     }
 }
 
-/// Date construite à partir d'un `yyyy-MM-dd`, pour des tests lisibles.
+/// A date built from `yyyy-MM-dd`, for readable tests.
 func date(_ iso: String) -> Date {
     let f = DateFormatter()
     f.locale = Locale(identifier: "en_US_POSIX")

@@ -3,19 +3,19 @@ import Testing
 
 @testable import Nemoris
 
-/// Pipeline d'ingestion : reconnaissance du format par les octets, lecture
-/// des classeurs, des relevés CAMT et OFX.
+/// Ingestion pipeline: format recognition from bytes, reading
+/// spreadsheets, CAMT and OFX statements.
 ///
-/// La règle qui fonde tout : ne JAMAIS déduire un format d'une extension, et
-/// ne jamais traiter un décodage Latin-1 réussi comme une preuve que le
-/// contenu est du texte — toute suite d'octets est du Latin-1 valide, si bien
-/// qu'une capture d'écran devenait 670 000 caractères de binaire envoyés au
-/// modèle.
+/// The rule everything else rests on: NEVER infer a format from an
+/// extension, and never treat a successful Latin-1 decode as proof that
+/// the content is text — any byte sequence is valid Latin-1, to the point
+/// that a screenshot became 670,000 characters of binary sent to the
+/// model.
 @Suite("Pipeline d'import")
 struct ImportPipelineEngineTests {
 
-    // Ces aides propagent la localisation de l'appelant : sans elle,
-    // tout échec pointerait ici au lieu du test concerné.
+    // These helpers propagate the caller's location: without it,
+    // every failure would point here instead of at the actual test.
     private func expect(_ condition: Bool, _ label: String, _ detail: String = "",
                         sourceLocation: SourceLocation = #_sourceLocation) {
         #expect(condition, "\(label)\(detail.isEmpty ? "" : " — \(detail)")",
@@ -23,24 +23,24 @@ struct ImportPipelineEngineTests {
     }
 
 
-    // Harness sans XCTest — compile les fichiers RÉELS des moteurs
-    // (cf. run_import_pipeline_tests.sh).
+    // A harness without XCTest — compiles the REAL engine files
+    // (see run_import_pipeline_tests.sh).
     //
-    // Couvre les moteurs PURS du pipeline d'import unifié :
-    //   • `ImportFormatSniffer`  — identification du format par les octets
-    //   • `ZIPArchiveReader`     — lecture ZIP (STORE + DEFLATE)
-    //   • `XLSXReader`           — classeur → table commune
-    //   • `LedgerXMLReader`      — CAMT.053 et OFX/QFX
-    //   • `ImportElement`        — modèle d'échange, agrégation par source
+    // Covers the PURE engines of the unified import pipeline:
+    //   • `ImportFormatSniffer`  — format identification from bytes
+    //   • `ZIPArchiveReader`     — ZIP reading (STORE + DEFLATE)
+    //   • `XLSXReader`           — spreadsheet → common table
+    //   • `LedgerXMLReader`      — CAMT.053 and OFX/QFX
+    //   • `ImportElement`        — exchange model, aggregation by source
     //
-    // ⚠️ Le garde-fou de PURETÉ est ce harnais lui-même : aucun de ces fichiers ne
-    // peut importer PDFKit, Vision, FoundationModels ni SwiftUI sans le casser.
+    // ⚠️ The PURITY guard is this harness itself: none of these files may
+    // import PDFKit, Vision, FoundationModels, or SwiftUI without breaking it.
 
 
 
-    /// Racine des fixtures. Les jeux d'essai restent dans `Tests/Fixtures/`,
-    /// partagés avec les scripts de génération (`build_xlsx_fixture.py`) — les
-    /// dupliquer dans le bundle de test les ferait diverger.
+    /// Fixtures root. The test data lives in `Tests/Fixtures/`,
+    /// shared with the generation scripts (`build_xlsx_fixture.py`) — duplicating
+    /// it into the test bundle would let them drift apart.
     let fixturesDirectory = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()   // Engines
         .deletingLastPathComponent()   // NemorisTests
@@ -48,18 +48,18 @@ struct ImportPipelineEngineTests {
         .appendingPathComponent("Tests/Fixtures")
 
 
-    // MARK: - t1 — Sniffing : le format vient des OCTETS, jamais de l'extension
+    // MARK: - t1 — Sniffing: the format comes from the BYTES, never the extension
 
     @Test("Identification du format par les octets d'en-tête")
     func t1() throws {
         let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] + Array(repeating: 0x00, count: 40))
-        // LE bug de production : une capture partagée arrive nommée `<uuid>.dat`.
-        // Sans sniffing elle tombait en « texte », et le décodage Latin-1 — qui
-        // n'échoue jamais — produisait des centaines de milliers de caractères de
-        // binaire envoyés au modèle.
+        // THE production bug: a shared screenshot arrives named `<uuid>.dat`.
+        // Without sniffing it fell into "text", and the Latin-1 decode — which
+        // never fails — produced hundreds of thousands of characters of
+        // binary sent to the model.
         expect(ImportFormatSniffer.detect(data: png, fileExtension: "dat") == .image,
                "PNG nommé .dat reconnu comme image")
-        // Et l'inverse : une extension mensongère ne doit pas primer non plus.
+        // And the reverse: a misleading extension shouldn't win either.
         expect(ImportFormatSniffer.detect(data: png, fileExtension: "csv") == .image,
                "PNG nommé .csv reste une image")
 
@@ -72,12 +72,12 @@ struct ImportPipelineEngineTests {
         let camt = Data("<?xml version=\"1.0\"?><Document><BkToCstmrStmt/></Document>".utf8)
         expect(ImportFormatSniffer.detect(data: camt) == .xml, "CAMT reconnu comme XML")
 
-        // OFX 1.x n'est PAS du XML : il commence par un bloc d'en-têtes SGML.
+        // OFX 1.x is NOT XML: it starts with an SGML header block.
         let ofx = Data("OFXHEADER:100\nDATA:OFXSGML\n\n<OFX><SIGNONMSGSRSV1>".utf8)
         expect(ImportFormatSniffer.detect(data: ofx) == .xml, "OFX 1.x SGML rangé en XML")
         expect(ImportFormatSniffer.isOFX(ofx), "dialecte OFX distingué de CAMT")
 
-        // Le NUL est le marqueur qui empêche un binaire de passer pour du texte.
+        // A NUL byte is the marker that keeps binary from passing as text.
         let binary = Data([0x00, 0x01, 0x02, 0x03] + Array(repeating: 0x41, count: 100))
         expect(ImportFormatSniffer.looksLikeText(binary) == false, "octet NUL → pas du texte")
         expect(ImportFormatSniffer.detect(data: binary) == .unknown, "binaire inconnu reste inconnu")
@@ -85,13 +85,13 @@ struct ImportPipelineEngineTests {
         expect(ImportFormatSniffer.detect(data: Data(), fileExtension: "pdf") == .pdf,
                "fichier vide → repli sur l'extension")
 
-        // Un ZIP quelconque n'est pas un classeur : la signature ne suffit pas.
+        // Any ZIP isn't necessarily a spreadsheet: the signature alone isn't enough.
         let plainZip = Data([0x50, 0x4B, 0x03, 0x04] + Array("photos/img.png".utf8))
         expect(ImportFormatSniffer.detect(data: plainZip) == .unknown,
                "ZIP sans marqueur OOXML n'est pas un classeur")
     }
 
-    // MARK: - t2 — Lecture ZIP
+    // MARK: - t2 — Reading a ZIP
 
     @Test("Lecture d'archive ZIP (STORE et DEFLATE)")
     func t2() throws {
@@ -106,9 +106,9 @@ struct ImportPipelineEngineTests {
         case .success(let entries):
             expect(entries.count == 5, "5 entrées listées", "\(entries.count)")
             expect(entries.contains { $0.name == "xl/sharedStrings.xml" }, "chaînes partagées présentes")
-            // Le répertoire central est lu en fin d'archive, pas les en-têtes
-            // locaux : c'est ce qui garantit des tailles réelles même quand
-            // l'archive a été écrite en flux.
+            // The central directory is read at the end of the archive, not the
+            // local headers: that's what guarantees real sizes even when
+            // the archive was written in streaming mode.
             expect(entries.allSatisfy { $0.uncompressedSize > 0 }, "tailles réelles connues")
         }
 
@@ -141,8 +141,8 @@ struct ImportPipelineEngineTests {
             guard let sheet = grids.first else { break }
 
             expect(sheet.sheetName == "Operations", "nom d'onglet repris", sheet.sheetName ?? "nil")
-            // Le bloc d'identité en tête (« RELEVE DE COMPTE », IBAN) ne doit pas
-            // être pris pour l'en-tête : la table ferait une seule colonne.
+            // The identity block at the top ("BANK STATEMENT", IBAN) must not
+            // be mistaken for the header: the table would end up with a single column.
             expect(sheet.hasExplicitHeader, "vraie ligne d'en-tête trouvée sous le bloc d'identité")
             expect(sheet.headers == ["Date", "Libelle", "Montant", "Devise"],
                    "en-têtes lus depuis les chaînes partagées", "\(sheet.headers)")
@@ -150,20 +150,20 @@ struct ImportPipelineEngineTests {
             expect(sheet.isTabular, "table exploitable par l'écran de mapping")
 
             if sheet.rows.count == 3 {
-                // Excel stocke les dates en numéro de série ; sans conversion la
-                // colonne arrive en « 45845 » et aucun format ne la reconnaît.
+                // Excel stores dates as a serial number; without conversion the
+                // column comes out as "45845" and no format recognizes it.
                 expect(sheet.rows[0][0] == "2025-07-02",
                        "série Excel convertie en date", sheet.rows[0][0])
-                // Une chaîne partagée coupée par un run de mise en forme doit être
-                // recollée, sinon le libellé est tronqué au 1er changement de style.
+                // A shared string cut by a formatting run must be
+                // stitched back together, otherwise the label is truncated at the 1st style change.
                 expect(sheet.rows[0][1] == "CARREFOUR MARKET PARIS",
                        "runs `<r><t>` concaténés", sheet.rows[0][1])
                 expect(sheet.rows[0][2] == "-42.5", "montant brut conservé", sheet.rows[0][2])
                 expect(sheet.rows[0][3] == "EUR", "chaîne inline lue", sheet.rows[0][3])
 
-                // ⚠️ LE piège des tableurs : une cellule vide n'est PAS écrite dans
-                // le XML. Sans lire la référence `r`, tout se décale à gauche — ici
-                // « EUR » remonterait en colonne Montant pour toute la suite.
+                // ⚠️ THE spreadsheet trap: an empty cell is NOT written in
+                // the XML. Without reading the `r` reference, everything shifts left — here
+                // "EUR" would move up into the Amount column for the rest of the file.
                 expect(sheet.rows[2].count >= 4, "ligne à trou conservée à 4 colonnes",
                        "\(sheet.rows[2].count)")
                 expect(sheet.rows[2][1] == "PRLV EDF", "libellé en place", sheet.rows[2][1])
@@ -173,22 +173,22 @@ struct ImportPipelineEngineTests {
             }
         }
 
-        // Tri des feuilles : lexicographiquement, sheet10 passerait avant sheet2.
+        // Sheet sorting: lexicographically, sheet10 would come before sheet2.
         expect(XLSXReader.sheetIndex("xl/worksheets/sheet2.xml")
                < XLSXReader.sheetIndex("xl/worksheets/sheet10.xml"),
                "feuilles triées numériquement, pas lexicographiquement")
 
-        // Références de colonnes OOXML.
+        // OOXML column references.
         expect(XLSXCellReference.columnIndex(from: "A1") == 0, "A → 0")
         expect(XLSXCellReference.columnIndex(from: "D7") == 3, "D → 3")
         expect(XLSXCellReference.columnIndex(from: "AA1") == 26, "AA → 26")
         expect(XLSXCellReference.columnIndex(from: "BC12") == 54, "BC → 54")
 
-        // Le décalage de 25 569 jours intègre le 29 février 1900 fictif d'Excel.
+        // The 25,569-day offset accounts for Excel's fictitious February 29, 1900.
         let date = XLSXCellReference.date(fromSerial: 45840)
         expect(date.map { XLSXCellReference.isoFormatter.string(from: $0) } == "2025-07-02",
                "époque Excel (bissextile 1900 comprise)")
-        // Point d'ancrage de la constante : la série 25569 EST le 1er janvier 1970.
+        // The constant's anchor point: serial 25569 IS January 1st, 1970.
         expect(XLSXCellReference.date(fromSerial: 25569)
                 .map { XLSXCellReference.isoFormatter.string(from: $0) } == "1970-01-01",
                "série 25569 = époque Unix")
@@ -199,9 +199,9 @@ struct ImportPipelineEngineTests {
 
     @Test("Relevé CAMT.053 (ISO 20022)")
     func t4() throws {
-        // Préfixe de namespace VOLONTAIRE (`ns2:`) : les producteurs réels en
-        // mettent, et comparer le nom qualifié complet ferait échouer le parsing
-        // sur la moitié des fichiers.
+        // A DELIBERATE namespace prefix (`ns2:`): real producers use
+        // them, and comparing the full qualified name would make parsing fail
+        // on half of real-world files.
         let camt = """
         <?xml version="1.0" encoding="UTF-8"?>
         <ns2:Document xmlns:ns2="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
@@ -243,11 +243,11 @@ struct ImportPipelineEngineTests {
             }
 
             expect(debit.date == "2026-07-02", "date COMPTABLE préférée à la date de valeur", debit.date)
-            // ⚠️ CAMT écrit TOUJOURS un montant positif : le signe vient de
-            // `CdtDbtInd`. Lire le nombre seul importerait un débit en recette.
+            // ⚠️ CAMT ALWAYS writes a positive amount: the sign comes from
+            // `CdtDbtInd`. Reading the number alone would book a debit as income.
             expect(debit.amount == -42.50, "DBIT → montant négatif", "\(debit.amount)")
-            // Le `<Amt>` de 45,00 des détails (montant avant frais) ne doit PAS
-            // écraser celui de l'écriture.
+            // The detail's `<Amt>` of 45.00 (amount before fees) must NOT
+            // overwrite the entry's own amount.
             expect(abs(debit.amount) == 42.50, "montant de l'écriture, pas celui des détails")
             expect(debit.label == "ACHAT CB 01/07", "libellé depuis RmtInf/Ustrd", debit.label)
             expect(debit.isSignExplicit, "signe déclaré par le format, pas déduit")
@@ -258,8 +258,8 @@ struct ImportPipelineEngineTests {
                    "repli sur AddtlNtryInf quand RmtInf est absent", credit.label)
         }
 
-        // Une écriture sans date ni montant ne doit produire AUCUNE ligne :
-        // le moteur n'invente pas.
+        // An entry with neither a date nor an amount must produce NO row:
+        // the engine never invents one.
         let empty = """
         <Document><BkToCstmrStmt><Stmt><Ntry><CdtDbtInd>DBIT</CdtDbtInd></Ntry></Stmt></BkToCstmrStmt></Document>
         """
@@ -274,8 +274,8 @@ struct ImportPipelineEngineTests {
 
     @Test("Relevé OFX (SGML 1.x et XML 2.0)")
     func t5() throws {
-        // OFX 1.x : balises NON fermées. `XMLParser` rejette ce document en bloc,
-        // d'où le tokenizer tolérant — et c'est le dialecte le plus répandu.
+        // OFX 1.x: UNCLOSED tags. `XMLParser` rejects this document outright,
+        // hence the tolerant tokenizer — and it's the most widespread dialect.
         let ofx = """
         OFXHEADER:100
         DATA:OFXSGML
@@ -326,7 +326,7 @@ struct ImportPipelineEngineTests {
             }
 
             expect(first.date == "2026-07-02", "horodatage OFX réduit au jour", first.date)
-            // ⚠️ En OFX, contrairement à CAMT, le signe est DANS le nombre.
+            // ⚠️ In OFX, unlike CAMT, the sign is IN the number.
             expect(first.amount == -42.50, "signe porté par le nombre", "\(first.amount)")
             expect(first.label == "CARREFOUR MARKET — ACHAT CB 01/07",
                    "NAME et MEMO combinés", first.label)
@@ -336,15 +336,15 @@ struct ImportPipelineEngineTests {
             expect(second.paymentTypeHint == "VIREMENT", "DIRECTDEP → VIREMENT",
                    second.paymentTypeHint ?? "nil")
 
-            // ⚠️ Un remboursement est un `DEBIT` au montant POSITIF. Forcer le
-            // signe d'après TRNTYPE l'inverserait — d'où la règle « le nombre fait
-            // foi » en OFX.
+            // ⚠️ A refund is a `DEBIT` with a POSITIVE amount. Forcing the
+            // sign from TRNTYPE would flip it — hence the "the number is
+            // authoritative" rule in OFX.
             expect(third.amount == 18.90, "DEBIT positif conservé positif", "\(third.amount)")
             expect(third.label == "REMBOURSEMENT MUTUELLE", "MEMO absent → NAME seul", third.label)
         }
 
-        // OFX 2.0 : même contenu, en XML bien formé. Le même tokenizer doit
-        // l'absorber sans branche dédiée.
+        // OFX 2.0: the same content, in well-formed XML. The same tokenizer must
+        // absorb it with no dedicated branch.
         let ofx2 = """
         <?xml version="1.0" encoding="UTF-8"?>
         <?OFX OFXHEADER="200" VERSION="211"?>
@@ -366,8 +366,8 @@ struct ImportPipelineEngineTests {
             expect(false, "OFX 2.0 XML lu par le même tokenizer")
         }
 
-        // OFX de courtier : les ordres de bourse ressortent en payload
-        // investissement, sans passer par l'ancrage ISIN ni par l'IA.
+        // A broker's OFX: stock trades come out as an investment
+        // payload, without going through ISIN anchoring or the AI.
         let invest = """
         OFXHEADER:100
         <OFX><INVSTMTMSGSRSV1><INVSTMTTRNRS><INVSTMTRS><INVTRANLIST>
@@ -402,9 +402,9 @@ struct ImportPipelineEngineTests {
                 expect(orders[0].unitPrice == 485.30, "cours unitaire", "\(orders[0].unitPrice)")
                 expect(orders[0].fees == 1.99, "commission", "\(orders[0].fees)")
                 expect(orders[0].executedAt == "2026-04-15", "date d'exécution", orders[0].executedAt)
-                // ⚠️ Un dividende n'a NI quantité NI cours : exiger `UNITS > 0`
-                // comme pour les autres ferait disparaître toutes les lignes de
-                // revenu, qui ne portent que le total.
+                // ⚠️ A dividend has NEITHER a quantity NOR a price: requiring `UNITS > 0`
+                // as for the others would make every income
+                // row disappear, since they only carry a total.
                 expect(orders[1].orderType == "DIV", "INCOME → DIV", orders[1].orderType)
                 expect(orders[1].unitPrice == 34.53, "dividende valorisé par son total",
                        "\(orders[1].unitPrice)")
@@ -413,15 +413,15 @@ struct ImportPipelineEngineTests {
             expect(false, "2 ordres depuis un OFX de courtier")
         }
 
-        // Un XML qui n'est ni CAMT ni OFX doit être refusé PROPREMENT, jamais
-        // interprété au hasard.
+        // An XML that's neither CAMT nor OFX must be rejected CLEANLY, never
+        // interpreted at random.
         switch LedgerXMLReader.parse(text: "<?xml version=\"1.0\"?><catalog><item/></catalog>") {
         case .success: expect(false, "XML étranger refusé")
         case .failure: expect(true, "XML étranger refusé")
         }
     }
 
-    // MARK: - t6 — Modèle d'échange
+    // MARK: - t6 — Exchange model
 
     @Test("ImportElement : agrégation par source et inspection")
     func t6() throws {
@@ -444,8 +444,8 @@ struct ImportPipelineEngineTests {
                 ImportUnitReport(origin: origin("releve.pdf", 0, 2), recognizedCount: 0,
                                  diagnostic: .nothingRecognized),
                 ImportUnitReport(origin: origin("capture.png", 1, 3), recognizedCount: 1),
-                // Une source qui n'a RIEN produit : c'est précisément celle qu'il
-                // faut voir dans le détail par source, et qu'un total agrégé cache.
+                // A source that produced NOTHING: that's exactly the one that
+                // needs to show up in the per-source detail, and that an aggregated total hides.
                 ImportUnitReport(origin: origin("vide.csv", 2, 4), recognizedCount: 0,
                                  diagnostic: .noTextExtracted),
             ])
@@ -464,14 +464,14 @@ struct ImportPipelineEngineTests {
         expect(sources[0].summaryLabel(noun: "opération") == "2 opérations",
                "libellé au pluriel", sources[0].summaryLabel(noun: "opération"))
 
-        // Inspection de debug : sur la structure NORMALISÉE, pas sur du texte OCR —
-        // c'est le seul format qui couvre aussi CSV, classeur et XML.
+        // Debug inspection: on the NORMALIZED structure, not on OCR text —
+        // it's the only format that also covers CSV, spreadsheets, and XML.
         let json = result.debugJSON(sourceIndex: 0)
         expect(json.contains("CARREFOUR"), "JSON de debug produit")
         expect(json.contains("releve.pdf"), "origine tracée dans le JSON")
         expect(!json.contains("capture.png"), "filtre par source respecté")
 
-        // Le confidence remonte du payload sans avoir à le déballer.
+        // The confidence value comes up from the payload without needing to unwrap it.
         expect(result.elements[0].confidence == 0.9, "confiance reprise du payload",
                "\(result.elements[0].confidence)")
         expect(result.elements[0].kind == .transaction, "type d'élément exposé")
@@ -494,9 +494,9 @@ struct ImportPipelineEngineTests {
 
         let merged = ImportBatchResult.merge(batch("a.csv"), batch("b.pdf"))
         expect(merged.elements.count == 2, "éléments cumulés", "\(merged.elements.count)")
-        // ⚠️ Sans renumérotation, les deux passes repartent à sourceIndex 0 et
-        // unitNumber 1 : l'agrégation par source les fusionnerait en UNE seule
-        // source, et un rapport d'échec désignerait une unité ambiguë.
+        // ⚠️ Without renumbering, the two passes both restart at sourceIndex 0 and
+        // unitNumber 1: aggregation by source would merge them into ONE
+        // source, and a failure report would point to an ambiguous unit.
         expect(merged.perSource().count == 2, "sources restées distinctes",
                "\(merged.perSource().count)")
         expect(merged.units.map(\.origin.unitNumber) == [1, 2], "unités renumérotées à la suite",
@@ -522,14 +522,14 @@ struct ImportPipelineEngineTests {
         expect(grid.isTabular, "table exploitable")
         expect(grid.separator == ";", "séparateur détecté", grid.separator)
 
-        // Une source à UNE colonne n'est pas un tableau : l'envoyer au mapping
-        // demanderait de désigner des colonnes inexistantes.
+        // A source with a SINGLE column isn't a table: sending it to mapping
+        // would ask the user to designate columns that don't exist.
         let prose = "RELEVE DE COMPTE\nLe 2 juillet, achat CARREFOUR de 42,50 EUR\n"
         let proseGrid = CSVParser.parse(content: prose)
         expect(proseGrid?.isTabular != true, "texte en prose non traité comme une table")
 
-        // Séparateur imposé par l'utilisateur : l'autodétection se trompe sur les
-        // fichiers dont les libellés contiennent des virgules.
+        // A separator forced by the user: autodetection gets it wrong on
+        // files whose labels contain commas.
         let ambiguous = "Date,Libelle,Montant\n02/07/2026,\"CARREFOUR, PARIS\",-42.50"
         let forced = CSVParser.parse(content: ambiguous, forcedSeparator: ",")
         expect(forced?.rows.first?.count == 3, "guillemets respectés avec séparateur imposé",
@@ -537,14 +537,14 @@ struct ImportPipelineEngineTests {
         expect(forced?.rows.first?[1] == "CARREFOUR, PARIS", "virgule protégée par les guillemets",
                forced?.rows.first?[1] ?? "nil")
 
-        // Guillemets ÉCHAPPÉS (`""` dans un champ). L'import d'investissements
-        // avait son propre découpage, qui basculait `inQuotes` à chaque guillemet
-        // et cassait donc sur ce cas — il passe désormais par ce parseur.
+        // ESCAPED quotes (`""` inside a field). Investment import had
+        // its own splitting logic, which toggled `inQuotes` on every quote
+        // and so broke on this case — it now goes through this parser.
         let escaped = CSVParser.parse(content: "libelle;montant\n\"dit \"\"bonjour\"\"\";2")
         expect(escaped?.rows.first?[0] == "dit \"bonjour\"", "guillemet échappé préservé",
                escaped?.rows.first?[0] ?? "nil")
 
-        // Montants : les pièges qui faisaient rejeter des lignes valides.
+        // Amounts: the traps that made valid rows get rejected.
         expect(CSVParser.parseAmount("1 234,56", decimal: ",") == 1234.56,
                "séparateur de milliers (espace)")
         expect(CSVParser.parseAmount("1\u{00A0}234,56", decimal: ",") == 1234.56,
@@ -555,7 +555,7 @@ struct ImportPipelineEngineTests {
                "négatif comptable entre parenthèses")
     }
 
-    // MARK: - t9 — Payload de session discriminé par la destination
+    // MARK: - t9 — Session payload discriminated by destination
 
     @Test("Session : le contenu de rows_json dépend de la destination")
     func t9() throws {
@@ -564,7 +564,7 @@ struct ImportPipelineEngineTests {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
-        // Transactions : [ImportSessionRow], qui porte l'état de RÉSOLUTION.
+        // Transactions: [ImportSessionRow], which carries the RESOLUTION state.
         var row = ImportSessionRow(sourceRowNumber: 1, rawLabel: "CARREFOUR",
                                    date: Date(timeIntervalSince1970: 1_770_000_000),
                                    amount: -42.5, sourceFile: "releve.csv")
@@ -578,10 +578,10 @@ struct ImportPipelineEngineTests {
         expect(decodedRows[0].assignedPayeeId == 7, "tier assigné conservé")
         expect(decodedRows[0].sourceFile == "releve.csv", "origine conservée")
 
-        // ⚠️ Le comptage des lignes en attente se fait par SCAN DE CHAÎNE, pas par
-        // décodage (coût sur une grosse session). Si la représentation de l'enum
-        // change, ce scan devient silencieusement faux — d'où cette vérification
-        // du littéral exact attendu.
+        // ⚠️ Pending-row counting is done by STRING SCAN, not by
+        // decoding (cost on a large session). If the enum's representation
+        // changes, this scan silently becomes wrong — hence this check
+        // against the exact expected literal.
         var pending = ImportSessionRow(sourceRowNumber: 2, rawLabel: "EDF",
                                        date: Date(), amount: -89.9)
         pending.userAction = .pending
@@ -589,7 +589,7 @@ struct ImportPipelineEngineTests {
         expect(pendingJSON.contains("\"userAction\":\"pending\""),
                "littéral scanné par countPending inchangé")
 
-        // Investissements : ImportBatchResult, sans état de résolution.
+        // Investments: ImportBatchResult, with no resolution state.
         let order = ExtractedStatementOrder(
             orderType: "BUY", assetName: "Epargne MSCI World", isin: "LU1681043599",
             ticker: "CW8", quantity: 2, unitPrice: 485.30, fees: 1.99,
@@ -613,15 +613,15 @@ struct ImportPipelineEngineTests {
         expect(decodedBatch.units.first?.origin.sourceName == "avis.pdf",
                "origine des unités conservée")
 
-        // Les deux formes ne sont PAS interchangeables : c'est bien la colonne
-        // `destination` qui doit trancher, jamais une tentative de décodage.
+        // The two forms are NOT interchangeable: it's really the `destination`
+        // column that decides, never a decoding attempt.
         expect((try? decoder.decode([ImportSessionRow].self, from: batchJSON)) == nil,
                "un lot ne se décode pas comme des lignes")
         expect((try? decoder.decode(ImportBatchResult.self, from: rowsJSON)) == nil,
                "des lignes ne se décodent pas comme un lot")
     }
 
-    // MARK: - t10 — Encodage : le BOM prime sur toute heuristique
+    // MARK: - t10 — Encoding: the BOM overrides any heuristic
 
     @Test("Décodage texte, UTF-16 compris")
     func t10() throws {
@@ -637,10 +637,10 @@ struct ImportPipelineEngineTests {
             return data
         }
 
-        // ⚠️ LA régression : un CSV UTF-16 big-endian décodé en little-endian
-        // produit des idéogrammes CJK (« date » → 搀愀琀攀). Le fichier devenait
-        // illisible, donc plus tabulaire, donc envoyé à l'IA au lieu du parseur
-        // déterministe — d'où les caractères chinois ET la lenteur sur un CSV.
+        // ⚠️ THE regression: a UTF-16 big-endian CSV decoded as little-endian
+        // produces CJK ideograms ("date" → 搀愀琀攀). The file became
+        // unreadable, so no longer tabular, so sent to the AI instead of the
+        // deterministic parser — hence both the Chinese characters and the slowdown on a CSV.
         let beWithBOM = utf16Data(bigEndian: true, bom: true)
         expect(ImportFormatSniffer.decodeText(beWithBOM)?.contains("CARREFOUR") == true,
                "UTF-16 BE avec BOM décodé correctement",
@@ -652,18 +652,18 @@ struct ImportPipelineEngineTests {
         expect(ImportFormatSniffer.decodeText(leWithBOM)?.contains("CARREFOUR") == true,
                "UTF-16 LE avec BOM décodé correctement")
 
-        // Sans BOM : la position des octets nuls donne le boutisme.
+        // Without a BOM: the position of the null bytes gives the endianness.
         expect(ImportFormatSniffer.decodeText(utf16Data(bigEndian: true, bom: false))?
                 .contains("CARREFOUR") == true, "UTF-16 BE sans BOM deviné")
         expect(ImportFormatSniffer.decodeText(utf16Data(bigEndian: false, bom: false))?
                 .contains("CARREFOUR") == true, "UTF-16 LE sans BOM deviné")
 
-        // Un BOM UTF-16 est une déclaration explicite : c'est du texte, malgré les
-        // octets nuls qui feraient échouer le test générique.
+        // A UTF-16 BOM is an explicit declaration: it's text, despite the
+        // null bytes that would fail the generic test.
         expect(ImportFormatSniffer.looksLikeText(beWithBOM), "BOM UTF-16 reconnu comme texte")
         expect(ImportFormatSniffer.detect(data: beWithBOM) == .text, "UTF-16 sans extension → texte")
 
-        // Et le CSV redevient TABULAIRE, donc ne part plus à l'IA.
+        // And the CSV becomes TABULAR again, so it no longer goes to the AI.
         if let text = ImportFormatSniffer.decodeText(beWithBOM),
            let grid = CSVParser.parse(content: text) {
             expect(grid.isTabular, "CSV UTF-16 exploitable par le mapping (donc pas d'IA)")
@@ -672,7 +672,7 @@ struct ImportPipelineEngineTests {
             expect(false, "CSV UTF-16 exploitable par le mapping (donc pas d'IA)")
         }
 
-        // Non-régression : l'UTF-8 ordinaire n'est pas pris pour de l'UTF-16.
+        // Non-regression: plain UTF-8 isn't mistaken for UTF-16.
         expect(ImportFormatSniffer.decodeText(Data(csv.utf8))?.contains("CARREFOUR") == true,
                "UTF-8 sans BOM inchangé")
         let utf8BOM = Data([0xEF, 0xBB, 0xBF] + Array(csv.utf8))
@@ -680,14 +680,14 @@ struct ImportPipelineEngineTests {
                "BOM UTF-8 retiré")
     }
 
-    // MARK: - t11 — JSON de modèle : réparation de mise en forme
+    // MARK: - t11 — Model JSON: formatting repair
 
     @Test("Réparation d'un JSON coupé par la mise en forme")
     func t11() throws {
-        // ⚠️ Cas RÉEL : le modèle a coupé le nom d'une clé sur deux lignes. C'est du
-        // JSON invalide (caractère de contrôle brut dans une chaîne), `JSONDecoder`
-        // lève, et TOUT le document est perdu — huit opérations correctement
-        // extraites donnaient « aucune transaction à importer ».
+        // ⚠️ A REAL case: the model split a key's name across two lines. That's
+        // invalid JSON (a raw control character inside a string), `JSONDecoder`
+        // throws, and the ENTIRE document is lost — eight correctly
+        // extracted operations resulted in "no transaction to import".
         let broken = """
         {
           "transactions": [
@@ -713,8 +713,8 @@ struct ImportPipelineEngineTests {
         expect(rows.count == 1, "1 opération récupérée", "\(rows.count)")
         expect(rows.first?["payment_type"] as? String == "CB", "valeur de la clé recollée")
 
-        // Une VALEUR coupée se recolle avec une espace : c'est un libellé dont les
-        // mots ont été séparés, pas un identifiant.
+        // A split VALUE is rejoined with a space: it's a label whose
+        // words got separated, not an identifier.
         let wrappedValue = """
         {"transactions":[{"label":"CARREFOUR
             CITY PARIS","amount":-1.0,"date":"2026-07-22"}]}
@@ -724,33 +724,33 @@ struct ImportPipelineEngineTests {
                "libellé recollé avec une espace",
                fixedValue.contains("CARREFOURCITY") ? "mots collés" : String(fixedValue.prefix(60)))
 
-        // Non-régression : un JSON valide traverse inchangé, échappements compris.
+        // Non-regression: valid JSON passes through unchanged, escapes included.
         let valid = #"{"label":"dit \"bonjour\"","n":1}"#
         expect(LenientJSON.repaired(valid) == valid, "JSON valide inchangé",
                LenientJSON.repaired(valid))
 
-        // Les balises de code que les modèles ajoutent sont retirées.
+        // Markdown code fences that models add are stripped.
         let fenced = "```json\n" + #"{"a":1}"# + "\n```"
         expect(LenientJSON.extractObject(from: fenced) == #"{"a":1}"#,
                "balises de code retirées", LenientJSON.extractObject(from: fenced))
 
-        // ⚠️ On ne referme RIEN : une structure tronquée doit rester une erreur
-        // visible, pas une donnée devinée.
+        // ⚠️ We close NOTHING: a truncated structure must remain a visible
+        // error, not a guessed value.
         let truncated = #"{"transactions":[{"label":"X""#
         expect((try? JSONSerialization.jsonObject(
                     with: Data(LenientJSON.repaired(truncated).utf8))) == nil,
                "JSON tronqué reste invalide (rien n'est inventé)")
     }
 
-    // MARK: - t12 — Une faute de syntaxe ne coûte qu'UNE ligne
+    // MARK: - t12 — A syntax mistake only costs ONE line
 
     @Test("Décodage objet par objet d'une réponse fautive")
     func t12() throws {
-        // ⚠️ JSON RÉEL renvoyé par un modèle sur une capture d'appli bancaire.
-        // Deux fautes de ponctuation : une virgule finale (3ᵉ objet) et un
-        // guillemet ouvrant de clé oublié précédé d'une virgule parasite (8ᵉ).
-        // Le décodage du DOCUMENT ENTIER échouait, donc les huit opérations
-        // étaient perdues — dont six parfaitement formées.
+        // ⚠️ REAL JSON returned by a model on a banking app screenshot.
+        // Two punctuation mistakes: a trailing comma (3rd object) and a
+        // missing opening key quote preceded by a stray comma (8th). Decoding
+        // the WHOLE document failed, so all eight operations
+        // were lost — six of them perfectly well-formed.
         let response = """
         {
           "transactions": [
@@ -775,7 +775,7 @@ struct ImportPipelineEngineTests {
         }
         """
 
-        // Le document entier reste invalide — on ne prétend pas le contraire.
+        // The whole document is still invalid — we don't claim otherwise.
         expect((try? JSONSerialization.jsonObject(with: Data(response.utf8))) == nil,
                "le document brut est bien invalide (précondition)")
 
@@ -786,7 +786,7 @@ struct ImportPipelineEngineTests {
             guard let data = object.data(using: .utf8) else { return nil }
             return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         }
-        // Les DEUX fautes sont de la ponctuation réparable : on récupère tout.
+        // BOTH mistakes are repairable punctuation: everything is recovered.
         expect(decoded.count == 8, "8 opérations décodées", "\(decoded.count)")
         expect(decoded.compactMap { $0["label"] as? String }.contains("Terrys Cafe"),
                "libellé conservé")
@@ -795,7 +795,7 @@ struct ImportPipelineEngineTests {
         expect(decoded.compactMap { $0["amount"] as? Double }.contains(-6.00),
                "l'objet à guillemet manquant est récupéré")
 
-        // Réparations prises une par une.
+        // Repairs taken one at a time.
         expect(LenientJSON.repairSyntax(#"{"a":1,}"#) == #"{"a":1}"#,
                "virgule finale retirée", LenientJSON.repairSyntax(#"{"a":1,}"#))
         expect(LenientJSON.repairSyntax(#"{"a":1,, "b":2}"#).contains(#""b":2"#),
@@ -803,13 +803,13 @@ struct ImportPipelineEngineTests {
         expect(LenientJSON.repairSyntax(#"{"a":1, b": 2}"#).contains(#""b": 2"#),
                "guillemet ouvrant de clé restauré", LenientJSON.repairSyntax(#"{"a":1, b": 2}"#))
 
-        // ⚠️ Non-régression : le contenu d'une CHAÎNE ne doit pas être touché par
-        // les réparations de ponctuation.
+        // ⚠️ Non-regression: a STRING's content must not be touched by
+        // the punctuation repairs.
         let withComma = #"{"label":"CARREFOUR, PARIS","amount":-1}"#
         expect(LenientJSON.repairSyntax(withComma) == withComma,
                "virgule dans un libellé préservée", LenientJSON.repairSyntax(withComma))
 
-        // Un objet irrécupérable ne fait perdre QUE lui.
+        // An unrecoverable object only loses ITSELF.
         let partlyBroken = #"[{"date":"2026-07-01","label":"OK","amount":-1},{"date":BROKEN}]"#
         let salvaged = LenientJSON.innermostObjects(in: partlyBroken).compactMap {
             (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any]
@@ -818,7 +818,7 @@ struct ImportPipelineEngineTests {
         expect(salvaged.first?["label"] as? String == "OK", "et c'est le bon")
     }
 
-    // MARK: - t13 — Virgule FR comme séparateur décimal dans un nombre
+    // MARK: - t13 — FR comma as a decimal separator inside a number
 
     @Test("Virgule décimale FR dans un nombre JSON")
     func t13() throws {
@@ -826,21 +826,21 @@ struct ImportPipelineEngineTests {
                "négatif corrigé", LenientJSON.repairSyntax(#"{"amount":-19,50}"#))
         expect(LenientJSON.repairSyntax(#"{"amount":19,50}"#) == #"{"amount":19.50}"#,
                "positif corrigé", LenientJSON.repairSyntax(#"{"amount":19,50}"#))
-        // Le vrai séparateur de champ suivant reste intact : la virgule qui
-        // introduit "payment_type" n'a pas de chiffre juste après, le motif ne
-        // la touche donc jamais.
+        // The real next field separator stays intact: the comma that
+        // introduces "payment_type" has no digit right after it, so the pattern
+        // never touches it.
         let field = #"{"amount":-19,50,"payment_type":null}"#
         expect(LenientJSON.repairSyntax(field) == #"{"amount":-19.50,"payment_type":null}"#,
                "séparateur de champ suivant intact", LenientJSON.repairSyntax(field))
-        // Un entier suivi d'un champ qui COMMENCE par un chiffre n'est pas une
-        // fausse décimale (ex. deux champs numériques consécutifs) : ancré
-        // juste après ":", jamais après une autre valeur.
+        // An integer followed by a field that STARTS with a digit isn't a
+        // false decimal (e.g. two consecutive numeric fields): anchored
+        // right after ":", never after another value.
         expect(LenientJSON.repairSyntax(#"{"quantity":4,"amount":-19,50}"#)
                    == #"{"quantity":4,"amount":-19.50}"#,
                "un entier voisin n'est pas confondu avec une décimale")
 
-        // Réplique du cas réel : 9 opérations, décimales FR sur 4 d'entre elles,
-        // aucune n'est perdue une fois réparées.
+        // A replica of the real-world case: 9 operations, FR decimals on 4 of
+        // them, none lost once repaired.
         let real = #"""
         [
           {"date":"2026-07-31","label":"Carrefour City","amount":-19,50,"payment_type":null},

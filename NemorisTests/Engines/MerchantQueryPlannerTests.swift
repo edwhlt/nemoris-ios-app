@@ -2,17 +2,17 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Planification des requêtes au registre des entreprises.
+/// Planning queries against the business registry.
 ///
-/// La règle cardinale, mesurée sur l'API réelle : « carrefour market
-/// flanches » rend 0 résultat quand « carrefour market » en rend 1411. Un nom
-/// de lieu dans le terme cherché ne restreint pas la recherche — il la fait
-/// échouer. La localité doit être un FILTRE, jamais un mot du terme.
+/// The cardinal rule, measured against the real API: "carrefour market
+/// flanches" returns 0 results while "carrefour market" returns 1411. A place
+/// name inside the search term doesn't narrow the search — it makes it
+/// fail. Locality must be a FILTER, never a word in the term.
 @Suite("Planificateur de requêtes marchandes")
 struct MerchantQueryPlannerEngineTests {
 
-    // Ces aides conservent la localisation de l'appelant : sans le paramètre
-    // de source, tout échec pointerait ici au lieu du test concerné.
+    // These helpers preserve the caller's location: without the source
+    // parameter, every failure would point here instead of at the actual test.
     private func expect(_ condition: Bool, _ label: String, _ detail: String = "",
                         sourceLocation: SourceLocation = #_sourceLocation) {
         #expect(condition, "\(label)\(detail.isEmpty ? "" : " — \(detail)")",
@@ -32,29 +32,29 @@ struct MerchantQueryPlannerEngineTests {
     }
 
 
-    // Tests unitaires de la planification de requêtes marchand (AXE S) — compile les fichiers
-    // RÉELS du module `Nemoris/Enrichment/QueryPlanning/`.
+    // Unit tests for merchant query planning (AXE S) — compiles the
+    // REAL files of the `Nemoris/Enrichment/QueryPlanning/` module.
     //
-    // RÉGRESSION PRINCIPALE VERROUILLÉE ICI (t1) : le libellé bancaire entier partait dans le
-    // `q=` de recherche-entreprises.api.gouv.fr. Or cette API matche `q` contre la raison
-    // sociale et les enseignes, JAMAIS contre l'adresse. Mesuré sur l'API réelle :
+    // THE MAIN REGRESSION LOCKED DOWN HERE (t1): the whole bank label went into the
+    // `q=` of recherche-entreprises.api.gouv.fr. But this API matches `q` against the
+    // legal name and trade names, NEVER against the address. Measured against the real API:
     //
-    //     q=carrefour market flanches  →  0 résultat
-    //     q=carrefour market           →  1907 résultats
-    //     q=srom                       →  13 résultats, dont SROM · 69370 Saint-Didier-au-Mont-d'Or
+    //     q=carrefour market flanches  →  0 results
+    //     q=carrefour market           →  1907 results
+    //     q=srom                       →  13 results, including SROM · 69370 Saint-Didier-au-Mont-d'Or
     //
-    // La localité doit donc devenir un FILTRE ou un SIGNAL DE TRI, jamais un mot de la requête.
+    // So locality must become a FILTER or a RANKING SIGNAL, never a word in the query.
     //
-    // t2 verrouille la seconde découverte : 91 % des libellés « PAIEMENT » du corpus réel
-    // suivent un gabarit à champs fixes où la localité est AVANT le marchand et TRONQUÉE à
-    // ~13 caractères — deux choses que le tag de ville du moteur (position finale, set fermé
-    // de 153 communes, correspondance exacte) ne peut structurellement pas voir.
+    // t2 locks down the second discovery: 91% of the "PAIEMENT" labels in the real corpus
+    // follow a fixed-field template where the locality comes BEFORE the merchant and is TRUNCATED to
+    // ~13 characters — two things the engine's city tag (last position, a closed
+    // set of 153 communes, exact match) structurally cannot see.
 
-    // MARK: - Aides de construction
+    // MARK: - Construction helpers
 
-    /// Construit une entrée à partir d'un libellé brut, sans sortie moteur (le planificateur
-    /// retombe alors sur sa tokenisation interne — c'est le cas nominal quand le moteur ONNX
-    /// est encore en cours de démarrage).
+    /// Builds an entry from a raw label, with no engine output (the planner
+    /// then falls back to its own internal tokenization — the nominal case while
+    /// the ONNX engine is still booting).
     private func input(_ label: String,
                userCountry: String? = nil,
                userPostalCode: String? = nil,
@@ -81,7 +81,7 @@ struct MerchantQueryPlannerEngineTests {
         )
     }
 
-    /// Tous les `q=` des tentatives registre d'un plan.
+    /// All the `q=` values from a plan's registry attempts.
     private func registryQueries(_ plan: MerchantQueryPlan) -> [String] {
         plan.attempts.compactMap {
             if case .companyRegistry(let q) = $0.kind { return q.q }
@@ -96,7 +96,7 @@ struct MerchantQueryPlannerEngineTests {
         }
     }
 
-    /// Aucune tentative ne doit contenir `needle` dans son `q=`.
+    /// No attempt should contain `needle` in its `q=`.
     private func noAttemptMentions(_ plan: MerchantQueryPlan, _ needle: String) -> Bool {
         registryQueries(plan).allSatisfy { !$0.contains(needle) }
     }
@@ -119,7 +119,7 @@ struct MerchantQueryPlannerEngineTests {
         )
     }
 
-    /// Générateur congruentiel linéaire à graine — mélange reproductible pour t10.
+    /// A seeded linear congruential generator — a reproducible shuffle for t10.
     struct SeededRandom: RandomNumberGenerator {
         private var state: UInt64
         init(seed: UInt64) { state = seed &* 6364136223846793005 &+ 1442695040888963407 }
@@ -130,7 +130,7 @@ struct MerchantQueryPlannerEngineTests {
     }
 
 
-    // MARK: - t1 · La ville ne finit JAMAIS dans q= (le bug d'origine)
+    // MARK: - t1 · The city NEVER ends up in q= (the original bug)
 
     @Test("La ville ne finit jamais dans le q= du registre")
     func t1() {
@@ -142,8 +142,8 @@ struct MerchantQueryPlannerEngineTests {
                "aucune tentative ne contient « flanches » dans q=")
         expect(!plan.attempts.isEmpty, "le plan produit au moins une tentative")
 
-        // Localité NON résolue (geo.api.gouv.fr ne connaît pas « Flanches ») : la première
-        // tentative doit être le q= NU, sans aucun filtre géo inventé.
+        // An UNRESOLVED locality (geo.api.gouv.fr doesn't know "Flanches"): the first
+        // attempt must be the BARE q=, with no invented geo filter.
         let first = registryAttempts(plan).first
         expect(first != nil && !first!.hasGeoFilter,
                "sans commune résolue, la 1re tentative registre est le q= nu")
@@ -152,13 +152,13 @@ struct MerchantQueryPlannerEngineTests {
         expectEqual(plan.ranking.freeLocalityText ?? "", "flanches",
                     "« flanches » survit comme texte de tri sur les adresses")
 
-        // Même règle avec une enseigne multi-mots.
+        // Same rule with a multi-word trade name.
         let plan2 = MerchantQueryPlanner.plan(input("CARREFOUR MARKET FLANCHES"))
         expectEqual(plan2.extraction.nameQuery, "carrefour market",
                     "« CARREFOUR MARKET FLANCHES » → q = carrefour market")
         expect(noAttemptMentions(plan2, "flanches"), "q= ne contient pas la ville (enseigne multi-mots)")
 
-        // Et avec la commune résolue, la ville devient un FILTRE, jamais un mot de q=.
+        // And with a resolved commune, the city becomes a FILTER, never a word in q=.
         let plan3 = MerchantQueryPlanner.plan(
             input("CB SROM FLANCHES"),
             locality: locality("Saint-Didier-au-Mont-d'Or", insee: "69194", cp: ["69370"], dep: "69")
@@ -175,11 +175,11 @@ struct MerchantQueryPlannerEngineTests {
                "le retrait de la ville est tracé dans droppedTokens (puce « Retiré du nom »)")
     }
 
-    // MARK: - t2 · Gabarit bancaire à champs fixes (la découverte du corpus réel)
+    // MARK: - t2 · Fixed-field bank template (the discovery from the real corpus)
 
     @Test("Gabarit à champs fixes : localité EN TÊTE et tronquée")
     func t2() {
-        // Cas nominal : PAIEMENT PSC DDMM <VILLE tronquée> <MARCHAND> CARTE NNNN GIR<id>
+        // Nominal case: PAIEMENT PSC DDMM <truncated CITY> <MERCHANT> CARTE NNNN GIR<id>
         let plan = MerchantQueryPlanner.plan(
             input("PAIEMENT PSC 1803 MONT SUR LOIR SC-X2M VERNON CARTE 1042 GIR012607803713662")
         )
@@ -197,7 +197,7 @@ struct MerchantQueryPlannerEngineTests {
                "la date DDMM est retirée")
         expectEqual(plan.extraction.countryHint ?? "", "FR", "gabarit FR ⇒ pays FR")
 
-        // Préfixe département explicite : « 35 RENNES » → filtre gratuit.
+        // Explicit department prefix: "35 RENNES" → a free filter.
         let plan2 = MerchantQueryPlanner.plan(
             input("PAIEMENT PSC 1903 35 RENNES SELF2 EIFFEL CARTE 1042")
         )
@@ -209,7 +209,7 @@ struct MerchantQueryPlannerEngineTests {
         expect(plan2.extraction.nameQuery.contains("self2") || plan2.extraction.nameQuery.contains("eiffel"),
                "le marchand est conservé")
 
-        // Paiement web : PAYLI dans le créneau localité ⇒ aucun filtre géographique.
+        // Web payment: PAYLI in the locality slot ⇒ no geographic filter.
         let plan3 = MerchantQueryPlanner.plan(
             input("PAIEMENT CB 2503 PAYLI2469 AMAZON PRIME FR PAYWEB1042 GIR012608403558190")
         )
@@ -224,25 +224,25 @@ struct MerchantQueryPlannerEngineTests {
                "pas de recherche par proximité pour un paiement web")
         expect(plan3.extraction.nameQuery.contains("amazon"), "le marchand Amazon est conservé")
 
-        // Terminateur « PAYWEB1042 » collé (variante observée dans le corpus).
+        // Terminator "PAYWEB1042" glued on (a variant observed in the corpus).
         let plan4 = MerchantQueryPlanner.plan(
             input("PAIEMENT CB 0904 CORK APPLE COM/BILL PAYWEB1042 GIR012610000095685")
         )
         expect(plan4.extraction.nameQuery.contains("apple"), "« APPLE » est reconnu malgré la troncature")
         expect(!plan4.extraction.nameQuery.contains("payweb"), "PAYWEB1042 collé est retiré")
 
-        // Repli n-gram quand aucun gabarit ne s'applique.
+        // N-gram fallback when no template applies.
         let plan5 = MerchantQueryPlanner.plan(input("TCL 69 LYO"))
         expect(plan5.extraction.templateId == nil, "aucun gabarit ⇒ repli heuristique")
         expect(!plan5.extraction.nameQuery.isEmpty, "le repli produit tout de même un nom")
 
-        // Un libellé « PAIEMENT » ne doit jamais produire un q= vide.
+        // A "PAIEMENT" label must never produce an empty q=.
         let plan6 = MerchantQueryPlanner.plan(input("PAIEMENT PSC 1609 OULLINS ELKAN CARTE 1042"))
         expectEqual(plan6.extraction.nameQuery, "elkan", "un seul token marchand est préservé")
         expectEqual(plan6.extraction.primaryLocalityText ?? "", "oullins", "la ville est bien isolée")
     }
 
-    // MARK: - t3 · Cascade avec commune résolue
+    // MARK: - t3 · Cascade with a resolved commune
 
     @Test("Cascade ordonnée quand la commune est résolue")
     func t3() {
@@ -277,19 +277,19 @@ struct MerchantQueryPlannerEngineTests {
         expect(queries[0].canonicalKey != queries[3].canonicalKey,
                "deux requêtes différentes ont deux clés de cache différentes")
 
-        // Les identifiants de tentative sont des ordinaux 1-based contigus.
+        // Attempt IDs are contiguous 1-based ordinals.
         expect(plan.attempts.enumerated().allSatisfy { $0.offset + 1 == $0.element.id },
                "les id de tentative sont des ordinaux 1-based contigus")
         expect(plan.attempts.allSatisfy { !$0.rationale.isEmpty },
                "chaque tentative porte une justification affichable")
     }
 
-    // MARK: - t4 · Code postal collé au nom
+    // MARK: - t4 · Postal code glued to the name
 
     @Test("Le code postal est extrait du nom, jamais laissé dans q=")
     func t4() {
-        // NormalizerPipeline.isPureNumericNoise ne jette un token numérique que s'il fait
-        // ≤ 4 caractères ET est en dernier → un code postal à 5 chiffres survit toujours.
+        // NormalizerPipeline.isPureNumericNoise only drops a numeric token if it's
+        // ≤ 4 characters AND last → a 5-digit postal code always survives.
         let plan = MerchantQueryPlanner.plan(input("CB CARREFOUR MARKET 75011 PARIS"))
         expect(!plan.extraction.nameQuery.contains("75011"), "75011 ne reste pas dans le nom")
         expectEqual(plan.extraction.postalCodeToken ?? "", "75011", "75011 devient un token de localité")
@@ -301,25 +301,25 @@ struct MerchantQueryPlannerEngineTests {
                "le retrait du code postal est tracé")
         expect(plan.extraction.nameQuery.contains("carrefour"), "le nom de l'enseigne survit")
 
-        // Négatif : 5 chiffres dans un libellé étranger ne doivent PAS produire de filtre FR.
+        // Negative: 5 digits in a foreign label must NOT produce an FR filter.
         let vn = MerchantQueryPlanner.plan(input("VNPAY HUNG RES 12345 HA GIANG"))
         expectEqual(vn.extraction.countryHint ?? "", "VN", "la ville vietnamienne impose VN")
         expect(!registryAttempts(vn).contains { $0.codePostal != nil },
                "pas de filtre code_postal hors de France")
         expect(registryAttempts(vn).isEmpty, "aucune requête registre hors de France")
 
-        // Le code postal saisi par l'utilisateur prime.
+        // A postal code entered by the user takes priority.
         let user = MerchantQueryPlanner.plan(input("BOULANGERIE MARIE", userPostalCode: "69002"))
         expect(registryAttempts(user).contains { $0.codePostal == "69002" },
                "le code postal du formulaire est utilisé comme filtre")
 
-        // Un code postal invalide côté formulaire est ignoré.
+        // An invalid form-entered postal code is ignored.
         let bad = MerchantQueryPlanner.plan(input("BOULANGERIE MARIE", userPostalCode: "69"))
         expect(!registryAttempts(bad).contains { $0.codePostal != nil },
                "un code postal mal formé est ignoré")
     }
 
-    // MARK: - t5 · Communes multi-mots et tronquées
+    // MARK: - t5 · Multi-word and truncated communes
 
     @Test("Communes multi-mots, particules toponymiques, troncature")
     func t5() {
@@ -336,15 +336,15 @@ struct MerchantQueryPlannerEngineTests {
                "le n-gram grandit vers la gauche jusqu'à « saint »")
         expectEqual(stDidier.extraction.nameQuery, "srom", "il reste toujours un nom exploitable")
 
-        // Un seul token : c'est le NOM, pas une ville. Miroir de la règle
-        // promote-geo-back-to-merchant du moteur — sans quoi q= serait vide.
+        // A single token: that's the NAME, not a city. Mirrors the engine's
+        // promote-geo-back-to-merchant rule — without which q= would be empty.
         let parisOnly = MerchantQueryPlanner.plan(input("PARIS"))
         expectEqual(parisOnly.extraction.nameQuery, "paris", "« PARIS » seul reste le nom")
         expect(parisOnly.extraction.primaryLocalityText == nil,
                "aucune localité extraite d'un libellé à un seul token")
 
-        // Troncature en largeur fixe : le fragment doit être conservé tel quel pour l'oracle,
-        // qui sait résoudre « ISSY LES » → Issy-les-Moulineaux (vérifié à l'API).
+        // Fixed-width truncation: the fragment must be kept as-is for the oracle,
+        // which knows how to resolve "ISSY LES" → Issy-les-Moulineaux (verified against the API).
         let issy = MerchantQueryPlanner.plan(
             input("PAIEMENT CB 2503 ISSY LES CANAL PLUS FR PAYWEB1042")
         )
@@ -360,7 +360,7 @@ struct MerchantQueryPlannerEngineTests {
                "la localité tronquée ne reste pas dans le nom")
         expect(!cormeilles.extraction.nameQuery.isEmpty, "un nom subsiste")
 
-        // Le nom ne doit jamais être entièrement mangé par la localité.
+        // The name must never be entirely eaten by the locality.
         for label in ["PAIEMENT PSC 1703 NIMES AUCHAN NIMES CARTE 1042",
                       "PAIEMENT PSC 1001 LYON CITADIUM LYON CARTE 1042"] {
             let p = MerchantQueryPlanner.plan(input(label))
@@ -368,7 +368,7 @@ struct MerchantQueryPlannerEngineTests {
         }
     }
 
-    // MARK: - t6 · Libellés étrangers
+    // MARK: - t6 · Foreign labels
 
     @Test("Libellés étrangers : aucune requête au registre français")
     func t6() {
@@ -389,7 +389,7 @@ struct MerchantQueryPlannerEngineTests {
         expect(!vnpay.extraction.nameQuery.contains("psc"), "le code de référence PSC est retiré")
         expect(registryAttempts(vnpay).isEmpty, "aucune requête registre")
 
-        // Les abréviations sont développées pour la recherche cartographique.
+        // Abbreviations are expanded for the map search.
         let expanded = AbbreviationTable.expand(["hung", "res"])
         expect(expanded.contains("restaurant"), "« RES » est développé en « restaurant »")
         let nhaHang = AbbreviationTable.expand(["nha", "hang", "rau", "m"])
@@ -400,14 +400,14 @@ struct MerchantQueryPlannerEngineTests {
         expect(!paypal.extraction.nameQuery.contains("paypal"), "PAYPAL est retiré")
         expectEqual(paypal.extraction.processorId ?? "", "paypal", "PAYPAL est le processeur")
 
-        // Un code pays de 2 lettres en tête ne doit jamais être pris pour un pays.
+        // A leading 2-letter country code must never be mistaken for a country.
         let cb = MerchantQueryPlanner.plan(input("CB CARREFOUR"))
         expect(cb.extraction.countryHint == nil || cb.extraction.countryHint == "FR",
                "« CB » en tête n'est pas interprété comme un code pays")
         expect(cb.extraction.nameQuery.contains("carrefour"), "le nom survit")
     }
 
-    // MARK: - t7 · Préfixes bancaires et personnes physiques
+    // MARK: - t7 · Bank prefixes and individuals
 
     @Test("Bruit bancaire retiré, particuliers jamais envoyés au registre")
     func t7() {
@@ -420,7 +420,7 @@ struct MerchantQueryPlannerEngineTests {
         expect(!prlv.extraction.nameQuery.hasPrefix("prlv"), "le préfixe PRLV est retiré")
         expect(!prlv.extraction.nameQuery.isEmpty, "un nom subsiste")
 
-        // Virements nominatifs → JAMAIS de requête à un registre d'entreprises.
+        // Named transfers → NEVER a query to a business registry.
         for label in ["VIR DE M DIDIER HELET CG3V25344L068242",
                       "VIR INST WERO M NATHAN LAURENT WERO DB7E79E3B27D4097",
                       "VIR SEPA RECU M DUPONT"] {
@@ -429,7 +429,7 @@ struct MerchantQueryPlannerEngineTests {
             expect(p.attempts.isEmpty, "aucune tentative pour un particulier")
         }
 
-        // Contre-exemple : un virement vers une opération interne n'est PAS une personne.
+        // Counter-example: a transfer to an internal operation is NOT a person.
         let livret = MerchantQueryPlanner.plan(input("VIR LIVRET JEUNE CG3W26063M200769"))
         expect(!livret.extraction.isPersonNotBusiness,
                "« VIR LIVRET JEUNE » n'est pas un virement nominatif")
@@ -450,25 +450,25 @@ struct MerchantQueryPlannerEngineTests {
         )
         expect(registryQueries(plan).contains("carrefour market"),
                "la marque multi-mots reste entière dans q=")
-        // Le nom raccourci existe mais arrive APRÈS le nom complet.
+        // The shortened name exists but comes AFTER the full name.
         let queries = registryQueries(plan)
         if let fullIndex = queries.firstIndex(of: "carrefour market"),
            let shortIndex = queries.firstIndex(of: "carrefour") {
             expect(fullIndex < shortIndex, "le nom raccourci est tenté après le nom complet")
         } else {
-            // À deux mots seulement, aucun raccourcissement n'est nécessaire.
+            // With just two words, no shortening is needed.
             expect(queries.contains("carrefour market"), "le nom complet est présent")
         }
 
-        // Classement : à localité égale, la raison sociale exacte bat l'enseigne seule.
+        // Ranking: with equal locality, the exact legal name beats a trade name alone.
         let ctx = RankingContext(nameTokens: ["boulangerie", "pralus"], cityLabel: "Roanne")
         let exact = candidate("A", names: ["Boulangerie Pralus"], city: "Roanne")
         let enseigneOnly = candidate("B", names: ["CSF"], city: "Roanne", viaEnseigne: true)
         let ranked = CandidateRanker.rank([enseigneOnly, exact], context: ctx)
         expectEqual(ranked.first?.id ?? "", "A", "la raison sociale exacte gagne")
 
-        // Mais si la raison sociale ne matche pas du tout, l'enseigne l'emporte —
-        // c'est le cas LIDL/CARREFOUR MARKET vérifié à l'API.
+        // But if the legal name doesn't match at all, the trade name wins —
+        // this is the LIDL/CARREFOUR MARKET case verified against the API.
         let ctx2 = RankingContext(nameTokens: ["carrefour", "market"], cityLabel: "Roanne")
         let unrelated = candidate("A", names: ["Syndicat des copropriétaires"], city: "Roanne")
         let viaEnseigne = candidate("B", names: ["LIDL", "Carrefour Market"], city: "Roanne",
@@ -476,16 +476,16 @@ struct MerchantQueryPlannerEngineTests {
         let ranked2 = CandidateRanker.rank([unrelated, viaEnseigne], context: ctx2)
         expectEqual(ranked2.first?.id ?? "", "B", "l'enseigne gagne quand la raison sociale ne dit rien")
 
-        // Troncature en largeur fixe : les relevés coupent les mots (« BOULANG » pour
-        // BOULANGERIE, « YVETT » pour YVETTE, « DEFE » pour DÉFENSE). Un token tronqué doit
-        // matcher son mot complet par préfixe, sinon toute enseigne coupée serait mal classée.
+        // Fixed-width truncation: statements cut off words ("BOULANG" for
+        // BOULANGERIE, "YVETT" for YVETTE, "DEFE" for DÉFENSE). A truncated token must
+        // match its full word by prefix, otherwise any truncated trade name would be misranked.
         let sim = MerchantTokenSimilarity.score(["boulang", "marie"], ["boulangerie", "marie"])
         expect(sim > 0.7, "un mot tronqué matche son mot complet par préfixe (\(String(format: "%.2f", sim)))")
         let sim2 = MerchantTokenSimilarity.score(["gif", "sur", "yvett"], ["gif", "sur", "yvette"])
         expect(sim2 > 0.7, "« yvett » matche « yvette » (\(String(format: "%.2f", sim2)))")
-        // Limite assumée : une CONTRACTION n'est pas un préfixe (« phie » ≠ pha…), elle ne
-        // matche donc que sur les autres tokens. C'est le rôle du filtre géographique de
-        // rattraper ces cas, pas celui de la similarité de noms.
+        // An accepted limitation: a CONTRACTION isn't a prefix ("phie" ≠ pha…), so it only
+        // matches on the other tokens. It's the geographic filter's job to
+        // catch these cases, not name similarity's.
         let contraction = MerchantTokenSimilarity.score(["phie", "nimes"], ["pharmacie", "nimes"])
         expect(contraction >= 0.4 && contraction < 0.7,
                "une contraction ne matche que partiellement (\(String(format: "%.2f", contraction)))")
@@ -497,7 +497,7 @@ struct MerchantQueryPlannerEngineTests {
         expect(unordered > 0.7, "l'ordre des mots n'a pas d'importance (\(String(format: "%.2f", unordered)))")
     }
 
-    // MARK: - t9 · Libellés vides et poubelle
+    // MARK: - t9 · Empty and junk labels
 
     @Test("Libellés dégénérés : aucun appel réseau")
     func t9() {
@@ -508,7 +508,7 @@ struct MerchantQueryPlannerEngineTests {
         let garbage = MerchantQueryPlanner.plan(input("***"))
         expect(garbage.extraction.degenerate, "« *** » est marqué dégénéré")
 
-        // Round-trip Codable : le plan doit survivre à la sérialisation (cache, tests corpus).
+        // Codable round-trip: the plan must survive serialization (cache, corpus tests).
         let plan = MerchantQueryPlanner.plan(
             input("CB SROM FLANCHES"),
             locality: locality("Roanne", insee: "42187", cp: ["42300"], dep: "42")
@@ -526,13 +526,13 @@ struct MerchantQueryPlannerEngineTests {
             expect(false, "round-trip Codable du plan complet", "encodage ou décodage échoué")
         }
 
-        // Un libellé fait uniquement de bruit bancaire ne doit rien produire.
+        // A label made purely of bank noise must produce nothing.
         let onlyNoise = MerchantQueryPlanner.plan(input("PAIEMENT CB 1503 CARTE 1042"))
         expect(onlyNoise.attempts.isEmpty || !onlyNoise.extraction.nameQuery.isEmpty,
                "un libellé sans marchand ne produit pas de q= vide")
     }
 
-    // MARK: - t10 · Le ranker est un ordre total déterministe (verrouille results.first)
+    // MARK: - t10 · The ranker is a deterministic total order (locks down results.first)
 
     @Test("Classement : ordre total, reproductible, indépendant de l'ordre d'entrée")
     func t10() {
@@ -561,7 +561,7 @@ struct MerchantQueryPlannerEngineTests {
         expect(stable, "20 mélanges à graine produisent le MÊME classement")
         expectEqual(reference.count, pool.count, "aucun candidat perdu au classement")
 
-        // Hiérarchie des signaux de localité.
+        // Locality signal hierarchy.
         let ctxInsee = RankingContext(nameTokens: ["pralus"], inseeCode: "69382",
                                       postalCodes: ["69002"], departmentCode: "69", cityLabel: "Lyon")
         let good = candidate("g", names: ["Pralus"], cp: "69002", city: "Lyon", insee: "69382")
@@ -572,25 +572,25 @@ struct MerchantQueryPlannerEngineTests {
                CandidateRanker.score(wrongCity, context: ctxInsee).localityMatch,
                "INSEE correspondant > INSEE différent")
 
-        // Un établissement fermé ne dépasse jamais un ouvert à nom égal.
+        // A closed establishment never outranks an open one with an equal name.
         let openOne = candidate("open", names: ["Pralus"], cp: "69002", city: "Lyon", insee: "69382")
         let closedOne = candidate("closed", names: ["Pralus"], cp: "69002", city: "Lyon",
                                   insee: "69382", active: false)
         expectEqual(CandidateRanker.rank([closedOne, openOne], context: ctxInsee).first?.id ?? "",
                     "open", "un établissement fermé ne dépasse pas un ouvert")
 
-        // Bris d'égalité par siège, puis par id.
+        // Tiebreak by headquarters, then by id.
         let hq = candidate("z_hq", names: ["Pralus"], cp: "69002", city: "Lyon", insee: "69382", siege: true)
         let branch = candidate("a_branch", names: ["Pralus"], cp: "69002", city: "Lyon", insee: "69382")
         expectEqual(CandidateRanker.rank([branch, hq], context: ctxInsee).first?.id ?? "",
                     "z_hq", "à score égal, le siège passe devant")
 
-        // Aucune information de lieu ⇒ score de localité NEUTRE (0.5), pas une pénalité.
+        // No location information ⇒ a NEUTRAL locality score (0.5), not a penalty.
         let ctxNoGeo = RankingContext(nameTokens: ["pralus"])
         expect(CandidateRanker.score(good, context: ctxNoGeo).localityMatch == 0.5,
                "sans info de lieu, le score de localité est neutre")
 
-        // Localité NON résolue retrouvée dans l'adresse — le cœur du correctif SROM.
+        // An UNRESOLVED locality found inside the address — the core of the SROM fix.
         let ctxFree = RankingContext(nameTokens: ["srom"], freeLocalityText: "flanches")
         let atFlanches = candidate("f", names: ["SROM"], address: "12 route de Flanches 69370 Chazay")
         let elsewhere = candidate("e", names: ["SROM"], address: "3 rue de la Fosse 89400 Bassou")
@@ -600,12 +600,12 @@ struct MerchantQueryPlannerEngineTests {
         expectEqual(CandidateRanker.rank([elsewhere, atFlanches], context: ctxFree).first?.id ?? "",
                     "f", "le candidat dont l'adresse cite le lieu-dit gagne")
 
-        // Un candidat SANS aucun nom ne peut rien matcher : son score de nom est 0.
-        // C'est la raison pour laquelle l'adaptateur `Establishment.rankable` DOIT joindre la
-        // raison sociale de l'entreprise — la plupart des petits commerces n'ont pas d'enseigne
-        // déclarée. Sans ça, tous les établissements se retrouvaient à 0 et étaient départagés
-        // par leur seul identifiant : « CB SROM FLANCHES » classait « COMMUNE DE POMMEVIC »
-        // devant « SROM ». Le câblage lui-même est vérifié par integration/ExecutorLiveCheck.
+        // A candidate with NO name at all can't match anything: its name score is 0.
+        // This is why the `Establishment.rankable` adapter MUST join the
+        // company's legal name — most small businesses have no declared
+        // trade name. Without that, every establishment ended up at 0 and was tiebroken
+        // by its id alone: "CB SROM FLANCHES" ranked "COMMUNE DE POMMEVIC"
+        // above "SROM". The wiring itself is verified by integration/ExecutorLiveCheck.
         let ctxNamed = RankingContext(nameTokens: ["srom"])
         let named = candidate("named", names: ["SROM"])
         let nameless = candidate("aaa_nameless", names: [])
@@ -616,7 +616,7 @@ struct MerchantQueryPlannerEngineTests {
         expectEqual(CandidateRanker.rank([nameless, named], context: ctxNamed).first?.id ?? "",
                     "named", "le candidat nommé passe devant, malgré un id supérieur")
 
-        // Le poids du fournisseur module le score final.
+        // The provider's weight modulates the final score.
         let ctxW = RankingContext(nameTokens: ["pralus"], cityLabel: "Lyon")
         let sirene = candidate("sirene", names: ["Pralus"], city: "Lyon", weight: 1.0)
         let mapkit = candidate("mapkit", names: ["Pralus"], city: "Lyon", weight: 0.7)
@@ -624,7 +624,7 @@ struct MerchantQueryPlannerEngineTests {
                     "sirene", "à qualité égale, la source officielle prime")
     }
 
-    // MARK: - t11 · Budget respecté
+    // MARK: - t11 · Budget respected
 
     @Test("Le budget borne le plan, de façon auditable sans rien exécuter")
     func t11() {
@@ -648,7 +648,7 @@ struct MerchantQueryPlannerEngineTests {
         expect(interactive.attempts.count > batch.attempts.count,
                "l'interactif planifie plus large que le batch")
 
-        // Les budgets sont cohérents entre eux.
+        // The budgets are consistent with each other.
         expect(SearchBudget.batch.maxRequests < SearchBudget.interactive.maxRequests,
                "le budget batch est plus serré que l'interactif")
         expect(!SearchBudget.batch.allowLLM, "le batch n'appelle jamais le modèle de langage")
@@ -657,18 +657,18 @@ struct MerchantQueryPlannerEngineTests {
         expect(SearchBudget.Usage().totalLookups == 0, "une consommation neuve est à zéro")
     }
 
-    // MARK: - t12 · L'IA enrichit, elle ne conditionne jamais (règle iOS 18)
+    // MARK: - t12 · The AI enriches, it never gates (the iOS 18 rule)
 
     @Test("Le raffinement IA est additif et ne peut rien détruire")
     func t12() {
         let label = "VNPAY HUNG RES PSC VN P HA GIANG"
 
-        // Sans raffinement : le plan est déjà exploitable (chemin iOS 18).
+        // Without refinement: the plan is already usable (the iOS 18 path).
         let without = MerchantQueryPlanner.plan(input(label))
         expect(!without.attempts.isEmpty, "sans IA, le plan produit tout de même des tentatives")
         expect(!without.extraction.nameQuery.isEmpty, "sans IA, un nom est extrait")
 
-        // Raffinement ADVERSARIAL : ville hallucinée, confiance maximale, nom poubelle.
+        // An ADVERSARIAL refinement: a hallucinated city, maximum confidence, a junk name.
         let adversarial = LLMQueryRefinement(
             merchantName: "@@@@", localityName: "atlantide", postalCode: "99999",
             countryCode: "ZZ", processorName: "inexistant",
@@ -682,11 +682,11 @@ struct MerchantQueryPlannerEngineTests {
         expect(withoutNames.isSubset(of: withBadNames),
                "toutes les tentatives déterministes subsistent")
 
-        // Un code pays invalide ne doit pas être retenu tel quel.
+        // An invalid country code must not be kept as-is.
         expect(withBad.extraction.countryHint != "ZZ" || withBad.attempts.isEmpty,
                "un code pays fantaisiste ne pilote pas la cascade")
 
-        // Raffinement UTILE : il ajoute ce que le déterministe ne savait pas.
+        // A USEFUL refinement: it adds what the deterministic pass didn't know.
         let helpful = LLMQueryRefinement(
             merchantName: "Hung Restaurant", localityName: "ha giang",
             countryCode: "VN", processorName: "vnpay",
@@ -696,13 +696,13 @@ struct MerchantQueryPlannerEngineTests {
         expectEqual(withGood.extraction.countryHint ?? "", "VN", "le raffinement confirme le pays")
         expect(registryAttempts(withGood).isEmpty, "toujours aucune requête registre hors FR")
 
-        // La requête saisie par l'utilisateur prime sur tout.
+        // The user-entered query takes priority over everything.
         let override = MerchantQueryPlanner.plan(input(label, userQuery: "Hung Restaurant"))
         expectEqual(override.extraction.nameQuery, "hung restaurant",
                     "la requête tapée par l'utilisateur fait autorité")
 
-        // Mapping @Generable : vide → nil, clamp, majuscules. C'est CE bout-là qui est
-        // testable, et c'est là que se logent les vraies erreurs du chemin IA.
+        // The @Generable mapping: empty → nil, clamp, uppercase. THIS is the piece
+        // that's testable, and it's where the AI path's real bugs live.
         let mapped = GeneratedQueryPlanMapping.map(
             merchantName: "  Boulangerie Marie  ", localityName: "LYON", postalCode: "69002",
             countryCode: "fr", processorName: "SumUp", expandedTokens: ["", "boulangerie", "null"],
@@ -725,7 +725,7 @@ struct MerchantQueryPlannerEngineTests {
         expect(empties.confidence == 0, "une confiance négative est bornée à 0")
         expect(empties.isPersonNotBusiness, "le drapeau personne physique est conservé")
 
-        // Un code postal mal formé venant du modèle est rejeté avant de devenir un filtre.
+        // A malformed postal code coming from the model is rejected before becoming a filter.
         let badPC = GeneratedQueryPlanMapping.map(
             merchantName: "X", localityName: "", postalCode: "7501", countryCode: "",
             processorName: "", expandedTokens: [], isPersonNotBusiness: false, confidence: 0.5
@@ -735,11 +735,11 @@ struct MerchantQueryPlannerEngineTests {
         expect(LLMQueryRefinement.none.isEmpty, "l'élément neutre est bien vide")
     }
 
-    // MARK: - t13 · Sigles épelés, villes répétées, devinettes de localité
+    // MARK: - t13 · Spelled-out acronyms, repeated cities, locality guesses
 
     @Test("Sigles recollés, ville répétée retirée, devinettes prudentes")
     func t13() {
-        // Les relevés espacent les sigles. `q=c p a m` ne trouve rien, `q=cpam` trouve.
+        // Statements space out acronyms. `q=c p a m` finds nothing, `q=cpam` finds it.
         expectEqual(MerchantQueryPlanner.joinSpelledAcronyms(["c", "p", "a", "m", "troyes"])
                         .joined(separator: " "),
                     "cpam troyes", "« C P A M TROYES » est recollé en « cpam troyes »")
@@ -760,7 +760,7 @@ struct MerchantQueryPlannerEngineTests {
         expect(!cpam.extraction.nameQuery.contains("928133150967"),
                "la référence numérique longue est retirée")
 
-        // La ville répétée dans l'enseigne doit sortir de q=.
+        // The city repeated in the trade name must come out of q=.
         let auchan = MerchantQueryPlanner.plan(input("PAIEMENT PSC 1703 NIMES AUCHAN NIMES CARTE 1042"))
         expectEqual(auchan.extraction.nameQuery, "auchan", "« NIMES AUCHAN NIMES » → q = auchan")
         expect(noAttemptMentions(auchan, "nimes"), "la ville répétée ne reste pas dans q=")
@@ -768,13 +768,13 @@ struct MerchantQueryPlannerEngineTests {
         let citadium = MerchantQueryPlanner.plan(input("PAIEMENT PSC 1001 LYON CITADIUM LYON CARTE 1042"))
         expectEqual(citadium.extraction.nameQuery, "citadium", "« LYON CITADIUM LYON » → q = citadium")
 
-        // La localité ne mange jamais tout le nom.
+        // The locality never eats the whole name.
         let onlyCity = MerchantQueryPlanner.plan(input("PAIEMENT PSC 1001 LYON LYON CARTE 1042"))
         expect(!onlyCity.extraction.nameQuery.isEmpty,
                "si l'enseigne EST la ville, on garde un q= non vide")
 
-        // La devinette de localité en fin de libellé est prudente : un mot court ou un
-        // fragment de domaine n'est pas une commune.
+        // The trailing-locality guess is cautious: a short word or a
+        // domain fragment isn't a commune.
         let appleCom = MerchantQueryPlanner.plan(input("APPLE COM BILL IE ITUNES COM"))
         expect(appleCom.extraction.primaryLocalityText == nil,
                "« com » n'est pas deviné comme une commune")
@@ -782,12 +782,12 @@ struct MerchantQueryPlannerEngineTests {
         expect(onAir.extraction.primaryLocalityText == nil,
                "aucune devinette de lieu sur un prélèvement (pas de point de vente)")
 
-        // Mais une commune composée finissant par un mot court reste reconnue.
+        // But a compound commune name ending in a short word is still recognized.
         let montDOr = MerchantQueryPlanner.plan(input("SROM SAINT DIDIER AU MONT D OR"))
         expectEqual(montDOr.extraction.nameQuery, "srom",
                     "« …au Mont d'Or » reste une commune malgré le « or » final")
 
-        // Un remboursement entre amis EST un virement nominatif.
+        // A reimbursement between friends IS a named transfer.
         let refund = MerchantQueryPlanner.plan(
             input("VIR INST WERO M ADAM FOURNIER REMBOURSEMENT PHILIPPINES 0823366242924587")
         )

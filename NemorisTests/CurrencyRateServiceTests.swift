@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Récupération d'un taux de change historique.
+/// Fetching a historical exchange rate.
 ///
-/// Le service interroge deux hébergements du même jeu de données : si le
-/// premier ne répond pas, le second prend le relais. Sans ce relais, un
-/// Tricount en devise étrangère resterait non converti — l'utilisateur verrait
-/// des montants dans une monnaie qu'il ne peut pas comparer aux autres.
+/// The service queries two hosts of the same dataset: if the
+/// first doesn't respond, the second takes over. Without this fallback, a
+/// Tricount in a foreign currency would stay unconverted — the user would see
+/// amounts in a currency they can't compare to the others.
 extension NetworkSeam {
 
 @Suite("CurrencyRateService")
@@ -16,7 +16,7 @@ struct CurrencyRateServiceTests {
     private let principal = "cdn.jsdelivr.net"
     private let secours = "currency-api.pages.dev"
 
-    // MARK: - Lecture du taux
+    // MARK: - Reading the rate
 
     @Test("Le taux est lu dans la réponse de la source principale")
     func tauxPrincipal() async throws {
@@ -32,8 +32,8 @@ struct CurrencyRateServiceTests {
     func codesEnMinuscules() async throws {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
-        // Le jeu de données indexe tout en minuscules ; interroger « USD »
-        // tel quel ne trouverait aucune clé et déclencherait un faux échec.
+        // The dataset indexes everything in lowercase; querying "USD"
+        // as-is would find no key and trigger a false failure.
         StubURLProtocol.on(principal, .json("{\"vnd\":{\"eur\":0.000038}}"))
 
         let taux = try await CurrencyRateService.fetchRate(from: "VND", to: "EUR", date: "2026-03-10")
@@ -48,13 +48,13 @@ struct CurrencyRateServiceTests {
 
         _ = try await CurrencyRateService.fetchRate(from: "USD", date: "2025-11-04")
 
-        // Un taux du jour appliqué à une dépense d'il y a six mois fausserait
-        // silencieusement toutes les conversions du voyage.
+        // Today's rate applied to a six-month-old expense would silently
+        // skew every conversion for the trip.
         #expect(StubURLProtocol.requestedURLs.contains { $0.absoluteString.contains("2025-11-04") },
                 "URLs : \(StubURLProtocol.requestedURLs.map(\.absoluteString))")
     }
 
-    // MARK: - Relais vers la source de secours
+    // MARK: - Falling back to the backup source
 
     @Test("Une source principale en échec fait basculer sur le secours")
     func basculeSurSecours() async throws {
@@ -72,8 +72,8 @@ struct CurrencyRateServiceTests {
     func basculeSurReponseIllisible() async throws {
         StubURLProtocol.start()
         defer { StubURLProtocol.stop() }
-        // Un 200 avec un corps inattendu est un échec au même titre qu'un 404 :
-        // le CDN sert parfois une page d'erreur avec un statut de succès.
+        // A 200 with an unexpected body is a failure just like a 404:
+        // the CDN sometimes serves an error page with a success status.
         StubURLProtocol.on(principal, .json("<html>Not Found</html>"))
         StubURLProtocol.on(secours, .json("{\"usd\":{\"eur\":0.91}}"))
 
@@ -88,7 +88,7 @@ struct CurrencyRateServiceTests {
         StubURLProtocol.on(principal, .json("{\"usd\":{\"gbp\":0.79}}"))
         StubURLProtocol.on(secours, .json("{\"usd\":{\"gbp\":0.79}}"))
 
-        // La devise cible manque : mieux vaut ne rien enregistrer qu'un taux faux.
+        // The target currency is missing: better to save nothing than a wrong rate.
         await #expect(throws: (any Error).self) {
             _ = try await CurrencyRateService.fetchRate(from: "USD", to: "EUR", date: "2026-03-10")
         }
@@ -101,8 +101,8 @@ struct CurrencyRateServiceTests {
         StubURLProtocol.on(principal, .networkFailure())
         StubURLProtocol.on(secours, .networkFailure())
 
-        // Rendre 1.0 par défaut serait pire : les montants passeraient pour
-        // convertis alors qu'ils sont restés dans leur devise d'origine.
+        // Returning 1.0 by default would be worse: amounts would look
+        // converted while they actually stayed in their original currency.
         await #expect(throws: (any Error).self) {
             _ = try await CurrencyRateService.fetchRate(from: "USD", date: "2026-03-10")
         }

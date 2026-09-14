@@ -2,12 +2,12 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Liens de synchronisation automatique (bourses et portefeuilles).
+/// Automatic sync links (exchanges and wallets).
 ///
-/// Ce que cette table contient est aussi important que ce qu'elle ne contient
-/// pas : **aucun identifiant secret**. Les clés d'API vivent dans le trousseau,
-/// et la table ne garde que le pointeur vers le fournisseur, sa configuration
-/// et le résultat de la dernière synchronisation.
+/// What this table holds matters as much as what it doesn't hold:
+/// **no secret credentials**. API keys live in the keychain,
+/// and the table only keeps the pointer to the provider, its configuration,
+/// and the last sync's result.
 @Suite("LiveSyncRepository")
 struct LiveSyncRepositoryTests {
 
@@ -16,7 +16,7 @@ struct LiveSyncRepositoryTests {
         return (db, LiveSyncRepository(store: db.store))
     }
 
-    // MARK: - Création
+    // MARK: - Creation
 
     @Test("Un lien créé se relit avec sa configuration")
     func creation() throws {
@@ -41,8 +41,8 @@ struct LiveSyncRepositoryTests {
         let (db, repo) = try fixture()
         defer { db.destroy() }
 
-        // Le compte est créé automatiquement à la première synchronisation :
-        // exiger un compte dès la création imposerait de le préparer à la main.
+        // The account is created automatically on the first sync:
+        // requiring an account at creation would force preparing it by hand.
         let id = try #require(repo.addLink(providerId: "bitcoin_wallet",
                                            displayName: "Cold wallet",
                                            accountId: nil, config: [:]))
@@ -54,8 +54,8 @@ struct LiveSyncRepositoryTests {
         let (db, repo) = try fixture()
         defer { db.destroy() }
 
-        // Deux portefeuilles Ethereum, ou deux comptes chez la même bourse :
-        // interdire le doublon de fournisseur empêcherait un cas courant.
+        // Two Ethereum wallets, or two accounts at the same exchange:
+        // forbidding a duplicate provider would rule out a common case.
         _ = repo.addLink(providerId: "evm_wallet", displayName: "Wallet A",
                          accountId: nil, config: ["chain": "eth"])
         _ = repo.addLink(providerId: "evm_wallet", displayName: "Wallet B",
@@ -95,8 +95,8 @@ struct LiveSyncRepositoryTests {
         let relu = try #require(repo.fetchLink(id: id))
         #expect(relu.displayName == "Après")
         #expect(!relu.enabled)
-        // Le trousseau indexe les identifiants secrets PAR identifiant de lien :
-        // en changer un ici les rendrait introuvables.
+        // The keychain indexes secret credentials BY link id:
+        // changing one here would make them unfindable.
         #expect(relu.id == id)
     }
 
@@ -111,12 +111,12 @@ struct LiveSyncRepositoryTests {
         lien.enabled = false
         _ = repo.updateLink(lien)
 
-        // Une pause de synchronisation ne doit pas coûter la ressaisie de la clé.
+        // Pausing a sync must not cost re-entering the key.
         #expect(repo.fetchLinks().count == 1)
         #expect(repo.fetchLink(id: id)?.enabled == false)
     }
 
-    // MARK: - Compte rendu de synchronisation
+    // MARK: - Sync report
 
     @Test("Un succès de synchronisation est horodaté et daté")
     func succesDeSynchronisation() throws {
@@ -144,7 +144,7 @@ struct LiveSyncRepositoryTests {
 
         repo.updateSyncStatus(linkId: id, status: .error, message: "Clé refusée")
 
-        // Sans le message, l'utilisateur voit « échec » sans savoir quoi corriger.
+        // Without the message, the user sees "failed" with no idea what to fix.
         #expect(repo.fetchLink(id: id)?.lastSyncMessage == "Clé refusée")
     }
 
@@ -160,7 +160,7 @@ struct LiveSyncRepositoryTests {
 
         let lien = try #require(repo.fetchLink(id: id))
         #expect(lien.lastSyncStatus == .ok)
-        // Garder l'ancien message afficherait une erreur résolue comme actuelle.
+        // Keeping the old message would show a resolved error as current.
         #expect(lien.lastSyncMessage == nil)
     }
 
@@ -179,7 +179,7 @@ struct LiveSyncRepositoryTests {
                 "une synchronisation par lien : un échec ne doit pas contaminer les autres")
     }
 
-    // MARK: - Suppression
+    // MARK: - Deletion
 
     @Test("Supprimer un lien le retire de la liste")
     func suppression() throws {

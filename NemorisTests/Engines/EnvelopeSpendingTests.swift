@@ -2,19 +2,19 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Calcul du dépensé par enveloppe budgétaire.
+/// Computing spending per budget envelope.
 ///
-/// Ce calcul a existé en QUATRE implémentations divergentes : le tableau de
-/// bord ignorait les enveloppes annuelles, les alertes ignoraient les
-/// sous-catégories, le widget faisait un troisième mélange. Une même enveloppe
-/// pouvait donc être « dépassée » dans le bandeau d'alertes et « saine » dans
-/// le bandeau budget, **sur le même écran**. Ce moteur est l'unique source.
+/// This calculation existed in FOUR divergent implementations: the
+/// dashboard ignored yearly envelopes, alerts ignored
+/// subcategories, the widget did a third mix. So the same envelope
+/// could be "overspent" in the alerts banner and "healthy" in
+/// the budget banner, **on the same screen**. This engine is the single source of truth.
 @Suite("Dépensé par enveloppe")
 struct EnvelopeSpendingEngineTests {
 
     private let maintenant = Date()
 
-    /// « Alimentation » avec deux enfants, « Loisirs » sans enfant.
+    /// "Groceries" with two children, "Leisure" with none.
     private let categories: [Nemoris.Category] = [
         .init(id: 10, name: "Alimentation"),
         .init(id: 11, name: "Supermarché", parentId: 10),
@@ -28,8 +28,8 @@ struct EnvelopeSpendingEngineTests {
                        amount: montant, period: periode, startDate: maintenant, isActive: true)
     }
 
-    /// Fabrique une transaction complète — le montant et la catégorie sont les
-    /// seuls champs que ce moteur regarde, le reste est du remplissage.
+    /// Builds a full transaction — the amount and category are the
+    /// only fields this engine looks at, the rest is padding.
     private func transaction(_ id: Int, categorie: Int?, montant: Double) -> FinanceTransaction {
         FinanceTransaction(id: id, accountId: 1, tiersId: nil, categoryId: categorie,
                            paymentTypeId: nil, remboursementTiersId: nil,
@@ -42,7 +42,7 @@ struct EnvelopeSpendingEngineTests {
         transaction(id, categorie: categorie, montant: -abs(montant))
     }
 
-    // MARK: - Hiérarchie des catégories
+    // MARK: - Category hierarchy
 
     @Test("Une dépense sur une sous-catégorie compte dans l'enveloppe parente")
     func hierarchieDesCategories() {
@@ -63,8 +63,8 @@ struct EnvelopeSpendingEngineTests {
 
     @Test("Une enveloppe annuelle est mensualisée")
     func enveloppeAnnuelle() {
-        // 1 200 €/an = 100 €/mois, donc 150 € dépensés est un dépassement.
-        // L'ancien tableau de bord comparait 150 à 1 200 et concluait « saine ».
+        // €1,200/year = €100/month, so €150 spent is an overspend.
+        // The old dashboard compared 150 to 1,200 and concluded "healthy".
         let avancement = EnvelopeSpendingCalculator.progresses(
             envelopes: [enveloppe(1, categorie: 20, montant: 1200, periode: .yearly)],
             transactions: [depense(1, categorie: 20, 150)],
@@ -75,7 +75,7 @@ struct EnvelopeSpendingEngineTests {
         #expect(avancement[0].isOverBudget)
     }
 
-    // MARK: - Seuils de santé
+    // MARK: - Health thresholds
 
     @Test("Les seuils distinguent sain, vigilance et dépassement")
     func seuilsDeSante() {
@@ -99,14 +99,14 @@ struct EnvelopeSpendingEngineTests {
             transactions: [depense(1, categorie: 20, 250)],
             categories: categories)
 
-        // `ratio` est une largeur de barre, donc plafonné à 1. Sans `rawRatio`
-        // à côté, l'ampleur d'un dépassement serait indétectable.
+        // `ratio` is a bar width, so it's capped at 1. Without `rawRatio`
+        // alongside it, the extent of an overspend would be undetectable.
         #expect(abs(avancement[0].ratio - 1.0) < 0.005)
         #expect(abs(avancement[0].rawRatio - 2.5) < 0.005)
         #expect(avancement[0].healthState == .exceeded)
     }
 
-    // MARK: - Ce qui ne compte pas
+    // MARK: - What doesn't count
 
     @Test("Les recettes ne comptent pas comme des dépenses")
     func recettesIgnorees() {
@@ -125,7 +125,7 @@ struct EnvelopeSpendingEngineTests {
         #expect(avancement[1].healthState == .healthy, "et reste saine plutôt que dépassée")
     }
 
-    // MARK: - Part récurrente et prévisionnel
+    // MARK: - Recurring share and forecast
 
     @Test("Le dépensé se répartit entre part récurrente et part variable")
     func partRecurrenteEtPrevisionnel() {
@@ -136,15 +136,15 @@ struct EnvelopeSpendingEngineTests {
             startDate: maintenant, endDate: nil)
 
         let previsions = [
-            // Confirmée : sa transaction réelle constitue la part fixe.
+            // Confirmed: its real transaction makes up the fixed portion.
             BudgetPrevision(id: 100, recurringPatternId: 7, amount: -60,
                             expectedDate: maintenant, status: .matched,
                             actualTransactionId: 1, notes: nil),
-            // Encore attendue : compte au prévisionnel.
+            // Still pending: counts toward the forecast.
             BudgetPrevision(id: 101, recurringPatternId: 7, amount: -60,
                             expectedDate: maintenant, status: .pending,
                             actualTransactionId: nil, notes: nil),
-            // Écartée par l'utilisateur : ne compte nulle part.
+            // Dismissed by the user: doesn't count anywhere.
             BudgetPrevision(id: 102, recurringPatternId: 7, amount: -60,
                             expectedDate: maintenant, status: .skipped,
                             actualTransactionId: nil, notes: nil)
@@ -164,8 +164,8 @@ struct EnvelopeSpendingEngineTests {
 
     @Test("L'appel minimal fonctionne sans prévision ni récurrent")
     func appelMinimal() {
-        // C'est la forme utilisée par le tableau de bord, les alertes et le
-        // widget : exiger les prévisions les obligerait à les charger pour rien.
+        // This is the form used by the dashboard, alerts, and the
+        // widget: requiring forecasts would force them to load them for nothing.
         let avancement = EnvelopeSpendingCalculator.progresses(
             envelopes: [enveloppe(1, categorie: 10, montant: 200)],
             transactions: [depense(1, categorie: 11, 50)],
@@ -177,12 +177,12 @@ struct EnvelopeSpendingEngineTests {
         #expect(avancement[0].categoryName == "Alimentation")
     }
 
-    // MARK: - Synthèse
+    // MARK: - Summary
 
     @Test("La synthèse agrège les états sans les recalculer")
     func synthese() {
-        // Catégories FEUILLES distinctes : une enveloppe posée sur la parente
-        // capterait aussi les dépenses des filles et fausserait le décompte.
+        // Distinct LEAF categories: an envelope set on the parent
+        // would also capture the children's spending and throw off the count.
         let avancement = EnvelopeSpendingCalculator.progresses(
             envelopes: [enveloppe(1, categorie: 20, montant: 100),
                         enveloppe(2, categorie: 11, montant: 100),
@@ -203,13 +203,13 @@ struct EnvelopeSpendingEngineTests {
         #expect(!BudgetRecap.from([]).hasData, "aucune enveloppe n'est un état vide, pas un zéro")
     }
 
-    // MARK: - La régression croisée
+    // MARK: - The cross-regression
 
     @Test("Une sous-catégorie sur une enveloppe annuelle est enfin détectée")
     func regressionCroisee() {
-        // Le cas que l'ancien moteur d'alertes ratait deux fois : il ne voyait
-        // ni la sous-catégorie ni la mensualisation, donc comparait 0 € à
-        // 1 200 € et n'alertait jamais.
+        // The case the old alert engine missed twice over: it saw
+        // neither the subcategory nor the monthly conversion, so it compared €0 to
+        // €1,200 and never alerted.
         let avancement = EnvelopeSpendingCalculator.progresses(
             envelopes: [enveloppe(1, categorie: 10, montant: 1200, periode: .yearly)],
             transactions: [depense(1, categorie: 11, 130)],

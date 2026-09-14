@@ -2,13 +2,13 @@ import Foundation
 import Testing
 @testable import Nemoris
 
-/// Le coach IA : arbitrage des recommandations, lecture de la réponse du
-/// modèle, et construction des dossiers qui lui sont envoyés.
+/// The AI coach: ranking recommendations, reading the model's
+/// response, and building the briefings sent to it.
 ///
-/// Ce que ces tests protègent en priorité : le coach coûte cher (un appel
-/// modèle par analyse) et n'est pas reproductible. Tout ce qui PEUT être
-/// décidé sans lui — priorité, tolérance de parsing, contenu du dossier — doit
-/// donc l'être ici, une fois pour toutes.
+/// What these tests protect above all: the coach is expensive (one model
+/// call per analysis) and isn't reproducible. Everything that CAN be
+/// decided without it — priority, parsing tolerance, briefing content — must
+/// therefore be decided here, once and for all.
 @Suite("Coach")
 struct CoachTests {
 
@@ -38,10 +38,10 @@ struct CoachTests {
 
     @Test("Une recommandation non chiffrable reste dans la course")
     func impactNonChiffrableNeTombePasAZero() {
-        // Régression directe de `Insight.compositeScore`, qui MULTIPLIAIT les
-        // trois dimensions : tout insight à impact nul valait 0 et ne
-        // remontait jamais — alors que « tu es à 70 % sur une seule ligne »
-        // est exactement le conseil structurant qu'un consultant met en avant.
+        // A direct regression of `Insight.compositeScore`, which MULTIPLIED the
+        // three dimensions: any insight with zero impact was worth 0 and never
+        // surfaced — even though "you're at 70% on a single line item"
+        // is exactly the structuring advice a consultant would highlight.
         let structurel = reco("concentration", impact: 0, effort: 2, confidence: 0.95)
         #expect(CoachRanker.score(structurel) > 0.3,
                 "score obtenu : \(CoachRanker.score(structurel))")
@@ -53,8 +53,8 @@ struct CoachTests {
         let moyen = CoachRanker.impactScore(200)
         let gros = CoachRanker.impactScore(2_000)
         #expect(petit < moyen && moyen < gros)
-        // Au-delà du plafond, deux montants « énormes » ne doivent plus se
-        // départager par le seul montant.
+        // Beyond the ceiling, two "huge" amounts must no longer be
+        // distinguished by amount alone.
         #expect(CoachRanker.impactScore(50_000) == 1.0)
         #expect(CoachRanker.impactScore(3_000) == 1.0)
     }
@@ -76,16 +76,16 @@ struct CoachTests {
 
     @Test("Le classement est stable d'un affichage à l'autre")
     func classementStable() {
-        // Deux recommandations rigoureusement équivalentes ne doivent pas
-        // s'inverser d'un rendu au suivant — sinon l'écran « bouge tout seul ».
+        // Two strictly equivalent recommendations must not swap order
+        // from one render to the next — otherwise the screen "moves on its own".
         let items = [reco("zebre", impact: 100, id: 1), reco("alpha", impact: 100, id: 2)]
         #expect(CoachRanker.ranked(items).map(\.ref) == CoachRanker.ranked(items.reversed()).map(\.ref))
     }
 
     @Test("Les valeurs aberrantes du modèle sont ramenées dans leurs bornes")
     func normalisation() {
-        // Un modèle rend volontiers un effort hors barème et une confiance en
-        // pourcentage. Sans normalisation, ces valeurs contaminent le classement.
+        // A model will happily return an out-of-range effort or a confidence
+        // expressed as a percentage. Without normalization, these values contaminate the ranking.
         let a = CoachRanker.normalize(annualImpact: -50, effort: 12, confidence: 85)
         #expect(a.annualImpact == 0, "un impact négatif n'a pas de sens ici")
         #expect(a.effort == 5)
@@ -95,7 +95,7 @@ struct CoachTests {
         #expect(b.annualImpact == 0 && b.effort == 1 && b.confidence <= 1)
     }
 
-    // MARK: - Lecture de la réponse du modèle
+    // MARK: - Reading the model's response
 
     @Test("Une réponse bien formée est lue intégralement")
     func parseNominal() {
@@ -124,8 +124,8 @@ struct CoachTests {
 
     @Test("Une ligne mal formée ne fait pas perdre les autres")
     func parseTolerant() {
-        // C'est la classe de bug déjà payée sur l'import de documents : une
-        // clé manquante faisait jeter la page entière.
+        // This is the same class of bug already paid for on document import: a
+        // missing key caused the entire page to be discarded.
         let raw = """
         {"recommendations":[
           {"title":"Garde-moi","detail":"D","annual_impact":"120,50","effort":"4","confidence":"0,9"},
@@ -135,8 +135,8 @@ struct CoachTests {
         """
         let drafts = CoachResponseParser.parse(raw).drafts
         #expect(drafts.count == 2, "obtenu : \(drafts.map(\.title))")
-        // Un modèle qui répond en français écrit « 120,50 » : les trois
-        // écritures doivent donner le même nombre.
+        // A model answering in French writes "120,50": all three
+        // notations must produce the same number.
         #expect(abs(drafts[0].annualImpact - 120.5) < 0.01)
         #expect(drafts[0].effort == 4)
         #expect(abs(drafts[0].confidence - 0.9) < 0.01)
@@ -144,8 +144,8 @@ struct CoachTests {
 
     @Test("Deux recommandations sur le même sujet ne sont comptées qu'une fois")
     func parseDedupe() {
-        // La table a un UNIQUE(domain, ref) : sans déduplication, la seconde
-        // écraserait la première en silence.
+        // The table has a UNIQUE(domain, ref): without deduplication, the second
+        // entry would silently overwrite the first.
         let raw = """
         {"recommendations":[
           {"key":"meme_sujet","title":"A","detail":"D"},
@@ -163,8 +163,8 @@ struct CoachTests {
 
     @Test("La référence reste stable malgré une reformulation de surface")
     func slugStable() {
-        // C'est ce qui fait tenir le rejet persistant : le modèle reformule
-        // presque toujours légèrement le même conseil d'une analyse à l'autre.
+        // This is what makes persistent dismissal hold up: the model almost
+        // always slightly rephrases the same advice from one analysis to the next.
         #expect(CoachRecommendationDraft.slug("Résilier l'abonnement Netflix")
                 == CoachRecommendationDraft.slug("resilier l abonnement netflix"))
         #expect(CoachRecommendationDraft.slug("Frais : 2 %") == "frais_2")
@@ -179,10 +179,10 @@ struct CoachTests {
 
     @Test("Zéro recommandation n'est PAS une erreur")
     func listeVideEstUnSucces() {
-        // Retour d'usage 2026-08-28 : les deux cas étaient confondus, donc
-        // « le modèle n'a rien à proposer » s'affichait « l'analyse n'a pas
-        // abouti » — et les vrais échecs devenaient indiagnosticables, noyés
-        // dans le même message.
+        // Usage feedback 2026-08-28: the two cases were conflated, so
+        // "the model has nothing to propose" showed as "the analysis didn't
+        // complete" — and real failures became undiagnosable, drowned
+        // in the same message.
         let result = CoachResponseParser.parse(#"{"profile":"Tout est sain.","recommendations":[]}"#)
         #expect(result.drafts.isEmpty)
         #expect(result.failure == nil, "une liste vide est une réponse légitime")
@@ -191,11 +191,11 @@ struct CoachTests {
 
     @Test("Une réponse coupée en plein JSON conserve les recommandations complètes")
     func reponseTronqueeEstRecuperee() {
-        // Cause la plus probable de l'échec constaté : sur un modèle à petit
-        // contexte, le dossier et les consignes laissent trop peu de place et
-        // la réponse est coupée. `LenientJSON` refuse par conception de
-        // refermer les accolades — mais les objets écrits AVANT la coupure
-        // sont complets, et les jeter perdrait des recommandations valides.
+        // The most likely cause of the observed failure: on a small-context
+        // model, the briefing and instructions leave too little room and
+        // the response gets cut off. `LenientJSON` deliberately refuses to
+        // close braces on its own — but objects written BEFORE the cutoff
+        // are complete, and discarding them would lose valid recommendations.
         let tronquee = """
         {"profile":"Profil","recommendations":[
           {"key":"un","title":"Premier conseil","detail":"D1","annual_impact":120,"effort":4,"confidence":0.9},
@@ -210,9 +210,9 @@ struct CoachTests {
 
     @Test("Un modèle qui traduit ses propres clés JSON reste lisible")
     func clesEnFrancais() {
-        // On demande une réponse en français : un modèle qui rédige en
-        // français traduit volontiers « recommendations » en
-        // « recommandations », ce qui rendait la réponse entière inexploitable.
+        // We ask for a response in French: a model writing in
+        // French will happily translate "recommendations" to
+        // "recommandations", which made the entire response unusable.
         let raw = #"{"profil":"P","recommandations":[{"key":"x","title":"T","detail":"D"}]}"#
         let result = CoachResponseParser.parse(raw)
         #expect(result.failure == nil)
@@ -222,15 +222,15 @@ struct CoachTests {
 
     @Test("La réponse réelle qui échouait est désormais exploitée")
     func reponseTerrainMalformee() {
-        // Réponse BRUTE capturée en production (2026-08-28), reproduite ici à
-        // l'identique dans sa structure. Deux défauts cumulés :
-        //  1. `,"recommendations":` OUBLIÉ — le tableau est collé à la fin de
-        //     la chaîne `profile`, jamais refermée, ce qui décale la parité
-        //     des guillemets pour tout le reste du document ;
-        //  2. `effort:` et `confidence:` écrites SANS guillemets, alors que
-        //     les autres clés du même objet en ont.
-        // Résultat avant correctif : « La réponse du modèle n'a pas pu être
-        // exploitée », alors que les deux recommandations étaient complètes.
+        // RAW response captured in production (2026-08-28), reproduced here
+        // identically in structure. Two compounding defects:
+        //  1. `,"recommendations":` MISSING — the array is glued to the end of
+        //     the `profile` string, never closed, which shifts the quote
+        //     parity for the rest of the document;
+        //  2. `effort:` and `confidence:` written WITHOUT quotes, while
+        //     the other keys of the same object have them.
+        // Result before the fix: "The model's response couldn't be
+        // used", even though both recommendations were complete.
         let raw = """
         {"profile":"Tu es un utilisateur avec un revenu moyen de 2 830,20 €/mois. Ton rythme de dépense est élevé.\n[{"key":"abonnements_streaming","title":"Annule l'Abonnement Canal+ cette semaine","detail":"Tu dois supprimer l'Abonnement Canal+ de 21,99 €.","rationale":"Abonnement Canal+ : 21,99 €/mois.","category":"Abonnements","annual_impact":0, effort:2, confidence:0.92},{"key":"abonnements_diversification","title":"Réévalue l'Abonnement","detail":"Tu dois examiner l'Abonnement.","rationale":"Abonnement : 92,42 €/mois.","category":"Abonnements","annual_impact":0, effort:4, confidence:0.85}]}
         """
@@ -238,21 +238,21 @@ struct CoachTests {
         #expect(result.failure == nil, "cette réponse contient deux recommandations complètes")
         #expect(result.drafts.count == 2, "obtenu : \(result.drafts.map(\.title))")
         #expect(result.drafts.first?.ref == "abonnements_streaming")
-        // Les clés nues doivent avoir été récupérées, pas remplacées par les défauts.
+        // The bare keys must have been recovered, not replaced by defaults.
         #expect(result.drafts.first?.effort == 2)
         #expect(abs((result.drafts.first?.confidence ?? 0) - 0.92) < 0.01)
-        // Le profil, collé au tableau, doit être récupéré sans sa queue parasite.
+        // The profile, glued to the array, must be recovered without its stray tail.
         #expect(result.profileSummary?.contains("revenu moyen") == true)
         #expect(result.profileSummary?.hasSuffix("[{") == false, "la queue « \\n[{ » doit être retirée")
     }
 
     @Test("Un préambule coupé avant toute recommandation est nommé précisément")
     func coupeAvantLesRecommandations() {
-        // Deuxième réponse réelle capturée (2026-08-28) : le modèle a dépensé
-        // tout son budget de sortie dans le profil et s'est arrêté net, sans
-        // guillemet fermant ni la moindre recommandation. Il n'y a RIEN à
-        // récupérer — le dire précisément importe, parce que la seule action
-        // utile est de changer de backend, pas de relancer.
+        // A second real response captured (2026-08-28): the model spent
+        // its entire output budget on the profile and stopped dead, with no
+        // closing quote and not a single recommendation. There is NOTHING to
+        // recover — saying so precisely matters, because the only useful
+        // action is switching backends, not retrying.
         let raw = """
         {"profile":"Tu es un utilisateur avec un rythme de dépenses élevé par rapport à tes revenus. Ton défi est de transformer chaque dépense en opportunité de contrôle, sans sacrifier ta stabilité.
         """
@@ -266,10 +266,10 @@ struct CoachTests {
 
     @Test("Les consignes demandent les recommandations AVANT le profil")
     func recommandationsDemandeesEnPremier() {
-        // C'est la parade structurelle à la troncature : si la réponse est
-        // coupée, mieux vaut perdre le profil que tous les conseils. Vérifié
-        // pour les DEUX budgets — un profil plus détaillé en `.generous` ne
-        // doit jamais faire passer les recommandations après lui.
+        // This is the structural defense against truncation: if the response is
+        // cut off, it's better to lose the profile than every recommendation. Verified
+        // for BOTH budgets — a more detailed profile in `.generous` must
+        // never push the recommendations behind it.
         for domain in CoachDomain.allCases {
             for budget: CoachContextBudget in [.compact, .generous] {
                 let system = CoachPrompt.system(for: domain, budget: budget)
@@ -287,10 +287,10 @@ struct CoachTests {
 
     @Test("Le profil demandé est détaillé en budget généreux, court en Apple Intelligence")
     func profilDetailleSelonLeBudget() {
-        // Retour d'usage 2026-08-29 : « avant on avait beaucoup plus de
-        // détail sur le profil » — la consigne « 2 phrases COURTES au
-        // maximum » s'appliquait uniformément, y compris quand le backend
-        // avait largement la place d'en dire plus.
+        // Usage feedback 2026-08-29: "before we had a lot more
+        // detail on the profile" — the "2 SHORT sentences maximum"
+        // instruction applied uniformly, even when the backend
+        // had plenty of room to say more.
         for domain in CoachDomain.allCases {
             let compact = CoachPrompt.system(for: domain, budget: .compact)
             #expect(compact.contains("2 phrases COURTES"))
@@ -307,8 +307,8 @@ struct CoachTests {
 
     @Test("Une clé nue dans une valeur texte n'est jamais réécrite")
     func clesNuesSeulementHorsChaines() {
-        // Garde-fou du réparateur : « Bilan: … » dans une phrase française est
-        // fréquent, et le réécrire corromprait la valeur.
+        // A guard for the repair pass: "Summary: …" in a French sentence is
+        // common, and rewriting it would corrupt the value.
         let repaired = LenientJSON.quotingBareKeys(#"{"detail":"Bilan: revoir ce poste", effort:3}"#)
         #expect(repaired.contains(#""effort":3"#), "la clé nue doit être citée")
         #expect(repaired.contains("Bilan: revoir ce poste"), "le texte de la valeur doit rester intact")
@@ -320,7 +320,7 @@ struct CoachTests {
         #expect(result.failure == .missingList, "à distinguer d'une liste vide et d'une réponse illisible")
     }
 
-    // MARK: - Dossier « dépenses »
+    // MARK: - "Spending" briefing
 
     private func briefingInput(objectives: String = "", transactions: [FinanceTransaction]? = nil)
         -> CoachBriefingBuilder.Input {
@@ -350,8 +350,8 @@ struct CoachTests {
         #expect(text.contains("PROFIL"))
         #expect(text.contains("DÉPENSES PAR CATÉGORIE"))
         #expect(text.contains("Logement"))
-        // Les sous-catégories sont remontées à leur racine, sinon le dossier
-        // se noie dans des postes à quelques euros.
+        // Subcategories are rolled up to their root, otherwise the briefing
+        // drowns in line items worth a few euros.
         #expect(text.contains("Alimentation"), "la sous-catégorie « Courses » doit être agrégée sous « Alimentation »")
         #expect(!text.contains("  Courses :"), "aucun poste ne doit apparaître au niveau sous-catégorie")
     }
@@ -364,13 +364,13 @@ struct CoachTests {
         #expect(months[1].income == 2_000 && months[1].expense == 1_100)
     }
 
-    /// Un dossier « au maximum » : chaque liste au-delà de son plafond, sur un
-    /// historique long. C'est le pire cas réaliste, celui qui doit rester
-    /// exploitable par le modèle.
+    /// A briefing at its "maximum": every list past its cap, over a
+    /// long history. This is the worst realistic case, the one that must
+    /// stay usable by the model.
     private func inputMaximal(objectives: String = "") -> CoachBriefingBuilder.Input {
         var txs: [FinanceTransaction] = []
         var id = 0
-        // 36 mois d'historique — au-delà du plafond de 24.
+        // 36 months of history — past the 24-month cap.
         for monthOffset in 0..<36 {
             let year = 2023 + monthOffset / 12
             let month = monthOffset % 12 + 1
@@ -381,7 +381,7 @@ struct CoachTests {
                 txs.append(tx(id: id, montant: -40, jour: jour, categoryId: c, tiersId: c, tiers: "Marchand numéro \(c)"))
             }
         }
-        // Le mois en cours, pour que les enveloppes aient de quoi se remplir.
+        // The current month, so envelopes have something to fill them with.
         for c in 0..<25 {
             id += 1
             txs.append(tx(id: id, montant: -60, jour: "2026-08-05", categoryId: c, tiersId: c, tiers: "Marchand numéro \(c)"))
@@ -408,10 +408,10 @@ struct CoachTests {
 
     @Test("Les objectifs de l'utilisateur survivent à la troncature du dossier")
     func objectifsJamaisTronques() {
-        // Décision de conception : les objectifs sont ajoutés APRÈS la
-        // troncature. C'est la seule partie que l'utilisateur a écrite
-        // lui-même — la sacrifier reviendrait à analyser sans savoir ce qu'il
-        // cherche, précisément ce que le coach doit éviter.
+        // Design decision: objectives are added AFTER
+        // truncation. It's the only part the user wrote
+        // themselves — sacrificing it would mean analyzing without knowing what they're
+        // looking for, exactly what the coach must avoid.
         let text = CoachBriefingBuilder.build(inputMaximal(objectives: "Acheter un appartement d'ici 2029."))
         #expect(text.contains("tronqué"),
                 "ce jeu de données doit saturer le dossier (obtenu : \(text.count) caractères)")
@@ -422,16 +422,16 @@ struct CoachTests {
     @Test("Le dossier reste borné quel que soit le volume")
     func dossierBorne() {
         let text = CoachBriefingBuilder.build(inputMaximal())
-        // Marge au-delà du plafond pour le bloc objectifs et le marqueur.
+        // Margin past the cap for the objectives block and the marker.
         #expect(text.count < CoachBriefingBuilder.maxCharacters + 2_000,
                 "dossier de \(text.count) caractères — il doit tenir dans la fenêtre de contexte")
     }
 
     @Test("Chaque liste du dossier est plafonnée, sans exception")
     func toutesLesListesSontPlafonnees() {
-        // Le détail mensuel et les enveloppes étaient les deux seules listes
-        // non bornées : sur un historique long, c'était la TRONCATURE qui
-        // décidait de ce qui partait au modèle, en coupant la fin.
+        // The monthly detail and the envelopes were the only two unbounded
+        // lists: on a long history, it was TRUNCATION that
+        // decided what reached the model, by cutting off the end.
         let text = CoachBriefingBuilder.build(inputMaximal())
         let monthLines = text.components(separatedBy: "\n").filter { $0.hasPrefix("  20") }
         #expect(monthLines.count <= CoachBriefingBuilder.maxMonths,
@@ -445,15 +445,15 @@ struct CoachTests {
 
     @Test("Le budget se résout depuis le backend RÉSOLU, jamais depuis une préférence brute")
     func budgetResoluDepuisLeBackend() {
-        // Retour d'usage 2026-08-29 : le dossier et le profil étaient bridés
-        // aux mêmes plafonds qu'Apple Intelligence même quand le backend
-        // réellement utilisé (serveur local, cloud) avait largement la place.
+        // Usage feedback 2026-08-29: the briefing and the profile were capped
+        // to the same limits as Apple Intelligence even when the backend
+        // actually in use (local server, cloud) had plenty of room.
         #expect(CoachContextBudget.resolved(from: .foundationModels) == .compact)
         #expect(CoachContextBudget.resolved(from: .localServer) == .generous)
         #expect(CoachContextBudget.resolved(from: .cloud(.claude)) == .generous)
         #expect(CoachContextBudget.resolved(from: .cloud(.openAI)) == .generous)
-        // Ne devraient jamais atteindre un appel modèle réel, mais un défaut
-        // prudent (compact) plutôt qu'un crash si jamais c'est le cas.
+        // Should never reach a real model call, but a cautious
+        // default (compact) rather than a crash if it ever does.
         #expect(CoachContextBudget.resolved(from: .automatic) == .compact)
         #expect(CoachContextBudget.resolved(from: .off) == .compact)
         #expect(CoachContextBudget.resolved(from: nil) == .compact)
@@ -461,32 +461,32 @@ struct CoachTests {
 
     @Test("Un modèle qui réfléchit sans conclure déclenche UNE relance en passes courtes")
     func repliQuandLeModeleNeConclutJamais() {
-        // Signature mesurée trois fois (qwen3.5-9b via LM Studio) : du
-        // raisonnement tronqué, zéro réponse. Ce motif-là — et lui seul — se
-        // rattrape en réduisant l'entrée.
+        // A signature measured three times (qwen3.5-9b via LM Studio): truncated
+        // reasoning, zero response. THIS pattern — and only this one — can be
+        // recovered by shrinking the input.
         #expect(CoachContextBudget.shouldRetryInPasses(
             budget: .generous, sawReasoningOnly: true,
             producedRecommendations: false, alreadyRetried: false))
 
-        // Une réponse hors format n'a rien à voir avec la taille de l'entrée :
-        // relancer ferait juste attendre deux fois.
+        // An out-of-format response has nothing to do with the input size:
+        // retrying would just mean waiting twice.
         #expect(!CoachContextBudget.shouldRetryInPasses(
             budget: .generous, sawReasoningOnly: false,
             producedRecommendations: false, alreadyRetried: false))
 
-        // Des recommandations sont sorties malgré tout : on ne jette pas un
-        // résultat obtenu pour retenter.
+        // Some recommendations came out anyway: a result already obtained isn't
+        // discarded just to retry.
         #expect(!CoachContextBudget.shouldRetryInPasses(
             budget: .generous, sawReasoningOnly: true,
             producedRecommendations: true, alreadyRetried: false))
 
-        // UNE seule relance : si les passes courtes échouent aussi, le
-        // problème n'est plus la taille de l'entrée.
+        // A SINGLE retry: if the short passes also fail, the
+        // problem is no longer the input size.
         #expect(!CoachContextBudget.shouldRetryInPasses(
             budget: .generous, sawReasoningOnly: true,
             producedRecommendations: false, alreadyRetried: true))
 
-        // Déjà en passes courtes : il n'y a rien de plus court à tenter.
+        // Already in short passes: there's nothing shorter left to try.
         #expect(!CoachContextBudget.shouldRetryInPasses(
             budget: .compact, sawReasoningOnly: true,
             producedRecommendations: false, alreadyRetried: false))
@@ -494,8 +494,8 @@ struct CoachTests {
 
     @Test("Le repli réduit vraiment ce qui part au modèle")
     func repliReduitLEntree() {
-        // C'est la raison d'être du repli : si les passes courtes n'allégeaient
-        // pas l'entrée, relancer ne changerait rien au problème constaté.
+        // This is the whole point of the fallback: if short passes didn't
+        // lighten the input, retrying wouldn't change anything about the observed problem.
         let input = inputMaximal(objectives: "Moins dépenser tous les mois.")
         let sections = CoachBriefingBuilder.sections(input)
         let header = CoachBriefingBuilder.condensedHeader(input)
@@ -512,9 +512,9 @@ struct CoachTests {
 
     @Test("Un dossier maximal survit sans troncature en budget généreux")
     func dossierGenereuxMoinsTronque() {
-        // Même jeu de données « pire cas réaliste » que `dossierBorne` — en
-        // `.compact` il sature et se fait couper ; en `.generous`, le plafond
-        // 3-4× plus large doit suffire à tout faire tenir.
+        // The same "worst realistic case" dataset as `dossierBorne` — in
+        // `.compact` it saturates and gets cut off; in `.generous`, the
+        // 3-4x wider cap should be enough to fit everything.
         let compact = CoachBriefingBuilder.build(inputMaximal(), budget: .compact)
         let generous = CoachBriefingBuilder.build(inputMaximal(), budget: .generous)
         #expect(compact.contains("tronqué"), "le cas compact doit rester le pire cas déjà testé par `dossierBorne`")
@@ -525,7 +525,7 @@ struct CoachTests {
                 "le budget généreux reste borné, ce n'est pas « illimité »")
     }
 
-    // MARK: - Découpage en passes
+    // MARK: - Splitting into passes
 
     @Test("Un backend qui encaisse tout le dossier reçoit UNE seule passe")
     func budgetGenereuxUneSeulePasse() {
@@ -541,9 +541,9 @@ struct CoachTests {
 
     @Test("Une fenêtre étroite découpe le dossier sans jamais perdre de section")
     func passesCompactesGardentToutLeDossier() {
-        // C'est LE point du découpage : sur un modèle à petite fenêtre, ce
-        // n'était pas « moins bien analysé », c'était l'analyse entière qui
-        // échouait (Apple Intelligence, retour d'usage 2026-09-02).
+        // This is THE point of splitting: on a small-context model, it
+        // wasn't "analyzed a bit worse" — the ENTIRE analysis was
+        // failing (Apple Intelligence, usage feedback 2026-09-02).
         let input = inputMaximal(objectives: "Moins dépenser tous les mois.")
         let sections = CoachBriefingBuilder.sections(input)
         let passes = CoachPassPlanner.plan(sections: sections,
@@ -554,9 +554,9 @@ struct CoachTests {
         #expect(passes.allSatisfy { $0.total == passes.count })
         #expect(passes.map(\.index) == Array(1...passes.count))
 
-        // Chaque section apparaît dans exactement une passe : rien n'est
-        // abandonné en route, sinon le découpage ferait disparaître de la
-        // matière au lieu de l'étaler.
+        // Each section appears in exactly one pass: nothing is
+        // dropped along the way, otherwise splitting would make
+        // material disappear instead of spreading it out.
         for section in sections {
             let carriers = passes.filter { $0.focus.contains(section.title) }
             #expect(carriers.count == 1, "section « \(section.title) » portée par \(carriers.count) passe(s)")
@@ -565,9 +565,9 @@ struct CoachTests {
 
     @Test("Chaque passe porte les chiffres clés ET les objectifs")
     func chaquePassePorteLeContexte() {
-        // Une passe qui ne voit que « les marchands » n'a aucune échelle de
-        // référence et conseille dans le vide ; une passe qui ne voit pas les
-        // objectifs conseille à côté de ce que la personne cherche.
+        // A pass that only sees "merchants" has no reference scale and
+        // gives advice in a vacuum; a pass that doesn't see the
+        // objectives gives advice unrelated to what the person is looking for.
         let input = inputMaximal(objectives: "Moins dépenser tous les mois.")
         let passes = CoachPassPlanner.plan(sections: CoachBriefingBuilder.sections(input),
                                            header: CoachBriefingBuilder.condensedHeader(input),
@@ -581,9 +581,9 @@ struct CoachTests {
 
     @Test("Une passe reste dans son budget, objectifs compris")
     func passeBornee() {
-        // Le budget par passe n'est pas décoratif : c'est ce qui garantit qu'il
-        // reste de la place pour ÉCRIRE la réponse dans une fenêtre de 4 000
-        // tokens.
+        // The per-pass budget isn't decorative: it's what guarantees there's
+        // still room to WRITE the response within a 4,000-token
+        // window.
         let objectifsTresLongs = String(repeating: "Objectif détaillé numéro un. ", count: 200)
         let input = inputMaximal(objectives: objectifsTresLongs)
         let passes = CoachPassPlanner.plan(sections: CoachBriefingBuilder.sections(input),
@@ -597,7 +597,7 @@ struct CoachTests {
             #expect(pass.body.count <= ceiling,
                     "passe \(pass.index) : \(pass.body.count) caractères")
         }
-        // Des objectifs à rallonge ne doivent pas affamer la matière à analyser.
+        // Lengthy objectives must not starve the material being analyzed.
         #expect(passes.allSatisfy { $0.body.contains("CHIFFRES CLÉS") })
     }
 
@@ -628,7 +628,7 @@ struct CoachTests {
                                       header: "X", objectivesBlock: nil, budget: .generous).isEmpty)
     }
 
-    // MARK: - Fusion des passes
+    // MARK: - Merging passes
 
     @Test("Deux passes qui repèrent le même sujet ne le comptent qu'une fois")
     func fusionDeduplique() {
@@ -640,10 +640,10 @@ struct CoachTests {
                                           category: nil, annualImpact: 260, effort: 2, confidence: 0.95)]
         let merged = CoachResponseParser.merge([a, b])
         #expect(merged.count == 2)
-        // La version dont le modèle est le plus sûr gagne, jamais « la dernière vue ».
+        // The version the model is most confident about wins, never "the last one seen".
         #expect(merged.first(where: { $0.ref == "abo" })?.title == "Annule Canal+ (vu ailleurs)")
-        // L'ordre de première apparition est conservé : le classement final,
-        // c'est le rôle de `CoachRanker`, pas celui de la fusion.
+        // The order of first appearance is preserved: final ranking
+        // is `CoachRanker`'s job, not the merge's.
         #expect(merged.map(\.ref) == ["abo", "grab"])
     }
 
@@ -666,7 +666,7 @@ struct CoachTests {
         #expect(CoachResponseParser.parseProfileOnly("désolé") == nil)
     }
 
-    // MARK: - Dossier « portefeuille »
+    // MARK: - "Portfolio" briefing
 
     @Test("Le dossier portefeuille chiffre la concentration et les liquidités")
     func dossierInvestissement() {
@@ -685,10 +685,10 @@ struct CoachTests {
 
         #expect(text.contains("PORTEFEUILLE"))
         #expect(text.contains("ALLOCATION ET CONCENTRATION"))
-        // 8 000 / 10 000 : la première ligne pèse 80 % — c'est le risque
-        // structurel qu'un particulier ne voit pas de lui-même.
+        // 8,000 / 10,000: the top line accounts for 80% — that's the
+        // structural risk an individual won't spot on their own.
         #expect(text.contains("80 %"), "le poids de la 1re ligne doit apparaître")
-        // 2 000 de cash sur 12 000 de capital total ≈ 17 %.
+        // 2,000 in cash out of 12,000 total capital ≈ 17%.
         #expect(text.contains("17 %"), "la part de liquidités dormantes doit apparaître")
     }
 
@@ -703,16 +703,16 @@ struct CoachTests {
 
     @Test("Les consignes interdisent explicitement le conseil générique")
     func promptInterditLeGenerique() {
-        // C'est LE reproche fait à la version précédente. Si cette contrainte
-        // disparaît des consignes, le modèle retombe spontanément dans le
-        // conseil passe-partout.
+        // This is THE complaint made about the previous version. If this constraint
+        // is dropped from the instructions, the model spontaneously falls
+        // back into generic advice.
         for domain in CoachDomain.allCases {
             let system = CoachPrompt.system(for: domain)
             #expect(system.contains("CHIFFRE PRÉCIS"))
             #expect(system.contains("N'invente AUCUN chiffre"))
             #expect(system.lowercased().contains("json"))
         }
-        // Le coach investissement ne doit jamais se transformer en oracle.
+        // The investment coach must never turn into an oracle.
         #expect(CoachPrompt.system(for: .investments).contains("Tu ne prédis JAMAIS"))
     }
 
@@ -720,8 +720,8 @@ struct CoachTests {
     func domainesEtBackends() {
         #expect(CoachDomain.transactions.aiFeature == .insights)
         #expect(CoachDomain.investments.aiFeature == .investmentCoach)
-        // Le rawValue historique doit être conservé, sinon le choix de backend
-        // déjà persisté par l'utilisateur est perdu en silence.
+        // The historical rawValue must be kept, otherwise the backend choice
+        // already persisted by the user is silently lost.
         #expect(AIFeature.insights.rawValue == "insights")
     }
 
