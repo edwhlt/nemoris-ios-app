@@ -60,9 +60,42 @@ struct PendingApplePayRepository {
     /// with the rest of the app's convention (`transactions.amount < 0` = an
     /// expense) without every future reader (budget, notifications) having
     /// to think about it.
+    ///
+    /// The "Apple Pay Transaction" personal automation can fire more than
+    /// once for the SAME real-world purchase — typically once while the
+    /// transaction is still pending (amount not yet known by Apple Pay,
+    /// stored as 0 by `ImportTransactionApplePayEntityIntent`) and again
+    /// once it settles with the final amount. Without a merge step here,
+    /// that produces two rows at the same minute for one purchase: an "à
+    /// saisir" placeholder next to the real one. `findRecentDuplicate`
+    /// collapses that into a single row.
     @discardableResult
     func addEntry(card: String?, amount: Double, merchant: String) -> Bool {
-        let now = isoFormatter.string(from: Date())
+        let now = Date()
+        let normalizedAmount = -abs(amount)
+
+        if let duplicate = findRecentDuplicate(card: card, merchant: merchant, on: now) {
+            // The earlier firing had no amount yet: complete it with this
+            // one instead of leaving a stray "à saisir" row beside it.
+            if duplicate.amount == 0 && normalizedAmount != 0 {
+                return updateAmount(id: duplicate.id, amount: amount)
+            }
+            // This firing has no amount but the earlier one already does:
+            // the good data is already stored, drop this one silently.
+            if duplicate.amount != 0 && normalizedAmount == 0 {
+                return true
+            }
+            // Both sides already carry the same known amount: an exact
+            // duplicate firing, nothing to merge or insert.
+            if abs(duplicate.amount - normalizedAmount) < 0.005 {
+                return true
+            }
+            // Both known but different amounts: a genuinely separate
+            // purchase at the same merchant/card the same day — fall
+            // through and insert it as its own row.
+        }
+
+        let iso = isoFormatter.string(from: now)
         return store.writeSingle(sql: """
             INSERT INTO pending_apple_pay_entries (card, amount, merchant, status, created_at)
             VALUES (?, ?, ?, 'pending', ?);
@@ -72,10 +105,50 @@ struct PendingApplePayRepository {
             } else {
                 sqlite3_bind_null(stmt, 1)
             }
-            sqlite3_bind_double(stmt, 2, -abs(amount))
+            sqlite3_bind_double(stmt, 2, normalizedAmount)
             sqlite3_bind_text(stmt, 3, merchant, -1, SQLITE_TRANSIENT_APPLEPAY)
-            sqlite3_bind_text(stmt, 4, now, -1, SQLITE_TRANSIENT_APPLEPAY)
+            sqlite3_bind_text(stmt, 4, iso, -1, SQLITE_TRANSIENT_APPLEPAY)
         }
+    }
+
+    /// A still-`pending` entry, dropped off the same calendar day, matching
+    /// `card` and `merchant` (case/whitespace-insensitive) — the signature
+    /// of the Shortcuts automation firing more than once for the same
+    /// purchase (see `addEntry`). `card IS ?` (not `= ?`) so two entries
+    /// with no card at all still match each other.
+    ///
+    /// Intentionally scoped to `pending` only and to the current day, not a
+    /// short rolling time window: an Apple Pay pre-authorization can settle
+    /// hours later (restaurants, gas stations), and comparing calendar days
+    /// avoids hardcoding a duration that would either miss slow settlements
+    /// or risk merging two unrelated purchases made minutes apart.
+    private func findRecentDuplicate(card: String?, merchant: String, on date: Date) -> (id: Int, amount: Double)? {
+        let dayString = isoFormatter.string(from: date)
+        let sentinel = (id: 0, amount: 0.0)
+        let result = store.read { db -> (id: Int, amount: Double) in
+            var stmt: OpaquePointer?
+            let sql = """
+                SELECT id, amount FROM pending_apple_pay_entries
+                WHERE status = 'pending'
+                  AND lower(trim(merchant)) = lower(trim(?))
+                  AND card IS ?
+                  AND date(created_at) = date(?)
+                ORDER BY created_at DESC
+                LIMIT 1;
+                """
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return sentinel }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, merchant, -1, SQLITE_TRANSIENT_APPLEPAY)
+            if let card, !card.isEmpty {
+                sqlite3_bind_text(stmt, 2, card, -1, SQLITE_TRANSIENT_APPLEPAY)
+            } else {
+                sqlite3_bind_null(stmt, 2)
+            }
+            sqlite3_bind_text(stmt, 3, dayString, -1, SQLITE_TRANSIENT_APPLEPAY)
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return sentinel }
+            return (Int(sqlite3_column_int(stmt, 0)), sqlite3_column_double(stmt, 1))
+        } ?? sentinel
+        return result.id > 0 ? result : nil
     }
 
     // MARK: - Updating

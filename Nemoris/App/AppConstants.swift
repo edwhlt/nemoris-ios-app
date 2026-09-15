@@ -19,11 +19,15 @@ enum AppConstants {
     }
 
     enum Shortcuts {
-        /// iCloud link for the "Import an Apple Pay transaction" shortcut
-        /// (a personal Shortcuts automation → `ImportTransactionApplePayEntityIntent`).
-        /// ⚠️ Frozen at export time: if the shortcut is edited in Shortcuts,
-        /// it must be re-shared (Share → Copy iCloud Link) and this constant
-        /// updated — Apple doesn't republish the same link.
-        static let applePayInstallURL = URL(string: "https://www.icloud.com/shortcuts/d43dedc201014857859c6b5204535233")!
+        /// LAST-RESORT fallback for `ApplePayShortcutManifest.resolveInstallURL()`,
+        /// used only if `versions.json` can't be reached at all (offline, site
+        /// down, malformed manifest). Points at a `.shortcut` file WE host on
+        /// `nemoris-site` (`assets/shortcuts/apple-pay-v2.shortcut`), not an
+        /// iCloud share link: a file under our own control never gets revoked
+        /// or expires the way a personal iCloud share could. It intentionally
+        /// lags behind the real "latest" — that's the manifest's job, not
+        /// this constant's. Update it only if this exact archived file is
+        /// ever removed from the site.
+        static let applePayInstallFallbackURL = URL(string: "https://nemorisapp.com/assets/shortcuts/apple-pay-v2.shortcut")!
     }
 }

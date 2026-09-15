@@ -64,11 +64,21 @@ struct ApplePayAlertSettingsView: View {
             if showsInstallSection {
                 Section {
                     Button {
-                        #if os(iOS)
-                        UIApplication.shared.open(AppConstants.Shortcuts.applePayInstallURL)
-                        #else
-                        NSWorkspace.shared.open(AppConstants.Shortcuts.applePayInstallURL)
-                        #endif
+                        // Resolved from `versions.json` at tap time rather
+                        // than a URL baked into the app: whoever maintains
+                        // the automation can publish a newer version (a
+                        // fresh export, or just a new iCloud link) without a
+                        // new app build. `@MainActor` for `UIApplication`/
+                        // `NSWorkspace`, same convention as
+                        // `EngineBootstrap.bootIfNeeded()`.
+                        Task { @MainActor in
+                            let url = await ApplePayShortcutManifest.resolveInstallURL()
+                            #if os(iOS)
+                            await UIApplication.shared.open(url)
+                            #else
+                            NSWorkspace.shared.open(url)
+                            #endif
+                        }
                     } label: {
                         Label("Installer le raccourci Apple Pay", systemImage: "square.and.arrow.down.on.square")
                     }
